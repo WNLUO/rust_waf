@@ -1,0 +1,50 @@
+{
+  "interface": "eth0",
+  "listen_addr": "0.0.0.0:8080",
+  "runtime_profile": "standard",
+  "api_enabled": false,
+  "api_bind": "127.0.0.1:3000",
+  "bloom_enabled": false,
+  "l4_bloom_false_positive_verification": false,
+  "l7_bloom_false_positive_verification": false,
+  "maintenance_interval_secs": 20,
+  "l4_config": {
+    "ddos_protection_enabled": true,
+    "advanced_ddos_enabled": false,
+    "connection_rate_limit": 128,
+    "syn_flood_threshold": 64,
+    "scan_enabled": true,
+    "max_tracked_ips": 4096,
+    "max_blocked_ips": 1024,
+    "state_ttl_secs": 300
+  },
+  "l7_config": {
+    "http_inspection_enabled": true,
+    "max_request_size": 8192,
+    "prefilter_enabled": true,
+    "enable_sql_injection_detection": true,
+    "enable_xss_detection": true,
+    "enable_path_traversal_detection": true,
+    "enable_command_injection_detection": true,
+    "http2_config": {
+      "enabled": true,
+      "max_concurrent_streams": 100,
+      "max_frame_size": 16384,
+      "enable_priorities": true,
+      "initial_window_size": 65535
+    }
+  },
+  "http3_config": {
+    "enabled": false,
+    "listen_addr": "0.0.0.0:8443",
+    "max_concurrent_streams": 100,
+    "idle_timeout_secs": 300,
+    "mtu": 1350,
+    "max_frame_size": 65536,
+    "enable_connection_migration": true,
+    "qpack_table_size": 4096,
+    "enable_tls13": true
+  },
+  "rules": [],
+  "metrics_enabled": true
+}

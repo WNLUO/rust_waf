@@ -1,0 +1,42 @@
+[package]
+name = "waf"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "waf"
+path = "src/lib.rs"
+
+[[bin]]
+name = "waf"
+path = "src/main.rs"
+
+[features]
+default = []
+api = ["dep:axum"]
+capture = ["dep:pnet"]
+http2 = []  # 现有HTTP/2.0支持
+http3 = ["dep:quinn", "dep:h3", "dep:rustls", "dep:rustls-native-certs"]  # HTTP/3.0支持
+
+[dependencies]
+tokio = { version = "1.35", features = ["macros", "rt-multi-thread", "sync", "time", "net", "signal", "io-util"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.10"
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1.0"
+thiserror = "1.0"
+pnet = { version = "0.35", optional = true }
+lazy_static = "1.4"
+axum = { version = "0.7", optional = true }
+# HTTP/2.0 support
+hyper = { version = "1.0", features = ["full"] }
+http = "1.0"
+h2 = "0.3"
+tower = "0.4"
+# HTTP/3.0 support
+quinn = { version = "0.10", optional = true }
+h3 = { version = "0.0.4", optional = true }
+rustls = { version = "0.23", optional = true }
+rustls-native-certs = { version = "0.7", optional = true }

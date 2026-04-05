@@ -135,11 +135,6 @@ impl UnifiedHttpRequest {
         self.get_header("content-type")
     }
 
-    /// 获取User-Agent头部值
-    pub fn user_agent(&self) -> Option<&String> {
-        self.get_header("user-agent")
-    }
-
     /// 检查是否为JSON请求
     #[allow(dead_code)]
     pub fn is_json(&self) -> bool {

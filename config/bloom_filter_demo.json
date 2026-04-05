@@ -13,19 +13,13 @@
     "advanced_ddos_enabled": false,
     "connection_rate_limit": 128,
     "syn_flood_threshold": 64,
-    "scan_enabled": true,
     "max_tracked_ips": 4096,
     "max_blocked_ips": 1024,
     "state_ttl_secs": 300
   },
   "l7_config": {
     "http_inspection_enabled": true,
-    "max_request_size": 8192,
-    "prefilter_enabled": true,
-    "enable_sql_injection_detection": true,
-    "enable_xss_detection": true,
-    "enable_path_traversal_detection": true,
-    "enable_command_injection_detection": true
+    "max_request_size": 8192
   },
   "rules": [],
   "metrics_enabled": true,

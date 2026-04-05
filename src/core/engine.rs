@@ -1409,7 +1409,6 @@ mod tests {
                 ddos_protection_enabled: false,
                 advanced_ddos_enabled: false,
                 connection_rate_limit: 1_000,
-                scan_enabled: false,
                 ..L4Config::default()
             },
             l7_config: L7Config::default(),

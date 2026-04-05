@@ -25,11 +25,6 @@ impl Default for Http2Config {
 pub struct L7Config {
     pub http_inspection_enabled: bool,
     pub max_request_size: usize,
-    pub prefilter_enabled: bool,
-    pub enable_sql_injection_detection: bool,
-    pub enable_xss_detection: bool,
-    pub enable_path_traversal_detection: bool,
-    pub enable_command_injection_detection: bool,
     pub http2_config: Http2Config,
     #[serde(default = "default_bloom_filter_scale")]
     pub bloom_filter_scale: f64,
@@ -44,11 +39,6 @@ impl Default for L7Config {
         Self {
             http_inspection_enabled: true,
             max_request_size: 8192,
-            prefilter_enabled: true,
-            enable_sql_injection_detection: true,
-            enable_xss_detection: true,
-            enable_path_traversal_detection: true,
-            enable_command_injection_detection: true,
             http2_config: Http2Config::default(),
             bloom_filter_scale: default_bloom_filter_scale(),
         }

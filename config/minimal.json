@@ -15,7 +15,6 @@
     "advanced_ddos_enabled": false,
     "connection_rate_limit": 64,
     "syn_flood_threshold": 32,
-    "scan_enabled": false,
     "max_tracked_ips": 512,
     "max_blocked_ips": 128,
     "state_ttl_secs": 180
@@ -23,11 +22,6 @@
   "l7_config": {
     "http_inspection_enabled": true,
     "max_request_size": 4096,
-    "prefilter_enabled": true,
-    "enable_sql_injection_detection": true,
-    "enable_xss_detection": true,
-    "enable_path_traversal_detection": true,
-    "enable_command_injection_detection": true,
     "http2_config": {
       "enabled": false,
       "max_concurrent_streams": 50,

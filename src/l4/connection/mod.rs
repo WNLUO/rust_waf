@@ -52,10 +52,6 @@ impl ConnectionManager {
         self.tracker.recent_connection_count(ip, window)
     }
 
-    pub fn unique_destination_ports(&self, ip: &IpAddr, window: Duration) -> usize {
-        self.tracker.unique_destination_ports(ip, window)
-    }
-
     pub fn get_stats(&self) -> ConnectionStats {
         ConnectionStats {
             total_connections: self.tracker.get_total_connections(),

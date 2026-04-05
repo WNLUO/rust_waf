@@ -293,7 +293,6 @@ impl Config {
             self.l4_config.state_ttl_secs = clamp_u64(self.l4_config.state_ttl_secs, 60, 1800, 180);
             self.l7_config.max_request_size =
                 clamp_or_default(self.l7_config.max_request_size, 4096);
-            self.l7_config.prefilter_enabled = true;
             self.l4_config.bloom_filter_scale =
                 clamp_scale(self.l4_config.bloom_filter_scale, 0.5, 0.1, 1.0);
             self.l7_config.bloom_filter_scale =

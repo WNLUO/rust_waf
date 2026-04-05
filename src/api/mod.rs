@@ -1,7 +1,7 @@
 use crate::config::Rule;
 use crate::core::WafContext;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
@@ -50,6 +50,48 @@ pub struct RuleResponse {
     severity: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SecurityEventsResponse {
+    total: u64,
+    limit: u32,
+    offset: u32,
+    events: Vec<SecurityEventResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SecurityEventResponse {
+    id: i64,
+    layer: String,
+    action: String,
+    reason: String,
+    source_ip: String,
+    dest_ip: String,
+    source_port: i64,
+    dest_port: i64,
+    protocol: String,
+    http_method: Option<String>,
+    uri: Option<String>,
+    http_version: Option<String>,
+    created_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockedIpsResponse {
+    total: u64,
+    limit: u32,
+    offset: u32,
+    blocked_ips: Vec<BlockedIpResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockedIpResponse {
+    id: i64,
+    ip: String,
+    reason: String,
+    blocked_at: i64,
+    expires_at: i64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateRuleRequest {
     id: String,
@@ -69,6 +111,24 @@ pub struct UpdateRuleRequest {
     pattern: String,
     action: String,
     severity: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct EventsQueryParams {
+    limit: Option<u32>,
+    offset: Option<u32>,
+    layer: Option<String>,
+    source_ip: Option<String>,
+    action: Option<String>,
+    blocked_only: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct BlockedIpsQueryParams {
+    limit: Option<u32>,
+    offset: Option<u32>,
+    ip: Option<String>,
+    active_only: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +158,8 @@ impl ApiServer {
         let app = Router::new()
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
+            .route("/events", get(list_security_events_handler))
+            .route("/blocked-ips", get(list_blocked_ips_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
             .route(
                 "/rules/:id",
@@ -141,6 +203,50 @@ async fn metrics_handler(State(state): State<ApiState>) -> Json<MetricsResponse>
         state.context.active_rule_count(),
         storage_summary,
     ))
+}
+
+async fn list_security_events_handler(
+    State(state): State<ApiState>,
+    Query(params): Query<EventsQueryParams>,
+) -> ApiResult<Json<SecurityEventsResponse>> {
+    let store = sqlite_store(&state)?;
+    let result = store
+        .list_security_events(&params.into_query())
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(SecurityEventsResponse {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        events: result
+            .items
+            .into_iter()
+            .map(SecurityEventResponse::from)
+            .collect(),
+    }))
+}
+
+async fn list_blocked_ips_handler(
+    State(state): State<ApiState>,
+    Query(params): Query<BlockedIpsQueryParams>,
+) -> ApiResult<Json<BlockedIpsResponse>> {
+    let store = sqlite_store(&state)?;
+    let result = store
+        .list_blocked_ips(&params.into_query())
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(BlockedIpsResponse {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        blocked_ips: result
+            .items
+            .into_iter()
+            .map(BlockedIpResponse::from)
+            .collect(),
+    }))
 }
 
 async fn list_rules_handler(State(state): State<ApiState>) -> ApiResult<Json<RulesListResponse>> {
@@ -285,6 +391,38 @@ impl From<Rule> for RuleResponse {
     }
 }
 
+impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
+    fn from(event: crate::storage::SecurityEventEntry) -> Self {
+        Self {
+            id: event.id,
+            layer: event.layer,
+            action: event.action,
+            reason: event.reason,
+            source_ip: event.source_ip,
+            dest_ip: event.dest_ip,
+            source_port: event.source_port,
+            dest_port: event.dest_port,
+            protocol: event.protocol,
+            http_method: event.http_method,
+            uri: event.uri,
+            http_version: event.http_version,
+            created_at: event.created_at,
+        }
+    }
+}
+
+impl From<crate::storage::BlockedIpEntry> for BlockedIpResponse {
+    fn from(entry: crate::storage::BlockedIpEntry) -> Self {
+        Self {
+            id: entry.id,
+            ip: entry.ip,
+            reason: entry.reason,
+            blocked_at: entry.blocked_at,
+            expires_at: entry.expires_at,
+        }
+    }
+}
+
 impl CreateRuleRequest {
     fn into_rule(self) -> Result<Rule, String> {
         Ok(Rule {
@@ -313,15 +451,34 @@ impl UpdateRuleRequest {
     }
 }
 
-fn rules_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
+impl EventsQueryParams {
+    fn into_query(self) -> crate::storage::SecurityEventQuery {
+        crate::storage::SecurityEventQuery {
+            limit: self.limit.unwrap_or(50),
+            offset: self.offset.unwrap_or(0),
+            layer: self.layer,
+            source_ip: self.source_ip,
+            action: self.action,
+            blocked_only: self.blocked_only.unwrap_or(false),
+        }
+    }
+}
+
+impl BlockedIpsQueryParams {
+    fn into_query(self) -> crate::storage::BlockedIpQuery {
+        crate::storage::BlockedIpQuery {
+            limit: self.limit.unwrap_or(50),
+            offset: self.offset.unwrap_or(0),
+            ip: self.ip,
+            active_only: self.active_only.unwrap_or(false),
+        }
+    }
+}
+
+fn sqlite_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
     if !state.context.config.sqlite_enabled {
         return Err(ApiError::conflict(
             "SQLite storage is disabled in configuration".to_string(),
-        ));
-    }
-    if !state.context.config.sqlite_rules_enabled {
-        return Err(ApiError::conflict(
-            "SQLite-backed rules are disabled in configuration".to_string(),
         ));
     }
 
@@ -330,6 +487,16 @@ fn rules_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
         .sqlite_store
         .as_deref()
         .ok_or_else(|| ApiError::conflict("SQLite store is unavailable".to_string()))
+}
+
+fn rules_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
+    let store = sqlite_store(state)?;
+    if !state.context.config.sqlite_rules_enabled {
+        return Err(ApiError::conflict(
+            "SQLite-backed rules are disabled in configuration".to_string(),
+        ));
+    }
+    Ok(store)
 }
 
 type ApiResult<T> = Result<T, ApiError>;
@@ -472,5 +639,41 @@ mod tests {
         assert_eq!(response.layer, "l4");
         assert_eq!(response.action, "alert");
         assert_eq!(response.severity, "medium");
+    }
+
+    #[test]
+    fn test_events_query_params_into_query() {
+        let query = EventsQueryParams {
+            limit: Some(25),
+            offset: Some(10),
+            layer: Some("L7".to_string()),
+            source_ip: Some("10.0.0.1".to_string()),
+            action: Some("block".to_string()),
+            blocked_only: Some(true),
+        }
+        .into_query();
+
+        assert_eq!(query.limit, 25);
+        assert_eq!(query.offset, 10);
+        assert_eq!(query.layer.as_deref(), Some("L7"));
+        assert_eq!(query.source_ip.as_deref(), Some("10.0.0.1"));
+        assert_eq!(query.action.as_deref(), Some("block"));
+        assert!(query.blocked_only);
+    }
+
+    #[test]
+    fn test_blocked_ips_query_params_into_query() {
+        let query = BlockedIpsQueryParams {
+            limit: Some(5),
+            offset: Some(2),
+            ip: Some("10.0.0.2".to_string()),
+            active_only: Some(true),
+        }
+        .into_query();
+
+        assert_eq!(query.limit, 5);
+        assert_eq!(query.offset, 2);
+        assert_eq!(query.ip.as_deref(), Some("10.0.0.2"));
+        assert!(query.active_only);
     }
 }

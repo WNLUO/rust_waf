@@ -208,6 +208,8 @@ cargo check
 - `POST /rules`: 创建规则
 - `PUT /rules/:id`: 更新规则
 - `DELETE /rules/:id`: 删除规则
+- `GET /events`: 查询持久化安全事件，支持 `limit`、`offset`、`layer`、`source_ip`、`action`、`blocked_only`
+- `GET /blocked-ips`: 查询封禁历史，支持 `limit`、`offset`、`ip`、`active_only`
 
 规则写入 API 后会立即刷新内存中的规则集，无需等待下一个维护周期。
 

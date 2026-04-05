@@ -13,13 +13,10 @@ pub struct L4Inspector {
     connection_manager: ConnectionManager,
     ddos_enabled: bool,
     advanced_ddos_enabled: bool,
-    scan_detection_enabled: bool,
     syn_flood_threshold: usize,
-    scan_port_threshold: usize,
     bloom_manager: Option<L4BloomFilterManager>,
     port_stats: Mutex<HashMap<String, PortStats>>,
     ddos_events: AtomicU64,
-    scan_events: AtomicU64,
     defense_actions: AtomicU64,
 }
 
@@ -49,13 +46,10 @@ impl L4Inspector {
             connection_manager: ConnectionManager::new(config.clone()),
             ddos_enabled: config.ddos_protection_enabled,
             advanced_ddos_enabled: config.advanced_ddos_enabled,
-            scan_detection_enabled: config.scan_enabled,
             syn_flood_threshold: config.syn_flood_threshold.max(1),
-            scan_port_threshold: Self::scan_port_threshold(&config),
             bloom_manager,
             port_stats: Mutex::new(HashMap::new()),
             ddos_events: AtomicU64::new(0),
-            scan_events: AtomicU64::new(0),
             defense_actions: AtomicU64::new(0),
         }
     }
@@ -175,32 +169,6 @@ impl L4Inspector {
             }
         }
 
-        // Port scan detection (simplified)
-        if self.scan_detection_enabled {
-            if self.detect_simple_scan(packet) {
-                self.connection_manager.block_ip(
-                    &packet.source_ip,
-                    "port scanning detected",
-                    Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
-                );
-                self.record_port_event(&port, |stats| {
-                    stats.increment_block();
-                    stats.increment_scan();
-                });
-                self.scan_events.fetch_add(1, Ordering::Relaxed);
-                self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                return InspectionResult {
-                    blocked: true,
-                    reason: format!(
-                        "Port scanning detected: {} unique destination ports in 30s",
-                        self.connection_manager
-                            .unique_destination_ports(&packet.source_ip, Duration::from_secs(30))
-                    ),
-                    layer: crate::core::InspectionLayer::L4,
-                };
-            }
-        }
-
         // Record successful connection
         self.record_port_event(&port, |stats| {
             stats.increment_connection();
@@ -234,20 +202,11 @@ impl L4Inspector {
         false
     }
 
-    fn detect_simple_scan(&self, packet: &PacketInfo) -> bool {
-        let unique_ports = self
-            .connection_manager
-            .unique_destination_ports(&packet.source_ip, Duration::from_secs(30));
-
-        unique_ports >= self.scan_port_threshold
-    }
-
     pub fn get_statistics(&self) -> L4Statistics {
         let per_port_stats = self.port_stats.lock().unwrap().clone();
         L4Statistics {
             connections: self.connection_manager.get_stats(),
             ddos_events: self.ddos_events.load(Ordering::Relaxed),
-            scan_events: self.scan_events.load(Ordering::Relaxed),
             protocol_anomalies: 0,
             traffic: 0,
             defense_actions: self.defense_actions.load(Ordering::Relaxed),
@@ -293,10 +252,6 @@ impl L4Inspector {
     pub fn maintenance_tick(&self) {
         self.connection_manager.maintenance_tick();
     }
-
-    fn scan_port_threshold(config: &L4Config) -> usize {
-        (config.syn_flood_threshold / 4).clamp(4, 32)
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -306,7 +261,6 @@ pub struct PortStats {
     pub blocks: u64,
     pub bytes_processed: u64,
     pub ddos_events: u64,
-    pub scan_events: u64,
 }
 
 impl PortStats {
@@ -317,7 +271,6 @@ impl PortStats {
             blocks: 0,
             bytes_processed: 0,
             ddos_events: 0,
-            scan_events: 0,
         }
     }
 
@@ -337,17 +290,12 @@ impl PortStats {
     pub fn increment_ddos(&mut self) {
         self.ddos_events += 1;
     }
-
-    pub fn increment_scan(&mut self) {
-        self.scan_events += 1;
-    }
 }
 
 #[derive(Debug, Clone)]
 pub struct L4Statistics {
     pub connections: crate::l4::connection::ConnectionStats,
     pub ddos_events: u64,
-    pub scan_events: u64,
     pub protocol_anomalies: u64,
     pub traffic: u64,
     pub defense_actions: u64,
@@ -383,7 +331,6 @@ mod tests {
                 advanced_ddos_enabled: false,
                 connection_rate_limit: 1_000,
                 syn_flood_threshold: 3,
-                scan_enabled: false,
                 ..L4Config::default()
             },
             false,
@@ -399,28 +346,4 @@ mod tests {
         assert!(result.reason.contains("DDoS attack detected"));
     }
 
-    #[test]
-    fn detects_port_scans_across_multiple_ports() {
-        let inspector = L4Inspector::new(
-            L4Config {
-                ddos_protection_enabled: false,
-                connection_rate_limit: 1_000,
-                syn_flood_threshold: 16,
-                scan_enabled: true,
-                ..L4Config::default()
-            },
-            false,
-            false,
-        );
-
-        for port in [80, 443, 8080] {
-            let result = inspector.inspect_packet(&packet(port));
-            assert!(!result.blocked, "unexpected block on port {}", port);
-        }
-
-        let result = inspector.inspect_packet(&packet(8443));
-        assert!(result.blocked);
-        assert_eq!(result.layer, InspectionLayer::L4);
-        assert!(result.reason.contains("Port scanning detected"));
-    }
 }

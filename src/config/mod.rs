@@ -284,7 +284,6 @@ impl Config {
             self.l4_bloom_false_positive_verification = false;
             self.l7_bloom_false_positive_verification = false;
             self.l4_config.advanced_ddos_enabled = false;
-            self.l4_config.scan_enabled = false;
             self.l4_config.connection_rate_limit = self.l4_config.connection_rate_limit.min(64);
             self.l4_config.syn_flood_threshold = self.l4_config.syn_flood_threshold.min(32);
             self.l4_config.max_tracked_ips =

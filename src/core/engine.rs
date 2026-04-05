@@ -421,9 +421,8 @@ impl WafEngine {
                     stats.connections.rate_limit_hits
                 );
                 info!(
-                    "L4 counters: ddos_events={}, scan_events={}, protocol_anomalies={}, traffic={}, defense_actions={}",
+                    "L4 counters: ddos_events={}, protocol_anomalies={}, traffic={}, defense_actions={}",
                     stats.ddos_events,
-                    stats.scan_events,
                     stats.protocol_anomalies,
                     stats.traffic,
                     stats.defense_actions
@@ -434,12 +433,11 @@ impl WafEngine {
                     info!("=== Per-Port Statistics ===");
                     for (port, port_stats) in &stats.per_port_stats {
                         info!(
-                            "Port {}: connections={}, blocks={}, ddos_events={}, scan_events={}",
+                            "Port {}: connections={}, blocks={}, ddos_events={}",
                             port,
                             port_stats.connections,
                             port_stats.blocks,
-                            port_stats.ddos_events,
-                            port_stats.scan_events
+                            port_stats.ddos_events
                         );
                     }
                     info!("=============================");

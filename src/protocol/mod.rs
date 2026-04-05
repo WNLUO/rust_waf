@@ -50,7 +50,7 @@ pub enum ProtocolError {
 
 pub use detector::ProtocolDetector;
 pub use http1::Http1Handler;
-pub use http2::Http2Handler;
+pub use http2::{Http2Handler, Http2Response};
 #[allow(unused_imports)]
-pub use http3::{Http3Handler, Http3StreamManager};
+pub use http3::{Http3Handler, Http3StreamManager, QuicPacketInfo};
 pub use unified::UnifiedHttpRequest;

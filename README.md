@@ -12,7 +12,9 @@
 - 端口扫描检测
 
 ### L7 层防护 (应用层)
-- HTTP/HTTPS 请求解析
+- HTTP/1.1 请求解析
+- HTTP/2 直连流量解析（prior knowledge / cleartext h2）
+- HTTP/3 / QUIC datagram 元数据识别
 - SQL 注入检测
 - XSS 攻击检测
 - 路径遍历防护
@@ -209,7 +211,15 @@ TCP 代理示例：
 }
 ```
 
-当前 TCP 回源仅对真实解析后的 HTTP/1.1 请求生效；HTTP/2 和 HTTP/3 仍保持现有的简化处理路径。
+当前 TCP 回源已支持：
+
+- HTTP/1.1 请求原样检测与转发
+- HTTP/2 直连请求解析后转成统一请求对象，再按 HTTP/1.1 语义回源
+
+说明：
+- `Upgrade: h2c` 首包仍按 HTTP/1.1 检测，避免把升级握手误判成完整 h2 会话
+- 上游若返回 `chunked` 响应，WAF 会在转回 HTTP/2 前做基础解块
+- 当前仍未实现 TLS 终止后的 HTTPS / ALPN h2 解密代理
 
 UDP 转发示例：
 
@@ -221,6 +231,17 @@ UDP 转发示例：
 ```
 
 当前 UDP 链路会在 L4 检测通过后，将 datagram 转发到 `udp_upstream_addr`，等待上游响应，再把响应回给原始客户端。
+
+当 `http3_config.enabled=true` 时，UDP 链路还会额外识别 QUIC / HTTP/3 datagram，并把以下元数据送入现有 L7 / 规则引擎：
+
+- QUIC header form（long / short）
+- packet type（initial / handshake / retry / short 等）
+- QUIC version
+- source / destination connection id
+
+说明：
+- 当前 HTTP/3 支持是“基于 QUIC 元数据的检测”，不是完整的 HTTP/3 明文请求解析
+- 在未做 TLS 终止前，WAF 无法看到 HTTP/3 的真实 header/body，因此不会伪造明文 GET/POST 请求
 
 当前实现不会把数据库查询放进请求热路径，拦截事件通过异步队列写入 SQLite。
 当 `sqlite_rules_enabled=true` 时，启动阶段会先把 JSON 配置中的规则做一次“只插入不覆盖”的种子导入，再从 SQLite 读取规则，并在维护周期里检查规则表是否变化后自动热重载。

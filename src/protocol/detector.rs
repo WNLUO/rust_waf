@@ -22,9 +22,11 @@ impl ProtocolDetector {
     ///
     /// 检测策略：
     /// 1. 检查HTTP/2.0直接模式前置请求
-    /// 2. 检查HTTP/2.0升级请求
-    /// 3. 检查HTTP/3.0（QUIC协议）
-    /// 4. 默认回退到HTTP/1.1
+    /// 2. 默认回退到HTTP/1.1
+    ///
+    /// 说明：
+    /// - h2c Upgrade 请求本质上仍然是 HTTP/1.1 首请求，应先按 HTTP/1.1 读取；
+    /// - HTTP/3.0 / QUIC 基于 UDP，不应在 TCP 连接分流阶段误判。
     pub fn detect_version(&self, initial_bytes: &[u8]) -> HttpVersion {
         // 1. 检查HTTP/2.0直接模式
         if self.is_http2_direct(initial_bytes) {
@@ -32,19 +34,7 @@ impl ProtocolDetector {
             return HttpVersion::Http2_0;
         }
 
-        // 2. 检查HTTP/2.0升级请求
-        if let Some(version) = self.check_http2_upgrade(initial_bytes) {
-            debug!("Detected HTTP/2.0 via upgrade header");
-            return version;
-        }
-
-        // 3. 检查HTTP/3.0（QUIC协议）
-        if self.is_http3_quic(initial_bytes) {
-            debug!("Detected HTTP/3.0 via QUIC");
-            return HttpVersion::Http3_0;
-        }
-
-        // 4. 默认回退到HTTP/1.1
+        // 2. 默认回退到HTTP/1.1
         debug!("Defaulting to HTTP/1.1");
         HttpVersion::Http1_1
     }
@@ -87,24 +77,24 @@ impl ProtocolDetector {
 
     /// 检查HTTP/2.0升级请求
     ///
-    /// 通过检查Upgrade头部来检测
-    fn check_http2_upgrade(&self, bytes: &[u8]) -> Option<HttpVersion> {
+    /// h2c Upgrade 首包仍然是合法的 HTTP/1.1 请求，
+    /// 这里只做“识别”而不用于 TCP 分流。
+    pub fn is_http2_upgrade_request(&self, bytes: &[u8]) -> bool {
         let request_str = String::from_utf8_lossy(bytes);
 
-        // 检查HTTP/2.0升级头
         if request_str.contains("Upgrade: h2c")
             || request_str.contains("Upgrade: h2")
-            || request_str.contains("HTTP/2.0")
         {
-            return Some(HttpVersion::Http2_0);
+            return true;
         }
 
-        None
+        false
     }
 
     /// 检查是否为HTTP/3.0（QUIC协议）
     ///
     /// QUIC协议包检测逻辑
+    #[allow(dead_code)]
     pub fn is_http3_quic(&self, bytes: &[u8]) -> bool {
         // QUIC包格式检测
         // QUIC包以特定头部格式开始
@@ -148,10 +138,8 @@ mod tests {
         let detector = ProtocolDetector::new(100);
         let upgrade_request = b"GET / HTTP/1.1\r\nHost: example.com\r\nUpgrade: h2c\r\nConnection: Upgrade, HTTP2-Settings\r\n";
 
-        assert_eq!(
-            detector.detect_version(upgrade_request),
-            HttpVersion::Http2_0
-        );
+        assert_eq!(detector.detect_version(upgrade_request), HttpVersion::Http1_1);
+        assert!(detector.is_http2_upgrade_request(upgrade_request));
     }
 
     #[test]

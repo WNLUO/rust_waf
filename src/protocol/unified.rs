@@ -24,6 +24,7 @@ pub struct UnifiedHttpRequest {
     pub body: Vec<u8>,
 
     /// HTTP/2.0流ID (仅HTTP/2.0有效)
+    #[allow(dead_code)]
     pub stream_id: Option<u32>,
 
     /// 流优先级 (0-255, 仅HTTP/2.0有效)
@@ -99,6 +100,12 @@ impl UnifiedHttpRequest {
             inspection_text.push_str(&format!("{}: {}\n", key, value));
         }
 
+        if !self.metadata.is_empty() {
+            for (key, value) in &self.metadata {
+                inspection_text.push_str(&format!("@{}: {}\n", key, value));
+            }
+        }
+
         // 添加请求体
         if !self.body.is_empty() {
             inspection_text.push_str("\n");
@@ -153,6 +160,7 @@ impl UnifiedHttpRequest {
     }
 
     /// 设置HTTP/2.0流ID
+    #[allow(dead_code)]
     pub fn set_stream_id(&mut self, stream_id: u32) {
         self.stream_id = Some(stream_id);
     }
@@ -182,12 +190,19 @@ impl UnifiedHttpRequest {
     pub fn to_http1_bytes(&self) -> Vec<u8> {
         let mut request = format!("{} {} HTTP/1.1\r\n", self.method, self.uri).into_bytes();
         let has_content_length = self.headers.contains_key("content-length");
+        let has_host = self.headers.contains_key("host");
 
         for (key, value) in &self.headers {
-            if key.eq_ignore_ascii_case("connection") {
+            if key.eq_ignore_ascii_case("connection") || key.starts_with(':') {
                 continue;
             }
             request.extend_from_slice(format!("{}: {}\r\n", key, value).as_bytes());
+        }
+
+        if !has_host {
+            if let Some(authority) = self.metadata.get("authority") {
+                request.extend_from_slice(format!("host: {}\r\n", authority).as_bytes());
+            }
         }
 
         request.extend_from_slice(b"connection: close\r\n");
@@ -248,11 +263,13 @@ mod tests {
         let mut request = UnifiedHttpRequest::default();
         request.add_header("Host".to_string(), "example.com".to_string());
         request.add_header("User-Agent".to_string(), "Test/1.0".to_string());
+        request.add_metadata("quic.version".to_string(), "1".to_string());
         request.body = b"test data".to_vec();
 
         let inspection_text = request.to_inspection_string();
         assert!(inspection_text.contains("GET /"));
         assert!(inspection_text.contains("host: example.com"));
+        assert!(inspection_text.contains("@quic.version: 1"));
         assert!(inspection_text.contains("test data"));
     }
 
@@ -289,5 +306,20 @@ mod tests {
         assert!(serialized.contains("connection: close\r\n"));
         assert!(serialized.contains("content-length: 5\r\n"));
         assert!(serialized.ends_with("\r\n\r\nhello"));
+    }
+
+    #[test]
+    fn test_http1_serialization_skips_pseudo_headers_and_rebuilds_host() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/demo".to_string());
+        request.add_header(":method".to_string(), "GET".to_string());
+        request.add_header("User-Agent".to_string(), "demo".to_string());
+        request.add_metadata("authority".to_string(), "example.com".to_string());
+
+        let serialized = String::from_utf8(request.to_http1_bytes()).unwrap();
+        assert!(serialized.contains("GET /demo HTTP/1.1\r\n"));
+        assert!(serialized.contains("host: example.com\r\n"));
+        assert!(serialized.contains("user-agent: demo\r\n"));
+        assert!(!serialized.contains(":method"));
     }
 }

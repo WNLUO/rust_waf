@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
-use tokio::io::{self, AsyncWriteExt};
+use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
@@ -10,7 +10,8 @@ use crate::config::{Config, RuntimeProfile};
 use crate::core::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
-    Http1Handler, Http2Handler, Http3Handler, HttpVersion, ProtocolDetector, UnifiedHttpRequest,
+    Http1Handler, Http2Handler, Http2Response, Http3Handler, HttpVersion, ProtocolDetector,
+    UnifiedHttpRequest,
 };
 use crate::storage::{BlockedIpRecord, SecurityEventRecord};
 
@@ -354,6 +355,28 @@ async fn handle_udp_datagram(
         payload.len()
     );
 
+    if context.config.http3_config.enabled {
+        let http3_handler = Http3Handler::new(context.config.http3_config.clone());
+        if let Some(request) = http3_handler.inspect_datagram(&payload, peer_addr, local_addr)? {
+            debug!("Detected QUIC/HTTP3 datagram from {}", peer_addr);
+            let request_dump = request.to_inspection_string();
+            let inspection_result =
+                inspect_application_layers(context.as_ref(), &packet, &request, &request_dump);
+
+            if inspection_result.blocked {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_block(inspection_result.layer.clone());
+                }
+                persist_http_block_event(context.as_ref(), &packet, &request, &inspection_result);
+                debug!(
+                    "Blocked QUIC/HTTP3 datagram from {}: {}",
+                    peer_addr, inspection_result.reason
+                );
+                return Ok(());
+            }
+        }
+    }
+
     if let Some(upstream_addr) = context.config.udp_upstream_addr.as_deref() {
         forward_udp_payload(listener_socket, peer_addr, &payload, upstream_addr).await?;
     }
@@ -402,6 +425,114 @@ async fn forward_http1_request(
     Ok(copied)
 }
 
+#[derive(Debug, Clone)]
+struct UpstreamHttpResponse {
+    status_code: u16,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+async fn proxy_http_request(
+    request: &UnifiedHttpRequest,
+    upstream_addr: &str,
+) -> Result<UpstreamHttpResponse> {
+    let mut upstream_stream = TcpStream::connect(upstream_addr).await?;
+    upstream_stream.write_all(&request.to_http1_bytes()).await?;
+    upstream_stream.shutdown().await?;
+
+    let mut response_bytes = Vec::new();
+    upstream_stream.read_to_end(&mut response_bytes).await?;
+
+    parse_http1_response(&response_bytes)
+}
+
+fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
+    let headers_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| anyhow::anyhow!("Invalid upstream HTTP/1 response: missing header terminator"))?;
+    let header_block = &response[..headers_end];
+    let body_offset = headers_end + 4;
+    let header_text = String::from_utf8_lossy(header_block);
+    let mut lines = header_text.lines();
+
+    let status_line = lines
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Invalid upstream HTTP/1 response: missing status line"))?;
+    let mut status_parts = status_line.splitn(3, ' ');
+    let _version = status_parts.next();
+    let status_code = status_parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Invalid upstream HTTP/1 response: missing status code"))?
+        .parse::<u16>()?;
+
+    let mut headers = Vec::new();
+    let mut chunked = false;
+    for line in lines {
+        if let Some((name, value)) = line.split_once(':') {
+            let name = name.trim().to_string();
+            let value = value.trim().to_string();
+            if name.eq_ignore_ascii_case("transfer-encoding")
+                && value.to_ascii_lowercase().contains("chunked")
+            {
+                chunked = true;
+                continue;
+            }
+            if name.eq_ignore_ascii_case("connection") {
+                continue;
+            }
+            headers.push((name, value));
+        }
+    }
+
+    let body = if chunked {
+        decode_chunked_body(&response[body_offset..])?
+    } else {
+        response[body_offset..].to_vec()
+    };
+
+    Ok(UpstreamHttpResponse {
+        status_code,
+        headers,
+        body,
+    })
+}
+
+fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>> {
+    let mut cursor = 0usize;
+    let mut decoded = Vec::new();
+
+    loop {
+        let line_end = body[cursor..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .ok_or_else(|| anyhow::anyhow!("Invalid chunked response: missing chunk size terminator"))?
+            + cursor;
+        let size_line = std::str::from_utf8(&body[cursor..line_end])?;
+        let size_hex = size_line.split(';').next().unwrap_or(size_line).trim();
+        let chunk_size = usize::from_str_radix(size_hex, 16)?;
+        cursor = line_end + 2;
+
+        if chunk_size == 0 {
+            break;
+        }
+
+        let chunk_end = cursor + chunk_size;
+        if chunk_end > body.len() {
+            anyhow::bail!("Invalid chunked response: chunk exceeds body length");
+        }
+        decoded.extend_from_slice(&body[cursor..chunk_end]);
+        cursor = chunk_end;
+
+        if body.get(cursor..cursor + 2) != Some(b"\r\n") {
+            anyhow::bail!("Invalid chunked response: missing CRLF after chunk");
+        }
+        cursor += 2;
+    }
+
+    Ok(decoded)
+}
+
 /// 检测协议版本并路由到相应的处理器
 async fn detect_and_handle_protocol(
     context: Arc<WafContext>,
@@ -421,9 +552,16 @@ async fn detect_and_handle_protocol(
     .await??;
 
     let detected_version = if bytes_read > 0 {
-        detector.detect_version(&initial_buffer[..bytes_read])
+        let preview = &initial_buffer[..bytes_read];
+        if detector.is_http2_upgrade_request(preview) {
+            debug!(
+                "Detected h2c upgrade request from {}, inspecting first exchange as HTTP/1.1",
+                peer_addr
+            );
+        }
+        detector.detect_version(preview)
     } else {
-        HttpVersion::Http1_1 // 默认回退到HTTP/1.1
+        HttpVersion::Http1_1
     };
 
     debug!(
@@ -433,16 +571,10 @@ async fn detect_and_handle_protocol(
 
     // 根据检测到的协议版本路由到相应处理器
     match detected_version {
-        HttpVersion::Http3_0 if context.config.http3_config.enabled => {
-            // HTTP/3.0支持已启用，使用HTTP/3.0处理器
-            handle_http3_connection(context, stream, peer_addr, packet).await
-        }
         HttpVersion::Http2_0 if context.config.l7_config.http2_config.enabled => {
-            // HTTP/2.0支持已启用，使用HTTP/2.0处理器
             handle_http2_connection(context, stream, peer_addr, packet).await
         }
         _ => {
-            // HTTP/1.1或其他协议未启用，使用HTTP/1.1处理器
             handle_http1_connection(context, stream, peer_addr, packet).await
         }
     }
@@ -531,74 +663,10 @@ async fn handle_http1_connection(
     Ok(())
 }
 
-/// 处理HTTP/3.0连接
-async fn handle_http3_connection(
-    context: Arc<WafContext>,
-    _stream: TcpStream,
-    peer_addr: std::net::SocketAddr,
-    packet: &PacketInfo,
-) -> Result<()> {
-    let http3_config = &context.config.http3_config;
-    let _http3_handler = Http3Handler::new(http3_config.clone());
-
-    info!("HTTP/3.0 connection from {}", peer_addr);
-
-    // 在实际的QUIC实现中，这里会：
-    // 1. 建立QUIC连接
-    // 2. 读取HTTP/3.0请求
-    // 3. 进行L7安全检测
-    // 4. 写入HTTP/3.0响应
-
-    // 模拟HTTP/3.0请求处理
-    let mut request =
-        UnifiedHttpRequest::new(HttpVersion::Http3_0, "GET".to_string(), "/".to_string());
-
-    // 添加HTTP/3.0特定的伪头部
-    request.add_header(":method".to_string(), "GET".to_string());
-    request.add_header(":path".to_string(), "/".to_string());
-    request.add_header(":scheme".to_string(), "https".to_string());
-    request.add_header(":authority".to_string(), peer_addr.ip().to_string());
-
-    // 添加常见的HTTP头
-    request.add_header("User-Agent".to_string(), "HTTP/3.0 Test Client".to_string());
-    request.add_header("Accept".to_string(), "*/*".to_string());
-
-    info!(
-        "Parsed HTTP/3.0 request: {} {}",
-        request.method, request.uri
-    );
-
-    let request_dump = request.to_inspection_string();
-    if let Some(metrics) = context.metrics.as_ref() {
-        metrics.record_packet(request_dump.len());
-    }
-
-    let inspection_result =
-        inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
-
-    // HTTP/3.0响应处理（模拟）
-    // 在实际实现中会使用h3库发送HTTP/3.0响应
-    if inspection_result.blocked {
-        if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_block(inspection_result.layer.clone());
-        }
-        persist_http_block_event(context.as_ref(), packet, &request, &inspection_result);
-        info!("Blocking HTTP/3.0 request: {}", inspection_result.reason);
-        // HTTP/3.0会使用流级错误处理
-    } else {
-        let _metrics = context.metrics_snapshot();
-        info!("Allowed HTTP/3.0 request with metrics");
-        // HTTP/3.0会发送200状态码和可能的指标
-    }
-
-    info!("HTTP/3.0 connection handled for {}", peer_addr);
-    Ok(())
-}
-
 /// 处理HTTP/2.0连接
 async fn handle_http2_connection(
     context: Arc<WafContext>,
-    mut stream: TcpStream,
+    stream: TcpStream,
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
 ) -> Result<()> {
@@ -606,61 +674,102 @@ async fn handle_http2_connection(
     let http2_handler = Http2Handler::new()
         .with_max_concurrent_streams(http2_config.max_concurrent_streams)
         .with_max_frame_size(http2_config.max_frame_size)
-        .with_priorities(http2_config.enable_priorities);
+        .with_priorities(http2_config.enable_priorities)
+        .with_initial_window_size(http2_config.initial_window_size);
 
-    // 读取HTTP/2.0请求
-    let mut request = http2_handler
-        .read_request(&mut stream, context.config.l7_config.max_request_size)
+    let packet = packet.clone();
+    let context_for_service = Arc::clone(&context);
+    let peer_ip = peer_addr.ip().to_string();
+    let max_request_size = context.config.l7_config.max_request_size;
+    let upstream_addr = context.config.tcp_upstream_addr.clone();
+
+    http2_handler
+        .serve_connection(
+            stream,
+            peer_ip,
+            packet.dest_port,
+            max_request_size,
+            move |request| {
+                let context = Arc::clone(&context_for_service);
+                let packet = packet.clone();
+                let upstream_addr = upstream_addr.clone();
+
+                async move {
+                    debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
+
+                    let request_dump = request.to_inspection_string();
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        metrics.record_packet(request_dump.len());
+                    }
+
+                    let inspection_result =
+                        inspect_application_layers(context.as_ref(), &packet, &request, &request_dump);
+
+                    if inspection_result.blocked {
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(inspection_result.layer.clone());
+                        }
+                        persist_http_block_event(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &inspection_result,
+                        );
+                        return Ok(Http2Response {
+                            status_code: 403,
+                            headers: vec![],
+                            body: format!("blocked: {}", inspection_result.reason).into_bytes(),
+                        });
+                    }
+
+                    if let Some(upstream_addr) = upstream_addr.as_deref() {
+                        match proxy_http_request(&request, upstream_addr).await {
+                            Ok(response) => {
+                                return Ok(Http2Response {
+                                    status_code: response.status_code,
+                                    headers: response.headers,
+                                    body: response.body,
+                                });
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "Failed to proxy HTTP/2 request from {} to {}: {}",
+                                    request.client_ip.as_deref().unwrap_or("unknown"),
+                                    upstream_addr,
+                                    err
+                                );
+                                return Ok(Http2Response {
+                                    status_code: 502,
+                                    headers: vec![],
+                                    body: b"upstream proxy failed".to_vec(),
+                                });
+                            }
+                        }
+                    }
+
+                    let metrics = context.metrics_snapshot();
+                    let metrics_line = metrics
+                        .map(|snapshot| {
+                            format!(
+                                "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
+                                snapshot.total_packets,
+                                snapshot.blocked_packets,
+                                snapshot.blocked_l4,
+                                snapshot.blocked_l7,
+                                snapshot.total_bytes
+                            )
+                        })
+                        .unwrap_or_else(|| "metrics=disabled".to_string());
+
+                    Ok(Http2Response {
+                        status_code: 200,
+                        headers: vec![],
+                        body: format!("allowed\n{}\n", metrics_line).into_bytes(),
+                    })
+                }
+            },
+        )
         .await?;
-
-    request.set_client_ip(peer_addr.ip().to_string());
-    request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
-    request.add_metadata("protocol".to_string(), "HTTP/2.0".to_string());
-
-    debug!(
-        "HTTP/2.0 request: {} {} (stream {:?})",
-        request.method, request.uri, request.stream_id
-    );
-
-    let request_dump = request.to_inspection_string();
-    if let Some(metrics) = context.metrics.as_ref() {
-        metrics.record_packet(request_dump.len());
-    }
-
-    let inspection_result =
-        inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
-
-    // 写入HTTP/2.0响应
-    let stream_id = request.stream_id.unwrap_or(1);
-    if inspection_result.blocked {
-        if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_block(inspection_result.layer.clone());
-        }
-        persist_http_block_event(context.as_ref(), packet, &request, &inspection_result);
-        let body = format!("blocked: {}", inspection_result.reason);
-        http2_handler
-            .write_response(&mut stream, stream_id, 403, &[], body.as_bytes())
-            .await?;
-    } else {
-        let metrics = context.metrics_snapshot();
-        let metrics_line = metrics
-            .map(|snapshot| {
-                format!(
-                    "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
-                    snapshot.total_packets,
-                    snapshot.blocked_packets,
-                    snapshot.blocked_l4,
-                    snapshot.blocked_l7,
-                    snapshot.total_bytes
-                )
-            })
-            .unwrap_or_else(|| "metrics=disabled".to_string());
-
-        let body = format!("allowed\n{}\n", metrics_line);
-        http2_handler
-            .write_response(&mut stream, stream_id, 200, &[], body.as_bytes())
-            .await?;
-    }
 
     Ok(())
 }
@@ -942,5 +1051,20 @@ mod tests {
         let response = client_task.await.unwrap();
         assert!(String::from_utf8_lossy(&response).contains("HTTP/1.1 200 OK"));
         assert!(String::from_utf8_lossy(&response).ends_with("ok"));
+    }
+
+    #[test]
+    fn parse_http1_response_decodes_chunked_body() {
+        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/plain\r\n\r\n4\r\ntest\r\n0\r\n\r\n";
+
+        let parsed = parse_http1_response(response).unwrap();
+        assert_eq!(parsed.status_code, 200);
+        assert_eq!(parsed.body, b"test".to_vec());
+        assert!(
+            parsed
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("transfer-encoding"))
+        );
     }
 }

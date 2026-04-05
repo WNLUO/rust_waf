@@ -208,8 +208,14 @@ cargo check
 - `POST /rules`: 创建规则
 - `PUT /rules/:id`: 更新规则
 - `DELETE /rules/:id`: 删除规则
-- `GET /events`: 查询持久化安全事件，支持 `limit`、`offset`、`layer`、`source_ip`、`action`、`blocked_only`
-- `GET /blocked-ips`: 查询封禁历史，支持 `limit`、`offset`、`ip`、`active_only`
+- `GET /events`: 查询持久化安全事件，支持 `limit`、`offset`、`layer`、`source_ip`、`action`、`blocked_only`、`created_from`、`created_to`、`sort_by`、`sort_direction`
+- `GET /blocked-ips`: 查询封禁历史，支持 `limit`、`offset`、`ip`、`active_only`、`blocked_from`、`blocked_to`、`sort_by`、`sort_direction`
+
+排序白名单：
+
+- `/events`: `created_at`、`source_ip`、`dest_port`
+- `/blocked-ips`: `blocked_at`、`expires_at`、`ip`
+- `sort_direction`: `asc` 或 `desc`
 
 规则写入 API 后会立即刷新内存中的规则集，无需等待下一个维护周期。
 

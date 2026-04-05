@@ -35,6 +35,10 @@ pub struct SecurityEventQuery {
     pub source_ip: Option<String>,
     pub action: Option<String>,
     pub blocked_only: bool,
+    pub created_from: Option<i64>,
+    pub created_to: Option<i64>,
+    pub sort_by: EventSortField,
+    pub sort_direction: SortDirection,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -43,6 +47,36 @@ pub struct BlockedIpQuery {
     pub offset: u32,
     pub ip: Option<String>,
     pub active_only: bool,
+    pub blocked_from: Option<i64>,
+    pub blocked_to: Option<i64>,
+    pub sort_by: BlockedIpSortField,
+    pub sort_direction: SortDirection,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default)]
+pub enum SortDirection {
+    Asc,
+    #[default]
+    Desc,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default)]
+pub enum EventSortField {
+    #[default]
+    CreatedAt,
+    SourceIp,
+    DestPort,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default)]
+pub enum BlockedIpSortField {
+    #[default]
+    BlockedAt,
+    ExpiresAt,
+    Ip,
 }
 
 #[derive(Debug, Clone)]
@@ -263,7 +297,8 @@ impl SqliteStore {
             "#,
         );
         append_security_event_filters(&mut builder, query);
-        builder.push(" ORDER BY created_at DESC, id DESC LIMIT ");
+        append_event_sort(&mut builder, query);
+        builder.push(" LIMIT ");
         builder.push_bind(i64::from(limit));
         builder.push(" OFFSET ");
         builder.push_bind(i64::from(offset));
@@ -300,7 +335,8 @@ impl SqliteStore {
             "SELECT id, ip, reason, blocked_at, expires_at FROM blocked_ips WHERE 1=1",
         );
         append_blocked_ip_filters(&mut builder, query);
-        builder.push(" ORDER BY blocked_at DESC, id DESC LIMIT ");
+        append_blocked_ip_sort(&mut builder, query);
+        builder.push(" LIMIT ");
         builder.push_bind(i64::from(limit));
         builder.push(" OFFSET ");
         builder.push_bind(i64::from(offset));
@@ -595,6 +631,14 @@ fn append_security_event_filters<'a>(
         builder.push(" AND action = ");
         builder.push_bind(action);
     }
+    if let Some(created_from) = query.created_from {
+        builder.push(" AND created_at >= ");
+        builder.push_bind(created_from);
+    }
+    if let Some(created_to) = query.created_to {
+        builder.push(" AND created_at <= ");
+        builder.push_bind(created_to);
+    }
 }
 
 fn append_blocked_ip_filters<'a>(
@@ -609,6 +653,50 @@ fn append_blocked_ip_filters<'a>(
         builder.push(" AND expires_at > ");
         builder.push_bind(unix_timestamp());
     }
+    if let Some(blocked_from) = query.blocked_from {
+        builder.push(" AND blocked_at >= ");
+        builder.push_bind(blocked_from);
+    }
+    if let Some(blocked_to) = query.blocked_to {
+        builder.push(" AND blocked_at <= ");
+        builder.push_bind(blocked_to);
+    }
+}
+
+fn append_event_sort<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &SecurityEventQuery) {
+    builder.push(" ORDER BY ");
+    builder.push(match query.sort_by {
+        EventSortField::CreatedAt => "created_at",
+        EventSortField::SourceIp => "source_ip",
+        EventSortField::DestPort => "dest_port",
+    });
+    builder.push(match query.sort_direction {
+        SortDirection::Asc => " ASC",
+        SortDirection::Desc => " DESC",
+    });
+    builder.push(", id ");
+    builder.push(match query.sort_direction {
+        SortDirection::Asc => "ASC",
+        SortDirection::Desc => "DESC",
+    });
+}
+
+fn append_blocked_ip_sort<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &BlockedIpQuery) {
+    builder.push(" ORDER BY ");
+    builder.push(match query.sort_by {
+        BlockedIpSortField::BlockedAt => "blocked_at",
+        BlockedIpSortField::ExpiresAt => "expires_at",
+        BlockedIpSortField::Ip => "ip",
+    });
+    builder.push(match query.sort_direction {
+        SortDirection::Asc => " ASC",
+        SortDirection::Desc => " DESC",
+    });
+    builder.push(", id ");
+    builder.push(match query.sort_direction {
+        SortDirection::Asc => "ASC",
+        SortDirection::Desc => "DESC",
+    });
 }
 
 #[derive(sqlx::FromRow)]
@@ -844,6 +932,7 @@ mod tests {
     async fn test_sqlite_store_queries_events_and_blocked_ips() {
         let path = unique_test_db_path("queries");
         let store = SqliteStore::new(path, true).await.unwrap();
+        let now = unix_timestamp();
 
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L7".to_string(),
@@ -857,7 +946,7 @@ mod tests {
             http_method: Some("GET".to_string()),
             uri: Some("/login".to_string()),
             http_version: Some("HTTP/1.1".to_string()),
-            created_at: unix_timestamp(),
+            created_at: now - 10,
         });
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L4".to_string(),
@@ -871,13 +960,12 @@ mod tests {
             http_method: None,
             uri: None,
             http_version: None,
-            created_at: unix_timestamp(),
+            created_at: now - 5,
         });
-        let now = unix_timestamp();
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             "10.0.0.1",
             "rate limit exceeded",
-            now,
+            now - 15,
             now + 60,
         ));
         store.enqueue_blocked_ip(BlockedIpRecord::new(
@@ -909,6 +997,18 @@ mod tests {
         assert_eq!(blocked_only_events.total, 1);
         assert_eq!(blocked_only_events.items[0].action, "block");
 
+        let recent_events = store
+            .list_security_events(&SecurityEventQuery {
+                created_from: Some(now - 7),
+                sort_by: EventSortField::CreatedAt,
+                sort_direction: SortDirection::Asc,
+                ..SecurityEventQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(recent_events.total, 1);
+        assert_eq!(recent_events.items[0].reason, "port scan");
+
         let active_blocks = store
             .list_blocked_ips(&BlockedIpQuery {
                 active_only: true,
@@ -918,6 +1018,17 @@ mod tests {
             .unwrap();
         assert_eq!(active_blocks.total, 1);
         assert_eq!(active_blocks.items[0].ip, "10.0.0.1");
+
+        let sorted_blocks = store
+            .list_blocked_ips(&BlockedIpQuery {
+                sort_by: BlockedIpSortField::Ip,
+                sort_direction: SortDirection::Asc,
+                ..BlockedIpQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(sorted_blocks.total, 2);
+        assert_eq!(sorted_blocks.items[0].ip, "10.0.0.1");
 
         let paged_blocks = store
             .list_blocked_ips(&BlockedIpQuery {

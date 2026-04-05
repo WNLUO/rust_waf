@@ -121,6 +121,10 @@ pub struct EventsQueryParams {
     source_ip: Option<String>,
     action: Option<String>,
     blocked_only: Option<bool>,
+    created_from: Option<i64>,
+    created_to: Option<i64>,
+    sort_by: Option<String>,
+    sort_direction: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -129,6 +133,10 @@ pub struct BlockedIpsQueryParams {
     offset: Option<u32>,
     ip: Option<String>,
     active_only: Option<bool>,
+    blocked_from: Option<i64>,
+    blocked_to: Option<i64>,
+    sort_by: Option<String>,
+    sort_direction: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -211,7 +219,7 @@ async fn list_security_events_handler(
 ) -> ApiResult<Json<SecurityEventsResponse>> {
     let store = sqlite_store(&state)?;
     let result = store
-        .list_security_events(&params.into_query())
+        .list_security_events(&params.into_query().map_err(ApiError::bad_request)?)
         .await
         .map_err(ApiError::internal)?;
 
@@ -233,7 +241,7 @@ async fn list_blocked_ips_handler(
 ) -> ApiResult<Json<BlockedIpsResponse>> {
     let store = sqlite_store(&state)?;
     let result = store
-        .list_blocked_ips(&params.into_query())
+        .list_blocked_ips(&params.into_query().map_err(ApiError::bad_request)?)
         .await
         .map_err(ApiError::internal)?;
 
@@ -452,26 +460,72 @@ impl UpdateRuleRequest {
 }
 
 impl EventsQueryParams {
-    fn into_query(self) -> crate::storage::SecurityEventQuery {
-        crate::storage::SecurityEventQuery {
+    fn into_query(self) -> Result<crate::storage::SecurityEventQuery, String> {
+        Ok(crate::storage::SecurityEventQuery {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
             layer: self.layer,
             source_ip: self.source_ip,
             action: self.action,
             blocked_only: self.blocked_only.unwrap_or(false),
-        }
+            created_from: self.created_from,
+            created_to: self.created_to,
+            sort_by: parse_event_sort_field(self.sort_by.as_deref())?,
+            sort_direction: parse_sort_direction(self.sort_direction.as_deref())?,
+        })
     }
 }
 
 impl BlockedIpsQueryParams {
-    fn into_query(self) -> crate::storage::BlockedIpQuery {
-        crate::storage::BlockedIpQuery {
+    fn into_query(self) -> Result<crate::storage::BlockedIpQuery, String> {
+        Ok(crate::storage::BlockedIpQuery {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
             ip: self.ip,
             active_only: self.active_only.unwrap_or(false),
-        }
+            blocked_from: self.blocked_from,
+            blocked_to: self.blocked_to,
+            sort_by: parse_blocked_ip_sort_field(self.sort_by.as_deref())?,
+            sort_direction: parse_sort_direction(self.sort_direction.as_deref())?,
+        })
+    }
+}
+
+fn parse_sort_direction(value: Option<&str>) -> Result<crate::storage::SortDirection, String> {
+    match value.unwrap_or("desc").trim().to_ascii_lowercase().as_str() {
+        "asc" => Ok(crate::storage::SortDirection::Asc),
+        "desc" => Ok(crate::storage::SortDirection::Desc),
+        other => Err(format!("Unsupported sort_direction '{}'", other)),
+    }
+}
+
+fn parse_event_sort_field(value: Option<&str>) -> Result<crate::storage::EventSortField, String> {
+    match value
+        .unwrap_or("created_at")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "created_at" => Ok(crate::storage::EventSortField::CreatedAt),
+        "source_ip" => Ok(crate::storage::EventSortField::SourceIp),
+        "dest_port" => Ok(crate::storage::EventSortField::DestPort),
+        other => Err(format!("Unsupported event sort_by '{}'", other)),
+    }
+}
+
+fn parse_blocked_ip_sort_field(
+    value: Option<&str>,
+) -> Result<crate::storage::BlockedIpSortField, String> {
+    match value
+        .unwrap_or("blocked_at")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "blocked_at" => Ok(crate::storage::BlockedIpSortField::BlockedAt),
+        "expires_at" => Ok(crate::storage::BlockedIpSortField::ExpiresAt),
+        "ip" => Ok(crate::storage::BlockedIpSortField::Ip),
+        other => Err(format!("Unsupported blocked IP sort_by '{}'", other)),
     }
 }
 
@@ -650,15 +704,30 @@ mod tests {
             source_ip: Some("10.0.0.1".to_string()),
             action: Some("block".to_string()),
             blocked_only: Some(true),
+            created_from: Some(100),
+            created_to: Some(200),
+            sort_by: Some("source_ip".to_string()),
+            sort_direction: Some("asc".to_string()),
         }
         .into_query();
 
+        let query = query.unwrap();
         assert_eq!(query.limit, 25);
         assert_eq!(query.offset, 10);
         assert_eq!(query.layer.as_deref(), Some("L7"));
         assert_eq!(query.source_ip.as_deref(), Some("10.0.0.1"));
         assert_eq!(query.action.as_deref(), Some("block"));
         assert!(query.blocked_only);
+        assert_eq!(query.created_from, Some(100));
+        assert_eq!(query.created_to, Some(200));
+        assert!(matches!(
+            query.sort_by,
+            crate::storage::EventSortField::SourceIp
+        ));
+        assert!(matches!(
+            query.sort_direction,
+            crate::storage::SortDirection::Asc
+        ));
     }
 
     #[test]
@@ -668,12 +737,40 @@ mod tests {
             offset: Some(2),
             ip: Some("10.0.0.2".to_string()),
             active_only: Some(true),
+            blocked_from: Some(300),
+            blocked_to: Some(400),
+            sort_by: Some("ip".to_string()),
+            sort_direction: Some("asc".to_string()),
         }
         .into_query();
 
+        let query = query.unwrap();
         assert_eq!(query.limit, 5);
         assert_eq!(query.offset, 2);
         assert_eq!(query.ip.as_deref(), Some("10.0.0.2"));
         assert!(query.active_only);
+        assert_eq!(query.blocked_from, Some(300));
+        assert_eq!(query.blocked_to, Some(400));
+        assert!(matches!(
+            query.sort_by,
+            crate::storage::BlockedIpSortField::Ip
+        ));
+    }
+
+    #[test]
+    fn test_invalid_sort_params_fail_validation() {
+        let invalid_events = EventsQueryParams {
+            sort_by: Some("unknown".to_string()),
+            ..EventsQueryParams::default()
+        }
+        .into_query();
+        assert!(invalid_events.is_err());
+
+        let invalid_blocked = BlockedIpsQueryParams {
+            sort_direction: Some("sideways".to_string()),
+            ..BlockedIpsQueryParams::default()
+        }
+        .into_query();
+        assert!(invalid_blocked.is_err());
     }
 }

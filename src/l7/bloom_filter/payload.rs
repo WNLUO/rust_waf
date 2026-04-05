@@ -1,15 +1,15 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L7Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct PayloadBloomFilter {
-    config: L7Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PayloadBloomStats {
     pub filter_size: usize,
@@ -23,11 +23,10 @@ impl PayloadBloomFilter {
     pub fn new(config: L7Config) -> Self {
         info!("Initializing Payload Bloom Filter");
 
-        let filter_size = 10000000; // 10 million bits ~1.25MB
+        let filter_size = scaled_bloom_size(10_000_000, config.bloom_filter_scale, 262_144);
         let hash_functions = 6;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),
@@ -53,6 +52,7 @@ impl PayloadBloomFilter {
         debug!("Payload Bloom filter insert for '{}'", payload);
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> PayloadBloomStats {
         let insert_count = self.insert_count.load(Ordering::Relaxed);
         let hit_count = self.hit_count.load(Ordering::Relaxed);

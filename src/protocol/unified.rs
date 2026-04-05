@@ -27,9 +27,11 @@ pub struct UnifiedHttpRequest {
     pub stream_id: Option<u32>,
 
     /// 流优先级 (0-255, 仅HTTP/2.0有效)
+    #[allow(dead_code)]
     pub priority: Option<u8>,
 
     /// 请求时间戳
+    #[allow(dead_code)]
     pub timestamp: u64,
 
     /// 客户端IP地址
@@ -72,11 +74,13 @@ impl UnifiedHttpRequest {
     }
 
     /// 添加元数据
+    #[allow(dead_code)]
     pub fn add_metadata(&mut self, key: String, value: String) {
         self.metadata.insert(key, value);
     }
 
     /// 获取元数据
+    #[allow(dead_code)]
     pub fn get_metadata(&self, key: &str) -> Option<&String> {
         self.metadata.get(key)
     }
@@ -106,17 +110,20 @@ impl UnifiedHttpRequest {
     }
 
     /// 获取请求体作为UTF-8字符串
+    #[allow(dead_code)]
     pub fn get_body_as_string(&self) -> String {
         String::from_utf8_lossy(&self.body).to_string()
     }
 
     /// 获取Content-Length头部值
+    #[allow(dead_code)]
     pub fn content_length(&self) -> Option<usize> {
         self.get_header("content-length")
             .and_then(|v| v.parse().ok())
     }
 
     /// 获取Content-Type头部值
+    #[allow(dead_code)]
     pub fn content_type(&self) -> Option<&String> {
         self.get_header("content-type")
     }
@@ -127,6 +134,7 @@ impl UnifiedHttpRequest {
     }
 
     /// 检查是否为JSON请求
+    #[allow(dead_code)]
     pub fn is_json(&self) -> bool {
         self.content_type()
             .map(|ct| ct.contains("application/json"))
@@ -134,11 +142,12 @@ impl UnifiedHttpRequest {
     }
 
     /// 检查是否为表单提交
+    #[allow(dead_code)]
     pub fn is_form(&self) -> bool {
         self.content_type()
             .map(|ct| {
-                ct.contains("application/x-www-form-urlencoded") ||
-                ct.contains("multipart/form-data")
+                ct.contains("application/x-www-form-urlencoded")
+                    || ct.contains("multipart/form-data")
             })
             .unwrap_or(false)
     }
@@ -149,6 +158,7 @@ impl UnifiedHttpRequest {
     }
 
     /// 设置流优先级
+    #[allow(dead_code)]
     pub fn set_priority(&mut self, priority: u8) {
         self.priority = Some(priority);
     }
@@ -160,7 +170,9 @@ impl UnifiedHttpRequest {
 
     /// 获取请求总大小（头部+请求体）
     pub fn total_size(&self) -> usize {
-        let headers_size = self.headers.iter()
+        let headers_size = self
+            .headers
+            .iter()
             .map(|(k, v)| k.len() + v.len() + 4) // 4 for ": " and "\n"
             .sum::<usize>();
 
@@ -197,8 +209,14 @@ mod tests {
         request.add_header("Content-Type".to_string(), "application/json".to_string());
         request.add_header("User-Agent".to_string(), "TestClient/1.0".to_string());
 
-        assert_eq!(request.get_header("content-type"), Some(&"application/json".to_string()));
-        assert_eq!(request.get_header("USER-AGENT"), Some(&"TestClient/1.0".to_string()));
+        assert_eq!(
+            request.get_header("content-type"),
+            Some(&"application/json".to_string())
+        );
+        assert_eq!(
+            request.get_header("USER-AGENT"),
+            Some(&"TestClient/1.0".to_string())
+        );
     }
 
     #[test]
@@ -225,11 +243,8 @@ mod tests {
 
     #[test]
     fn test_stream_metadata() {
-        let mut request = UnifiedHttpRequest::new(
-            HttpVersion::Http2_0,
-            "GET".to_string(),
-            "/api".to_string(),
-        );
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/api".to_string());
 
         request.set_stream_id(123);
         request.set_priority(5);

@@ -1,16 +1,15 @@
 pub mod engine;
 pub mod packet;
 
-use anyhow::Result;
-use log::debug;
 use crate::config::Config;
 use crate::l4::L4Inspector;
 use crate::l7::L7Inspector;
-use crate::rules::RuleEngine;
 use crate::metrics::MetricsCollector;
+use crate::rules::RuleEngine;
+use anyhow::Result;
 
 pub use engine::WafEngine;
-pub use packet::{PacketInfo, InspectionResult, InspectionLayer, Protocol};
+pub use packet::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
 
 pub struct WafContext {
     pub config: Config,
@@ -61,49 +60,7 @@ impl WafContext {
         })
     }
 
-    pub fn inspect_request(&self, packet: &PacketInfo, payload: &[u8]) -> InspectionResult {
-        if let Some(metrics) = &self.metrics {
-            metrics.record_packet(payload.len());
-        }
-
-        if let Some(l4_inspector) = &self.l4_inspector {
-            let result = l4_inspector.inspect_packet(packet);
-            if result.blocked {
-                self.record_block(&result);
-                return result;
-            }
-        }
-
-        if let Some(l7_inspector) = &self.l7_inspector {
-            let result = l7_inspector.inspect_http_request(packet, payload);
-            if result.blocked {
-                self.record_block(&result);
-                return result;
-            }
-        }
-
-        if let Some(rule_engine) = &self.rule_engine {
-            let payload_str = String::from_utf8_lossy(payload);
-            let rule_result = rule_engine.inspect(packet, Some(payload_str.as_ref()));
-            if rule_result.blocked {
-                self.record_block(&rule_result);
-                return rule_result;
-            }
-            if rule_engine.has_rules() && !rule_result.reason.is_empty() {
-                debug!("Non-blocking rule matched: {}", rule_result.reason);
-            }
-        }
-
-        InspectionResult::allow(InspectionLayer::L7)
-    }
-
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
         self.metrics.as_ref().map(MetricsCollector::get_stats)
-    }
-
-    fn record_block(&self, result: &InspectionResult) {
-        if let Some(metrics) = &self.metrics {
-            metrics.record_block(result.layer.clone());
-        }
     }
 }

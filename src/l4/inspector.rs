@@ -1,8 +1,8 @@
 use crate::config::L4Config;
-use crate::core::{WafContext, PacketInfo, InspectionResult};
-use crate::l4::connection::ConnectionManager;
+use crate::core::{InspectionResult, PacketInfo, WafContext};
 use crate::l4::bloom_filter::L4BloomFilterManager;
-use log::{info, debug};
+use crate::l4::connection::ConnectionManager;
+use log::{debug, info};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -15,13 +15,23 @@ pub struct L4Inspector {
 }
 
 impl L4Inspector {
-    pub fn new(config: L4Config, bloom_enabled: bool, bloom_false_positive_verification: bool) -> Self {
+    pub fn new(
+        config: L4Config,
+        bloom_enabled: bool,
+        bloom_false_positive_verification: bool,
+    ) -> Self {
         info!("Initializing L4 Inspector with comprehensive detection capabilities");
-        info!("Bloom filter enabled: {}, false positive verification: {}",
-              bloom_enabled, bloom_false_positive_verification);
+        info!(
+            "Bloom filter enabled: {}, false positive verification: {}",
+            bloom_enabled, bloom_false_positive_verification
+        );
 
         let bloom_manager = if bloom_enabled {
-            Some(L4BloomFilterManager::new(config.clone(), bloom_enabled, bloom_false_positive_verification))
+            Some(L4BloomFilterManager::new(
+                config.clone(),
+                bloom_enabled,
+                bloom_false_positive_verification,
+            ))
         } else {
             None
         };
@@ -101,13 +111,19 @@ impl L4Inspector {
 
                 // Check IP:Port combination
                 if bloom_manager.check_ip_port(&packet.source_ip, packet.source_port) {
-                    debug!("IP:Port {}:{} matched in bloom filter", packet.source_ip, packet.source_port);
+                    debug!(
+                        "IP:Port {}:{} matched in bloom filter",
+                        packet.source_ip, packet.source_port
+                    );
                     self.record_port_event(&port, |stats| {
                         stats.increment_block();
                     });
                     return InspectionResult {
                         blocked: true,
-                        reason: format!("Blocked by L4 bloom filter: {}:{}", packet.source_ip, packet.source_port),
+                        reason: format!(
+                            "Blocked by L4 bloom filter: {}:{}",
+                            packet.source_ip, packet.source_port
+                        ),
                         layer: crate::core::InspectionLayer::L4,
                     };
                 }
@@ -174,7 +190,10 @@ impl L4Inspector {
             traffic: 0,
             defense_actions: 0,
             bloom_stats: self.bloom_manager.as_ref().map(|m| m.get_statistics()),
-            false_positive_stats: self.bloom_manager.as_ref().map(|m| m.get_false_positive_stats()),
+            false_positive_stats: self
+                .bloom_manager
+                .as_ref()
+                .map(|m| m.get_false_positive_stats()),
             per_port_stats,
         }
     }
@@ -184,20 +203,25 @@ impl L4Inspector {
         F: FnOnce(&mut PortStats),
     {
         let mut stats = self.port_stats.lock().unwrap();
-        let port_stats = stats.entry(port.to_string()).or_insert_with(|| PortStats::new(port.to_string()));
+        let port_stats = stats
+            .entry(port.to_string())
+            .or_insert_with(|| PortStats::new(port.to_string()));
         update_fn(port_stats);
     }
 
+    #[allow(dead_code)]
     pub fn get_bloom_manager_mut(&mut self) -> Option<&mut L4BloomFilterManager> {
         self.bloom_manager.as_mut()
     }
 
+    #[allow(dead_code)]
     pub fn enable_bloom_filter(&mut self, enabled: bool) {
         if let Some(ref mut bloom_manager) = self.bloom_manager {
             bloom_manager.set_enabled(enabled);
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_bloom_false_positive_verification(&mut self, verification: bool) {
         if let Some(ref mut bloom_manager) = self.bloom_manager {
             bloom_manager.set_false_positive_verification(verification);
@@ -239,6 +263,7 @@ impl PortStats {
         self.blocks += 1;
     }
 
+    #[allow(dead_code)]
     pub fn add_bytes(&mut self, bytes: usize) {
         self.bytes_processed += bytes as u64;
     }
@@ -260,7 +285,9 @@ pub struct L4Statistics {
     pub protocol_anomalies: u64,
     pub traffic: u64,
     pub defense_actions: u64,
+    #[allow(dead_code)]
     pub bloom_stats: Option<crate::l4::bloom_filter::L4BloomStats>,
+    #[allow(dead_code)]
     pub false_positive_stats: Option<crate::l4::bloom_filter::L4FalsePositiveStats>,
     pub per_port_stats: HashMap<String, PortStats>,
 }

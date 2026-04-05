@@ -1,7 +1,7 @@
 use super::{HttpVersion, ProtocolError, UnifiedHttpRequest};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use log::{debug, info, warn, error};
 use anyhow::Result;
+use log::{debug, error, info, warn};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// HTTP/2.0处理器
 ///
@@ -44,7 +44,11 @@ impl Http2Handler {
     ///
     /// 注意：这是一个简化的HTTP/2.0处理器实现。
     /// 完整的HTTP/2.0支持需要使用hyper库的完整功能。
-    pub async fn read_request<R>(&self, reader: &mut R, _max_size: usize) -> Result<UnifiedHttpRequest, ProtocolError>
+    pub async fn read_request<R>(
+        &self,
+        reader: &mut R,
+        _max_size: usize,
+    ) -> Result<UnifiedHttpRequest, ProtocolError>
     where
         R: AsyncReadExt + Unpin,
     {
@@ -63,7 +67,8 @@ impl Http2Handler {
 
         // 在实际实现中，这里应该使用hyper的HTTP/2.0服务器功能
         // 这里我们创建一个示例请求来演示结构
-        let mut request = UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
         request.set_stream_id(1); // 客户端发起的流ID为奇数
 
         // 添加示例头部
@@ -101,24 +106,34 @@ impl Http2Handler {
              Content-Length: {}\r\n\
              \r\n\
              {}",
-            status_code, stream_id, body.len(),
+            status_code,
+            stream_id,
+            body.len(),
             String::from_utf8_lossy(body)
         );
 
         writer.write_all(response.as_bytes()).await?;
         writer.flush().await?;
 
-        debug!("Wrote HTTP/2.0 response for stream {}: {}", stream_id, status_code);
+        debug!(
+            "Wrote HTTP/2.0 response for stream {}: {}",
+            stream_id, status_code
+        );
         Ok(())
     }
 
     /// 处理HTTP/2.0流错误
+    #[allow(dead_code)]
     pub fn handle_stream_error(&self, stream_id: u32, error_code: u32) {
-        error!("HTTP/2.0 stream error on stream {}: error code {}", stream_id, error_code);
+        error!(
+            "HTTP/2.0 stream error on stream {}: error code {}",
+            stream_id, error_code
+        );
         // 在实际实现中，这里应该发送RST_STREAM帧
     }
 
     /// 处理HTTP/2.0连接错误
+    #[allow(dead_code)]
     pub fn handle_connection_error(&self, error_code: u32) {
         error!("HTTP/2.0 connection error: error code {}", error_code);
         // 在实际实现中，这里应该发送GOAWAY帧并关闭连接
@@ -134,6 +149,7 @@ impl Default for Http2Handler {
 /// HTTP/2.0流管理器
 ///
 /// 管理HTTP/2.0连接中的多个流
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Http2StreamManager {
     active_streams: std::collections::HashMap<u32, StreamState>,
@@ -141,24 +157,13 @@ pub struct Http2StreamManager {
     max_concurrent_streams: usize,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct StreamState {
-    stream_id: u32,
-    state: StreamStateType,
     window_size: u32,
-    bytes_sent: u64,
-    bytes_received: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamStateType {
-    Idle,
-    Open,
-    HalfClosedRemote,
-    HalfClosedLocal,
-    Closed,
-}
-
+#[allow(dead_code)]
 impl Http2StreamManager {
     /// 创建新的流管理器
     pub fn new(max_concurrent_streams: usize) -> Self {
@@ -180,11 +185,7 @@ impl Http2StreamManager {
         self.next_stream_id += 2; // 客户端流ID是奇数
 
         let state = StreamState {
-            stream_id,
-            state: StreamStateType::Idle,
             window_size: 65535, // 默认窗口大小
-            bytes_sent: 0,
-            bytes_received: 0,
         };
 
         self.active_streams.insert(stream_id, state);
@@ -203,7 +204,10 @@ impl Http2StreamManager {
     pub fn update_window(&mut self, stream_id: u32, increment: u32) {
         if let Some(state) = self.active_streams.get_mut(&stream_id) {
             state.window_size = state.window_size.saturating_add(increment);
-            debug!("Updated window for stream {}: {}", stream_id, state.window_size);
+            debug!(
+                "Updated window for stream {}: {}",
+                stream_id, state.window_size
+            );
         }
     }
 

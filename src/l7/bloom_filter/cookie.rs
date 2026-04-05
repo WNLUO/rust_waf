@@ -1,15 +1,15 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L7Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct CookieBloomFilter {
-    config: L7Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CookieBloomStats {
     pub filter_size: usize,
@@ -23,11 +23,10 @@ impl CookieBloomFilter {
     pub fn new(config: L7Config) -> Self {
         info!("Initializing Cookie Bloom Filter");
 
-        let filter_size = 3000000; // 3 million bits ~375KB
+        let filter_size = scaled_bloom_size(3_000_000, config.bloom_filter_scale, 131_072);
         let hash_functions = 4;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),
@@ -53,6 +52,7 @@ impl CookieBloomFilter {
         debug!("Cookie Bloom filter insert for '{}'", cookie);
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> CookieBloomStats {
         let insert_count = self.insert_count.load(Ordering::Relaxed);
         let hit_count = self.hit_count.load(Ordering::Relaxed);

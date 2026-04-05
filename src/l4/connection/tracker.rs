@@ -1,6 +1,6 @@
 use crate::config::L4Config;
-use std::sync::atomic::{AtomicU64, Ordering};
 use log::info;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct ConnectionTracker {
     total_connections: AtomicU64,

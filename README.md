@@ -178,9 +178,13 @@ cargo check
 
 低配服务器优先使用 [config/minimal.json](/Users/wnluo/Desktop/code/waf/config/minimal.json)。
 
+- 设置 `max_concurrent_tasks`（默认 128）为服务器能承受的最大并发，超过上限的连接会立即丢弃，避免 0.5GB 内存被任务队列挤满。
+- `maintenance_interval_secs` 在低配模式默认 60 秒，无需额外日志；如需更频繁的统计，请在标准模式中调小。
+- Bloom Filter 现支持 `bloom_filter_scale`（0.1~1.0）。低配模式默认 0.5，可根据可用内存手动调节。
 - 建议关闭 API 和 Bloom Filter
 - 建议保留预筛和核心 L7 规则
-- 建议先用 `cargo build --release` 再部署
+- 建议使用 `cargo build --release --no-default-features` 产出仅含 HTTP/1.1 的最小二进制，必要时再用 `--features api,http2` 等增量开启功能。
+- 部署前清理 `target` 并仅上传 `target/release/waf` 与配置文件，可把二进制 `strip` 后压到 <4MB，减少 1GB 磁盘压力。
 
 标准配置可参考 [config/standard.json](/Users/wnluo/Desktop/code/waf/config/standard.json)。
 

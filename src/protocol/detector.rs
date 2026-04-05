@@ -1,11 +1,12 @@
 use super::{HttpVersion, ProtocolError};
-use tokio::io::AsyncReadExt;
-use tokio::time::timeout;
 use log::{debug, info};
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
+use tokio::time::timeout;
 
 /// HTTP协议检测器
 pub struct ProtocolDetector {
+    #[allow(dead_code)]
     detection_timeout: Duration,
 }
 
@@ -49,13 +50,15 @@ impl ProtocolDetector {
     }
 
     /// 从流中检测协议版本（读取初始字节）
+    #[allow(dead_code)]
     pub async fn detect_from_stream<R>(&self, reader: &mut R) -> Result<HttpVersion, ProtocolError>
     where
         R: AsyncReadExt + Unpin,
     {
         let mut buffer = vec![0u8; 256]; // 读取前256字节用于检测
 
-        let bytes_read = timeout(self.detection_timeout, reader.read(&mut buffer)).await
+        let bytes_read = timeout(self.detection_timeout, reader.read(&mut buffer))
+            .await
             .map_err(|_| ProtocolError::Timeout)??;
 
         if bytes_read == 0 {
@@ -137,10 +140,7 @@ mod tests {
         let detector = ProtocolDetector::new(100);
         let http2_pri = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
-        assert_eq!(
-            detector.detect_version(http2_pri),
-            HttpVersion::Http2_0
-        );
+        assert_eq!(detector.detect_version(http2_pri), HttpVersion::Http2_0);
     }
 
     #[test]
@@ -159,10 +159,7 @@ mod tests {
         let detector = ProtocolDetector::new(100);
         let http1_request = b"GET / HTTP/1.1\r\nHost: example.com\r\n";
 
-        assert_eq!(
-            detector.detect_version(http1_request),
-            HttpVersion::Http1_1
-        );
+        assert_eq!(detector.detect_version(http1_request), HttpVersion::Http1_1);
     }
 
     #[test]
@@ -170,9 +167,6 @@ mod tests {
         let detector = ProtocolDetector::new(100);
         let empty_bytes = b"";
 
-        assert_eq!(
-            detector.detect_version(empty_bytes),
-            HttpVersion::Http1_1
-        );
+        assert_eq!(detector.detect_version(empty_bytes), HttpVersion::Http1_1);
     }
 }

@@ -1,13 +1,15 @@
-use crate::protocol::{HttpVersion, UnifiedHttpRequest, ProtocolError};
 use crate::config::Http3Config;
-use log::{debug, info, warn};
+use crate::protocol::{HttpVersion, ProtocolError, UnifiedHttpRequest};
 use anyhow::Result;
+use log::{debug, info, warn};
 
 // HTTP/3.0处理器
 ///
 /// 处理基于QUIC协议的HTTP/3.0请求和响应，支持多路复用和连接迁移
 pub struct Http3Handler {
+    #[allow(dead_code)]
     config: Http3Config,
+    #[allow(dead_code)]
     pub max_concurrent_streams: usize,
     #[allow(dead_code)]
     _enable_quic_metrics: bool, // 以下划线避免警告
@@ -35,12 +37,14 @@ impl Http3Handler {
     }
 
     /// 设置最大并发流数
+    #[allow(dead_code)]
     pub fn with_max_concurrent_streams(mut self, max: usize) -> Self {
         self.max_concurrent_streams = max;
         self
     }
 
     /// 启用/禁用QUIC指标
+    #[allow(dead_code)]
     pub fn with_quic_metrics(mut self, enabled: bool) -> Self {
         self._enable_quic_metrics = enabled;
         self
@@ -56,24 +60,26 @@ impl Http3Handler {
     /// - 转换为UnifiedHttpRequest结构
     ///
     /// 当前实现使用模拟的连接和流
-    pub async fn read_request<R>(&self, _conn: &mut R, _max_size: usize) -> Result<UnifiedHttpRequest, ProtocolError>
+    #[allow(dead_code)]
+    pub async fn read_request<R>(
+        &self,
+        _conn: &mut R,
+        _max_size: usize,
+    ) -> Result<UnifiedHttpRequest, ProtocolError>
     where
         R: std::marker::Send + std::marker::Sync,
     {
         if !self.config.enabled {
             return Err(ProtocolError::ParseError(
-                "HTTP/3.0 support is not enabled".to_string()
+                "HTTP/3.0 support is not enabled".to_string(),
             ));
         }
 
         debug!("Reading HTTP/3.0 request");
 
         // 模拟HTTP/3.0请求解析
-        let mut request = UnifiedHttpRequest::new(
-            HttpVersion::Http3_0,
-            "GET".to_string(),
-            "/".to_string()
-        );
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http3_0, "GET".to_string(), "/".to_string());
 
         // 添加HTTP/3.0特定的伪头部（实际QPACK压缩的头部）
         request.add_header(":method".to_string(), "GET".to_string());
@@ -85,7 +91,10 @@ impl Http3Handler {
         request.add_header("Accept".to_string(), "*/*".to_string());
         request.add_header("Content-Type".to_string(), "application/json".to_string());
 
-        info!("Parsed HTTP/3.0 request: {} {}", request.method, request.uri);
+        info!(
+            "Parsed HTTP/3.0 request: {} {}",
+            request.method, request.uri
+        );
         Ok(request)
     }
 
@@ -95,6 +104,7 @@ impl Http3Handler {
     /// - 使用h3库构建HTTP/3.0帧
     /// - 使用QPACK压缩头部
     /// - 通过QUIC流发送数据
+    #[allow(dead_code)]
     pub async fn write_response<W>(
         &self,
         _stream: &mut W,
@@ -108,12 +118,16 @@ impl Http3Handler {
     {
         if !self.config.enabled {
             return Err(ProtocolError::ParseError(
-                "HTTP/3.0 support is not enabled".to_string()
+                "HTTP/3.0 support is not enabled".to_string(),
             ));
         }
 
-        debug!("Writing HTTP/3.0 response for stream {}: status {}, body size {}",
-                _stream_id, status_code, body.len());
+        debug!(
+            "Writing HTTP/3.0 response for stream {}: status {}, body size {}",
+            _stream_id,
+            status_code,
+            body.len()
+        );
 
         // 模拟HTTP/3.0响应写入
         // 在实际实现中会使用h3库发送HTTP/3.0响应
@@ -124,6 +138,7 @@ impl Http3Handler {
 /// HTTP/3.0流管理器
 ///
 /// 管理HTTP/3.0中的QUIC流，包括创建、销毁、优先级处理等
+#[allow(dead_code)]
 pub struct Http3StreamManager {
     active_streams: std::collections::HashMap<u64, StreamState>,
     next_stream_id: u64,
@@ -131,25 +146,16 @@ pub struct Http3StreamManager {
     pub enable_priorities: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct StreamState {
-    stream_id: u64,
-    state: StreamStateType,
     window_size: u32,
     bytes_sent: u64,
     bytes_received: u64,
     priority: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StreamStateType {
-    Idle,
-    Open,
-    HalfClosedRemote,
-    HalfClosedLocal,
-    Closed,
-}
-
+#[allow(dead_code)]
 impl Http3StreamManager {
     /// 创建新的HTTP/3.0流管理器
     pub fn new(max_concurrent_streams: usize, enable_priorities: bool) -> Self {
@@ -173,8 +179,6 @@ impl Http3StreamManager {
         self.next_stream_id += 4; // 客户端发起的流ID为奇数
 
         let state = StreamState {
-            stream_id,
-            state: StreamStateType::Idle,
             window_size: 65535, // HTTP/3.0默认窗口大小
             bytes_sent: 0,
             bytes_received: 0,
@@ -197,7 +201,10 @@ impl Http3StreamManager {
     pub fn update_window(&mut self, stream_id: u64, increment: u32) {
         if let Some(state) = self.active_streams.get_mut(&stream_id) {
             state.window_size = state.window_size.saturating_add(increment);
-            debug!("Updated window for stream {}: {}", stream_id, state.window_size);
+            debug!(
+                "Updated window for stream {}: {}",
+                stream_id, state.window_size
+            );
         }
     }
 
@@ -224,7 +231,12 @@ impl Http3StreamManager {
     /// 获取流统计信息
     pub fn get_stream_stats(&self, stream_id: u64) -> Option<(u64, u64, u32, u8)> {
         self.active_streams.get(&stream_id).map(|state| {
-            (state.bytes_sent, state.bytes_received, state.window_size, state.priority)
+            (
+                state.bytes_sent,
+                state.bytes_received,
+                state.window_size,
+                state.priority,
+            )
         })
     }
 }

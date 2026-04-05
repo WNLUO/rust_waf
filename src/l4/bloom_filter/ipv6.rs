@@ -1,11 +1,10 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L4Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::net::Ipv6Addr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct IPv6BloomFilter {
-    config: L4Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
@@ -25,11 +24,10 @@ impl IPv6BloomFilter {
         info!("Initializing IPv6 Bloom Filter");
 
         // Larger filter for IPv6 (128 bits)
-        let filter_size = 2000000; // 2 million bits ~250KB
+        let filter_size = scaled_bloom_size(2_000_000, config.bloom_filter_scale, 262_144);
         let hash_functions = 5;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),

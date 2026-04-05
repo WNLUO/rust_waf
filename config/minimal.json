@@ -1,21 +1,21 @@
 {
   "interface": "eth0",
-  "listen_addr": "0.0.0.0:8080",
+  "listen_addrs": ["0.0.0.0:8080"],
   "runtime_profile": "minimal",
   "api_enabled": false,
   "api_bind": "127.0.0.1:3000",
   "bloom_enabled": false,
   "l4_bloom_false_positive_verification": false,
   "l7_bloom_false_positive_verification": false,
-  "maintenance_interval_secs": 30,
+  "maintenance_interval_secs": 60,
   "l4_config": {
     "ddos_protection_enabled": true,
     "advanced_ddos_enabled": false,
     "connection_rate_limit": 64,
     "syn_flood_threshold": 32,
     "scan_enabled": false,
-    "max_tracked_ips": 2048,
-    "max_blocked_ips": 512,
+    "max_tracked_ips": 512,
+    "max_blocked_ips": 128,
     "state_ttl_secs": 180
   },
   "l7_config": {
@@ -46,5 +46,6 @@
     "enable_tls13": true
   },
   "rules": [],
-  "metrics_enabled": true
+  "metrics_enabled": true,
+  "max_concurrent_tasks": 128
 }

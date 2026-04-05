@@ -1,9 +1,9 @@
 use crate::config::L4Config;
+use log::{info, warn};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, warn};
+use std::sync::Mutex;
 
 pub struct ConnectionLimiter {
     config: L4Config,
@@ -28,7 +28,10 @@ struct RateLimitEntry {
 
 impl ConnectionLimiter {
     pub fn new(config: L4Config) -> Self {
-        info!("Initializing Connection Limiter with max rate: {}", config.connection_rate_limit);
+        info!(
+            "Initializing Connection Limiter with max rate: {}",
+            config.connection_rate_limit
+        );
         Self {
             config,
             blocked_ips: Mutex::new(HashMap::new()),
@@ -50,7 +53,10 @@ impl ConnectionLimiter {
             return false;
         }
 
-        let mut request_counters = self.request_counters.lock().expect("request_counters mutex poisoned");
+        let mut request_counters = self
+            .request_counters
+            .lock()
+            .expect("request_counters mutex poisoned");
         let now = std::time::Instant::now();
         let entry = request_counters.entry(*ip).or_insert(RateLimitEntry {
             window_started: now,
@@ -65,8 +71,15 @@ impl ConnectionLimiter {
         if entry.count >= self.config.connection_rate_limit {
             self.total_rate_limit_hits.fetch_add(1, Ordering::Relaxed);
             drop(request_counters);
-            self.block_ip(ip, "rate limit exceeded", std::time::Duration::from_secs(30));
-            warn!("Connection rejected - IP {} exceeded rate limit {}", ip, self.config.connection_rate_limit);
+            self.block_ip(
+                ip,
+                "rate limit exceeded",
+                std::time::Duration::from_secs(30),
+            );
+            warn!(
+                "Connection rejected - IP {} exceeded rate limit {}",
+                ip, self.config.connection_rate_limit
+            );
             return false;
         }
 
@@ -90,17 +103,19 @@ impl ConnectionLimiter {
         if blocked_ips.len() >= self.config.max_blocked_ips {
             warn!(
                 "Blocked IP table is full (limit: {}), skipping new block for {}",
-                self.config.max_blocked_ips,
-                ip
+                self.config.max_blocked_ips, ip
             );
             return;
         }
 
-        blocked_ips.insert(*ip, BlockedIp {
-            blocked_at: std::time::Instant::now(),
-            block_duration: duration,
-            reason: reason.to_string(),
-        });
+        blocked_ips.insert(
+            *ip,
+            BlockedIp {
+                blocked_at: std::time::Instant::now(),
+                block_duration: duration,
+                reason: reason.to_string(),
+            },
+        );
         self.total_blocked.fetch_add(1, Ordering::Relaxed);
         warn!("Blocked IP {} for {:?}: {}", ip, duration, reason);
     }
@@ -117,7 +132,10 @@ impl ConnectionLimiter {
             keep
         });
 
-        let mut request_counters = self.request_counters.lock().expect("request_counters mutex poisoned");
+        let mut request_counters = self
+            .request_counters
+            .lock()
+            .expect("request_counters mutex poisoned");
         request_counters.retain(|_, entry| entry.window_started.elapsed() < ttl);
     }
 

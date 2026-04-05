@@ -1,15 +1,15 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L7Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct UrlBloomFilter {
-    config: L7Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UrlBloomStats {
     pub filter_size: usize,
@@ -24,11 +24,10 @@ impl UrlBloomFilter {
         info!("Initializing URL Bloom Filter");
 
         // Larger filter for URLs (longer strings)
-        let filter_size = 8000000; // 8 million bits ~1MB
+        let filter_size = scaled_bloom_size(8_000_000, config.bloom_filter_scale, 262_144);
         let hash_functions = 5;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),
@@ -54,6 +53,7 @@ impl UrlBloomFilter {
         debug!("URL Bloom filter insert for '{}'", url);
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> UrlBloomStats {
         let insert_count = self.insert_count.load(Ordering::Relaxed);
         let hit_count = self.hit_count.load(Ordering::Relaxed);

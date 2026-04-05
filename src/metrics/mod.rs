@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use crate::core::InspectionLayer;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct MetricsCollector {
     total_packets: AtomicU64,

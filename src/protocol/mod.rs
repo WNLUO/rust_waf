@@ -39,8 +39,10 @@ pub enum ProtocolError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Protocol detection timeout")]
+    #[allow(dead_code)]
     Timeout,
     #[error("Unsupported protocol version")]
+    #[allow(dead_code)]
     UnsupportedVersion,
     #[error("Protocol parsing error: {0}")]
     ParseError(String),
@@ -49,5 +51,6 @@ pub enum ProtocolError {
 pub use detector::ProtocolDetector;
 pub use http1::Http1Handler;
 pub use http2::Http2Handler;
+#[allow(unused_imports)]
 pub use http3::{Http3Handler, Http3StreamManager};
 pub use unified::UnifiedHttpRequest;

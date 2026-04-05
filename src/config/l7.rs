@@ -31,6 +31,12 @@ pub struct L7Config {
     pub enable_path_traversal_detection: bool,
     pub enable_command_injection_detection: bool,
     pub http2_config: Http2Config,
+    #[serde(default = "default_bloom_filter_scale")]
+    pub bloom_filter_scale: f64,
+}
+
+const fn default_bloom_filter_scale() -> f64 {
+    1.0
 }
 
 impl Default for L7Config {
@@ -44,6 +50,7 @@ impl Default for L7Config {
             enable_path_traversal_detection: true,
             enable_command_injection_detection: true,
             http2_config: Http2Config::default(),
+            bloom_filter_scale: default_bloom_filter_scale(),
         }
     }
 }

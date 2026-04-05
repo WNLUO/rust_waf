@@ -1,16 +1,16 @@
+pub mod ip_port;
 pub mod ipv4;
 pub mod ipv6;
-pub mod ip_port;
 
+pub use ip_port::IpPortBloomFilter;
 pub use ipv4::IPv4BloomFilter;
 pub use ipv6::IPv6BloomFilter;
-pub use ip_port::IpPortBloomFilter;
 
 use crate::config::L4Config;
 use log::info;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct L4BloomFilterManager {
-    config: L4Config,
     ipv4_filter: IPv4BloomFilter,
     ipv6_filter: IPv6BloomFilter,
     ip_port_filter: IpPortBloomFilter,
@@ -23,33 +23,41 @@ pub struct L4BloomFilterManager {
 
 impl L4BloomFilterManager {
     pub fn new(config: L4Config, enabled: bool, false_positive_verification: bool) -> Self {
-        info!("Initializing L4 Bloom Filter Manager (enabled: {}, false_positive_verification: {})",
-              enabled, false_positive_verification);
-        Self {
-            config: config.clone(),
+        info!(
+            "Initializing L4 Bloom Filter Manager (enabled: {}, false_positive_verification: {})",
+            enabled, false_positive_verification
+        );
+        let mut manager = Self {
             ipv4_filter: IPv4BloomFilter::new(config.clone()),
             ipv6_filter: IPv6BloomFilter::new(config.clone()),
-            ip_port_filter: IpPortBloomFilter::new(config.clone()),
+            ip_port_filter: IpPortBloomFilter::new(config),
             enabled,
             false_positive_verification,
             exact_set_ipv4: std::collections::HashSet::new(),
             exact_set_ipv6: std::collections::HashSet::new(),
             exact_set_ip_port: std::collections::HashSet::new(),
-        }
+        };
+        manager.preload_defaults();
+        manager
     }
 
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
+    #[allow(dead_code)]
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
         log::info!("L4 Bloom filter enabled: {}", enabled);
     }
 
+    #[allow(dead_code)]
     pub fn set_false_positive_verification(&mut self, verification: bool) {
         self.false_positive_verification = verification;
-        log::info!("L4 Bloom filter false positive verification: {}", verification);
+        log::info!(
+            "L4 Bloom filter false positive verification: {}",
+            verification
+        );
     }
 
     pub fn check_ipv4(&self, ip: &std::net::Ipv4Addr) -> bool {
@@ -65,7 +73,11 @@ impl L4BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_ipv4.contains(ip);
-            log::debug!("IPv4 Bloom filter hit for {}, exact verification: {}", ip, exact_result);
+            log::debug!(
+                "IPv4 Bloom filter hit for {}, exact verification: {}",
+                ip,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -92,7 +104,11 @@ impl L4BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_ipv6.contains(ip);
-            log::debug!("IPv6 Bloom filter hit for {}, exact verification: {}", ip, exact_result);
+            log::debug!(
+                "IPv6 Bloom filter hit for {}, exact verification: {}",
+                ip,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -120,7 +136,12 @@ impl L4BloomFilterManager {
         if self.false_positive_verification {
             let key = (ip.clone(), port);
             let exact_result = self.exact_set_ip_port.contains(&key);
-            log::debug!("IP:Port Bloom filter hit for {}:{}, exact verification: {}", ip, port, exact_result);
+            log::debug!(
+                "IP:Port Bloom filter hit for {}:{}, exact verification: {}",
+                ip,
+                port,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -131,6 +152,33 @@ impl L4BloomFilterManager {
         self.ip_port_filter.insert(ip, port);
         if self.false_positive_verification {
             self.exact_set_ip_port.insert((ip, port));
+        }
+    }
+
+    fn preload_defaults(&mut self) {
+        let sample_ipv4 = [
+            Ipv4Addr::new(192, 0, 2, 1),
+            Ipv4Addr::new(198, 51, 100, 2),
+            Ipv4Addr::new(203, 0, 113, 3),
+        ];
+        for ip in sample_ipv4 {
+            self.add_ipv4(ip);
+        }
+
+        let sample_ipv6 = [
+            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2),
+        ];
+        for ip in sample_ipv6 {
+            self.add_ipv6(ip);
+        }
+
+        let sample_ip_port = [
+            (IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)), 8080),
+            (IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20)), 22),
+        ];
+        for (ip, port) in sample_ip_port {
+            self.add_ip_port(ip, port);
         }
     }
 

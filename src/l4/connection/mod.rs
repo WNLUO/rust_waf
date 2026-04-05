@@ -1,12 +1,12 @@
-pub mod monitor;
 pub mod limiter;
+pub mod monitor;
 pub mod tracker;
 
 use crate::config::L4Config;
 use log::info;
 
-pub use monitor::ConnectionMonitor;
 pub use limiter::ConnectionLimiter;
+pub use monitor::ConnectionMonitor;
 pub use tracker::ConnectionTracker;
 
 pub struct ConnectionManager {
@@ -52,7 +52,8 @@ impl ConnectionManager {
     }
 
     pub fn maintenance_tick(&self) {
-        self.tracker.cleanup_inactive(std::time::Duration::from_secs(30));
+        self.tracker
+            .cleanup_inactive(std::time::Duration::from_secs(30));
         self.limiter.cleanup_expired();
         self.monitor.maintenance_tick();
     }

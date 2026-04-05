@@ -1,7 +1,7 @@
 use crate::config::L4Config;
+use log::info;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::info;
 
 pub struct ConnectionMonitor {
     total_connections: AtomicU64,
@@ -9,7 +9,10 @@ pub struct ConnectionMonitor {
 
 impl ConnectionMonitor {
     pub fn new(config: L4Config) -> Self {
-        info!("Initializing Connection Monitor with rate limit: {}", config.connection_rate_limit);
+        info!(
+            "Initializing Connection Monitor with rate limit: {}",
+            config.connection_rate_limit
+        );
         Self {
             total_connections: AtomicU64::new(0),
         }

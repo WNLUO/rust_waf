@@ -1,10 +1,10 @@
 // HTTP/2.0支持测试
 
-use waf::protocol::{ProtocolDetector, HttpVersion};
-use waf::l7::L7Inspector;
+use std::net::{IpAddr, Ipv4Addr};
 use waf::config::L7Config;
 use waf::core::{PacketInfo, Protocol};
-use std::net::{IpAddr, Ipv4Addr};
+use waf::l7::L7Inspector;
+use waf::protocol::{HttpVersion, ProtocolDetector};
 
 #[test]
 fn test_protocol_detector_http1() {
@@ -57,7 +57,7 @@ fn test_unified_request_creation() {
     let mut request = UnifiedHttpRequest::new(
         HttpVersion::Http2_0,
         "POST".to_string(),
-        "/api/data".to_string()
+        "/api/data".to_string(),
     );
 
     request.add_header("Content-Type".to_string(), "application/json".to_string());
@@ -67,7 +67,10 @@ fn test_unified_request_creation() {
     assert_eq!(request.version, HttpVersion::Http2_0);
     assert_eq!(request.method, "POST");
     assert_eq!(request.uri, "/api/data");
-    assert_eq!(request.get_header("content-type"), Some(&"application/json".to_string()));
+    assert_eq!(
+        request.get_header("content-type"),
+        Some(&"application/json".to_string())
+    );
 }
 
 #[test]
@@ -102,11 +105,8 @@ fn test_l7_inspector_with_unified_request() {
     let inspector = L7Inspector::new(config.clone(), false, false);
 
     // 创建测试请求
-    let mut request = UnifiedHttpRequest::new(
-        HttpVersion::Http1_1,
-        "GET".to_string(),
-        "/".to_string()
-    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
 
     request.add_header("Host".to_string(), "example.com".to_string());
     request.add_header("User-Agent".to_string(), "Test/1.0".to_string());
@@ -131,8 +131,6 @@ fn test_l7_inspector_with_unified_request() {
 
 #[test]
 fn test_l7_inspector_sql_injection_detection() {
-    use waf::protocol::UnifiedHttpRequest;
-
     let config = L7Config::default();
     let inspector = L7Inspector::new(config.clone(), false, false);
 
@@ -169,7 +167,7 @@ fn test_l7_inspector_xss_detection() {
     let mut request = UnifiedHttpRequest::new(
         HttpVersion::Http1_1,
         "GET".to_string(),
-        "/search".to_string()
+        "/search".to_string(),
     );
 
     request.add_header("Host".to_string(), "example.com".to_string());
@@ -190,7 +188,10 @@ fn test_l7_inspector_xss_detection() {
     let test_str = String::from_utf8_lossy(&test_payload).to_string();
 
     // 创建包含XSS的请求字符串
-    let inspection_str = format!("GET /search\nHost: example.com\nContent-Type: application/json\n\n{}", test_str);
+    let inspection_str = format!(
+        "GET /search\nHost: example.com\nContent-Type: application/json\n\n{}",
+        test_str
+    );
 
     // 检查请求
     let result = inspector.inspect_http_request(&packet, inspection_str.as_bytes());

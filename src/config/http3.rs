@@ -29,7 +29,7 @@ pub struct Http3Config {
 impl Default for Http3Config {
     fn default() -> Self {
         Self {
-            enabled: false,  // 默认禁用HTTP/3.0
+            enabled: false, // 默认禁用HTTP/3.0
             listen_addr: "0.0.0.0:8443".to_string(),
             max_concurrent_streams: 100,
             idle_timeout_secs: 300,
@@ -70,10 +70,16 @@ impl Http3Config {
         // 如果启用TLS，验证证书和私钥
         if self.enable_tls13 {
             if self.certificate_path.is_some() && self.private_key_path.is_none() {
-                return Err("If certificate path is provided, private key path is also required".to_string());
+                return Err(
+                    "If certificate path is provided, private key path is also required"
+                        .to_string(),
+                );
             }
             if self.certificate_path.is_none() && self.private_key_path.is_some() {
-                return Err("If private key path is provided, certificate path is also required".to_string());
+                return Err(
+                    "If private key path is provided, certificate path is also required"
+                        .to_string(),
+                );
             }
         }
 
@@ -81,6 +87,7 @@ impl Http3Config {
     }
 
     /// 获取默认配置（用于生产环境）
+    #[allow(dead_code)]
     pub fn production() -> Self {
         Self {
             enabled: true,
@@ -98,6 +105,7 @@ impl Http3Config {
     }
 
     /// 获取开发配置
+    #[allow(dead_code)]
     pub fn development() -> Self {
         Self {
             enabled: true,

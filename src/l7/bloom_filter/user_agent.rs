@@ -1,15 +1,15 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L7Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct UserAgentBloomFilter {
-    config: L7Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct UserAgentBloomStats {
     pub filter_size: usize,
@@ -23,11 +23,10 @@ impl UserAgentBloomFilter {
     pub fn new(config: L7Config) -> Self {
         info!("Initializing User-Agent Bloom Filter");
 
-        let filter_size = 6000000; // 6 million bits ~750KB
+        let filter_size = scaled_bloom_size(6_000_000, config.bloom_filter_scale, 131_072);
         let hash_functions = 5;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),
@@ -42,7 +41,10 @@ impl UserAgentBloomFilter {
             self.hit_count.fetch_add(1, Ordering::Relaxed);
         }
 
-        debug!("User-Agent Bloom filter check for '{}': {}", user_agent, result);
+        debug!(
+            "User-Agent Bloom filter check for '{}': {}",
+            user_agent, result
+        );
         result
     }
 
@@ -53,6 +55,7 @@ impl UserAgentBloomFilter {
         debug!("User-Agent Bloom filter insert for '{}'", user_agent);
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> UserAgentBloomStats {
         let insert_count = self.insert_count.load(Ordering::Relaxed);
         let hit_count = self.hit_count.load(Ordering::Relaxed);

@@ -1,22 +1,21 @@
-pub mod url;
-pub mod http_method;
-pub mod user_agent;
 pub mod cookie;
-pub mod payload;
 pub mod headers;
+pub mod http_method;
+pub mod payload;
+pub mod url;
+pub mod user_agent;
 
-pub use url::UrlBloomFilter;
-pub use http_method::HttpMethodBloomFilter;
-pub use user_agent::UserAgentBloomFilter;
 pub use cookie::CookieBloomFilter;
-pub use payload::PayloadBloomFilter;
 pub use headers::HeadersBloomFilter;
+pub use http_method::HttpMethodBloomFilter;
+pub use payload::PayloadBloomFilter;
+pub use url::UrlBloomFilter;
+pub use user_agent::UserAgentBloomFilter;
 
 use crate::config::L7Config;
 use log::info;
 
 pub struct L7BloomFilterManager {
-    config: L7Config,
     url_filter: UrlBloomFilter,
     http_method_filter: HttpMethodBloomFilter,
     user_agent_filter: UserAgentBloomFilter,
@@ -35,16 +34,17 @@ pub struct L7BloomFilterManager {
 
 impl L7BloomFilterManager {
     pub fn new(config: L7Config, enabled: bool, false_positive_verification: bool) -> Self {
-        info!("Initializing L7 Bloom Filter Manager (enabled: {}, false_positive_verification: {})",
-              enabled, false_positive_verification);
-        Self {
-            config: config.clone(),
+        info!(
+            "Initializing L7 Bloom Filter Manager (enabled: {}, false_positive_verification: {})",
+            enabled, false_positive_verification
+        );
+        let mut manager = Self {
             url_filter: UrlBloomFilter::new(config.clone()),
             http_method_filter: HttpMethodBloomFilter::new(config.clone()),
             user_agent_filter: UserAgentBloomFilter::new(config.clone()),
             cookie_filter: CookieBloomFilter::new(config.clone()),
             payload_filter: PayloadBloomFilter::new(config.clone()),
-            headers_filter: HeadersBloomFilter::new(config.clone()),
+            headers_filter: HeadersBloomFilter::new(config),
             enabled,
             false_positive_verification,
             exact_set_url: std::collections::HashSet::new(),
@@ -53,21 +53,28 @@ impl L7BloomFilterManager {
             exact_set_cookie: std::collections::HashSet::new(),
             exact_set_payload: std::collections::HashSet::new(),
             exact_set_headers: std::collections::HashSet::new(),
-        }
+        };
+        manager.preload_defaults();
+        manager
     }
 
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
+    #[allow(dead_code)]
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
         log::info!("L7 Bloom filter enabled: {}", enabled);
     }
 
+    #[allow(dead_code)]
     pub fn set_false_positive_verification(&mut self, verification: bool) {
         self.false_positive_verification = verification;
-        log::info!("L7 Bloom filter false positive verification: {}", verification);
+        log::info!(
+            "L7 Bloom filter false positive verification: {}",
+            verification
+        );
     }
 
     pub fn check_url(&self, url: &str) -> bool {
@@ -83,7 +90,11 @@ impl L7BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_url.contains(url);
-            log::debug!("URL Bloom filter hit for {}, exact verification: {}", url, exact_result);
+            log::debug!(
+                "URL Bloom filter hit for {}, exact verification: {}",
+                url,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -110,7 +121,11 @@ impl L7BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_http_method.contains(method);
-            log::debug!("HTTP Method Bloom filter hit for {}, exact verification: {}", method, exact_result);
+            log::debug!(
+                "HTTP Method Bloom filter hit for {}, exact verification: {}",
+                method,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -137,7 +152,11 @@ impl L7BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_user_agent.contains(user_agent);
-            log::debug!("User-Agent Bloom filter hit for {}, exact verification: {}", user_agent, exact_result);
+            log::debug!(
+                "User-Agent Bloom filter hit for {}, exact verification: {}",
+                user_agent,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -164,7 +183,11 @@ impl L7BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_cookie.contains(cookie);
-            log::debug!("Cookie Bloom filter hit for {}, exact verification: {}", cookie, exact_result);
+            log::debug!(
+                "Cookie Bloom filter hit for {}, exact verification: {}",
+                cookie,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -191,7 +214,11 @@ impl L7BloomFilterManager {
 
         if self.false_positive_verification {
             let exact_result = self.exact_set_payload.contains(payload);
-            log::debug!("Payload Bloom filter hit for {}, exact verification: {}", payload, exact_result);
+            log::debug!(
+                "Payload Bloom filter hit for {}, exact verification: {}",
+                payload,
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -218,12 +245,16 @@ impl L7BloomFilterManager {
 
         if self.false_positive_verification {
             // Convert headers to a string for exact matching
-            let headers_str = headers.iter()
+            let headers_str = headers
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<_>>()
                 .join(",");
             let exact_result = self.exact_set_headers.contains(&headers_str);
-            log::debug!("Headers Bloom filter hit, exact verification: {}", exact_result);
+            log::debug!(
+                "Headers Bloom filter hit, exact verification: {}",
+                exact_result
+            );
             exact_result
         } else {
             bloom_result
@@ -233,7 +264,8 @@ impl L7BloomFilterManager {
     pub fn add_headers(&mut self, headers: Vec<(String, String)>) {
         self.headers_filter.insert(headers.clone());
         if self.false_positive_verification {
-            let headers_str = headers.iter()
+            let headers_str = headers
+                .iter()
                 .map(|(k, v)| format!("{}: {}", k, v))
                 .collect::<Vec<_>>()
                 .join(",");
@@ -241,6 +273,40 @@ impl L7BloomFilterManager {
         }
     }
 
+    fn preload_defaults(&mut self) {
+        let suspicious_urls = ["/etc/passwd", "/wp-admin.php", "../etc/shadow"];
+        for url in suspicious_urls {
+            self.add_url(url.to_string());
+        }
+
+        let suspicious_methods = ["TRACE", "TRACK"];
+        for method in suspicious_methods {
+            self.add_http_method(method.to_string());
+        }
+
+        let suspicious_agents = ["sqlmap", "wpscan", "nmap"];
+        for agent in suspicious_agents {
+            self.add_user_agent(agent.to_string());
+        }
+
+        let suspicious_cookies = ["PHPSESSID=../../../../etc/passwd", "JSESSIONID=;drop table"];
+        for cookie in suspicious_cookies {
+            self.add_cookie(cookie.to_string());
+        }
+
+        let suspicious_payloads = ["' OR '1'='1", "<script>alert('xss')</script>"];
+        for payload in suspicious_payloads {
+            self.add_payload(payload.to_string());
+        }
+
+        let suspicious_headers = vec![
+            ("x-forwarded-for".to_string(), "127.0.0.1".to_string()),
+            ("user-agent".to_string(), "masscan".to_string()),
+        ];
+        self.add_headers(suspicious_headers);
+    }
+
+    #[allow(dead_code)]
     pub fn get_statistics(&self) -> L7BloomStats {
         L7BloomStats {
             url_filter: self.url_filter.get_stats(),
@@ -254,6 +320,7 @@ impl L7BloomFilterManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_false_positive_stats(&self) -> L7FalsePositiveStats {
         L7FalsePositiveStats {
             url_exact_size: self.exact_set_url.len(),
@@ -266,6 +333,7 @@ impl L7BloomFilterManager {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct L7BloomStats {
     pub url_filter: url::UrlBloomStats,
@@ -278,6 +346,7 @@ pub struct L7BloomStats {
     pub false_positive_verification: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct L7FalsePositiveStats {
     pub url_exact_size: usize,

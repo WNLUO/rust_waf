@@ -1,10 +1,12 @@
 // HTTP/3.0支持测试
 
-use waf::protocol::{HttpVersion, Http3Handler, Http3StreamManager, ProtocolDetector, UnifiedHttpRequest};
-use waf::config::Http3Config;
-use waf::l7::L7Inspector;
-use waf::core::{PacketInfo, Protocol, InspectionLayer};
 use std::net::{IpAddr, Ipv4Addr};
+use waf::config::Http3Config;
+use waf::core::{PacketInfo, Protocol};
+use waf::l7::L7Inspector;
+use waf::protocol::{
+    Http3Handler, Http3StreamManager, HttpVersion, ProtocolDetector, UnifiedHttpRequest,
+};
 
 #[test]
 fn test_http3_config_default() {
@@ -121,7 +123,7 @@ fn test_unified_request_http3() {
     let mut request = UnifiedHttpRequest::new(
         HttpVersion::Http3_0,
         "GET".to_string(),
-        "/api/data".to_string()
+        "/api/data".to_string(),
     );
 
     request.add_header(":method".to_string(), "GET".to_string());
@@ -142,11 +144,8 @@ fn test_l7_inspector_with_unified_request_http3() {
     let inspector = L7Inspector::new(l7_config, false, false);
 
     // 创建HTTP/3.0请求
-    let mut request = UnifiedHttpRequest::new(
-        HttpVersion::Http3_0,
-        "GET".to_string(),
-        "/".to_string()
-    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http3_0, "GET".to_string(), "/".to_string());
 
     request.add_header("User-Agent".to_string(), "HTTP/3.0 Test Client".to_string());
     request.body = b"UNION SELECT * FROM users".to_vec();
@@ -178,7 +177,7 @@ fn test_l7_inspector_xss_detection_http3() {
     let mut request = UnifiedHttpRequest::new(
         HttpVersion::Http3_0,
         "GET".to_string(),
-        "/search".to_string()
+        "/search".to_string(),
     );
 
     request.add_header("User-Agent".to_string(), "HTTP/3.0 Browser".to_string());
@@ -330,7 +329,9 @@ async fn test_http3_handler_response() {
 
     // 写入HTTP/3.0响应（模拟）
     let mut stream = MockQuicStream::new();
-    let status = handler.write_response(&mut stream, 123, 200, &[], b"Test response").await;
+    let status = handler
+        .write_response(&mut stream, 123, 200, &[], b"Test response")
+        .await;
 
     assert!(status.is_ok());
 }
@@ -344,15 +345,11 @@ impl MockQuicConnection {
     }
 }
 
-struct MockQuicStream {
-    data: Vec<u8>,
-}
+struct MockQuicStream;
 
 impl MockQuicStream {
     pub fn new() -> Self {
-        Self {
-            data: Vec::new(),
-        }
+        Self
     }
 }
 

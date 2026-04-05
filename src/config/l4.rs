@@ -10,6 +10,12 @@ pub struct L4Config {
     pub max_tracked_ips: usize,
     pub max_blocked_ips: usize,
     pub state_ttl_secs: u64,
+    #[serde(default = "default_bloom_filter_scale")]
+    pub bloom_filter_scale: f64,
+}
+
+const fn default_bloom_filter_scale() -> f64 {
+    1.0
 }
 
 impl Default for L4Config {
@@ -23,6 +29,7 @@ impl Default for L4Config {
             max_tracked_ips: 4096,
             max_blocked_ips: 1024,
             state_ttl_secs: 300,
+            bloom_filter_scale: default_bloom_filter_scale(),
         }
     }
 }

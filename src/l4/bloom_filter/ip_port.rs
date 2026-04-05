@@ -1,11 +1,10 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L4Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct IpPortBloomFilter {
-    config: L4Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
@@ -25,11 +24,10 @@ impl IpPortBloomFilter {
         info!("Initializing IP+Port Bloom Filter");
 
         // Larger filter for IP+Port combinations
-        let filter_size = 5000000; // 5 million bits ~625KB
+        let filter_size = scaled_bloom_size(5_000_000, config.bloom_filter_scale, 262_144);
         let hash_functions = 4;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),

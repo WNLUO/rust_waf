@@ -21,7 +21,11 @@ impl BloomFilter {
             let byte_index = (hash % self.size) / 8;
             let bit_mask = 1u8 << (hash % 8);
 
-            if self.data.get(byte_index).map_or(true, |&byte| byte & bit_mask == 0) {
+            if self
+                .data
+                .get(byte_index)
+                .map_or(true, |&byte| byte & bit_mask == 0)
+            {
                 return false;
             }
         }
@@ -55,4 +59,10 @@ impl BloomFilter {
     pub fn hash_count(&self) -> usize {
         self.hash_count
     }
+}
+
+pub fn scaled_bloom_size(base_bits: usize, scale: f64, min_bits: usize) -> usize {
+    let scale = scale.clamp(0.1, 1.0);
+    let scaled = (base_bits as f64 * scale).round() as usize;
+    scaled.max(min_bits)
 }

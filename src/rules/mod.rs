@@ -1,7 +1,7 @@
-use crate::config::{Rule, RuleLayer, RuleAction};
-use crate::core::{PacketInfo, InspectionResult, InspectionLayer};
-use regex::Regex;
+use crate::config::{Rule, RuleAction, RuleLayer};
+use crate::core::{InspectionLayer, InspectionResult, PacketInfo};
 use anyhow::Result;
+use regex::Regex;
 
 pub struct RuleEngine {
     rules: Vec<(Rule, Regex)>,

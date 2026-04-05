@@ -4,13 +4,13 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod http3;
 pub mod l4;
 pub mod l7;
-pub mod http3;
 
+pub use http3::Http3Config;
 pub use l4::L4Config;
 pub use l7::L7Config;
-pub use http3::Http3Config;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -28,6 +28,8 @@ pub struct Config {
     pub http3_config: Http3Config,
     pub rules: Vec<Rule>,
     pub metrics_enabled: bool,
+    #[serde(default)]
+    pub max_concurrent_tasks: usize,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -98,6 +100,7 @@ impl Default for Config {
             http3_config: Http3Config::default(),
             rules: vec![],
             metrics_enabled: true,
+            max_concurrent_tasks: 0,
         }
         .normalized()
     }
@@ -118,7 +121,7 @@ pub fn load_config() -> Result<Config> {
                 config_value.as_object_mut().unwrap().remove("listen_addr");
                 config_value.as_object_mut().unwrap().insert(
                     "listen_addrs".to_string(),
-                    serde_json::json!([listen_addr_string])
+                    serde_json::json!([listen_addr_string]),
                 );
 
                 let config: Config = serde_json::from_value(config_value)?;
@@ -156,16 +159,28 @@ impl Config {
             self.l4_config.scan_enabled = false;
             self.l4_config.connection_rate_limit = self.l4_config.connection_rate_limit.min(64);
             self.l4_config.syn_flood_threshold = self.l4_config.syn_flood_threshold.min(32);
-            self.l4_config.max_tracked_ips = clamp_or_default(self.l4_config.max_tracked_ips, 2048);
-            self.l4_config.max_blocked_ips = clamp_or_default(self.l4_config.max_blocked_ips, 512);
+            self.l4_config.max_tracked_ips =
+                clamp_or_default(self.l4_config.max_tracked_ips, 512).min(1024);
+            self.l4_config.max_blocked_ips =
+                clamp_or_default(self.l4_config.max_blocked_ips, 128).min(256);
             self.l4_config.state_ttl_secs = clamp_u64(self.l4_config.state_ttl_secs, 60, 1800, 180);
-            self.l7_config.max_request_size = clamp_or_default(self.l7_config.max_request_size, 4096);
+            self.l7_config.max_request_size =
+                clamp_or_default(self.l7_config.max_request_size, 4096);
             self.l7_config.prefilter_enabled = true;
+            self.l4_config.bloom_filter_scale =
+                clamp_scale(self.l4_config.bloom_filter_scale, 0.5, 0.1, 1.0);
+            self.l7_config.bloom_filter_scale =
+                clamp_scale(self.l7_config.bloom_filter_scale, 0.5, 0.1, 1.0);
         } else {
             self.l4_config.max_tracked_ips = clamp_or_default(self.l4_config.max_tracked_ips, 4096);
             self.l4_config.max_blocked_ips = clamp_or_default(self.l4_config.max_blocked_ips, 1024);
             self.l4_config.state_ttl_secs = clamp_u64(self.l4_config.state_ttl_secs, 60, 3600, 300);
-            self.l7_config.max_request_size = clamp_or_default(self.l7_config.max_request_size, 8192);
+            self.l7_config.max_request_size =
+                clamp_or_default(self.l7_config.max_request_size, 8192);
+            self.l4_config.bloom_filter_scale =
+                clamp_scale(self.l4_config.bloom_filter_scale, 1.0, 0.25, 1.0);
+            self.l7_config.bloom_filter_scale =
+                clamp_scale(self.l7_config.bloom_filter_scale, 1.0, 0.25, 1.0);
         }
 
         if !self.bloom_enabled {
@@ -175,11 +190,36 @@ impl Config {
 
         // 验证HTTP/3.0配置
         if let Err(e) = self.http3_config.validate() {
-            log::warn!("HTTP/3.0 configuration validation failed: {}, using defaults", e);
+            log::warn!(
+                "HTTP/3.0 configuration validation failed: {}, using defaults",
+                e
+            );
             self.http3_config = Http3Config::default();
         }
 
-        self.maintenance_interval_secs = clamp_u64(self.maintenance_interval_secs, 5, 300, 30);
+        if self.runtime_profile.is_minimal() {
+            self.maintenance_interval_secs = clamp_u64(self.maintenance_interval_secs, 30, 300, 60);
+        } else {
+            self.maintenance_interval_secs = clamp_u64(self.maintenance_interval_secs, 5, 180, 30);
+        }
+
+        if self.max_concurrent_tasks == 0 {
+            self.max_concurrent_tasks = if self.runtime_profile.is_minimal() {
+                128
+            } else {
+                512
+            };
+        }
+
+        let (min_concurrency, max_concurrency) = if self.runtime_profile.is_minimal() {
+            (32usize, 256usize)
+        } else {
+            (128usize, 1024usize)
+        };
+        self.max_concurrent_tasks = self
+            .max_concurrent_tasks
+            .clamp(min_concurrency, max_concurrency);
+
         self
     }
 }
@@ -213,4 +253,9 @@ fn clamp_or_default(value: usize, default: usize) -> usize {
 fn clamp_u64(value: u64, min: u64, max: u64, default: u64) -> u64 {
     let value = if value == 0 { default } else { value };
     value.clamp(min, max)
+}
+
+fn clamp_scale(value: f64, default: f64, min: f64, max: f64) -> f64 {
+    let initial = if value == 0.0 { default } else { value };
+    initial.clamp(min, max)
 }

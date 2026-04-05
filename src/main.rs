@@ -1,19 +1,19 @@
-mod core;
-mod bloom_filter;
-mod l4;
-mod l7;
-mod rules;
-mod config;
-mod metrics;
-mod protocol;
 #[cfg(feature = "api")]
 mod api;
+mod bloom_filter;
+mod config;
+mod core;
+mod l4;
+mod l7;
+mod metrics;
+mod protocol;
+mod rules;
 
 use anyhow::Result;
 use env_logger::Env;
 use log::info;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 

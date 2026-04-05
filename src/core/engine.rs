@@ -1,17 +1,20 @@
 use anyhow::Result;
-use log::{info, warn, debug};
+use log::{debug, info, warn};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
 use super::WafContext;
 use crate::config::{Config, RuntimeProfile};
-use crate::core::{InspectionResult, InspectionLayer, PacketInfo, Protocol};
-use crate::protocol::{ProtocolDetector, HttpVersion, Http1Handler, Http2Handler, Http3Handler, UnifiedHttpRequest};
+use crate::core::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
+use crate::protocol::{
+    Http1Handler, Http2Handler, Http3Handler, HttpVersion, ProtocolDetector, UnifiedHttpRequest,
+};
 
 pub struct WafEngine {
     context: Arc<WafContext>,
     shutdown_rx: mpsc::Receiver<()>,
+    connection_semaphore: Arc<Semaphore>,
 }
 
 impl WafEngine {
@@ -19,16 +22,22 @@ impl WafEngine {
         info!("Initializing WAF engine...");
 
         let (_shutdown_tx, shutdown_rx) = mpsc::channel(1);
+        let concurrency_limit = config.max_concurrent_tasks.max(1);
         let context = Arc::new(WafContext::new(config).await?);
 
         Ok(Self {
             context,
             shutdown_rx,
+            connection_semaphore: Arc::new(Semaphore::new(concurrency_limit)),
         })
     }
 
     pub async fn start(&mut self) -> Result<()> {
         info!("WAF engine started");
+        info!(
+            "Concurrency limit set to {} inflight connections",
+            self.context.config.max_concurrent_tasks
+        );
 
         if let Some(l4_inspector) = &self.context.l4_inspector {
             l4_inspector.start(self.context.as_ref()).await?;
@@ -54,7 +63,8 @@ impl WafEngine {
         }
 
         let maintenance_interval = self.context.config.maintenance_interval_secs.max(5);
-        let mut maintenance = tokio::time::interval(tokio::time::Duration::from_secs(maintenance_interval));
+        let mut maintenance =
+            tokio::time::interval(tokio::time::Duration::from_secs(maintenance_interval));
 
         // 创建多个监听器，每个监听器在独立任务中运行
         let mut shutdown_senders = Vec::new();
@@ -82,6 +92,7 @@ impl WafEngine {
             info!("Inspection listener started on {}", addr);
             let context = Arc::clone(&self.context);
             let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+            let connection_semaphore = Arc::clone(&self.connection_semaphore);
 
             let task = tokio::spawn(async move {
                 loop {
@@ -93,12 +104,24 @@ impl WafEngine {
                         accept_result = listener.accept() => {
                             match accept_result {
                                 Ok((stream, peer_addr)) => {
-                                    let ctx = Arc::clone(&context);
-                                    tokio::spawn(async move {
-                                        if let Err(err) = handle_connection(ctx, stream, peer_addr).await {
-                                            warn!("Connection handling failed: {}", err);
+                                    match connection_semaphore.clone().try_acquire_owned() {
+                                        Ok(permit) => {
+                                            let ctx = Arc::clone(&context);
+                                            tokio::spawn(async move {
+                                                if let Err(err) =
+                                                    handle_connection(ctx, stream, peer_addr, permit).await
+                                                {
+                                                    warn!("Connection handling failed: {}", err);
+                                                }
+                                            });
                                         }
-                                    });
+                                        Err(_) => {
+                                            warn!(
+                                                "Dropping connection from {} due to concurrency limit",
+                                                peer_addr
+                                            );
+                                        }
+                                    }
                                 }
                                 Err(err) => {
                                     warn!("Failed to accept connection on {}: {}", addr, err);
@@ -115,7 +138,10 @@ impl WafEngine {
             shutdown_senders.push((task, shutdown_tx));
         }
 
-        info!("Successfully started {} listener(s)", shutdown_senders.len());
+        info!(
+            "Successfully started {} listener(s)",
+            shutdown_senders.len()
+        );
 
         // 主循环处理维护任务
         loop {
@@ -146,7 +172,10 @@ impl WafEngine {
     async fn run_maintenance(&self) {
         if let Some(l4_inspector) = &self.context.l4_inspector {
             l4_inspector.maintenance_tick();
-            if matches!(self.context.config.runtime_profile, RuntimeProfile::Standard) {
+            if matches!(
+                self.context.config.runtime_profile,
+                RuntimeProfile::Standard
+            ) {
                 let stats = l4_inspector.get_statistics();
                 info!(
                     "Maintenance tick: active_connections={}, blocked_connections={}, rate_limit_hits={}",
@@ -187,9 +216,24 @@ async fn handle_connection(
     context: Arc<WafContext>,
     stream: TcpStream,
     peer_addr: std::net::SocketAddr,
+    _permit: OwnedSemaphorePermit,
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+
+    if let Some(l4_inspector) = &context.l4_inspector {
+        let l4_result = l4_inspector.inspect_packet(&packet);
+        if l4_result.blocked {
+            debug!(
+                "L4 inspection blocked connection from {}: {}",
+                peer_addr, l4_result.reason
+            );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(l4_result.layer.clone());
+            }
+            return Ok(());
+        }
+    }
 
     // 协议检测和路由
     match detect_and_handle_protocol(context, stream, peer_addr, &packet).await {
@@ -215,8 +259,9 @@ async fn detect_and_handle_protocol(
     let mut initial_buffer = vec![0u8; 256];
     let bytes_read = tokio::time::timeout(
         std::time::Duration::from_millis(100),
-        stream.peek(&mut initial_buffer)
-    ).await??;
+        stream.peek(&mut initial_buffer),
+    )
+    .await??;
 
     let detected_version = if bytes_read > 0 {
         detector.detect_version(&initial_buffer[..bytes_read])
@@ -224,7 +269,10 @@ async fn detect_and_handle_protocol(
         HttpVersion::Http1_1 // 默认回退到HTTP/1.1
     };
 
-    debug!("Detected protocol version: {} for connection from {}", detected_version, peer_addr);
+    debug!(
+        "Detected protocol version: {} for connection from {}",
+        detected_version, peer_addr
+    );
 
     // 根据检测到的协议版本路由到相应处理器
     match detected_version {
@@ -253,10 +301,13 @@ async fn handle_http1_connection(
     let http1_handler = Http1Handler::new();
 
     // 读取HTTP/1.1请求
-    let request = http1_handler.read_request(
-        &mut stream,
-        context.config.l7_config.max_request_size
-    ).await?;
+    let mut request = http1_handler
+        .read_request(&mut stream, context.config.l7_config.max_request_size)
+        .await?;
+
+    request.set_client_ip(peer_addr.ip().to_string());
+    request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
+    request.add_metadata("protocol".to_string(), "HTTP/1.1".to_string());
 
     if request.uri.is_empty() {
         debug!("Empty request from {}, ignoring", peer_addr);
@@ -265,15 +316,27 @@ async fn handle_http1_connection(
 
     debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
 
-    // 使用统一请求进行L7检测
-    let result = context.l7_inspector
-        .as_ref()
-        .map(|inspector| inspector.inspect_unified_request(packet, &request))
-        .unwrap_or_else(|| InspectionResult::allow(InspectionLayer::L7));
+    let request_dump = request.to_inspection_string();
+    if let Some(metrics) = context.metrics.as_ref() {
+        metrics.record_packet(request_dump.len());
+    }
+
+    let inspection_result =
+        inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
 
     // 写入响应
-    if result.blocked {
-        http1_handler.write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes()).await?;
+    if inspection_result.blocked {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(inspection_result.layer.clone());
+        }
+        http1_handler
+            .write_response(
+                &mut stream,
+                403,
+                "Forbidden",
+                inspection_result.reason.as_bytes(),
+            )
+            .await?;
     } else {
         let metrics = context.metrics_snapshot();
         let metrics_line = metrics
@@ -290,7 +353,9 @@ async fn handle_http1_connection(
             .unwrap_or_else(|| "metrics=disabled".to_string());
 
         let body = format!("allowed\n{}\n", metrics_line);
-        http1_handler.write_response(&mut stream, 200, "OK", body.as_bytes()).await?;
+        http1_handler
+            .write_response(&mut stream, 200, "OK", body.as_bytes())
+            .await?;
     }
 
     Ok(())
@@ -315,11 +380,8 @@ async fn handle_http3_connection(
     // 4. 写入HTTP/3.0响应
 
     // 模拟HTTP/3.0请求处理
-    let mut request = UnifiedHttpRequest::new(
-        HttpVersion::Http3_0,
-        "GET".to_string(),
-        "/".to_string()
-    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http3_0, "GET".to_string(), "/".to_string());
 
     // 添加HTTP/3.0特定的伪头部
     request.add_header(":method".to_string(), "GET".to_string());
@@ -331,18 +393,26 @@ async fn handle_http3_connection(
     request.add_header("User-Agent".to_string(), "HTTP/3.0 Test Client".to_string());
     request.add_header("Accept".to_string(), "*/*".to_string());
 
-    info!("Parsed HTTP/3.0 request: {} {}", request.method, request.uri);
+    info!(
+        "Parsed HTTP/3.0 request: {} {}",
+        request.method, request.uri
+    );
 
-    // 使用统一请求进行L7检测
-    let result = context.l7_inspector
-        .as_ref()
-        .map(|inspector| inspector.inspect_unified_request(packet, &request))
-        .unwrap_or_else(|| InspectionResult::allow(InspectionLayer::L7));
+    let request_dump = request.to_inspection_string();
+    if let Some(metrics) = context.metrics.as_ref() {
+        metrics.record_packet(request_dump.len());
+    }
+
+    let inspection_result =
+        inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
 
     // HTTP/3.0响应处理（模拟）
     // 在实际实现中会使用h3库发送HTTP/3.0响应
-    if result.blocked {
-        info!("Blocking HTTP/3.0 request: {}", result.reason);
+    if inspection_result.blocked {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(inspection_result.layer.clone());
+        }
+        info!("Blocking HTTP/3.0 request: {}", inspection_result.reason);
         // HTTP/3.0会使用流级错误处理
     } else {
         let _metrics = context.metrics_snapshot();
@@ -358,7 +428,7 @@ async fn handle_http3_connection(
 async fn handle_http2_connection(
     context: Arc<WafContext>,
     mut stream: TcpStream,
-    _peer_addr: std::net::SocketAddr,
+    peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
 ) -> Result<()> {
     let http2_config = &context.config.l7_config.http2_config;
@@ -368,25 +438,37 @@ async fn handle_http2_connection(
         .with_priorities(http2_config.enable_priorities);
 
     // 读取HTTP/2.0请求
-    let request = http2_handler.read_request(
-        &mut stream,
-        context.config.l7_config.max_request_size
-    ).await?;
+    let mut request = http2_handler
+        .read_request(&mut stream, context.config.l7_config.max_request_size)
+        .await?;
 
-    debug!("HTTP/2.0 request: {} {} (stream {:?})",
-           request.method, request.uri, request.stream_id);
+    request.set_client_ip(peer_addr.ip().to_string());
+    request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
+    request.add_metadata("protocol".to_string(), "HTTP/2.0".to_string());
 
-    // 使用统一请求进行L7检测
-    let result = context.l7_inspector
-        .as_ref()
-        .map(|inspector| inspector.inspect_unified_request(packet, &request))
-        .unwrap_or_else(|| InspectionResult::allow(InspectionLayer::L7));
+    debug!(
+        "HTTP/2.0 request: {} {} (stream {:?})",
+        request.method, request.uri, request.stream_id
+    );
+
+    let request_dump = request.to_inspection_string();
+    if let Some(metrics) = context.metrics.as_ref() {
+        metrics.record_packet(request_dump.len());
+    }
+
+    let inspection_result =
+        inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
 
     // 写入HTTP/2.0响应
     let stream_id = request.stream_id.unwrap_or(1);
-    if result.blocked {
-        let body = format!("blocked: {}", result.reason);
-        http2_handler.write_response(&mut stream, stream_id, 403, &[], body.as_bytes()).await?;
+    if inspection_result.blocked {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(inspection_result.layer.clone());
+        }
+        let body = format!("blocked: {}", inspection_result.reason);
+        http2_handler
+            .write_response(&mut stream, stream_id, 403, &[], body.as_bytes())
+            .await?;
     } else {
         let metrics = context.metrics_snapshot();
         let metrics_line = metrics
@@ -403,48 +485,36 @@ async fn handle_http2_connection(
             .unwrap_or_else(|| "metrics=disabled".to_string());
 
         let body = format!("allowed\n{}\n", metrics_line);
-        http2_handler.write_response(&mut stream, stream_id, 200, &[], body.as_bytes()).await?;
+        http2_handler
+            .write_response(&mut stream, stream_id, 200, &[], body.as_bytes())
+            .await?;
     }
 
     Ok(())
 }
 
-// 向后兼容的HTTP/1.1请求读取函数（保留给可能的内部使用）
-async fn read_http_request(stream: &mut TcpStream, max_request_size: usize) -> Result<Vec<u8>> {
-    let http1_handler = Http1Handler::new();
-    let request = http1_handler.read_request(stream, max_request_size).await?;
+fn inspect_application_layers(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    serialized_request: &str,
+) -> InspectionResult {
+    if let Some(l7_inspector) = &context.l7_inspector {
+        let l7_result = l7_inspector.inspect_unified_request(packet, request);
+        if l7_result.blocked {
+            return l7_result;
+        }
+    }
 
-    // 将统一请求转换为字节数组以保持向后兼容
-    let request_str = request.to_inspection_string();
-    Ok(request_str.into_bytes())
-}
+    if let Some(rule_engine) = &context.rule_engine {
+        let rule_result = rule_engine.inspect(packet, Some(serialized_request));
+        if rule_result.blocked {
+            return rule_result;
+        }
+        if rule_engine.has_rules() && !rule_result.reason.is_empty() {
+            debug!("Non-blocking rule matched: {}", rule_result.reason);
+        }
+    }
 
-// 向后兼容的HTTP响应写入函数（保留给可能的内部使用）
-async fn write_http_response(
-    stream: &mut TcpStream,
-    result: &InspectionResult,
-    metrics: Option<crate::metrics::MetricsSnapshot>,
-) -> Result<()> {
-    let http1_handler = Http1Handler::new();
-
-    let (status_code, status_text, body) = if result.blocked {
-        (403, "Forbidden", format!("blocked: {}\n", result.reason))
-    } else {
-        let metrics_line = metrics
-            .map(|snapshot| {
-                format!(
-                    "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
-                    snapshot.total_packets,
-                    snapshot.blocked_packets,
-                    snapshot.blocked_l4,
-                    snapshot.blocked_l7,
-                    snapshot.total_bytes
-                )
-            })
-            .unwrap_or_else(|| "metrics=disabled".to_string());
-        (200, "OK", format!("allowed\n{}\n", metrics_line))
-    };
-
-    http1_handler.write_response(stream, status_code, status_text, body.as_bytes()).await
-        .map_err(|e| anyhow::anyhow!("HTTP response error: {}", e))
+    InspectionResult::allow(InspectionLayer::L7)
 }

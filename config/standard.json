@@ -1,6 +1,6 @@
 {
   "interface": "eth0",
-  "listen_addr": "0.0.0.0:8080",
+  "listen_addrs": ["0.0.0.0:8080"],
   "runtime_profile": "standard",
   "api_enabled": false,
   "api_bind": "127.0.0.1:3000",
@@ -46,5 +46,6 @@
     "enable_tls13": true
   },
   "rules": [],
-  "metrics_enabled": true
+  "metrics_enabled": true,
+  "max_concurrent_tasks": 512
 }

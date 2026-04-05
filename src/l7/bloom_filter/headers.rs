@@ -1,15 +1,15 @@
+use crate::bloom_filter::{scaled_bloom_size, BloomFilter};
 use crate::config::L7Config;
-use crate::bloom_filter::BloomFilter;
+use log::{debug, info};
 use std::sync::atomic::{AtomicU64, Ordering};
-use log::{info, debug};
 
 pub struct HeadersBloomFilter {
-    config: L7Config,
     bloom_filter: BloomFilter,
     insert_count: AtomicU64,
     hit_count: AtomicU64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HeadersBloomStats {
     pub filter_size: usize,
@@ -23,11 +23,10 @@ impl HeadersBloomFilter {
     pub fn new(config: L7Config) -> Self {
         info!("Initializing Headers Bloom Filter");
 
-        let filter_size = 4000000; // 4 million bits ~500KB
+        let filter_size = scaled_bloom_size(4_000_000, config.bloom_filter_scale, 131_072);
         let hash_functions = 4;
 
         Self {
-            config,
             bloom_filter: BloomFilter::new(filter_size, hash_functions),
             insert_count: AtomicU64::new(0),
             hit_count: AtomicU64::new(0),
@@ -36,7 +35,8 @@ impl HeadersBloomFilter {
 
     pub fn contains(&self, headers: &[(String, String)]) -> bool {
         // Convert headers to a single string for filtering
-        let combined = headers.iter()
+        let combined = headers
+            .iter()
             .map(|(name, value)| format!("{}:{}", name, value))
             .collect::<Vec<_>>()
             .join("|");
@@ -54,7 +54,8 @@ impl HeadersBloomFilter {
 
     pub fn insert(&mut self, headers: Vec<(String, String)>) {
         // Convert headers to a single string for storage
-        let combined = headers.iter()
+        let combined = headers
+            .iter()
             .map(|(name, value)| format!("{}:{}", name, value))
             .collect::<Vec<_>>()
             .join("|");
@@ -65,6 +66,7 @@ impl HeadersBloomFilter {
         debug!("Headers Bloom filter insert");
     }
 
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> HeadersBloomStats {
         let insert_count = self.insert_count.load(Ordering::Relaxed);
         let hit_count = self.hit_count.load(Ordering::Relaxed);

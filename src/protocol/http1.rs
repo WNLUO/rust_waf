@@ -1,7 +1,7 @@
 use super::{HttpVersion, ProtocolError, UnifiedHttpRequest};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use log::debug;
 use anyhow::Result;
+use log::debug;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// HTTP/1.1处理器
 ///
@@ -17,7 +17,11 @@ impl Http1Handler {
     /// 读取HTTP/1.1请求
     ///
     /// 读取HTTP/1.1格式的请求并转换为统一请求结构
-    pub async fn read_request<R>(&self, reader: &mut R, max_size: usize) -> Result<UnifiedHttpRequest, ProtocolError>
+    pub async fn read_request<R>(
+        &self,
+        reader: &mut R,
+        max_size: usize,
+    ) -> Result<UnifiedHttpRequest, ProtocolError>
     where
         R: AsyncReadExt + Unpin,
     {
@@ -64,12 +68,13 @@ impl Http1Handler {
 
         // 读取请求体（如果有Content-Length）
         if let Some(expected_length) = content_length {
-            let headers_end = buffer.iter()
+            let headers_end = buffer
+                .iter()
                 .position(|_b| {
-                    buffer.get(buffer.len().saturating_sub(3)) == Some(&b'\r') &&
-                    buffer.get(buffer.len().saturating_sub(2)) == Some(&b'\n') &&
-                    buffer.get(buffer.len().saturating_sub(1)) == Some(&b'\r') &&
-                    buffer.last() == Some(&b'\n')
+                    buffer.get(buffer.len().saturating_sub(3)) == Some(&b'\r')
+                        && buffer.get(buffer.len().saturating_sub(2)) == Some(&b'\n')
+                        && buffer.get(buffer.len().saturating_sub(1)) == Some(&b'\r')
+                        && buffer.last() == Some(&b'\n')
                 })
                 .unwrap_or(0);
 
@@ -77,7 +82,9 @@ impl Http1Handler {
                 let current_body_size = buffer.len().saturating_sub(headers_end_pos);
 
                 // 继续读取请求体直到达到Content-Length
-                while body_bytes_read + current_body_size < expected_length && buffer.len() < max_size {
+                while body_bytes_read + current_body_size < expected_length
+                    && buffer.len() < max_size
+                {
                     let bytes_to_read = (expected_length - body_bytes_read - current_body_size)
                         .min(temp_buffer.len());
 
@@ -104,16 +111,13 @@ impl Http1Handler {
         let mut lines = request_str.lines();
 
         // 解析请求行
-        let request_line = lines.next()
+        let request_line = lines
+            .next()
             .ok_or_else(|| ProtocolError::ParseError("Missing request line".to_string()))?;
 
         let mut parts = request_line.split_whitespace();
-        let method = parts.next()
-            .unwrap_or("GET")
-            .to_string();
-        let uri = parts.next()
-            .unwrap_or("/")
-            .to_string();
+        let method = parts.next().unwrap_or("GET").to_string();
+        let uri = parts.next().unwrap_or("/").to_string();
 
         let mut unified_request = UnifiedHttpRequest::new(HttpVersion::Http1_1, method, uri);
 
@@ -132,16 +136,17 @@ impl Http1Handler {
 
         // 提取请求体
         if headers_complete {
-            let body_start = request_str.find("\r\n\r\n")
-                .map(|pos| pos + 4)
-                .unwrap_or(0);
+            let body_start = request_str.find("\r\n\r\n").map(|pos| pos + 4).unwrap_or(0);
 
             if body_start < request_str.len() {
                 unified_request.body = request_str[body_start..].as_bytes().to_vec();
             }
         }
 
-        debug!("Parsed HTTP/1.1 request: {} {}", unified_request.method, unified_request.uri);
+        debug!(
+            "Parsed HTTP/1.1 request: {} {}",
+            unified_request.method, unified_request.uri
+        );
         Ok(unified_request)
     }
 
@@ -163,7 +168,8 @@ impl Http1Handler {
              Connection: close\r\n\
              \r\n\
              {}",
-            status_code, status_text,
+            status_code,
+            status_text,
             body.len(),
             String::from_utf8_lossy(body)
         );
@@ -225,7 +231,10 @@ mod tests {
         let handler = Http1Handler::new();
         let mut buffer = Vec::new();
 
-        handler.write_response(&mut buffer, 200, "OK", b"Test response").await.unwrap();
+        handler
+            .write_response(&mut buffer, 200, "OK", b"Test response")
+            .await
+            .unwrap();
 
         let response_str = String::from_utf8_lossy(&buffer);
         assert!(response_str.contains("HTTP/1.1 200 OK"));

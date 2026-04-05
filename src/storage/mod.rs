@@ -142,10 +142,10 @@ impl SqliteStore {
             .bind(&rule.id)
             .bind(&rule.name)
             .bind(rule.enabled)
-            .bind(rule_layer_as_str(&rule.layer))
+            .bind(rule.layer.as_str())
             .bind(&rule.pattern)
-            .bind(rule_action_as_str(&rule.action))
-            .bind(severity_as_str(&rule.severity))
+            .bind(rule.action.as_str())
+            .bind(rule.severity.as_str())
             .bind(unix_timestamp())
             .execute(&self.pool)
             .await?;
@@ -183,6 +183,85 @@ impl SqliteStore {
             .await?;
         let latest_version = self.latest_rules_version().await?;
         Ok((count.max(0) as u64, latest_version))
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn load_rule(&self, id: &str) -> Result<Option<Rule>> {
+        let row = sqlx::query_as::<_, StoredRuleRow>(
+            r#"
+            SELECT id, name, enabled, layer, pattern, action, severity
+            FROM rules
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(TryInto::try_into).transpose()
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn insert_rule(&self, rule: &Rule) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO rules (
+                id, name, enabled, layer, pattern, action, severity, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&rule.id)
+        .bind(&rule.name)
+        .bind(rule.enabled)
+        .bind(rule.layer.as_str())
+        .bind(&rule.pattern)
+        .bind(rule.action.as_str())
+        .bind(rule.severity.as_str())
+        .bind(unix_timestamp())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn upsert_rule(&self, rule: &Rule) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO rules (id, name, enabled, layer, pattern, action, severity, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                enabled = excluded.enabled,
+                layer = excluded.layer,
+                pattern = excluded.pattern,
+                action = excluded.action,
+                severity = excluded.severity,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&rule.id)
+        .bind(&rule.name)
+        .bind(rule.enabled)
+        .bind(rule.layer.as_str())
+        .bind(&rule.pattern)
+        .bind(rule.action.as_str())
+        .bind(rule.severity.as_str())
+        .bind(unix_timestamp())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_rule(&self, id: &str) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM rules WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
     }
 }
 
@@ -383,55 +462,16 @@ impl TryFrom<StoredRuleRow> for Rule {
     }
 }
 
-fn rule_layer_as_str(layer: &RuleLayer) -> &'static str {
-    match layer {
-        RuleLayer::L4 => "l4",
-        RuleLayer::L7 => "l7",
-    }
-}
-
-fn rule_action_as_str(action: &RuleAction) -> &'static str {
-    match action {
-        RuleAction::Allow => "allow",
-        RuleAction::Block => "block",
-        RuleAction::Alert => "alert",
-    }
-}
-
-fn severity_as_str(severity: &Severity) -> &'static str {
-    match severity {
-        Severity::Low => "low",
-        Severity::Medium => "medium",
-        Severity::High => "high",
-        Severity::Critical => "critical",
-    }
-}
-
 fn parse_rule_layer(value: &str) -> Result<RuleLayer> {
-    match value {
-        "l4" => Ok(RuleLayer::L4),
-        "l7" => Ok(RuleLayer::L7),
-        _ => Err(anyhow::anyhow!("Unsupported rule layer '{}'", value)),
-    }
+    RuleLayer::parse(value).map_err(anyhow::Error::msg)
 }
 
 fn parse_rule_action(value: &str) -> Result<RuleAction> {
-    match value {
-        "allow" => Ok(RuleAction::Allow),
-        "block" => Ok(RuleAction::Block),
-        "alert" => Ok(RuleAction::Alert),
-        _ => Err(anyhow::anyhow!("Unsupported rule action '{}'", value)),
-    }
+    RuleAction::parse(value).map_err(anyhow::Error::msg)
 }
 
 fn parse_severity(value: &str) -> Result<Severity> {
-    match value {
-        "low" => Ok(Severity::Low),
-        "medium" => Ok(Severity::Medium),
-        "high" => Ok(Severity::High),
-        "critical" => Ok(Severity::Critical),
-        _ => Err(anyhow::anyhow!("Unsupported rule severity '{}'", value)),
-    }
+    Severity::parse(value).map_err(anyhow::Error::msg)
 }
 
 #[cfg(test)]
@@ -574,6 +614,47 @@ mod tests {
         assert_eq!(loaded_rules.len(), 2);
         assert_eq!(loaded_rules[0].id, "rule-1");
         assert_eq!(loaded_rules[1].id, "rule-2");
+        assert_eq!(
+            store.load_rule("rule-1").await.unwrap().unwrap().name,
+            "Block SQLi"
+        );
+
+        let updated_rule = Rule {
+            id: "rule-1".to_string(),
+            name: "Block Updated SQLi".to_string(),
+            enabled: false,
+            layer: RuleLayer::L7,
+            pattern: "(?i)select".to_string(),
+            action: RuleAction::Alert,
+            severity: Severity::Critical,
+        };
+        store.upsert_rule(&updated_rule).await.unwrap();
+        let fetched_updated = store.load_rule("rule-1").await.unwrap().unwrap();
+        assert_eq!(fetched_updated.name, "Block Updated SQLi");
+        assert!(!fetched_updated.enabled);
+        assert_eq!(fetched_updated.action, RuleAction::Alert);
+        assert_eq!(fetched_updated.severity, Severity::Critical);
+
+        let inserted_new = store
+            .insert_rule(&Rule {
+                id: "rule-3".to_string(),
+                name: "New Rule".to_string(),
+                enabled: true,
+                layer: RuleLayer::L4,
+                pattern: "syn".to_string(),
+                action: RuleAction::Block,
+                severity: Severity::Low,
+            })
+            .await
+            .unwrap();
+        assert!(inserted_new);
+        let inserted_duplicate = store.insert_rule(&updated_rule).await.unwrap();
+        assert!(!inserted_duplicate);
+
+        let deleted = store.delete_rule("rule-2").await.unwrap();
+        assert!(deleted);
+        let deleted_missing = store.delete_rule("missing").await.unwrap();
+        assert!(!deleted_missing);
 
         let latest_version = store.latest_rules_version().await.unwrap();
         assert!(latest_version > 0);

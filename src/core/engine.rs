@@ -243,6 +243,20 @@ async fn handle_connection(
         }
     }
 
+    if let Some(l4_rule_result) = inspect_l4_rules(context.as_ref(), &packet) {
+        if l4_rule_result.blocked {
+            debug!(
+                "L4 rule engine blocked connection from {}: {}",
+                peer_addr, l4_rule_result.reason
+            );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(l4_rule_result.layer.clone());
+            }
+            persist_l4_block_event(context.as_ref(), &packet, &l4_rule_result);
+            return Ok(());
+        }
+    }
+
     // 协议检测和路由
     match detect_and_handle_protocol(context, stream, peer_addr, &packet).await {
         Ok(_) => Ok(()),
@@ -532,6 +546,24 @@ fn inspect_application_layers(
     }
 
     InspectionResult::allow(InspectionLayer::L7)
+}
+
+fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> Option<InspectionResult> {
+    let rule_engine_guard = context
+        .rule_engine
+        .read()
+        .expect("rule_engine lock poisoned");
+    let rule_engine = rule_engine_guard.as_ref()?;
+
+    let rule_result = rule_engine.inspect(packet, None);
+    if rule_result.blocked {
+        return Some(rule_result);
+    }
+    if rule_engine.has_rules() && !rule_result.reason.is_empty() {
+        debug!("Non-blocking L4 rule matched: {}", rule_result.reason);
+    }
+
+    None
 }
 
 fn persist_l4_block_event(context: &WafContext, packet: &PacketInfo, result: &InspectionResult) {

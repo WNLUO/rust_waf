@@ -70,25 +70,82 @@ pub struct Rule {
     pub severity: Severity,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RuleLayer {
     L4,
     L7,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RuleAction {
     Allow,
     Block,
     Alert,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Severity {
     Low,
     Medium,
     High,
     Critical,
+}
+
+impl RuleLayer {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::L4 => "l4",
+            Self::L7 => "l7",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "l4" => Ok(Self::L4),
+            "l7" => Ok(Self::L7),
+            other => Err(format!("Unsupported rule layer '{}'", other)),
+        }
+    }
+}
+
+impl RuleAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Block => "block",
+            Self::Alert => "alert",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "allow" => Ok(Self::Allow),
+            "block" => Ok(Self::Block),
+            "alert" => Ok(Self::Alert),
+            other => Err(format!("Unsupported rule action '{}'", other)),
+        }
+    }
+}
+
+impl Severity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "critical" => Ok(Self::Critical),
+            other => Err(format!("Unsupported rule severity '{}'", other)),
+        }
+    }
 }
 
 impl Default for Config {

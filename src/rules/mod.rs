@@ -25,7 +25,20 @@ impl RuleEngine {
     pub fn inspect(&self, _packet: &PacketInfo, payload: Option<&str>) -> InspectionResult {
         for (rule, pattern) in &self.rules {
             if self.matches_layer(rule, payload) {
-                let content = payload.unwrap_or("");
+                let packet_summary;
+                let content = if let Some(payload) = payload {
+                    payload
+                } else {
+                    packet_summary = format!(
+                        "source_ip={} dest_ip={} source_port={} dest_port={} protocol={:?}",
+                        _packet.source_ip,
+                        _packet.dest_ip,
+                        _packet.source_port,
+                        _packet.dest_port,
+                        _packet.protocol
+                    );
+                    &packet_summary
+                };
                 if pattern.is_match(content) {
                     return InspectionResult {
                         blocked: matches!(rule.action, RuleAction::Block),
@@ -55,5 +68,40 @@ impl RuleEngine {
             RuleLayer::L4 => payload.is_none(),
             RuleLayer::L7 => payload.is_some(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{RuleAction, RuleLayer, Severity};
+    use crate::core::Protocol;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[test]
+    fn test_l4_rule_matches_packet_summary() {
+        let engine = RuleEngine::new(vec![Rule {
+            id: "l4-block-port".to_string(),
+            name: "Block SSH".to_string(),
+            enabled: true,
+            layer: RuleLayer::L4,
+            pattern: r"dest_port=22".to_string(),
+            action: RuleAction::Block,
+            severity: Severity::High,
+        }])
+        .unwrap();
+
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            source_port: 40000,
+            dest_port: 22,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+
+        let result = engine.inspect(&packet, None);
+        assert!(result.blocked);
+        assert_eq!(result.layer, InspectionLayer::L4);
     }
 }

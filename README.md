@@ -201,6 +201,16 @@ cargo check
 当前实现不会把数据库查询放进请求热路径，拦截事件通过异步队列写入 SQLite。
 当 `sqlite_rules_enabled=true` 时，启动阶段会先把 JSON 配置中的规则做一次“只插入不覆盖”的种子导入，再从 SQLite 读取规则，并在维护周期里检查规则表是否变化后自动热重载。
 
+启用 `api` feature 且 `sqlite_rules_enabled=true` 后，可通过以下接口管理规则：
+
+- `GET /rules`: 列出当前 SQLite 规则
+- `GET /rules/:id`: 查询单条规则
+- `POST /rules`: 创建规则
+- `PUT /rules/:id`: 更新规则
+- `DELETE /rules/:id`: 删除规则
+
+规则写入 API 后会立即刷新内存中的规则集，无需等待下一个维护周期。
+
 ## 部署建议
 
 低配服务器优先使用 [config/minimal.json](/Users/wnluo/Desktop/code/waf/config/minimal.json)。

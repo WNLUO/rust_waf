@@ -1,5 +1,6 @@
 use crate::config::Http3Config;
 use crate::protocol::{HttpVersion, ProtocolError, UnifiedHttpRequest};
+use http::Request;
 use log::{debug, warn};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -156,6 +157,59 @@ impl Http3Handler {
 
     fn is_long_header(&self, payload: &[u8]) -> bool {
         payload.first().map(|first| (first & 0x80) != 0).unwrap_or(false)
+    }
+
+    pub fn request_to_unified(
+        &self,
+        request: &Request<()>,
+        body: Vec<u8>,
+        client_ip: &str,
+        listener_port: u16,
+    ) -> UnifiedHttpRequest {
+        let method = request.method().as_str().to_string();
+        let uri = request
+            .uri()
+            .path_and_query()
+            .map(|pq| pq.as_str().to_string())
+            .unwrap_or_else(|| request.uri().path().to_string());
+
+        let mut unified = UnifiedHttpRequest::new(HttpVersion::Http3_0, method, uri);
+        unified.body = body;
+        unified.set_client_ip(client_ip.to_string());
+        unified.add_metadata("listener_port".to_string(), listener_port.to_string());
+        unified.add_metadata("protocol".to_string(), "HTTP/3.0".to_string());
+        unified.add_metadata("transport".to_string(), "quic".to_string());
+
+        if let Some(scheme) = request.uri().scheme_str() {
+            unified.add_metadata("scheme".to_string(), scheme.to_string());
+        }
+
+        let authority = request
+            .uri()
+            .authority()
+            .map(|authority| authority.as_str().to_string())
+            .or_else(|| {
+                request
+                    .headers()
+                    .get("host")
+                    .and_then(|host| host.to_str().ok())
+                    .map(|host| host.to_string())
+            });
+
+        if let Some(authority) = authority {
+            unified.add_metadata("authority".to_string(), authority.clone());
+            if unified.get_header("host").is_none() {
+                unified.add_header("host".to_string(), authority);
+            }
+        }
+
+        for (key, value) in request.headers() {
+            if let Ok(value) = value.to_str() {
+                unified.add_header(key.as_str().to_string(), value.to_string());
+            }
+        }
+
+        unified
     }
 }
 
@@ -423,5 +477,25 @@ mod tests {
         manager.set_priority(1, 200);
         let stats = manager.get_stream_stats(1).unwrap();
         assert_eq!(stats.3, 200);
+    }
+
+    #[test]
+    fn test_http3_request_to_unified() {
+        let handler = Http3Handler::new(Http3Config::default());
+        let request = Request::builder()
+            .method("POST")
+            .uri("https://example.com/upload?id=1")
+            .header("content-type", "application/octet-stream")
+            .body(())
+            .unwrap();
+
+        let unified = handler.request_to_unified(&request, b"hello".to_vec(), "127.0.0.1", 8443);
+        assert_eq!(unified.version, HttpVersion::Http3_0);
+        assert_eq!(unified.uri, "/upload?id=1");
+        assert_eq!(
+            unified.get_metadata("authority"),
+            Some(&"example.com".to_string())
+        );
+        assert_eq!(unified.body, b"hello".to_vec());
     }
 }

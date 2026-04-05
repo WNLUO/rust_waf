@@ -4,11 +4,26 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig as RustlsServerConfig;
 use std::fs::File;
 use std::io::BufReader;
+#[cfg(feature = "http3")]
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_rustls::TlsAcceptor;
+
+#[cfg(feature = "http3")]
+use bytes::Bytes;
+#[cfg(feature = "http3")]
+use bytes::Buf;
+#[cfg(feature = "http3")]
+use h3::server::RequestStream;
+#[cfg(feature = "http3")]
+use h3_quinn::Connection as H3QuinnConnection;
+#[cfg(feature = "http3")]
+use quinn::crypto::rustls::QuicServerConfig;
+#[cfg(feature = "http3")]
+use quinn::{Endpoint as QuinnEndpoint, Incoming as QuinnIncoming};
 
 use super::WafContext;
 use crate::config::{Config, RuntimeProfile};
@@ -81,6 +96,8 @@ impl WafEngine {
         let mut tcp_listener_addresses = Vec::new();
         let mut udp_listener_addresses = Vec::new();
         let mut tls_listener = None;
+        #[cfg(feature = "http3")]
+        let mut quic_listener = None;
 
         // 先绑定所有TCP/UDP监听器
         for addr in &self.context.config.listen_addrs {
@@ -118,8 +135,28 @@ impl WafEngine {
             }
         }
 
-        if tcp_listener_addresses.is_empty() && udp_listener_addresses.is_empty() && tls_listener.is_none() {
-            anyhow::bail!("No TCP, UDP, or TLS listeners could be started. Please check configuration.");
+        #[cfg(feature = "http3")]
+        if let Some(endpoint) = build_http3_endpoint(&self.context.config.http3_config)? {
+            let addr = endpoint.local_addr()?;
+            quic_listener = Some((addr, endpoint));
+        }
+
+        #[cfg(not(feature = "http3"))]
+        if self.context.config.http3_config.enabled {
+            warn!("HTTP/3 support was requested but the binary was built without the 'http3' feature");
+        }
+
+        #[cfg(feature = "http3")]
+        let has_quic_listener = quic_listener.is_some();
+        #[cfg(not(feature = "http3"))]
+        let has_quic_listener = false;
+
+        if tcp_listener_addresses.is_empty()
+            && udp_listener_addresses.is_empty()
+            && tls_listener.is_none()
+            && !has_quic_listener
+        {
+            anyhow::bail!("No TCP, UDP, TLS, or HTTP/3 listeners could be started. Please check configuration.");
         }
 
         // 为每个TCP监听器启动独立任务
@@ -283,6 +320,55 @@ impl WafEngine {
             shutdown_senders.push((task, shutdown_tx));
         }
 
+        #[cfg(feature = "http3")]
+        if let Some((addr, endpoint)) = quic_listener {
+            info!("HTTP/3 listener started on {}", addr);
+            let context = Arc::clone(&self.context);
+            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+            let connection_semaphore = Arc::clone(&self.connection_semaphore);
+
+            let task = tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            info!("HTTP/3 listener shutdown signal received for {}", addr);
+                            break;
+                        }
+                        accept_result = endpoint.accept() => {
+                            match accept_result {
+                                Some(incoming) => {
+                                    match connection_semaphore.clone().try_acquire_owned() {
+                                        Ok(permit) => {
+                                            let ctx = Arc::clone(&context);
+                                            tokio::spawn(async move {
+                                                if let Err(err) =
+                                                    handle_http3_quic_connection(ctx, incoming, addr, permit).await
+                                                {
+                                                    warn!("HTTP/3 connection handling failed: {}", err);
+                                                }
+                                            });
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Dropping HTTP/3 connection on {} due to concurrency limit",
+                                                addr
+                                            );
+                                        }
+                                    }
+                                }
+                                None => break,
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Ctrl+C received, shutting down HTTP/3 listener on {}", addr);
+                            break;
+                        }
+                    }
+                }
+            });
+            shutdown_senders.push((task, shutdown_tx));
+        }
+
         info!(
             "Successfully started {} listener task(s)",
             shutdown_senders.len()
@@ -385,6 +471,55 @@ fn build_tls_acceptor(
     Ok(Some(TlsAcceptor::from(Arc::new(server_config))))
 }
 
+#[cfg(feature = "http3")]
+fn build_http3_endpoint(
+    config: &crate::config::Http3Config,
+) -> Result<Option<QuinnEndpoint>> {
+    if !config.enabled {
+        return Ok(None);
+    }
+
+    if !config.enable_tls13 {
+        warn!("HTTP/3 requires TLS 1.3; skipping QUIC listener because enable_tls13=false");
+        return Ok(None);
+    }
+
+    let (Some(cert_path), Some(key_path)) = (
+        config.certificate_path.as_deref(),
+        config.private_key_path.as_deref(),
+    ) else {
+        warn!(
+            "HTTP/3 is enabled but certificate_path/private_key_path are missing; skipping QUIC listener"
+        );
+        return Ok(None);
+    };
+
+    let certs = load_tls_certificates(cert_path)?;
+    let private_key = load_tls_private_key(key_path)?;
+    let mut server_crypto = RustlsServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, private_key)?;
+    server_crypto.alpn_protocols = vec![b"h3".to_vec()];
+
+    let mut server_config =
+        quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
+    let transport = Arc::get_mut(&mut server_config.transport)
+        .ok_or_else(|| anyhow::anyhow!("Failed to configure QUIC transport"))?;
+    transport.max_concurrent_uni_streams(256_u32.into());
+    transport.max_concurrent_bidi_streams((config.max_concurrent_streams as u32).into());
+    transport.keep_alive_interval(Some(std::time::Duration::from_secs(
+        (config.idle_timeout_secs / 3).max(1),
+    )));
+    transport.max_idle_timeout(Some(
+        std::time::Duration::from_secs(config.idle_timeout_secs)
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid HTTP/3 idle timeout"))?,
+    ));
+
+    let listen_addr: SocketAddr = config.listen_addr.parse()?;
+    Ok(Some(QuinnEndpoint::server(server_config, listen_addr)?))
+}
+
 fn load_tls_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(File::open(path)?);
     let certs = rustls_pemfile::certs(&mut reader).collect::<std::result::Result<Vec<_>, _>>()?;
@@ -470,6 +605,188 @@ async fn handle_tls_connection(
         }
         _ => handle_http1_connection(context, tls_stream, peer_addr, &packet, metadata).await,
     }
+}
+
+#[cfg(feature = "http3")]
+async fn handle_http3_quic_connection(
+    context: Arc<WafContext>,
+    incoming: QuinnIncoming,
+    local_addr: SocketAddr,
+    _permit: OwnedSemaphorePermit,
+) -> Result<()> {
+    let connection = incoming.await?;
+    let peer_addr = connection.remote_address();
+    let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
+
+    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+        debug!(
+            "L4 inspection blocked HTTP/3 connection from {}: {}",
+            peer_addr, l4_result.reason
+        );
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(l4_result.layer.clone());
+        }
+        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
+        connection.close(0u32.into(), b"blocked by l4 policy");
+        return Ok(());
+    }
+
+    let mut h3_connection = h3::server::builder().build(H3QuinnConnection::new(connection)).await?;
+
+    loop {
+        match h3_connection.accept().await {
+            Ok(Some(resolver)) => {
+                let context = Arc::clone(&context);
+                let packet = packet.clone();
+                let http3_handler = Http3Handler::new(context.config.http3_config.clone());
+                tokio::spawn(async move {
+                    if let Err(err) =
+                        handle_http3_request(context, packet, http3_handler, resolver).await
+                    {
+                        warn!("HTTP/3 request failed: {}", err);
+                    }
+                });
+            }
+            Ok(None) => break,
+            Err(err) => {
+                warn!("HTTP/3 connection accept loop ended: {}", err);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "http3")]
+async fn handle_http3_request(
+    context: Arc<WafContext>,
+    packet: PacketInfo,
+    http3_handler: Http3Handler,
+    resolver: h3::server::RequestResolver<H3QuinnConnection, Bytes>,
+) -> Result<()> {
+    let (request, mut stream) = resolver.resolve_request().await?;
+    let body = read_http3_request_body(&mut stream, context.config.l7_config.max_request_size).await?;
+
+    let mut unified = http3_handler.request_to_unified(
+        &request,
+        body,
+        &packet.source_ip.to_string(),
+        packet.dest_port,
+    );
+    unified.add_metadata("udp.peer".to_string(), packet.source_ip.to_string());
+    unified.add_metadata("udp.local".to_string(), packet.dest_ip.to_string());
+
+    let request_dump = unified.to_inspection_string();
+    if let Some(metrics) = context.metrics.as_ref() {
+        metrics.record_packet(request_dump.len());
+    }
+
+    let inspection_result =
+        inspect_application_layers(context.as_ref(), &packet, &unified, &request_dump);
+
+    if inspection_result.blocked {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(inspection_result.layer.clone());
+        }
+        persist_http_block_event(context.as_ref(), &packet, &unified, &inspection_result);
+        send_http3_response(
+            &mut stream,
+            403,
+            &[],
+            format!("blocked: {}", inspection_result.reason).into_bytes(),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if let Some(upstream_addr) = context.config.tcp_upstream_addr.as_deref() {
+        match proxy_http_request(&unified, upstream_addr).await {
+            Ok(response) => {
+                send_http3_response(&mut stream, response.status_code, &response.headers, response.body)
+                    .await?;
+                return Ok(());
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to proxy HTTP/3 request from {} to {}: {}",
+                    unified.client_ip.as_deref().unwrap_or("unknown"),
+                    upstream_addr,
+                    err
+                );
+                send_http3_response(&mut stream, 502, &[], b"upstream proxy failed".to_vec())
+                    .await?;
+                return Ok(());
+            }
+        }
+    }
+
+    let metrics = context.metrics_snapshot();
+    let metrics_line = metrics
+        .map(|snapshot| {
+            format!(
+                "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
+                snapshot.total_packets,
+                snapshot.blocked_packets,
+                snapshot.blocked_l4,
+                snapshot.blocked_l7,
+                snapshot.total_bytes
+            )
+        })
+        .unwrap_or_else(|| "metrics=disabled".to_string());
+
+    send_http3_response(
+        &mut stream,
+        200,
+        &[],
+        format!("allowed\n{}\n", metrics_line).into_bytes(),
+    )
+    .await?;
+    Ok(())
+}
+
+#[cfg(feature = "http3")]
+async fn read_http3_request_body(
+    stream: &mut RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    max_size: usize,
+) -> Result<Vec<u8>> {
+    let mut body = Vec::new();
+
+    while let Some(mut chunk) = stream.recv_data().await? {
+        let remaining = chunk.remaining();
+        if body.len() + remaining > max_size {
+            anyhow::bail!("HTTP/3 request body exceeded limit");
+        }
+        body.extend_from_slice(chunk.copy_to_bytes(remaining).as_ref());
+    }
+
+    Ok(body)
+}
+
+#[cfg(feature = "http3")]
+async fn send_http3_response(
+    stream: &mut RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+    status_code: u16,
+    headers: &[(String, String)],
+    body: Vec<u8>,
+) -> Result<()> {
+    let mut builder = http::Response::builder().status(status_code);
+    for (key, value) in headers {
+        if key.eq_ignore_ascii_case("transfer-encoding")
+            || key.eq_ignore_ascii_case("connection")
+            || key.starts_with(':')
+        {
+            continue;
+        }
+        builder = builder.header(key, value);
+    }
+
+    stream.send_response(builder.body(())?).await?;
+    if !body.is_empty() {
+        stream.send_data(Bytes::from(body)).await?;
+    }
+    stream.finish().await?;
+    Ok(())
 }
 
 async fn handle_udp_datagram(

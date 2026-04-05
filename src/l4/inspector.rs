@@ -2,16 +2,25 @@ use crate::config::L4Config;
 use crate::core::{InspectionResult, PacketInfo, WafContext};
 use crate::l4::bloom_filter::L4BloomFilterManager;
 use crate::l4::connection::ConnectionManager;
+use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use log::{debug, info};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 pub struct L4Inspector {
     connection_manager: ConnectionManager,
     ddos_enabled: bool,
+    advanced_ddos_enabled: bool,
     scan_detection_enabled: bool,
+    syn_flood_threshold: usize,
+    scan_port_threshold: usize,
     bloom_manager: Option<L4BloomFilterManager>,
     port_stats: Mutex<HashMap<String, PortStats>>,
+    ddos_events: AtomicU64,
+    scan_events: AtomicU64,
+    defense_actions: AtomicU64,
 }
 
 impl L4Inspector {
@@ -39,9 +48,15 @@ impl L4Inspector {
         Self {
             connection_manager: ConnectionManager::new(config.clone()),
             ddos_enabled: config.ddos_protection_enabled,
+            advanced_ddos_enabled: config.advanced_ddos_enabled,
             scan_detection_enabled: config.scan_enabled,
+            syn_flood_threshold: config.syn_flood_threshold.max(1),
+            scan_port_threshold: Self::scan_port_threshold(&config),
             bloom_manager,
             port_stats: Mutex::new(HashMap::new()),
+            ddos_events: AtomicU64::new(0),
+            scan_events: AtomicU64::new(0),
+            defense_actions: AtomicU64::new(0),
         }
     }
 
@@ -67,6 +82,7 @@ impl L4Inspector {
             self.record_port_event(&port, |stats| {
                 stats.increment_block();
             });
+            self.defense_actions.fetch_add(1, Ordering::Relaxed);
             return InspectionResult {
                 blocked: true,
                 reason: "Connection rejected by L4 rate limiter".to_string(),
@@ -87,6 +103,7 @@ impl L4Inspector {
                             self.record_port_event(&port, |stats| {
                                 stats.increment_block();
                             });
+                            self.defense_actions.fetch_add(1, Ordering::Relaxed);
                             return InspectionResult {
                                 blocked: true,
                                 reason: format!("Blocked by L4 bloom filter: IPv4 {}", ipv4),
@@ -100,6 +117,7 @@ impl L4Inspector {
                             self.record_port_event(&port, |stats| {
                                 stats.increment_block();
                             });
+                            self.defense_actions.fetch_add(1, Ordering::Relaxed);
                             return InspectionResult {
                                 blocked: true,
                                 reason: format!("Blocked by L4 bloom filter: IPv6 {}", ipv6),
@@ -118,6 +136,7 @@ impl L4Inspector {
                     self.record_port_event(&port, |stats| {
                         stats.increment_block();
                     });
+                    self.defense_actions.fetch_add(1, Ordering::Relaxed);
                     return InspectionResult {
                         blocked: true,
                         reason: format!(
@@ -133,12 +152,24 @@ impl L4Inspector {
         // DDoS detection (simplified)
         if self.ddos_enabled {
             if self.detect_simple_ddos(packet) {
+                self.connection_manager.block_ip(
+                    &packet.source_ip,
+                    "connection flood detected",
+                    Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
+                );
                 self.record_port_event(&port, |stats| {
+                    stats.increment_block();
                     stats.increment_ddos();
                 });
+                self.ddos_events.fetch_add(1, Ordering::Relaxed);
+                self.defense_actions.fetch_add(1, Ordering::Relaxed);
                 return InspectionResult {
                     blocked: true,
-                    reason: "DDoS attack detected".to_string(),
+                    reason: format!(
+                        "DDoS attack detected: {} connections within 1s",
+                        self.connection_manager
+                            .recent_connection_count(&packet.source_ip, Duration::from_secs(1))
+                    ),
                     layer: crate::core::InspectionLayer::L4,
                 };
             }
@@ -147,12 +178,24 @@ impl L4Inspector {
         // Port scan detection (simplified)
         if self.scan_detection_enabled {
             if self.detect_simple_scan(packet) {
+                self.connection_manager.block_ip(
+                    &packet.source_ip,
+                    "port scanning detected",
+                    Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
+                );
                 self.record_port_event(&port, |stats| {
+                    stats.increment_block();
                     stats.increment_scan();
                 });
+                self.scan_events.fetch_add(1, Ordering::Relaxed);
+                self.defense_actions.fetch_add(1, Ordering::Relaxed);
                 return InspectionResult {
                     blocked: true,
-                    reason: "Port scanning detected".to_string(),
+                    reason: format!(
+                        "Port scanning detected: {} unique destination ports in 30s",
+                        self.connection_manager
+                            .unique_destination_ports(&packet.source_ip, Duration::from_secs(30))
+                    ),
                     layer: crate::core::InspectionLayer::L4,
                 };
             }
@@ -170,25 +213,44 @@ impl L4Inspector {
         }
     }
 
-    fn detect_simple_ddos(&self, _packet: &PacketInfo) -> bool {
-        // Simplified DDoS detection - in production would use full DDoS detector
+    fn detect_simple_ddos(&self, packet: &PacketInfo) -> bool {
+        let burst_count = self
+            .connection_manager
+            .recent_connection_count(&packet.source_ip, Duration::from_secs(1));
+        if burst_count >= self.syn_flood_threshold {
+            return true;
+        }
+
+        if self.advanced_ddos_enabled {
+            let sustained_threshold = self.syn_flood_threshold.saturating_mul(3);
+            let sustained_count = self
+                .connection_manager
+                .recent_connection_count(&packet.source_ip, Duration::from_secs(5));
+            if sustained_count >= sustained_threshold.max(self.syn_flood_threshold + 1) {
+                return true;
+            }
+        }
+
         false
     }
 
-    fn detect_simple_scan(&self, _packet: &PacketInfo) -> bool {
-        // Simplified scan detection - in production would use full scan detector
-        false
+    fn detect_simple_scan(&self, packet: &PacketInfo) -> bool {
+        let unique_ports = self
+            .connection_manager
+            .unique_destination_ports(&packet.source_ip, Duration::from_secs(30));
+
+        unique_ports >= self.scan_port_threshold
     }
 
     pub fn get_statistics(&self) -> L4Statistics {
         let per_port_stats = self.port_stats.lock().unwrap().clone();
         L4Statistics {
             connections: self.connection_manager.get_stats(),
-            ddos_events: 0,
-            scan_events: 0,
+            ddos_events: self.ddos_events.load(Ordering::Relaxed),
+            scan_events: self.scan_events.load(Ordering::Relaxed),
             protocol_anomalies: 0,
             traffic: 0,
-            defense_actions: 0,
+            defense_actions: self.defense_actions.load(Ordering::Relaxed),
             bloom_stats: self.bloom_manager.as_ref().map(|m| m.get_statistics()),
             false_positive_stats: self
                 .bloom_manager
@@ -230,6 +292,10 @@ impl L4Inspector {
 
     pub fn maintenance_tick(&self) {
         self.connection_manager.maintenance_tick();
+    }
+
+    fn scan_port_threshold(config: &L4Config) -> usize {
+        (config.syn_flood_threshold / 4).clamp(4, 32)
     }
 }
 
@@ -290,4 +356,71 @@ pub struct L4Statistics {
     #[allow(dead_code)]
     pub false_positive_stats: Option<crate::l4::bloom_filter::L4FalsePositiveStats>,
     pub per_port_stats: HashMap<String, PortStats>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{InspectionLayer, Protocol};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn packet(dest_port: u16) -> PacketInfo {
+        PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            source_port: 41_000,
+            dest_port,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        }
+    }
+
+    #[test]
+    fn detects_connection_floods_from_a_single_source() {
+        let inspector = L4Inspector::new(
+            L4Config {
+                ddos_protection_enabled: true,
+                advanced_ddos_enabled: false,
+                connection_rate_limit: 1_000,
+                syn_flood_threshold: 3,
+                scan_enabled: false,
+                ..L4Config::default()
+            },
+            false,
+            false,
+        );
+
+        assert!(!inspector.inspect_packet(&packet(8080)).blocked);
+        assert!(!inspector.inspect_packet(&packet(8080)).blocked);
+
+        let result = inspector.inspect_packet(&packet(8080));
+        assert!(result.blocked);
+        assert_eq!(result.layer, InspectionLayer::L4);
+        assert!(result.reason.contains("DDoS attack detected"));
+    }
+
+    #[test]
+    fn detects_port_scans_across_multiple_ports() {
+        let inspector = L4Inspector::new(
+            L4Config {
+                ddos_protection_enabled: false,
+                connection_rate_limit: 1_000,
+                syn_flood_threshold: 16,
+                scan_enabled: true,
+                ..L4Config::default()
+            },
+            false,
+            false,
+        );
+
+        for port in [80, 443, 8080] {
+            let result = inspector.inspect_packet(&packet(port));
+            assert!(!result.blocked, "unexpected block on port {}", port);
+        }
+
+        let result = inspector.inspect_packet(&packet(8443));
+        assert!(result.blocked);
+        assert_eq!(result.layer, InspectionLayer::L4);
+        assert!(result.reason.contains("Port scanning detected"));
+    }
 }

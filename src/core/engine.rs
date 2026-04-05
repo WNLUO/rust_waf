@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
 use super::WafContext;
@@ -71,28 +71,39 @@ impl WafEngine {
 
         // 创建多个监听器，每个监听器在独立任务中运行
         let mut shutdown_senders = Vec::new();
-        let mut listener_addresses = Vec::new();
+        let mut tcp_listener_addresses = Vec::new();
+        let mut udp_listener_addresses = Vec::new();
 
-        // 先绑定所有监听器
+        // 先绑定所有TCP/UDP监听器
         for addr in &self.context.config.listen_addrs {
             match TcpListener::bind(addr).await {
                 Ok(listener) => {
                     let addr = listener.local_addr()?;
-                    listener_addresses.push((addr, listener));
+                    tcp_listener_addresses.push((addr, listener));
                 }
                 Err(err) => {
-                    warn!("Failed to bind listener on {}: {}", addr, err);
+                    warn!("Failed to bind TCP listener on {}: {}", addr, err);
+                }
+            }
+
+            match UdpSocket::bind(addr).await {
+                Ok(socket) => {
+                    let addr = socket.local_addr()?;
+                    udp_listener_addresses.push((addr, Arc::new(socket)));
+                }
+                Err(err) => {
+                    warn!("Failed to bind UDP listener on {}: {}", addr, err);
                 }
             }
         }
 
-        if listener_addresses.is_empty() {
-            anyhow::bail!("No listeners could be started. Please check configuration.");
+        if tcp_listener_addresses.is_empty() && udp_listener_addresses.is_empty() {
+            anyhow::bail!("No TCP or UDP listeners could be started. Please check configuration.");
         }
 
-        // 为每个监听器启动独立任务
-        for (addr, listener) in listener_addresses {
-            info!("Inspection listener started on {}", addr);
+        // 为每个TCP监听器启动独立任务
+        for (addr, listener) in tcp_listener_addresses {
+            info!("TCP inspection listener started on {}", addr);
             let context = Arc::clone(&self.context);
             let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
             let connection_semaphore = Arc::clone(&self.connection_semaphore);
@@ -141,8 +152,64 @@ impl WafEngine {
             shutdown_senders.push((task, shutdown_tx));
         }
 
+        // 为每个UDP监听器启动独立任务
+        for (addr, socket) in udp_listener_addresses {
+            info!("UDP inspection listener started on {}", addr);
+            let context = Arc::clone(&self.context);
+            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+            let connection_semaphore = Arc::clone(&self.connection_semaphore);
+
+            let task = tokio::spawn(async move {
+                let mut buffer = vec![0u8; 65_535];
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            info!("UDP listener shutdown signal received for {}", addr);
+                            break;
+                        }
+                        recv_result = socket.recv_from(&mut buffer) => {
+                            match recv_result {
+                                Ok((bytes_read, peer_addr)) => {
+                                    match connection_semaphore.clone().try_acquire_owned() {
+                                        Ok(permit) => {
+                                            let ctx = Arc::clone(&context);
+                                            tokio::spawn(async move {
+                                                if let Err(err) = handle_udp_datagram(
+                                                    ctx,
+                                                    peer_addr,
+                                                    addr,
+                                                    bytes_read,
+                                                    permit,
+                                                ).await {
+                                                    warn!("UDP datagram handling failed: {}", err);
+                                                }
+                                            });
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Dropping UDP datagram from {} due to concurrency limit",
+                                                peer_addr
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!("Failed to receive UDP datagram on {}: {}", addr, err);
+                                }
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Ctrl+C received, shutting down UDP listener on {}", addr);
+                            break;
+                        }
+                    }
+                }
+            });
+            shutdown_senders.push((task, shutdown_tx));
+        }
+
         info!(
-            "Successfully started {} listener(s)",
+            "Successfully started {} listener task(s)",
             shutdown_senders.len()
         );
 
@@ -228,33 +295,16 @@ async fn handle_connection(
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
 
-    if let Some(l4_inspector) = &context.l4_inspector {
-        let l4_result = l4_inspector.inspect_packet(&packet);
-        if l4_result.blocked {
-            debug!(
-                "L4 inspection blocked connection from {}: {}",
-                peer_addr, l4_result.reason
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(l4_result.layer.clone());
-            }
-            persist_l4_block_event(context.as_ref(), &packet, &l4_result);
-            return Ok(());
+    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+        debug!(
+            "L4 inspection blocked connection from {}: {}",
+            peer_addr, l4_result.reason
+        );
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(l4_result.layer.clone());
         }
-    }
-
-    if let Some(l4_rule_result) = inspect_l4_rules(context.as_ref(), &packet) {
-        if l4_rule_result.blocked {
-            debug!(
-                "L4 rule engine blocked connection from {}: {}",
-                peer_addr, l4_rule_result.reason
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(l4_rule_result.layer.clone());
-            }
-            persist_l4_block_event(context.as_ref(), &packet, &l4_rule_result);
-            return Ok(());
-        }
+        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
+        return Ok(());
     }
 
     // 协议检测和路由
@@ -265,6 +315,38 @@ async fn handle_connection(
             Err(e)
         }
     }
+}
+
+async fn handle_udp_datagram(
+    context: Arc<WafContext>,
+    peer_addr: std::net::SocketAddr,
+    local_addr: std::net::SocketAddr,
+    bytes_read: usize,
+    _permit: OwnedSemaphorePermit,
+) -> Result<()> {
+    let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
+
+    if let Some(metrics) = context.metrics.as_ref() {
+        metrics.record_packet(bytes_read);
+    }
+
+    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+        debug!(
+            "L4 inspection blocked UDP datagram from {}: {}",
+            peer_addr, l4_result.reason
+        );
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(l4_result.layer.clone());
+        }
+        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
+        return Ok(());
+    }
+
+    debug!(
+        "Allowed UDP datagram from {} to {} ({} bytes)",
+        peer_addr, local_addr, bytes_read
+    );
+    Ok(())
 }
 
 /// 检测协议版本并路由到相应的处理器
@@ -566,6 +648,17 @@ fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> Option<Inspect
     None
 }
 
+fn inspect_transport_layers(context: &WafContext, packet: &PacketInfo) -> Option<InspectionResult> {
+    if let Some(l4_inspector) = &context.l4_inspector {
+        let l4_result = l4_inspector.inspect_packet(packet);
+        if l4_result.blocked {
+            return Some(l4_result);
+        }
+    }
+
+    inspect_l4_rules(context, packet)
+}
+
 fn persist_l4_block_event(context: &WafContext, packet: &PacketInfo, result: &InspectionResult) {
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
@@ -628,4 +721,73 @@ fn unix_timestamp() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        Config, Http3Config, L4Config, L7Config, Rule, RuleAction, RuleLayer, RuntimeProfile,
+        Severity,
+    };
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn test_config(rules: Vec<Rule>) -> Config {
+        Config {
+            interface: "lo0".to_string(),
+            listen_addrs: vec!["127.0.0.1:0".to_string()],
+            runtime_profile: RuntimeProfile::Minimal,
+            api_enabled: false,
+            api_bind: "127.0.0.1:3000".to_string(),
+            bloom_enabled: false,
+            l4_bloom_false_positive_verification: false,
+            l7_bloom_false_positive_verification: false,
+            maintenance_interval_secs: 30,
+            l4_config: L4Config {
+                ddos_protection_enabled: false,
+                advanced_ddos_enabled: false,
+                connection_rate_limit: 1_000,
+                scan_enabled: false,
+                ..L4Config::default()
+            },
+            l7_config: L7Config::default(),
+            http3_config: Http3Config::default(),
+            rules,
+            metrics_enabled: true,
+            sqlite_enabled: false,
+            sqlite_path: "data/test-waf.db".to_string(),
+            sqlite_auto_migrate: false,
+            sqlite_rules_enabled: false,
+            max_concurrent_tasks: 16,
+        }
+    }
+
+    fn udp_packet() -> PacketInfo {
+        PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            source_port: 40_000,
+            dest_port: 53,
+            protocol: Protocol::UDP,
+            timestamp: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn inspect_transport_layers_blocks_udp_packets_via_l4_rules() {
+        let rule = Rule {
+            id: "udp-block".to_string(),
+            name: "Block UDP".to_string(),
+            enabled: true,
+            layer: RuleLayer::L4,
+            pattern: r"protocol=UDP".to_string(),
+            action: RuleAction::Block,
+            severity: Severity::High,
+        };
+        let context = WafContext::new(test_config(vec![rule])).await.unwrap();
+
+        let result = inspect_transport_layers(&context, &udp_packet()).unwrap();
+        assert!(result.blocked);
+        assert_eq!(result.layer, InspectionLayer::L4);
+    }
 }

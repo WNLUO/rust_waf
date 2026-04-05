@@ -4,6 +4,8 @@ pub mod tracker;
 
 use crate::config::L4Config;
 use log::info;
+use std::net::IpAddr;
+use std::time::Duration;
 
 pub use limiter::ConnectionLimiter;
 pub use monitor::ConnectionMonitor;
@@ -40,6 +42,18 @@ impl ConnectionManager {
 
     pub fn check_rate_limit(&self, ip: &std::net::IpAddr) -> bool {
         self.limiter.check(ip)
+    }
+
+    pub fn block_ip(&self, ip: &IpAddr, reason: &str, duration: Duration) {
+        self.limiter.block_ip(ip, reason, duration);
+    }
+
+    pub fn recent_connection_count(&self, ip: &IpAddr, window: Duration) -> usize {
+        self.tracker.recent_connection_count(ip, window)
+    }
+
+    pub fn unique_destination_ports(&self, ip: &IpAddr, window: Duration) -> usize {
+        self.tracker.unique_destination_ports(ip, window)
     }
 
     pub fn get_stats(&self) -> ConnectionStats {

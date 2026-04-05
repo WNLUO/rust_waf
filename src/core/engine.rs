@@ -7,9 +7,11 @@ use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use super::WafContext;
 use crate::config::{Config, RuntimeProfile};
 use crate::core::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
+use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
     Http1Handler, Http2Handler, Http3Handler, HttpVersion, ProtocolDetector, UnifiedHttpRequest,
 };
+use crate::storage::{BlockedIpRecord, SecurityEventRecord};
 
 pub struct WafEngine {
     context: Arc<WafContext>,
@@ -50,8 +52,9 @@ impl WafEngine {
         #[cfg(feature = "api")]
         if self.context.config.api_enabled {
             let addr = self.context.config.api_bind.parse()?;
+            let context = Arc::clone(&self.context);
             tokio::spawn(async move {
-                if let Err(err) = crate::api::ApiServer::new(addr).start().await {
+                if let Err(err) = crate::api::ApiServer::new(addr, context).start().await {
                     warn!("API server exited with error: {}", err);
                 }
             });
@@ -170,6 +173,10 @@ impl WafEngine {
     }
 
     async fn run_maintenance(&self) {
+        if let Err(err) = self.context.refresh_rules_from_storage().await {
+            warn!("Failed to refresh rules from SQLite: {}", err);
+        }
+
         if let Some(l4_inspector) = &self.context.l4_inspector {
             l4_inspector.maintenance_tick();
             if matches!(
@@ -231,6 +238,7 @@ async fn handle_connection(
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_block(l4_result.layer.clone());
             }
+            persist_l4_block_event(context.as_ref(), &packet, &l4_result);
             return Ok(());
         }
     }
@@ -329,6 +337,7 @@ async fn handle_http1_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
+        persist_http_block_event(context.as_ref(), packet, &request, &inspection_result);
         http1_handler
             .write_response(
                 &mut stream,
@@ -412,6 +421,7 @@ async fn handle_http3_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
+        persist_http_block_event(context.as_ref(), packet, &request, &inspection_result);
         info!("Blocking HTTP/3.0 request: {}", inspection_result.reason);
         // HTTP/3.0会使用流级错误处理
     } else {
@@ -465,6 +475,7 @@ async fn handle_http2_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
+        persist_http_block_event(context.as_ref(), packet, &request, &inspection_result);
         let body = format!("blocked: {}", inspection_result.reason);
         http2_handler
             .write_response(&mut stream, stream_id, 403, &[], body.as_bytes())
@@ -506,7 +517,11 @@ fn inspect_application_layers(
         }
     }
 
-    if let Some(rule_engine) = &context.rule_engine {
+    let rule_engine_guard = context
+        .rule_engine
+        .read()
+        .expect("rule_engine lock poisoned");
+    if let Some(rule_engine) = rule_engine_guard.as_ref() {
         let rule_result = rule_engine.inspect(packet, Some(serialized_request));
         if rule_result.blocked {
             return rule_result;
@@ -517,4 +532,68 @@ fn inspect_application_layers(
     }
 
     InspectionResult::allow(InspectionLayer::L7)
+}
+
+fn persist_l4_block_event(context: &WafContext, packet: &PacketInfo, result: &InspectionResult) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    store.enqueue_security_event(SecurityEventRecord::now(
+        "L4",
+        "block",
+        result.reason.clone(),
+        packet.source_ip.to_string(),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    ));
+
+    if result.reason.contains("rate limiter") {
+        let blocked_at = unix_timestamp();
+        store.enqueue_blocked_ip(BlockedIpRecord::new(
+            packet.source_ip.to_string(),
+            result.reason.clone(),
+            blocked_at,
+            blocked_at + RATE_LIMIT_BLOCK_DURATION_SECS as i64,
+        ));
+    }
+}
+
+fn persist_http_block_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    result: &InspectionResult,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    let mut event = SecurityEventRecord::now(
+        match result.layer {
+            InspectionLayer::L4 => "L4",
+            InspectionLayer::L7 => "L7",
+        },
+        "block",
+        result.reason.clone(),
+        packet.source_ip.to_string(),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    );
+    event.http_method = Some(request.method.clone());
+    event.uri = Some(request.uri.clone());
+    event.http_version = Some(request.version.to_string());
+
+    store.enqueue_security_event(event);
+}
+
+fn unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }

@@ -5,6 +5,8 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
+pub const RATE_LIMIT_BLOCK_DURATION_SECS: u64 = 30;
+
 pub struct ConnectionLimiter {
     config: L4Config,
     blocked_ips: Mutex<HashMap<IpAddr, BlockedIp>>,
@@ -74,7 +76,7 @@ impl ConnectionLimiter {
             self.block_ip(
                 ip,
                 "rate limit exceeded",
-                std::time::Duration::from_secs(30),
+                std::time::Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
             );
             warn!(
                 "Connection rejected - IP {} exceeded rate limit {}",

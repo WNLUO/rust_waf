@@ -29,6 +29,14 @@ pub struct Config {
     pub rules: Vec<Rule>,
     pub metrics_enabled: bool,
     #[serde(default)]
+    pub sqlite_enabled: bool,
+    #[serde(default = "default_sqlite_path")]
+    pub sqlite_path: String,
+    #[serde(default = "default_sqlite_auto_migrate")]
+    pub sqlite_auto_migrate: bool,
+    #[serde(default)]
+    pub sqlite_rules_enabled: bool,
+    #[serde(default)]
     pub max_concurrent_tasks: usize,
 }
 
@@ -100,6 +108,10 @@ impl Default for Config {
             http3_config: Http3Config::default(),
             rules: vec![],
             metrics_enabled: true,
+            sqlite_enabled: false,
+            sqlite_path: default_sqlite_path(),
+            sqlite_auto_migrate: default_sqlite_auto_migrate(),
+            sqlite_rules_enabled: false,
             max_concurrent_tasks: 0,
         }
         .normalized()
@@ -139,6 +151,14 @@ pub fn load_config() -> Result<Config> {
 
 impl Config {
     pub fn normalized(mut self) -> Self {
+        if self.sqlite_path.trim().is_empty() {
+            self.sqlite_path = default_sqlite_path();
+        }
+
+        if !self.sqlite_enabled {
+            self.sqlite_rules_enabled = false;
+        }
+
         // 确保至少有一个监听地址
         if self.listen_addrs.is_empty() {
             self.listen_addrs = vec!["0.0.0.0:8080".to_string()];
@@ -258,4 +278,12 @@ fn clamp_u64(value: u64, min: u64, max: u64, default: u64) -> u64 {
 fn clamp_scale(value: f64, default: f64, min: f64, max: f64) -> f64 {
     let initial = if value == 0.0 { default } else { value };
     initial.clamp(min, max)
+}
+
+fn default_sqlite_path() -> String {
+    "data/waf.db".to_string()
+}
+
+const fn default_sqlite_auto_migrate() -> bool {
+    true
 }

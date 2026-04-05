@@ -47,5 +47,9 @@
   },
   "rules": [],
   "metrics_enabled": true,
+  "sqlite_enabled": false,
+  "sqlite_path": "data/waf.db",
+  "sqlite_auto_migrate": true,
+  "sqlite_rules_enabled": false,
   "max_concurrent_tasks": 512
 }

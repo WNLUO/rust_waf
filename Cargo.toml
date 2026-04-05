@@ -19,7 +19,7 @@ http2 = []  # 现有HTTP/2.0支持
 http3 = ["dep:quinn", "dep:h3", "dep:rustls", "dep:rustls-native-certs"]  # HTTP/3.0支持
 
 [dependencies]
-tokio = { version = "1.35", features = ["macros", "rt", "sync", "time", "net", "signal", "io-util"] }
+tokio = { version = "1.35", features = ["macros", "rt", "sync", "time", "net", "signal", "io-util", "fs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.10"
@@ -40,3 +40,4 @@ quinn = { version = "0.10", optional = true }
 h3 = { version = "0.0.4", optional = true }
 rustls = { version = "0.23", optional = true }
 rustls-native-certs = { version = "0.7", optional = true }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }

@@ -9,6 +9,7 @@ pub mod l7;
 pub mod metrics;
 pub mod protocol;
 pub mod rules;
+pub mod storage;
 
 #[cfg(feature = "api")]
 pub mod api;
@@ -23,3 +24,4 @@ pub use protocol::{
     Http1Handler, Http2Handler, Http3Handler, Http3StreamManager, HttpVersion, ProtocolDetector,
     UnifiedHttpRequest,
 };
+pub use storage::SqliteStore;

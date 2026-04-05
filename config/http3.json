@@ -48,5 +48,9 @@
     "private_key_path": null
   },
   "rules": [],
-  "metrics_enabled": true
+  "metrics_enabled": true,
+  "sqlite_enabled": false,
+  "sqlite_path": "data/waf.db",
+  "sqlite_auto_migrate": true,
+  "sqlite_rules_enabled": false
 }

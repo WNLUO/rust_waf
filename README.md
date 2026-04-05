@@ -106,6 +106,10 @@ cargo check
 - **l4_bloom_false_positive_verification**: L4 Bloom 命中后是否用精确集合校验，便于验证假阳性
 - **l7_bloom_false_positive_verification**: L7 Bloom 命中后是否用精确集合校验，便于验证假阳性
 - **maintenance_interval_secs**: 统一维护任务周期
+- **sqlite_enabled**: SQLite 持久化开关
+- **sqlite_path**: SQLite 数据库文件路径
+- **sqlite_auto_migrate**: 启动时自动建表
+- **sqlite_rules_enabled**: 使用 SQLite 作为规则持久化和热加载来源
 - **l4_config**: L4 层防护配置
   - ddos_protection_enabled: DDoS 防护开关
   - advanced_ddos_enabled: 高级 DDoS 检测开关
@@ -173,6 +177,29 @@ cargo check
 
 ### 示例配置文件
 参考 [config/bloom_filter_demo.json](config/bloom_filter_demo.json) 了解如何启用布隆过滤器功能。
+
+## SQLite 持久化
+
+启用 SQLite 后，系统会在后台异步写入以下信息：
+
+- `security_events`: L4/L7 拦截事件
+- `blocked_ips`: 由限流触发的封禁记录
+- `rules`: 持久化规则表，可作为规则加载来源
+- 启用 `api` feature 时，`/metrics` 会额外返回上述持久化统计摘要
+
+示例配置：
+
+```json
+{
+  "sqlite_enabled": true,
+  "sqlite_path": "data/waf.db",
+  "sqlite_auto_migrate": true,
+  "sqlite_rules_enabled": true
+}
+```
+
+当前实现不会把数据库查询放进请求热路径，拦截事件通过异步队列写入 SQLite。
+当 `sqlite_rules_enabled=true` 时，启动阶段会先把 JSON 配置中的规则做一次“只插入不覆盖”的种子导入，再从 SQLite 读取规则，并在维护周期里检查规则表是否变化后自动热重载。
 
 ## 部署建议
 

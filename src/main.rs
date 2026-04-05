@@ -8,6 +8,7 @@ mod l7;
 mod metrics;
 mod protocol;
 mod rules;
+mod storage;
 
 use anyhow::Result;
 use env_logger::Env;

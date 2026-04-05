@@ -37,6 +37,7 @@ use crate::storage::{BlockedIpRecord, SecurityEventRecord};
 
 pub struct WafEngine {
     context: Arc<WafContext>,
+    _shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
     connection_semaphore: Arc<Semaphore>,
 }
@@ -45,12 +46,13 @@ impl WafEngine {
     pub async fn new(config: Config) -> Result<Self> {
         info!("Initializing WAF engine...");
 
-        let (_shutdown_tx, shutdown_rx) = mpsc::channel(1);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let concurrency_limit = config.max_concurrent_tasks.max(1);
         let context = Arc::new(WafContext::new(config).await?);
 
         Ok(Self {
             context,
+            _shutdown_tx: shutdown_tx,
             shutdown_rx,
             connection_semaphore: Arc::new(Semaphore::new(concurrency_limit)),
         })
@@ -461,6 +463,8 @@ fn build_tls_acceptor(
         return Ok(None);
     };
 
+    crate::tls::ensure_rustls_crypto_provider();
+
     let certs = load_tls_certificates(cert_path)?;
     let private_key = load_tls_private_key(key_path)?;
     let mut server_config = RustlsServerConfig::builder()
@@ -493,6 +497,8 @@ fn build_http3_endpoint(
         );
         return Ok(None);
     };
+
+    crate::tls::ensure_rustls_crypto_provider();
 
     let certs = load_tls_certificates(cert_path)?;
     let private_key = load_tls_private_key(key_path)?;

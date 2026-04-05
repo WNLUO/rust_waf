@@ -159,6 +159,7 @@ impl Http3Handler {
         payload.first().map(|first| (first & 0x80) != 0).unwrap_or(false)
     }
 
+    #[allow(dead_code)]
     pub fn request_to_unified(
         &self,
         request: &Request<()>,

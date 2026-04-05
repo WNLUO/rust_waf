@@ -17,7 +17,10 @@ lazy_static! {
     static ref SQL_INJECTION_PATTERNS: Vec<Regex> = vec![
         Regex::new(r"'(?i)(or|and)\s+\d+\s*=\s*\d+").unwrap(),
         Regex::new(r"(?i)(union\s+select|drop\s+table|delete\s+from|insert\s+into)").unwrap(),
-        Regex::new(r"(?i)(;|\-\-|\/\*|\*\/)").unwrap(),
+        Regex::new(r"(?i);\s*(select|union|drop|delete|insert|update|exec|from|where)\b")
+            .unwrap(),
+        Regex::new(r#"(?i)(?:^|[\s'"=])(--|/\*)(?:[\s]|$)"#).unwrap(),
+        Regex::new(r#"(?i)(?:^|[\s'"=])\*/(?:[\s]|$)"#).unwrap(),
     ];
     static ref XSS_PATTERNS: Vec<Regex> = vec![
         Regex::new(r"(?i)<script[^>]*>.*?</script>").unwrap(),
@@ -33,6 +36,51 @@ lazy_static! {
         Regex::new(r"(?i)(\|\s*)(ls|cat|pwd|whoami|rm|mv|cp)\s").unwrap(),
         Regex::new(r"(?i)(`.*?`)").unwrap(),
     ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{PacketInfo, Protocol};
+    use crate::protocol::{HttpVersion, UnifiedHttpRequest};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn test_packet() -> PacketInfo {
+        PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            dest_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            source_port: 12345,
+            dest_port: 8080,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        }
+    }
+
+    #[test]
+    fn wildcard_accept_header_is_not_flagged_as_sql_injection() {
+        let inspector = L7Inspector::new(L7Config::default(), false, false);
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        request.add_header("accept".to_string(), "*/*".to_string());
+
+        let result = inspector.inspect_unified_request(&test_packet(), &request);
+        assert!(!result.blocked, "unexpected block reason: {}", result.reason);
+    }
+
+    #[test]
+    fn sql_comment_marker_still_triggers_detection() {
+        let inspector = L7Inspector::new(L7Config::default(), false, false);
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/?id=1' --".to_string(),
+        );
+        request.add_header("accept".to_string(), "text/plain".to_string());
+
+        let result = inspector.inspect_unified_request(&test_packet(), &request);
+        assert!(result.blocked);
+        assert!(result.reason.contains("SQL injection"));
+    }
 }
 
 impl L7Inspector {

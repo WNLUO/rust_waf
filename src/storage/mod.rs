@@ -2,7 +2,9 @@ use crate::config::{Rule, RuleAction, RuleLayer, Severity};
 use anyhow::Result;
 use log::{debug, warn};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use sqlx::{QueryBuilder, Sqlite, SqlitePool};
+#[cfg(any(feature = "api", test))]
+use sqlx::{QueryBuilder, Sqlite};
+use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +29,7 @@ pub struct StorageMetricsSummary {
     pub latest_rule_update_at: Option<i64>,
 }
 
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Default)]
 pub struct SecurityEventQuery {
     pub limit: u32,
@@ -41,6 +44,7 @@ pub struct SecurityEventQuery {
     pub sort_direction: SortDirection,
 }
 
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Default)]
 pub struct BlockedIpQuery {
     pub limit: u32,
@@ -53,7 +57,7 @@ pub struct BlockedIpQuery {
     pub sort_direction: SortDirection,
 }
 
-#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Copy, Default)]
 pub enum SortDirection {
     Asc,
@@ -61,7 +65,7 @@ pub enum SortDirection {
     Desc,
 }
 
-#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Copy, Default)]
 pub enum EventSortField {
     #[default]
@@ -70,7 +74,7 @@ pub enum EventSortField {
     DestPort,
 }
 
-#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Copy, Default)]
 pub enum BlockedIpSortField {
     #[default]
@@ -79,6 +83,7 @@ pub enum BlockedIpSortField {
     Ip,
 }
 
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone)]
 pub struct PagedResult<T> {
     pub total: u64,
@@ -273,6 +278,7 @@ impl SqliteStore {
         Ok((count.max(0) as u64, latest_version))
     }
 
+    #[cfg(any(feature = "api", test))]
     pub async fn list_security_events(
         &self,
         query: &SecurityEventQuery,
@@ -316,6 +322,7 @@ impl SqliteStore {
         })
     }
 
+    #[cfg(any(feature = "api", test))]
     pub async fn list_blocked_ips(
         &self,
         query: &BlockedIpQuery,
@@ -604,6 +611,7 @@ fn unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+#[cfg(any(feature = "api", test))]
 fn normalized_limit(limit: u32) -> u32 {
     if limit == 0 {
         50
@@ -612,6 +620,7 @@ fn normalized_limit(limit: u32) -> u32 {
     }
 }
 
+#[cfg(any(feature = "api", test))]
 fn append_security_event_filters<'a>(
     builder: &mut QueryBuilder<'a, Sqlite>,
     query: &'a SecurityEventQuery,
@@ -641,6 +650,7 @@ fn append_security_event_filters<'a>(
     }
 }
 
+#[cfg(any(feature = "api", test))]
 fn append_blocked_ip_filters<'a>(
     builder: &mut QueryBuilder<'a, Sqlite>,
     query: &'a BlockedIpQuery,
@@ -663,6 +673,7 @@ fn append_blocked_ip_filters<'a>(
     }
 }
 
+#[cfg(any(feature = "api", test))]
 fn append_event_sort<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &SecurityEventQuery) {
     builder.push(" ORDER BY ");
     builder.push(match query.sort_by {
@@ -681,6 +692,7 @@ fn append_event_sort<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &Securit
     });
 }
 
+#[cfg(any(feature = "api", test))]
 fn append_blocked_ip_sort<'a>(builder: &mut QueryBuilder<'a, Sqlite>, query: &BlockedIpQuery) {
     builder.push(" ORDER BY ");
     builder.push(match query.sort_by {
@@ -1009,6 +1021,28 @@ mod tests {
         assert_eq!(recent_events.total, 1);
         assert_eq!(recent_events.items[0].reason, "port scan");
 
+        let source_sorted_events = store
+            .list_security_events(&SecurityEventQuery {
+                sort_by: EventSortField::SourceIp,
+                sort_direction: SortDirection::Asc,
+                ..SecurityEventQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(source_sorted_events.total, 2);
+        assert_eq!(source_sorted_events.items[0].source_ip, "10.0.0.1");
+
+        let port_sorted_events = store
+            .list_security_events(&SecurityEventQuery {
+                sort_by: EventSortField::DestPort,
+                sort_direction: SortDirection::Asc,
+                ..SecurityEventQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(port_sorted_events.total, 2);
+        assert_eq!(port_sorted_events.items[0].dest_port, 22);
+
         let active_blocks = store
             .list_blocked_ips(&BlockedIpQuery {
                 active_only: true,
@@ -1029,6 +1063,17 @@ mod tests {
             .unwrap();
         assert_eq!(sorted_blocks.total, 2);
         assert_eq!(sorted_blocks.items[0].ip, "10.0.0.1");
+
+        let expires_sorted_blocks = store
+            .list_blocked_ips(&BlockedIpQuery {
+                sort_by: BlockedIpSortField::ExpiresAt,
+                sort_direction: SortDirection::Asc,
+                ..BlockedIpQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(expires_sorted_blocks.total, 2);
+        assert_eq!(expires_sorted_blocks.items[0].ip, "10.0.0.4");
 
         let paged_blocks = store
             .list_blocked_ips(&BlockedIpQuery {

@@ -14,6 +14,7 @@
 ### L7 层防护 (应用层)
 - HTTP/1.1 请求解析
 - HTTP/2 直连流量解析（prior knowledge / cleartext h2）
+- HTTP/3 请求解析（需 `--features http3` 且配置证书）
 - HTTP/3 / QUIC datagram 元数据识别
 - SQL 注入检测
 - XSS 攻击检测
@@ -101,7 +102,7 @@ cargo check
 
 - **interface**: 监听的网络接口
 - **runtime_profile**: 运行档位，支持 `minimal` / `standard`
-- **listen_addr**: WAF 监听地址
+- **listen_addrs**: WAF 监听地址数组（旧版 `listen_addr` 仍会在加载时自动兼容转换）
 - **tcp_upstream_addr**: HTTP/1.1 over TCP 放行流量的回源地址，未配置时返回本地检测结果
 - **udp_upstream_addr**: UDP 放行流量的回源地址，未配置时仅检测不转发
 - **api_enabled**: 管理 API 开关
@@ -221,6 +222,7 @@ TCP 代理示例：
 - 上游若返回 `chunked` 响应，WAF 会在转回 HTTP/2 前做基础解块
 - 当 `http3_config.certificate_path` 和 `http3_config.private_key_path` 同时配置后，WAF 会在 `http3_config.listen_addr` 上额外启动一个 TLS listener，并通过 ALPN 自动处理 `h2` / `http/1.1`
 - 这条 TLS listener 与 UDP 的 QUIC listener 可以共用同一个地址，例如都绑定 `0.0.0.0:8443`
+- 若以 `cargo run --features http3` 构建，且同样配置了证书与私钥，WAF 还会在相同 `listen_addr` 上启动真正的 QUIC / HTTP/3 listener
 
 UDP 转发示例：
 
@@ -241,9 +243,51 @@ UDP 转发示例：
 - source / destination connection id
 
 说明：
-- 当前 HTTP/3 支持是“基于 QUIC 元数据的检测”，不是完整的 HTTP/3 明文请求解析
-- 在未做 TLS 终止前，WAF 无法看到 HTTP/3 的真实 header/body，因此不会伪造明文 GET/POST 请求
-- 即使配置了 TLS 证书，当前也只是补齐了 HTTPS / ALPN h2 的解密检测；真正的 QUIC/TLS 终止与 HTTP/3 明文代理仍未实现
+- 默认构建下，HTTP/3 仍然只做 QUIC 元数据检测
+- 启用 `http3` feature 且配置证书后，WAF 会真正接受 HTTP/3 请求，解析 header/body，并复用现有 L7 检测链路
+- HTTP/3 放行请求当前仍会降级为 HTTP/1.1 回源到 `tcp_upstream_addr`
+
+### 本地验证 HTTP/2 / HTTP/3
+
+仓库内提供了一个最小 HTTP/3 smoke client：
+
+```bash
+cargo run --example http3_smoke --features http3 -- https://127.0.0.1:8443/ /path/to/cert.pem
+```
+
+下面是一套可直接复用的本地联调流程：
+
+1. 生成自签证书（同时包含 `127.0.0.1` 和 `localhost`）：
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+  -keyout /tmp/waf-http3-key.pem \
+  -out /tmp/waf-http3-cert.pem \
+  -subj "/CN=127.0.0.1" \
+  -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"
+```
+
+2. 准备一个临时配置，并把 `http3_config.certificate_path` / `private_key_path` 指向上面的证书与私钥。
+
+3. 启动 WAF：
+
+```bash
+WAF_CONFIG=/path/to/http3-local.json cargo run --features http3
+```
+
+4. 验证 HTTPS + ALPN h2：
+
+```bash
+curl --http2 -k https://127.0.0.1:8443/
+```
+
+5. 验证真正的 HTTP/3：
+
+```bash
+cargo run --example http3_smoke --features http3 -- https://127.0.0.1:8443/ /tmp/waf-http3-cert.pem
+```
+
+默认没有配置 `tcp_upstream_addr` 时，HTTP/2 / HTTP/3 放行请求会返回本地 `allowed` 响应，适合先做协议链路冒烟。
 
 当前实现不会把数据库查询放进请求热路径，拦截事件通过异步队列写入 SQLite。
 当 `sqlite_rules_enabled=true` 时，启动阶段会先把 JSON 配置中的规则做一次“只插入不覆盖”的种子导入，再从 SQLite 读取规则，并在维护周期里检查规则表是否变化后自动热重载。

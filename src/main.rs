@@ -9,6 +9,7 @@ mod metrics;
 mod protocol;
 mod rules;
 mod storage;
+mod tls;
 
 use anyhow::Result;
 use env_logger::Env;

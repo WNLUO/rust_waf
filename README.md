@@ -219,7 +219,8 @@ TCP 代理示例：
 说明：
 - `Upgrade: h2c` 首包仍按 HTTP/1.1 检测，避免把升级握手误判成完整 h2 会话
 - 上游若返回 `chunked` 响应，WAF 会在转回 HTTP/2 前做基础解块
-- 当前仍未实现 TLS 终止后的 HTTPS / ALPN h2 解密代理
+- 当 `http3_config.certificate_path` 和 `http3_config.private_key_path` 同时配置后，WAF 会在 `http3_config.listen_addr` 上额外启动一个 TLS listener，并通过 ALPN 自动处理 `h2` / `http/1.1`
+- 这条 TLS listener 与 UDP 的 QUIC listener 可以共用同一个地址，例如都绑定 `0.0.0.0:8443`
 
 UDP 转发示例：
 
@@ -242,6 +243,7 @@ UDP 转发示例：
 说明：
 - 当前 HTTP/3 支持是“基于 QUIC 元数据的检测”，不是完整的 HTTP/3 明文请求解析
 - 在未做 TLS 终止前，WAF 无法看到 HTTP/3 的真实 header/body，因此不会伪造明文 GET/POST 请求
+- 即使配置了 TLS 证书，当前也只是补齐了 HTTPS / ALPN h2 的解密检测；真正的 QUIC/TLS 终止与 HTTP/3 明文代理仍未实现
 
 当前实现不会把数据库查询放进请求热路径，拦截事件通过异步队列写入 SQLite。
 当 `sqlite_rules_enabled=true` 时，启动阶段会先把 JSON 配置中的规则做一次“只插入不覆盖”的种子导入，再从 SQLite 读取规则，并在维护周期里检查规则表是否变化后自动热重载。

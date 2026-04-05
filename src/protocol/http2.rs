@@ -9,7 +9,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use log::{debug, warn};
 use std::collections::HashMap;
 use std::future::Future;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub type Http2ResponseBody = Full<Bytes>;
 
@@ -68,7 +68,7 @@ impl Http2Handler {
     /// 驱动一个 HTTP/2 连接，并把每个请求转换成 UnifiedHttpRequest 交给回调处理。
     pub async fn serve_connection<H, Fut>(
         &self,
-        stream: TcpStream,
+        stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
         client_ip: String,
         listener_port: u16,
         max_size: usize,

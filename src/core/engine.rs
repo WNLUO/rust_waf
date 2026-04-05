@@ -1,9 +1,14 @@
 use anyhow::Result;
 use log::{debug, info, warn};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig as RustlsServerConfig;
+use std::fs::File;
+use std::io::BufReader;
 use std::sync::Arc;
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio_rustls::TlsAcceptor;
 
 use super::WafContext;
 use crate::config::{Config, RuntimeProfile};
@@ -75,6 +80,7 @@ impl WafEngine {
         let mut shutdown_senders = Vec::new();
         let mut tcp_listener_addresses = Vec::new();
         let mut udp_listener_addresses = Vec::new();
+        let mut tls_listener = None;
 
         // 先绑定所有TCP/UDP监听器
         for addr in &self.context.config.listen_addrs {
@@ -99,8 +105,21 @@ impl WafEngine {
             }
         }
 
-        if tcp_listener_addresses.is_empty() && udp_listener_addresses.is_empty() {
-            anyhow::bail!("No TCP or UDP listeners could be started. Please check configuration.");
+        if let Some(tls_acceptor) = build_tls_acceptor(&self.context.config.http3_config)? {
+            let tls_addr = &self.context.config.http3_config.listen_addr;
+            match TcpListener::bind(tls_addr).await {
+                Ok(listener) => {
+                    let addr = listener.local_addr()?;
+                    tls_listener = Some((addr, listener, tls_acceptor));
+                }
+                Err(err) => {
+                    warn!("Failed to bind TLS listener on {}: {}", tls_addr, err);
+                }
+            }
+        }
+
+        if tcp_listener_addresses.is_empty() && udp_listener_addresses.is_empty() && tls_listener.is_none() {
+            anyhow::bail!("No TCP, UDP, or TLS listeners could be started. Please check configuration.");
         }
 
         // 为每个TCP监听器启动独立任务
@@ -213,6 +232,57 @@ impl WafEngine {
             shutdown_senders.push((task, shutdown_tx));
         }
 
+        if let Some((addr, listener, tls_acceptor)) = tls_listener {
+            info!("TLS inspection listener started on {}", addr);
+            let context = Arc::clone(&self.context);
+            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+            let connection_semaphore = Arc::clone(&self.connection_semaphore);
+
+            let task = tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            info!("TLS listener shutdown signal received for {}", addr);
+                            break;
+                        }
+                        accept_result = listener.accept() => {
+                            match accept_result {
+                                Ok((stream, peer_addr)) => {
+                                    match connection_semaphore.clone().try_acquire_owned() {
+                                        Ok(permit) => {
+                                            let ctx = Arc::clone(&context);
+                                            let acceptor = tls_acceptor.clone();
+                                            tokio::spawn(async move {
+                                                if let Err(err) =
+                                                    handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await
+                                                {
+                                                    warn!("TLS connection handling failed: {}", err);
+                                                }
+                                            });
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Dropping TLS connection from {} due to concurrency limit",
+                                                peer_addr
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!("Failed to accept TLS connection on {}: {}", addr, err);
+                                }
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Ctrl+C received, shutting down TLS listener on {}", addr);
+                            break;
+                        }
+                    }
+                }
+            });
+            shutdown_senders.push((task, shutdown_tx));
+        }
+
         info!(
             "Successfully started {} listener task(s)",
             shutdown_senders.len()
@@ -291,6 +361,45 @@ impl WafEngine {
     }
 }
 
+fn build_tls_acceptor(
+    config: &crate::config::Http3Config,
+) -> Result<Option<TlsAcceptor>> {
+    if !config.enable_tls13 {
+        return Ok(None);
+    }
+
+    let (Some(cert_path), Some(key_path)) = (
+        config.certificate_path.as_deref(),
+        config.private_key_path.as_deref(),
+    ) else {
+        return Ok(None);
+    };
+
+    let certs = load_tls_certificates(cert_path)?;
+    let private_key = load_tls_private_key(key_path)?;
+    let mut server_config = RustlsServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, private_key)?;
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    Ok(Some(TlsAcceptor::from(Arc::new(server_config))))
+}
+
+fn load_tls_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let certs = rustls_pemfile::certs(&mut reader).collect::<std::result::Result<Vec<_>, _>>()?;
+    if certs.is_empty() {
+        anyhow::bail!("No TLS certificates found in {}", path);
+    }
+    Ok(certs)
+}
+
+fn load_tls_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
+    let mut reader = BufReader::new(File::open(path)?);
+    rustls_pemfile::private_key(&mut reader)?
+        .ok_or_else(|| anyhow::anyhow!("No TLS private key found in {}", path))
+}
+
 async fn handle_connection(
     context: Arc<WafContext>,
     stream: TcpStream,
@@ -319,6 +428,47 @@ async fn handle_connection(
             warn!("Connection handling error for {}: {}", peer_addr, e);
             Err(e)
         }
+    }
+}
+
+async fn handle_tls_connection(
+    context: Arc<WafContext>,
+    tls_acceptor: TlsAcceptor,
+    stream: TcpStream,
+    peer_addr: std::net::SocketAddr,
+    _permit: OwnedSemaphorePermit,
+) -> Result<()> {
+    let local_addr = stream.local_addr()?;
+    let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+
+    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+        debug!(
+            "L4 inspection blocked TLS connection from {}: {}",
+            peer_addr, l4_result.reason
+        );
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(l4_result.layer.clone());
+        }
+        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
+        return Ok(());
+    }
+
+    let tls_stream = tls_acceptor.accept(stream).await?;
+    let alpn = tls_stream
+        .get_ref()
+        .1
+        .alpn_protocol()
+        .map(|proto| String::from_utf8_lossy(proto).to_string());
+    let mut metadata = vec![("transport".to_string(), "tls".to_string())];
+    if let Some(protocol) = &alpn {
+        metadata.push(("tls.alpn".to_string(), protocol.clone()));
+    }
+
+    match alpn.as_deref() {
+        Some("h2") if context.config.l7_config.http2_config.enabled => {
+            handle_http2_connection(context, tls_stream, peer_addr, &packet, metadata).await
+        }
+        _ => handle_http1_connection(context, tls_stream, peer_addr, &packet, metadata).await,
     }
 }
 
@@ -411,11 +561,14 @@ async fn forward_udp_payload(
     Ok(())
 }
 
-async fn forward_http1_request(
-    client_stream: &mut TcpStream,
+async fn forward_http1_request<W>(
+    client_stream: &mut W,
     request: &UnifiedHttpRequest,
     upstream_addr: &str,
-) -> Result<u64> {
+) -> Result<u64>
+where
+    W: AsyncWrite + Unpin,
+{
     let mut upstream_stream = TcpStream::connect(upstream_addr).await?;
     upstream_stream.write_all(&request.to_http1_bytes()).await?;
     upstream_stream.shutdown().await?;
@@ -572,10 +725,10 @@ async fn detect_and_handle_protocol(
     // 根据检测到的协议版本路由到相应处理器
     match detected_version {
         HttpVersion::Http2_0 if context.config.l7_config.http2_config.enabled => {
-            handle_http2_connection(context, stream, peer_addr, packet).await
+            handle_http2_connection(context, stream, peer_addr, packet, Vec::new()).await
         }
         _ => {
-            handle_http1_connection(context, stream, peer_addr, packet).await
+            handle_http1_connection(context, stream, peer_addr, packet, Vec::new()).await
         }
     }
 }
@@ -583,9 +736,10 @@ async fn detect_and_handle_protocol(
 /// 处理HTTP/1.1连接
 async fn handle_http1_connection(
     context: Arc<WafContext>,
-    mut stream: TcpStream,
+    mut stream: impl AsyncRead + AsyncWrite + Unpin,
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
+    extra_metadata: Vec<(String, String)>,
 ) -> Result<()> {
     let http1_handler = Http1Handler::new();
 
@@ -597,6 +751,9 @@ async fn handle_http1_connection(
     request.set_client_ip(peer_addr.ip().to_string());
     request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
     request.add_metadata("protocol".to_string(), "HTTP/1.1".to_string());
+    for (key, value) in extra_metadata {
+        request.add_metadata(key, value);
+    }
 
     if request.uri.is_empty() {
         debug!("Empty request from {}, ignoring", peer_addr);
@@ -666,9 +823,10 @@ async fn handle_http1_connection(
 /// 处理HTTP/2.0连接
 async fn handle_http2_connection(
     context: Arc<WafContext>,
-    stream: TcpStream,
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
+    extra_metadata: Vec<(String, String)>,
 ) -> Result<()> {
     let http2_config = &context.config.l7_config.http2_config;
     let http2_handler = Http2Handler::new()
@@ -682,6 +840,7 @@ async fn handle_http2_connection(
     let peer_ip = peer_addr.ip().to_string();
     let max_request_size = context.config.l7_config.max_request_size;
     let upstream_addr = context.config.tcp_upstream_addr.clone();
+    let request_metadata = extra_metadata.clone();
 
     http2_handler
         .serve_connection(
@@ -693,8 +852,13 @@ async fn handle_http2_connection(
                 let context = Arc::clone(&context_for_service);
                 let packet = packet.clone();
                 let upstream_addr = upstream_addr.clone();
+                let request_metadata = request_metadata.clone();
 
                 async move {
+                    let mut request = request;
+                    for (key, value) in request_metadata {
+                        request.add_metadata(key, value);
+                    }
                     debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
 
                     let request_dump = request.to_inspection_string();
@@ -948,6 +1112,23 @@ mod tests {
             protocol: Protocol::UDP,
             timestamp: 0,
         }
+    }
+
+    #[test]
+    fn build_tls_acceptor_is_disabled_without_identity_files() {
+        let config = Http3Config::default();
+        assert!(build_tls_acceptor(&config).unwrap().is_none());
+    }
+
+    #[test]
+    fn build_tls_acceptor_errors_for_missing_identity_files() {
+        let config = Http3Config {
+            certificate_path: Some("/tmp/definitely-missing-cert.pem".to_string()),
+            private_key_path: Some("/tmp/definitely-missing-key.pem".to_string()),
+            ..Http3Config::default()
+        };
+
+        assert!(build_tls_acceptor(&config).is_err());
     }
 
     #[tokio::test]

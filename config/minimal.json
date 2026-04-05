@@ -1,6 +1,8 @@
 {
   "interface": "eth0",
   "listen_addrs": ["0.0.0.0:8080"],
+  "tcp_upstream_addr": null,
+  "udp_upstream_addr": null,
   "runtime_profile": "minimal",
   "api_enabled": false,
   "api_bind": "127.0.0.1:3000",

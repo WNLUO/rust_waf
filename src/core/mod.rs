@@ -196,6 +196,8 @@ mod tests {
         let config = Config {
             interface: "lo0".to_string(),
             listen_addrs: vec!["127.0.0.1:0".to_string()],
+            tcp_upstream_addr: None,
+            udp_upstream_addr: None,
             runtime_profile: RuntimeProfile::Standard,
             api_enabled: false,
             api_bind: "127.0.0.1:3000".to_string(),

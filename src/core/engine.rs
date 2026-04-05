@@ -1,6 +1,7 @@
 use anyhow::Result;
 use log::{debug, info, warn};
 use std::sync::Arc;
+use tokio::io::{self, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
@@ -173,12 +174,15 @@ impl WafEngine {
                                     match connection_semaphore.clone().try_acquire_owned() {
                                         Ok(permit) => {
                                             let ctx = Arc::clone(&context);
+                                            let listener_socket = Arc::clone(&socket);
+                                            let payload = buffer[..bytes_read].to_vec();
                                             tokio::spawn(async move {
                                                 if let Err(err) = handle_udp_datagram(
                                                     ctx,
+                                                    listener_socket,
                                                     peer_addr,
                                                     addr,
-                                                    bytes_read,
+                                                    payload,
                                                     permit,
                                                 ).await {
                                                     warn!("UDP datagram handling failed: {}", err);
@@ -319,15 +323,16 @@ async fn handle_connection(
 
 async fn handle_udp_datagram(
     context: Arc<WafContext>,
+    listener_socket: Arc<UdpSocket>,
     peer_addr: std::net::SocketAddr,
     local_addr: std::net::SocketAddr,
-    bytes_read: usize,
+    payload: Vec<u8>,
     _permit: OwnedSemaphorePermit,
 ) -> Result<()> {
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
 
     if let Some(metrics) = context.metrics.as_ref() {
-        metrics.record_packet(bytes_read);
+        metrics.record_packet(payload.len());
     }
 
     if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
@@ -344,9 +349,57 @@ async fn handle_udp_datagram(
 
     debug!(
         "Allowed UDP datagram from {} to {} ({} bytes)",
-        peer_addr, local_addr, bytes_read
+        peer_addr,
+        local_addr,
+        payload.len()
     );
+
+    if let Some(upstream_addr) = context.config.udp_upstream_addr.as_deref() {
+        forward_udp_payload(listener_socket, peer_addr, &payload, upstream_addr).await?;
+    }
+
     Ok(())
+}
+
+async fn forward_udp_payload(
+    listener_socket: Arc<UdpSocket>,
+    client_addr: std::net::SocketAddr,
+    payload: &[u8],
+    upstream_addr: &str,
+) -> Result<()> {
+    let upstream_addr: std::net::SocketAddr = upstream_addr.parse()?;
+    let bind_addr = match upstream_addr {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+        std::net::SocketAddr::V6(_) => "[::]:0",
+    };
+    let upstream_socket = UdpSocket::bind(bind_addr).await?;
+    upstream_socket.send_to(payload, upstream_addr).await?;
+
+    let mut response = vec![0u8; 65_535];
+    let response_size = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        upstream_socket.recv(&mut response),
+    )
+    .await??;
+
+    listener_socket
+        .send_to(&response[..response_size], client_addr)
+        .await?;
+    Ok(())
+}
+
+async fn forward_http1_request(
+    client_stream: &mut TcpStream,
+    request: &UnifiedHttpRequest,
+    upstream_addr: &str,
+) -> Result<u64> {
+    let mut upstream_stream = TcpStream::connect(upstream_addr).await?;
+    upstream_stream.write_all(&request.to_http1_bytes()).await?;
+    upstream_stream.shutdown().await?;
+
+    let copied = io::copy(&mut upstream_stream, client_stream).await?;
+    client_stream.flush().await?;
+    Ok(copied)
 }
 
 /// 检测协议版本并路由到相应的处理器
@@ -443,24 +496,36 @@ async fn handle_http1_connection(
             )
             .await?;
     } else {
-        let metrics = context.metrics_snapshot();
-        let metrics_line = metrics
-            .map(|snapshot| {
-                format!(
-                    "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
-                    snapshot.total_packets,
-                    snapshot.blocked_packets,
-                    snapshot.blocked_l4,
-                    snapshot.blocked_l7,
-                    snapshot.total_bytes
-                )
-            })
-            .unwrap_or_else(|| "metrics=disabled".to_string());
+        if let Some(upstream_addr) = context.config.tcp_upstream_addr.as_deref() {
+            if let Err(err) = forward_http1_request(&mut stream, &request, upstream_addr).await {
+                warn!(
+                    "Failed to proxy HTTP/1.1 request from {} to {}: {}",
+                    peer_addr, upstream_addr, err
+                );
+                http1_handler
+                    .write_response(&mut stream, 502, "Bad Gateway", b"upstream proxy failed")
+                    .await?;
+            }
+        } else {
+            let metrics = context.metrics_snapshot();
+            let metrics_line = metrics
+                .map(|snapshot| {
+                    format!(
+                        "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
+                        snapshot.total_packets,
+                        snapshot.blocked_packets,
+                        snapshot.blocked_l4,
+                        snapshot.blocked_l7,
+                        snapshot.total_bytes
+                    )
+                })
+                .unwrap_or_else(|| "metrics=disabled".to_string());
 
-        let body = format!("allowed\n{}\n", metrics_line);
-        http1_handler
-            .write_response(&mut stream, 200, "OK", body.as_bytes())
-            .await?;
+            let body = format!("allowed\n{}\n", metrics_line);
+            http1_handler
+                .write_response(&mut stream, 200, "OK", body.as_bytes())
+                .await?;
+        }
     }
 
     Ok(())
@@ -731,11 +796,14 @@ mod tests {
         Severity,
     };
     use std::net::{IpAddr, Ipv4Addr};
+    use tokio::net::UdpSocket;
 
     fn test_config(rules: Vec<Rule>) -> Config {
         Config {
             interface: "lo0".to_string(),
             listen_addrs: vec!["127.0.0.1:0".to_string()],
+            tcp_upstream_addr: None,
+            udp_upstream_addr: None,
             runtime_profile: RuntimeProfile::Minimal,
             api_enabled: false,
             api_bind: "127.0.0.1:3000".to_string(),
@@ -789,5 +857,90 @@ mod tests {
         let result = inspect_transport_layers(&context, &udp_packet()).unwrap();
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L4);
+    }
+
+    #[tokio::test]
+    async fn forward_udp_payload_relays_upstream_response() {
+        let upstream_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream_socket.local_addr().unwrap();
+        let listener_socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let client_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_addr = client_socket.local_addr().unwrap();
+
+        let upstream_task = tokio::spawn(async move {
+            let mut buffer = vec![0u8; 1024];
+            let (size, peer_addr) = upstream_socket.recv_from(&mut buffer).await.unwrap();
+            upstream_socket
+                .send_to(&buffer[..size], peer_addr)
+                .await
+                .unwrap();
+        });
+
+        forward_udp_payload(
+            Arc::clone(&listener_socket),
+            client_addr,
+            b"ping",
+            &upstream_addr.to_string(),
+        )
+        .await
+        .unwrap();
+
+        let mut response = vec![0u8; 1024];
+        let (size, peer_addr) = client_socket.recv_from(&mut response).await.unwrap();
+        upstream_task.await.unwrap();
+
+        assert_eq!(&response[..size], b"ping");
+        assert_eq!(peer_addr, listener_socket.local_addr().unwrap());
+    }
+
+    #[tokio::test]
+    async fn forward_http1_request_relays_upstream_response() {
+        let upstream_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream_listener.local_addr().unwrap();
+        let front_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let front_addr = front_listener.local_addr().unwrap();
+
+        let client_task = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(front_addr).await.unwrap();
+            let mut response = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut response)
+                .await
+                .unwrap();
+            response
+        });
+
+        let upstream_task = tokio::spawn(async move {
+            let (mut upstream_stream, _) = upstream_listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut upstream_stream, &mut request)
+                .await
+                .unwrap();
+            assert!(String::from_utf8_lossy(&request).contains("GET /proxy HTTP/1.1"));
+            upstream_stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                )
+                .await
+                .unwrap();
+        });
+
+        let (mut client_side_stream, _) = front_listener.accept().await.unwrap();
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/proxy".to_string());
+        request.add_header("Host".to_string(), "example.com".to_string());
+
+        forward_http1_request(
+            &mut client_side_stream,
+            &request,
+            &upstream_addr.to_string(),
+        )
+        .await
+        .unwrap();
+
+        upstream_task.await.unwrap();
+        drop(client_side_stream);
+        let response = client_task.await.unwrap();
+        assert!(String::from_utf8_lossy(&response).contains("HTTP/1.1 200 OK"));
+        assert!(String::from_utf8_lossy(&response).ends_with("ok"));
     }
 }

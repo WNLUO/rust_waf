@@ -178,6 +178,30 @@ impl UnifiedHttpRequest {
 
         headers_size + self.body.len()
     }
+
+    pub fn to_http1_bytes(&self) -> Vec<u8> {
+        let mut request = format!("{} {} HTTP/1.1\r\n", self.method, self.uri).into_bytes();
+        let has_content_length = self.headers.contains_key("content-length");
+
+        for (key, value) in &self.headers {
+            if key.eq_ignore_ascii_case("connection") {
+                continue;
+            }
+            request.extend_from_slice(format!("{}: {}\r\n", key, value).as_bytes());
+        }
+
+        request.extend_from_slice(b"connection: close\r\n");
+
+        if !self.body.is_empty() && !has_content_length {
+            request.extend_from_slice(
+                format!("content-length: {}\r\n", self.body.len()).as_bytes(),
+            );
+        }
+
+        request.extend_from_slice(b"\r\n");
+        request.extend_from_slice(&self.body);
+        request
+    }
 }
 
 impl Default for UnifiedHttpRequest {
@@ -251,5 +275,19 @@ mod tests {
 
         assert_eq!(request.stream_id, Some(123));
         assert_eq!(request.priority, Some(5));
+    }
+
+    #[test]
+    fn test_http1_serialization() {
+        let mut request = UnifiedHttpRequest::default();
+        request.add_header("Host".to_string(), "example.com".to_string());
+        request.body = b"hello".to_vec();
+
+        let serialized = String::from_utf8(request.to_http1_bytes()).unwrap();
+        assert!(serialized.starts_with("GET / HTTP/1.1\r\n"));
+        assert!(serialized.contains("host: example.com\r\n"));
+        assert!(serialized.contains("connection: close\r\n"));
+        assert!(serialized.contains("content-length: 5\r\n"));
+        assert!(serialized.ends_with("\r\n\r\nhello"));
     }
 }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 pub mod http3;
@@ -16,6 +17,10 @@ pub use l7::L7Config;
 pub struct Config {
     pub interface: String,
     pub listen_addrs: Vec<String>,
+    #[serde(default)]
+    pub tcp_upstream_addr: Option<String>,
+    #[serde(default)]
+    pub udp_upstream_addr: Option<String>,
     pub runtime_profile: RuntimeProfile,
     pub api_enabled: bool,
     pub api_bind: String,
@@ -153,6 +158,8 @@ impl Default for Config {
         Self {
             interface: "eth0".to_string(),
             listen_addrs: vec!["0.0.0.0:8080".to_string()],
+            tcp_upstream_addr: None,
+            udp_upstream_addr: None,
             runtime_profile: RuntimeProfile::Minimal,
             api_enabled: false,
             api_bind: "127.0.0.1:3000".to_string(),
@@ -220,6 +227,50 @@ impl Config {
         if self.listen_addrs.is_empty() {
             self.listen_addrs = vec!["0.0.0.0:8080".to_string()];
         }
+
+        self.udp_upstream_addr = self
+            .udp_upstream_addr
+            .take()
+            .and_then(|addr| {
+                let trimmed = addr.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    match trimmed.parse::<SocketAddr>() {
+                        Ok(_) => Some(trimmed.to_string()),
+                        Err(err) => {
+                            log::warn!(
+                                "Invalid udp_upstream_addr '{}': {}, disabling UDP forwarding",
+                                trimmed,
+                                err
+                            );
+                            None
+                        }
+                    }
+                }
+            });
+
+        self.tcp_upstream_addr = self
+            .tcp_upstream_addr
+            .take()
+            .and_then(|addr| {
+                let trimmed = addr.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    match trimmed.parse::<SocketAddr>() {
+                        Ok(_) => Some(trimmed.to_string()),
+                        Err(err) => {
+                            log::warn!(
+                                "Invalid tcp_upstream_addr '{}': {}, disabling TCP forwarding",
+                                trimmed,
+                                err
+                            );
+                            None
+                        }
+                    }
+                }
+            });
 
         // 多端口配置需要标准模式
         if self.listen_addrs.len() > 1 && self.runtime_profile.is_minimal() {
@@ -343,4 +394,42 @@ fn default_sqlite_path() -> String {
 
 const fn default_sqlite_auto_migrate() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_strips_empty_udp_upstream_addr() {
+        let config = Config {
+            udp_upstream_addr: Some("   ".to_string()),
+            ..Config::default()
+        }
+        .normalized();
+
+        assert!(config.udp_upstream_addr.is_none());
+    }
+
+    #[test]
+    fn normalized_drops_invalid_udp_upstream_addr() {
+        let config = Config {
+            udp_upstream_addr: Some("not-an-addr".to_string()),
+            ..Config::default()
+        }
+        .normalized();
+
+        assert!(config.udp_upstream_addr.is_none());
+    }
+
+    #[test]
+    fn normalized_drops_invalid_tcp_upstream_addr() {
+        let config = Config {
+            tcp_upstream_addr: Some("not-an-addr".to_string()),
+            ..Config::default()
+        }
+        .normalized();
+
+        assert!(config.tcp_upstream_addr.is_none());
+    }
 }

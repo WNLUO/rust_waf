@@ -100,6 +100,8 @@ cargo check
 - **interface**: 监听的网络接口
 - **runtime_profile**: 运行档位，支持 `minimal` / `standard`
 - **listen_addr**: WAF 监听地址
+- **tcp_upstream_addr**: HTTP/1.1 over TCP 放行流量的回源地址，未配置时返回本地检测结果
+- **udp_upstream_addr**: UDP 放行流量的回源地址，未配置时仅检测不转发
 - **api_enabled**: 管理 API 开关
 - **api_bind**: 管理 API 监听地址
 - **bloom_enabled**: Bloom Filter 开关
@@ -197,6 +199,28 @@ cargo check
   "sqlite_rules_enabled": true
 }
 ```
+
+TCP 代理示例：
+
+```json
+{
+  "listen_addrs": ["0.0.0.0:8080"],
+  "tcp_upstream_addr": "127.0.0.1:18080"
+}
+```
+
+当前 TCP 回源仅对真实解析后的 HTTP/1.1 请求生效；HTTP/2 和 HTTP/3 仍保持现有的简化处理路径。
+
+UDP 转发示例：
+
+```json
+{
+  "listen_addrs": ["0.0.0.0:5353"],
+  "udp_upstream_addr": "127.0.0.1:8053"
+}
+```
+
+当前 UDP 链路会在 L4 检测通过后，将 datagram 转发到 `udp_upstream_addr`，等待上游响应，再把响应回给原始客户端。
 
 当前实现不会把数据库查询放进请求热路径，拦截事件通过异步队列写入 SQLite。
 当 `sqlite_rules_enabled=true` 时，启动阶段会先把 JSON 配置中的规则做一次“只插入不覆盖”的种子导入，再从 SQLite 读取规则，并在维护周期里检查规则表是否变化后自动热重载。

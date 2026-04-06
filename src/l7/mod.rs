@@ -37,15 +37,14 @@ mod tests {
     }
 
     #[test]
-    fn oversized_request_is_blocked() {
+    fn oversized_request_is_allowed() {
         let inspector = L7Inspector::new(L7Config::default(), false, false);
         let mut request =
             UnifiedHttpRequest::new(HttpVersion::Http1_1, "POST".to_string(), "/".to_string());
         request.body = vec![b'a'; L7Config::default().max_request_size + 1];
 
         let result = inspector.inspect_unified_request(&test_packet(), &request);
-        assert!(result.blocked);
-        assert!(result.reason.contains("Request size exceeded limit"));
+        assert!(!result.blocked, "unexpected block reason: {}", result.reason);
     }
 }
 
@@ -70,15 +69,6 @@ impl L7Inspector {
             return InspectionResult {
                 blocked: false,
                 reason: String::new(),
-                layer: InspectionLayer::L7,
-            };
-        }
-
-        // Check request size
-        if payload.len() > self.config.max_request_size {
-            return InspectionResult {
-                blocked: true,
-                reason: "Request size exceeded limit".to_string(),
                 layer: InspectionLayer::L7,
             };
         }
@@ -120,18 +110,6 @@ impl L7Inspector {
             "Inspecting {} request: {} {}",
             request.version, request.method, request.uri
         );
-
-        // Check request size
-        if request.total_size() > self.config.max_request_size {
-            return InspectionResult {
-                blocked: true,
-                reason: format!(
-                    "Request size exceeded limit: {} bytes",
-                    request.total_size()
-                ),
-                layer: InspectionLayer::L7,
-            };
-        }
 
         debug!("{} request passed all checks", request.version);
         InspectionResult {

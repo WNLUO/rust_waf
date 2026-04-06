@@ -1,9 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::fs;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 
 pub mod http3;
 pub mod l4;
@@ -182,37 +180,6 @@ impl Default for Config {
     }
 }
 
-pub fn load_config() -> Result<Config> {
-    if let Some(config_path) = resolve_config_path() {
-        let raw = fs::read_to_string(&config_path)?;
-
-        // 向后兼容：先检查是否存在旧的listen_addr字段
-        if let Ok(legacy_config) = serde_json::from_str::<serde_json::Value>(&raw) {
-            if let Some(listen_addr) = legacy_config.get("listen_addr").and_then(|v| v.as_str()) {
-                let listen_addr_string = listen_addr.to_string();
-                log::warn!("Legacy configuration detected: 'listen_addr' has been converted to 'listen_addrs' array");
-
-                // 创建新的配置对象，替换listen_addr为listen_addrs
-                let mut config_value = legacy_config;
-                config_value.as_object_mut().unwrap().remove("listen_addr");
-                config_value.as_object_mut().unwrap().insert(
-                    "listen_addrs".to_string(),
-                    serde_json::json!([listen_addr_string]),
-                );
-
-                let config: Config = serde_json::from_value(config_value)?;
-                return Ok(config.normalized());
-            }
-        }
-
-        // 如果不存在旧的字段，正常反序列化
-        let config: Config = serde_json::from_str(&raw)?;
-        return Ok(config.normalized());
-    }
-
-    Ok(Config::default())
-}
-
 impl Config {
     pub fn normalized(mut self) -> Self {
         if self.sqlite_path.trim().is_empty() {
@@ -350,24 +317,6 @@ impl Config {
     }
 }
 
-fn resolve_config_path() -> Option<PathBuf> {
-    if let Some(path) = env::var_os("WAF_CONFIG") {
-        let path = PathBuf::from(path);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-
-    [
-        Path::new("config/waf.json"),
-        Path::new("config/minimal.json"),
-        Path::new("waf.json"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-    .map(Path::to_path_buf)
-}
-
 fn clamp_or_default(value: usize, default: usize) -> usize {
     if value == 0 {
         default
@@ -384,6 +333,10 @@ fn clamp_u64(value: u64, min: u64, max: u64, default: u64) -> u64 {
 fn clamp_scale(value: f64, default: f64, min: f64, max: f64) -> f64 {
     let initial = if value == 0.0 { default } else { value };
     initial.clamp(min, max)
+}
+
+pub fn resolve_sqlite_path() -> String {
+    env::var("WAF_SQLITE_PATH").unwrap_or_else(|_| default_sqlite_path())
 }
 
 fn default_sqlite_path() -> String {

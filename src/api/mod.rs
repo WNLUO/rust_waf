@@ -92,27 +92,6 @@ pub struct BlockedIpResponse {
     expires_at: i64,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateRuleRequest {
-    id: String,
-    name: String,
-    enabled: bool,
-    layer: String,
-    pattern: String,
-    action: String,
-    severity: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UpdateRuleRequest {
-    name: String,
-    enabled: bool,
-    layer: String,
-    pattern: String,
-    action: String,
-    severity: String,
-}
-
 #[derive(Debug, Deserialize, Default)]
 pub struct EventsQueryParams {
     limit: Option<u32>,
@@ -168,13 +147,8 @@ impl ApiServer {
             .route("/metrics", get(metrics_handler))
             .route("/events", get(list_security_events_handler))
             .route("/blocked-ips", get(list_blocked_ips_handler))
-            .route("/rules", get(list_rules_handler).post(create_rule_handler))
-            .route(
-                "/rules/:id",
-                get(get_rule_handler)
-                    .put(update_rule_handler)
-                    .delete(delete_rule_handler),
-            )
+            .route("/rules", get(list_rules_handler))
+            .route("/rules/:id", get(get_rule_handler))
             .with_state(state);
 
         let listener = TcpListener::bind(self.addr).await?;
@@ -279,75 +253,6 @@ async fn get_rule_handler(
     }
 }
 
-async fn create_rule_handler(
-    State(state): State<ApiState>,
-    Json(payload): Json<CreateRuleRequest>,
-) -> ApiResult<(StatusCode, Json<RuleResponse>)> {
-    let store = rules_store(&state)?;
-    let rule = payload.into_rule().map_err(ApiError::bad_request)?;
-
-    let inserted = store.insert_rule(&rule).await.map_err(ApiError::internal)?;
-    if !inserted {
-        return Err(ApiError::conflict(format!(
-            "Rule '{}' already exists",
-            rule.id
-        )));
-    }
-
-    state
-        .context
-        .refresh_rules_from_storage()
-        .await
-        .map_err(ApiError::internal)?;
-
-    Ok((StatusCode::CREATED, Json(RuleResponse::from(rule))))
-}
-
-async fn update_rule_handler(
-    State(state): State<ApiState>,
-    Path(id): Path<String>,
-    Json(payload): Json<UpdateRuleRequest>,
-) -> ApiResult<Json<RuleResponse>> {
-    let store = rules_store(&state)?;
-    if store
-        .load_rule(&id)
-        .await
-        .map_err(ApiError::internal)?
-        .is_none()
-    {
-        return Err(ApiError::not_found(format!("Rule '{}' not found", id)));
-    }
-
-    let rule = payload.into_rule(id).map_err(ApiError::bad_request)?;
-    store.upsert_rule(&rule).await.map_err(ApiError::internal)?;
-    state
-        .context
-        .refresh_rules_from_storage()
-        .await
-        .map_err(ApiError::internal)?;
-
-    Ok(Json(RuleResponse::from(rule)))
-}
-
-async fn delete_rule_handler(
-    State(state): State<ApiState>,
-    Path(id): Path<String>,
-) -> ApiResult<StatusCode> {
-    let store = rules_store(&state)?;
-    let deleted = store.delete_rule(&id).await.map_err(ApiError::internal)?;
-    if !deleted {
-        return Err(ApiError::not_found(format!("Rule '{}' not found", id)));
-    }
-
-    state
-        .context
-        .refresh_rules_from_storage()
-        .await
-        .map_err(ApiError::internal)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
 fn build_metrics_response(
     metrics: Option<crate::metrics::MetricsSnapshot>,
     active_rules: u64,
@@ -428,34 +333,6 @@ impl From<crate::storage::BlockedIpEntry> for BlockedIpResponse {
             blocked_at: entry.blocked_at,
             expires_at: entry.expires_at,
         }
-    }
-}
-
-impl CreateRuleRequest {
-    fn into_rule(self) -> Result<Rule, String> {
-        Ok(Rule {
-            id: self.id,
-            name: self.name,
-            enabled: self.enabled,
-            layer: crate::config::RuleLayer::parse(&self.layer)?,
-            pattern: self.pattern,
-            action: crate::config::RuleAction::parse(&self.action)?,
-            severity: crate::config::Severity::parse(&self.severity)?,
-        })
-    }
-}
-
-impl UpdateRuleRequest {
-    fn into_rule(self, id: String) -> Result<Rule, String> {
-        Ok(Rule {
-            id,
-            name: self.name,
-            enabled: self.enabled,
-            layer: crate::config::RuleLayer::parse(&self.layer)?,
-            pattern: self.pattern,
-            action: crate::config::RuleAction::parse(&self.action)?,
-            severity: crate::config::Severity::parse(&self.severity)?,
-        })
     }
 }
 
@@ -655,26 +532,6 @@ mod tests {
         assert_eq!(response.persisted_rules, 5);
         assert_eq!(response.last_persisted_event_at, Some(1234567890));
         assert_eq!(response.last_rule_update_at, Some(1234567899));
-    }
-
-    #[test]
-    fn test_create_rule_request_into_rule() {
-        let rule = CreateRuleRequest {
-            id: "rule-1".to_string(),
-            name: "Block SQLi".to_string(),
-            enabled: true,
-            layer: "l7".to_string(),
-            pattern: "(?i)select".to_string(),
-            action: "block".to_string(),
-            severity: "high".to_string(),
-        }
-        .into_rule()
-        .unwrap();
-
-        assert_eq!(rule.id, "rule-1");
-        assert_eq!(rule.layer, RuleLayer::L7);
-        assert_eq!(rule.action, RuleAction::Block);
-        assert_eq!(rule.severity, Severity::High);
     }
 
     #[test]

@@ -1,6 +1,7 @@
-use crate::config::{Rule, RuleAction, RuleLayer, Severity};
+use crate::config::{Config, Rule, RuleAction, RuleLayer, Severity};
 use anyhow::Result;
 use log::{debug, warn};
+use serde_json;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 #[cfg(any(feature = "api", test))]
 use sqlx::{QueryBuilder, Sqlite};
@@ -261,6 +262,61 @@ impl SqliteStore {
         .await?;
 
         rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    pub async fn seed_app_config(&self, config: &Config) -> Result<bool> {
+        let config_json = serde_json::to_string(config)?;
+        let result = sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO app_config (
+                id, config_json, updated_at
+            )
+            VALUES (?, ?, ?)
+            "#,
+        )
+        .bind(1_i64)
+        .bind(config_json)
+        .bind(unix_timestamp())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn load_app_config(&self) -> Result<Option<Config>> {
+        let row = sqlx::query_as::<_, StoredAppConfigRow>(
+            r#"
+            SELECT config_json
+            FROM app_config
+            WHERE id = 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn upsert_app_config(&self, config: &Config) -> Result<()> {
+        let config_json = serde_json::to_string(config)?;
+        sqlx::query(
+            r#"
+            INSERT INTO app_config (
+                id, config_json, updated_at
+            )
+            VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                config_json = excluded.config_json,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(1_i64)
+        .bind(config_json)
+        .bind(unix_timestamp())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn latest_rules_version(&self) -> Result<i64> {
@@ -535,6 +591,12 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_rules_updated_at
             ON rules(updated_at);
+
+        CREATE TABLE IF NOT EXISTS app_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            config_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
         "#,
     )
     .execute(pool)
@@ -722,6 +784,11 @@ struct StoredRuleRow {
     severity: String,
 }
 
+#[derive(sqlx::FromRow)]
+struct StoredAppConfigRow {
+    config_json: String,
+}
+
 impl TryFrom<StoredRuleRow> for Rule {
     type Error = anyhow::Error;
 
@@ -735,6 +802,14 @@ impl TryFrom<StoredRuleRow> for Rule {
             action: parse_rule_action(&value.action)?,
             severity: parse_severity(&value.severity)?,
         })
+    }
+}
+
+impl TryFrom<StoredAppConfigRow> for Config {
+    type Error = anyhow::Error;
+
+    fn try_from(value: StoredAppConfigRow) -> Result<Self, Self::Error> {
+        Ok(serde_json::from_str(&value.config_json)?)
     }
 }
 
@@ -795,10 +870,17 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let app_config_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'app_config'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         assert_eq!(security_events_exists, 1);
         assert_eq!(blocked_ips_exists, 1);
         assert_eq!(rules_exists, 1);
+        assert_eq!(app_config_exists, 1);
     }
 
     #[tokio::test]
@@ -938,6 +1020,40 @@ mod tests {
         let summary = store.metrics_summary().await.unwrap();
         assert_eq!(summary.rules, 2);
         assert!(summary.latest_rule_update_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_seeds_and_updates_app_config() {
+        let path = unique_test_db_path("app_config");
+        let store = SqliteStore::new(path, true).await.unwrap();
+        let initial = Config {
+            api_enabled: true,
+            sqlite_enabled: true,
+            sqlite_path: "data/custom.db".to_string(),
+            max_concurrent_tasks: 321,
+            ..Config::default()
+        };
+
+        let inserted = store.seed_app_config(&initial).await.unwrap();
+        assert!(inserted);
+
+        let loaded = store.load_app_config().await.unwrap().unwrap();
+        assert!(loaded.api_enabled);
+        assert_eq!(loaded.sqlite_path, "data/custom.db");
+
+        let inserted_again = store.seed_app_config(&Config::default()).await.unwrap();
+        assert!(!inserted_again);
+
+        let updated = Config {
+            api_enabled: false,
+            max_concurrent_tasks: 654,
+            ..initial.clone()
+        };
+        store.upsert_app_config(&updated).await.unwrap();
+
+        let loaded_updated = store.load_app_config().await.unwrap().unwrap();
+        assert!(!loaded_updated.api_enabled);
+        assert_eq!(loaded_updated.max_concurrent_tasks, 654);
     }
 
     #[tokio::test]

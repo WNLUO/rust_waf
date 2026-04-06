@@ -1263,26 +1263,12 @@ fn inspect_application_layers(
     context: &WafContext,
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
-    serialized_request: &str,
+    _serialized_request: &str,
 ) -> InspectionResult {
     if let Some(l7_inspector) = &context.l7_inspector {
         let l7_result = l7_inspector.inspect_unified_request(packet, request);
         if l7_result.blocked {
             return l7_result;
-        }
-    }
-
-    let rule_engine_guard = context
-        .rule_engine
-        .read()
-        .expect("rule_engine lock poisoned");
-    if let Some(rule_engine) = rule_engine_guard.as_ref() {
-        let rule_result = rule_engine.inspect(packet, Some(serialized_request));
-        if rule_result.blocked {
-            return rule_result;
-        }
-        if rule_engine.has_rules() && !rule_result.reason.is_empty() {
-            debug!("Non-blocking rule matched: {}", rule_result.reason);
         }
     }
 

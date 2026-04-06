@@ -21,8 +21,24 @@ async fn main() -> Result<()> {
 
     info!("Starting WAF system...");
 
-    // Initialize configuration
-    let config = config::load_config()?;
+    let sqlite_path = config::resolve_sqlite_path();
+    let bootstrap_store = storage::SqliteStore::new(sqlite_path.clone(), true).await?;
+    let mut config = if let Some(config) = bootstrap_store.load_app_config().await? {
+        info!("Loaded configuration from SQLite: {}", sqlite_path);
+        config
+    } else {
+        let mut config = config::Config::default();
+        config.sqlite_enabled = true;
+        config.sqlite_path = sqlite_path.clone();
+        config.sqlite_auto_migrate = true;
+        bootstrap_store.seed_app_config(&config).await?;
+        info!("Seeded default configuration into SQLite: {}", sqlite_path);
+        config
+    };
+    config.sqlite_enabled = true;
+    config.sqlite_path = sqlite_path;
+    config.sqlite_auto_migrate = true;
+    let config = config.normalized();
     info!(
         "Loaded configuration: profile={:?}, api_enabled={}, bloom_enabled={}, l4_bloom_fp_verification={}, l7_bloom_fp_verification={}",
         config.runtime_profile,

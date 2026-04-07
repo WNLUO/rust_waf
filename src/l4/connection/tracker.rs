@@ -66,6 +66,7 @@ impl ConnectionTracker {
         peer.recent_connections.len()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn unique_destination_ports(&self, ip: &IpAddr, window: Duration) -> usize {
         let now = Instant::now();
         let mut peers = self.peers.lock().expect("peers mutex poisoned");

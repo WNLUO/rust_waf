@@ -2629,6 +2629,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "dotenvy",
  "env_logger",
  "h2 0.3.27",
  "h3",

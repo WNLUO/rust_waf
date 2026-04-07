@@ -1,10 +1,11 @@
 use crate::config::Rule;
 use crate::core::WafContext;
 use axum::{
+    extract::Json as ExtractJson,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{delete, get},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,23 @@ pub struct RuleResponse {
     pattern: String,
     action: String,
     severity: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RuleUpsertRequest {
+    id: String,
+    name: String,
+    enabled: bool,
+    layer: String,
+    pattern: String,
+    action: String,
+    severity: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WriteStatusResponse {
+    success: bool,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -158,8 +176,14 @@ impl ApiServer {
             .route("/metrics", get(metrics_handler))
             .route("/events", get(list_security_events_handler))
             .route("/blocked-ips", get(list_blocked_ips_handler))
-            .route("/rules", get(list_rules_handler))
-            .route("/rules/:id", get(get_rule_handler))
+            .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
+            .route("/rules", get(list_rules_handler).post(create_rule_handler))
+            .route(
+                "/rules/:id",
+                get(get_rule_handler)
+                    .put(update_rule_handler)
+                    .delete(delete_rule_handler),
+            )
             .with_state(state);
 
         let listener = TcpListener::bind(self.addr).await?;
@@ -272,6 +296,82 @@ async fn get_rule_handler(
     }
 }
 
+async fn create_rule_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<RuleUpsertRequest>,
+) -> ApiResult<(StatusCode, Json<WriteStatusResponse>)> {
+    let store = rules_store(&state)?;
+    let rule = payload.into_rule().map_err(ApiError::bad_request)?;
+    let inserted = store.insert_rule(&rule).await.map_err(ApiError::internal)?;
+
+    if inserted {
+        Ok((
+            StatusCode::CREATED,
+            Json(WriteStatusResponse {
+                success: true,
+                message: format!("Rule '{}' created", rule.id),
+            }),
+        ))
+    } else {
+        Err(ApiError::conflict(format!("Rule '{}' already exists", rule.id)))
+    }
+}
+
+async fn update_rule_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    ExtractJson(payload): ExtractJson<RuleUpsertRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = rules_store(&state)?;
+    let rule = payload.into_rule_with_id(id).map_err(ApiError::bad_request)?;
+    store.upsert_rule(&rule).await.map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: format!("Rule '{}' updated", rule.id),
+    }))
+}
+
+async fn delete_rule_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = rules_store(&state)?;
+    let deleted = store.delete_rule(&id).await.map_err(ApiError::internal)?;
+
+    if deleted {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("Rule '{}' deleted", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!("Rule '{}' not found", id)))
+    }
+}
+
+async fn delete_blocked_ip_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_blocked_ip(id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if deleted {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("Blocked IP record '{}' removed", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!(
+            "Blocked IP record '{}' not found",
+            id
+        )))
+    }
+}
+
 fn build_metrics_response(
     metrics: Option<crate::metrics::MetricsSnapshot>,
     active_rules: u64,
@@ -330,6 +430,41 @@ impl RuleResponse {
             action: rule.action.as_str().to_string(),
             severity: rule.severity.as_str().to_string(),
         }
+    }
+}
+
+impl RuleUpsertRequest {
+    fn into_rule(self) -> Result<Rule, String> {
+        let id = self.id.clone();
+        self.into_rule_with_id(id)
+    }
+
+    fn into_rule_with_id(self, id: String) -> Result<Rule, String> {
+        let id = id.trim().to_string();
+        let name = self.name.trim().to_string();
+        let pattern = self.pattern.trim().to_string();
+        if id.is_empty() {
+            return Err("Rule id cannot be empty".to_string());
+        }
+        if name.is_empty() {
+            return Err("Rule name cannot be empty".to_string());
+        }
+        if pattern.is_empty() {
+            return Err("Rule pattern cannot be empty".to_string());
+        }
+
+        Ok(Rule {
+            id,
+            name,
+            enabled: self.enabled,
+            layer: crate::config::RuleLayer::parse(&self.layer)
+                .map_err(|err| err.to_string())?,
+            pattern,
+            action: crate::config::RuleAction::parse(&self.action)
+                .map_err(|err| err.to_string())?,
+            severity: crate::config::Severity::parse(&self.severity)
+                .map_err(|err| err.to_string())?,
+        })
     }
 }
 

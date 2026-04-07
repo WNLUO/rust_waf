@@ -429,13 +429,13 @@ impl WafEngine {
                 RuntimeProfile::Standard
             ) {
                 let stats = l4_inspector.get_statistics();
-                info!(
+                debug!(
                     "Maintenance tick: active_connections={}, blocked_connections={}, rate_limit_hits={}",
                     stats.connections.active_connections,
                     stats.connections.blocked_connections,
                     stats.connections.rate_limit_hits
                 );
-                info!(
+                debug!(
                     "L4 counters: ddos_events={}, protocol_anomalies={}, traffic={}, defense_actions={}",
                     stats.ddos_events,
                     stats.protocol_anomalies,
@@ -445,9 +445,9 @@ impl WafEngine {
 
                 // Display per-port statistics
                 if !stats.per_port_stats.is_empty() {
-                    info!("=== Per-Port Statistics ===");
+                    debug!("=== Per-Port Statistics ===");
                     for (port, port_stats) in &stats.per_port_stats {
-                        info!(
+                        debug!(
                             "Port {}: connections={}, blocks={}, ddos_events={}",
                             port,
                             port_stats.connections,
@@ -455,7 +455,7 @@ impl WafEngine {
                             port_stats.ddos_events
                         );
                     }
-                    info!("=============================");
+                    debug!("=============================");
                 }
             }
         }

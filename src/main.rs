@@ -17,6 +17,7 @@ use log::info;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    let _ = dotenvy::dotenv();
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     info!("Starting WAF system...");
@@ -38,6 +39,7 @@ async fn main() -> Result<()> {
     config.sqlite_enabled = true;
     config.sqlite_path = sqlite_path;
     config.sqlite_auto_migrate = true;
+    config = config::apply_env_overrides(config);
     let config = config.normalized();
     info!(
         "Loaded configuration: profile={:?}, api_enabled={}, bloom_enabled={}, l4_bloom_fp_verification={}, l7_bloom_fp_verification={}",

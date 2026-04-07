@@ -390,6 +390,80 @@ pub fn resolve_sqlite_path() -> String {
     env::var("WAF_SQLITE_PATH").unwrap_or_else(|_| default_sqlite_path())
 }
 
+pub fn apply_env_overrides(mut config: Config) -> Config {
+    if let Ok(value) = env::var("WAF_RUNTIME_PROFILE") {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "minimal" => config.runtime_profile = RuntimeProfile::Minimal,
+            "standard" => config.runtime_profile = RuntimeProfile::Standard,
+            other => log::warn!("Unsupported WAF_RUNTIME_PROFILE '{}', keeping SQLite value", other),
+        }
+    }
+
+    if let Ok(value) = env::var("WAF_API_ENABLED") {
+        if let Some(parsed) = parse_bool_env(&value) {
+            config.api_enabled = parsed;
+        } else {
+            log::warn!("Unsupported WAF_API_ENABLED '{}', keeping SQLite value", value);
+        }
+    }
+
+    if let Ok(value) = env::var("WAF_API_BIND") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            config.api_bind = trimmed.to_string();
+        }
+    }
+
+    if let Ok(value) = env::var("WAF_LISTEN_ADDRS") {
+        let addrs = value
+            .split(',')
+            .map(|addr| addr.trim().to_string())
+            .filter(|addr| !addr.is_empty())
+            .collect::<Vec<_>>();
+        if !addrs.is_empty() {
+            config.listen_addrs = addrs;
+        }
+    }
+
+    if let Ok(value) = env::var("WAF_TCP_UPSTREAM_ADDR") {
+        config.tcp_upstream_addr = non_empty_env(value);
+    }
+
+    if let Ok(value) = env::var("WAF_UDP_UPSTREAM_ADDR") {
+        config.udp_upstream_addr = non_empty_env(value);
+    }
+
+    if let Ok(value) = env::var("WAF_SQLITE_RULES_ENABLED") {
+        if let Some(parsed) = parse_bool_env(&value) {
+            config.sqlite_rules_enabled = parsed;
+        } else {
+            log::warn!(
+                "Unsupported WAF_SQLITE_RULES_ENABLED '{}', keeping SQLite value",
+                value
+            );
+        }
+    }
+
+    config
+}
+
+fn parse_bool_env(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn non_empty_env(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn default_sqlite_path() -> String {
     "data/waf.db".to_string()
 }

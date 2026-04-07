@@ -172,6 +172,7 @@ impl UnifiedHttpRequest {
     }
 
     /// 获取请求总大小（头部+请求体）
+    #[allow(dead_code)]
     pub fn total_size(&self) -> usize {
         let headers_size = self
             .headers

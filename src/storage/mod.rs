@@ -297,6 +297,7 @@ impl SqliteStore {
         row.map(TryInto::try_into).transpose()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn upsert_app_config(&self, config: &Config) -> Result<()> {
         let config_json = serde_json::to_string(config)?;
         sqlx::query(
@@ -490,6 +491,15 @@ impl SqliteStore {
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn delete_rule(&self, id: &str) -> Result<bool> {
         let result = sqlx::query("DELETE FROM rules WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_blocked_ip(&self, id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM blocked_ips WHERE id = ?")
             .bind(id)
             .execute(&self.pool)
             .await?;

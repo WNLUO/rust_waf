@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Component } from 'vue'
 import { TrendingUp, TrendingDown } from 'lucide-vue-next'
 
 defineProps<{
@@ -6,7 +7,7 @@ defineProps<{
   value: string | number
   hint?: string
   trend?: 'up' | 'down' | 'neutral'
-  icon?: any
+  icon?: Component
 }>()
 </script>
 

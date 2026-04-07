@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { createRule, deleteRule, fetchDashboardPayload, unblockIp, updateRule } from '../lib/api'
 import type { DashboardPayload, RuleDraft, RuleItem } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
@@ -14,12 +15,33 @@ import {
 
 type AdminView = 'overview' | 'rules' | 'events' | 'blocked'
 
+const route = useRoute()
+const router = useRouter()
 const dashboard = ref<DashboardPayload | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
-const activeView = ref<AdminView>('overview')
 const isRuleModalOpen = ref(false)
+
+const viewPaths: Record<AdminView, string> = {
+  overview: '/admin',
+  rules: '/admin/rules',
+  events: '/admin/events',
+  blocked: '/admin/blocked',
+}
+
+const activeView = computed<AdminView>(() => {
+  switch (route.path) {
+    case '/admin/rules':
+      return 'rules'
+    case '/admin/events':
+      return 'events'
+    case '/admin/blocked':
+      return 'blocked'
+    default:
+      return 'overview'
+  }
+})
 
 const ruleForm = reactive<RuleDraft>({
   id: '',
@@ -58,6 +80,10 @@ const formatTimestamp = (timestamp: number | null | undefined) => {
   }).format(new Date(timestamp * 1000))
 }
 
+const openView = (view: AdminView) => {
+  router.push(viewPaths[view])
+}
+
 // Logic from original AdminPage
 const fetchData = async () => {
   refreshing.value = true
@@ -66,7 +92,7 @@ const fetchData = async () => {
     dashboard.value = data
     error.value = ''
   } catch (e) {
-    error.value = 'Failed to fetch dashboard data'
+    error.value = e instanceof Error ? e.message : 'Failed to fetch dashboard data'
   } finally {
     loading.value = false
     refreshing.value = false
@@ -87,10 +113,10 @@ const handleCreateOrUpdateRule = async () => {
       await createRule(ruleForm)
     }
     isRuleModalOpen.value = false
-    fetchData()
+    await fetchData()
     Object.assign(ruleForm, { id: '', name: '', pattern: '' })
   } catch (e) {
-    alert('Operation failed')
+    error.value = e instanceof Error ? e.message : 'Operation failed'
   }
 }
 
@@ -111,18 +137,18 @@ const handleDeleteRule = async (id: string) => {
   if (!confirm('Are you sure?')) return
   try {
     await deleteRule(id)
-    fetchData()
+    await fetchData()
   } catch (e) {
-    alert('Delete failed')
+    error.value = e instanceof Error ? e.message : 'Delete failed'
   }
 }
 
 const handleUnblock = async (id: number) => {
   try {
     await unblockIp(id)
-    fetchData()
+    await fetchData()
   } catch (e) {
-    alert('Unblock failed')
+    error.value = e instanceof Error ? e.message : 'Unblock failed'
   }
 }
 </script>
@@ -137,6 +163,9 @@ const handleUnblock = async (id: number) => {
     </div>
 
     <div v-else class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div v-if="error" class="rounded-cyber border border-cyber-error/30 bg-cyber-error/10 px-4 py-3 text-sm text-cyber-error">
+        {{ error }}
+      </div>
       
       <!-- Top Overview Section (Conditional based on view) -->
       <section v-if="activeView === 'overview'" class="space-y-6">
@@ -230,7 +259,7 @@ const handleUnblock = async (id: number) => {
         <button 
           v-for="v in (['overview', 'rules', 'events', 'blocked'] as AdminView[])" 
           :key="v"
-          @click="activeView = v"
+          @click="openView(v)"
           class="px-6 py-2 text-xs font-mono uppercase tracking-widest transition-all relative"
           :class="activeView === v ? 'text-cyber-accent' : 'text-cyber-muted hover:text-gray-200'"
         >

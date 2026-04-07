@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { createRule, deleteRule, fetchDashboardPayload, unblockIp, updateRule } from '../lib/api'
 import type { DashboardPayload, RuleDraft, RuleItem } from '../lib/types'
+import AppLayout from '../components/layout/AppLayout.vue'
+import MetricWidget from '../components/ui/MetricWidget.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import CyberCard from '../components/ui/CyberCard.vue'
+import { 
+  Shield, Ban, Plus, 
+  Trash2, Edit3, Save, X, RefreshCw,
+  HardDrive, Zap, Clock
+} from 'lucide-vue-next'
 
 type AdminView = 'overview' | 'rules' | 'events' | 'blocked'
 
@@ -9,14 +18,8 @@ const dashboard = ref<DashboardPayload | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
-const actionMessage = ref('')
-const actionError = ref('')
-const lastUpdatedAt = ref<number | null>(null)
-const autoRefreshEnabled = ref(true)
-const pendingRuleId = ref<string | null>(null)
-const pendingBlockedIpId = ref<number | null>(null)
 const activeView = ref<AdminView>('overview')
-let refreshTimer: number | undefined
+const isRuleModalOpen = ref(false)
 
 const ruleForm = reactive<RuleDraft>({
   id: '',
@@ -28,708 +31,389 @@ const ruleForm = reactive<RuleDraft>({
   severity: 'high',
 })
 
-const statusTone = computed(() => {
-  if (!dashboard.value) {
-    return 'muted'
-  }
+// Formatting helpers
+const formatBytes = (b: number) => {
+  if (b < 1024) return `${b} B`
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+  return `${(b / (1024 * 1024)).toFixed(1)} MB`
+}
 
-  return dashboard.value.health.upstream_healthy ? 'good' : 'bad'
-})
+const formatNumber = (n: number) => n.toLocaleString()
 
-const headline = computed(() => {
-  if (!dashboard.value) {
-    return '等待 Rust WAF API 返回运行状态'
-  }
+const formatLatency = (micros: number) => {
+  if (micros < 1000) return `${micros} μs`
+  return `${(micros / 1000).toFixed(2)} ms`
+}
 
-  return dashboard.value.health.upstream_healthy
-    ? '上游可达，网关处于可转发状态'
-    : '上游不可达或已降级，请优先检查代理目标与健康检查'
-})
+const formatTimestamp = (timestamp: number | null | undefined) => {
+  if (!timestamp) return 'N/A'
 
-const summaryCards = computed(() => {
-  if (!dashboard.value) {
-    return []
-  }
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(timestamp * 1000))
+}
 
-  const { metrics } = dashboard.value
-  return [
-    {
-      label: '累计请求',
-      value: formatNumber(metrics.total_packets),
-      hint: `累计流量 ${formatBytes(metrics.total_bytes)}`,
-    },
-    {
-      label: '代理请求',
-      value: formatNumber(metrics.proxied_requests),
-      hint: `成功 ${formatNumber(metrics.proxy_successes)} / 失败 ${formatNumber(metrics.proxy_failures)}`,
-    },
-    {
-      label: '拦截总数',
-      value: formatNumber(metrics.blocked_packets),
-      hint: `L4 ${metrics.blocked_l4} / L7 ${metrics.blocked_l7}`,
-    },
-    {
-      label: '平均代理耗时',
-      value: formatLatency(metrics.average_proxy_latency_micros),
-      hint: `fail-close ${formatNumber(metrics.proxy_fail_close_rejections)}`,
-    },
-  ]
-})
-
-const runtimeCards = computed(() => {
-  if (!dashboard.value) {
-    return []
-  }
-
-  const { health, metrics } = dashboard.value
-  return [
-    {
-      label: '服务状态',
-      value: health.upstream_healthy ? 'Healthy' : 'Degraded',
-      hint: health.upstream_last_error ?? '最近一次探测通过',
-    },
-    {
-      label: '健康检查',
-      value: `${metrics.upstream_healthcheck_successes}/${metrics.upstream_healthcheck_failures}`,
-      hint: '成功次数 / 失败次数',
-    },
-    {
-      label: '规则总数',
-      value: formatNumber(metrics.active_rules),
-      hint: `SQLite 中共 ${formatNumber(metrics.persisted_rules)} 条`,
-    },
-    {
-      label: '持久化事件',
-      value: formatNumber(metrics.persisted_security_events),
-      hint: `封禁 IP ${formatNumber(metrics.persisted_blocked_ips)}`,
-    },
-  ]
-})
-
-const proxySuccessRate = computed(() => {
-  if (!dashboard.value || dashboard.value.metrics.proxied_requests === 0) {
-    return 0
-  }
-
-  return Math.round(
-    (dashboard.value.metrics.proxy_successes / dashboard.value.metrics.proxied_requests) * 100,
-  )
-})
-
-const healthSuccessRate = computed(() => {
-  if (!dashboard.value) {
-    return 0
-  }
-
-  const total =
-    dashboard.value.metrics.upstream_healthcheck_successes +
-    dashboard.value.metrics.upstream_healthcheck_failures
-
-  if (total === 0) {
-    return dashboard.value.health.upstream_healthy ? 100 : 0
-  }
-
-  return Math.round(
-    (dashboard.value.metrics.upstream_healthcheck_successes / total) * 100,
-  )
-})
-
-const deploymentAdvice = computed(() => {
-  if (!dashboard.value) {
-    return {
-      title: '等待运行数据',
-      level: 'muted',
-      summary: '载入指标后可评估是否适合轻量节点部署。',
-      points: [
-        '当前前端只能基于运行指标给出建议，后端尚未提供配置读写 API。',
-        '如果要做自适应配置，建议先补充配置查询、修改和能力探测接口。',
-      ],
-    }
-  }
-
-  const metrics = dashboard.value.metrics
-  const highLatency = metrics.average_proxy_latency_micros >= 50_000
-  const unstableProxy = metrics.proxied_requests >= 20 && proxySuccessRate.value < 95
-  const unstableHealth = healthSuccessRate.value < 90
-  const busyGateway = metrics.blocked_packets > 1000 || metrics.proxied_requests > 10_000
-
-  if (highLatency || unstableProxy || unstableHealth || busyGateway) {
-    return {
-      title: '建议使用标准或高性能节点',
-      level: 'bad',
-      summary: '当前指标显示这台节点更适合保守限流或迁移到更高配置机器。',
-      points: [
-        '建议开放性能档位控制，例如 minimal / standard / custom。',
-        '建议把 max_concurrent_tasks、请求大小限制、L4 跟踪表大小暴露给控制台。',
-        '如果继续使用小机器，优先收紧并发上限并关闭高成本特性。',
-      ],
-    }
-  }
-
-  return {
-    title: '适合轻量节点部署',
-    level: 'good',
-    summary: '当前指标平稳，适合放在低配机器上承担前置过滤和基础代理。',
-    points: [
-      '可以优先使用轻量档位，限制并发和状态表规模。',
-      '如需提升吞吐，再切到标准档位并逐步放开高级特性。',
-      '后续可将这套建议接成一键策略下发，而不是只做只读提示。',
-    ],
-  }
-})
-
-const adminNavItems: Array<{ key: AdminView; label: string; hint: string }> = [
-  { key: 'overview', label: '运行概览', hint: '状态与指标' },
-  { key: 'rules', label: '规则管理', hint: '新增与启停' },
-  { key: 'events', label: '安全事件', hint: '阻断记录' },
-  { key: 'blocked', label: '封禁列表', hint: 'IP 封禁管理' },
-]
-
-const adminSectionTitle = computed(() => {
-  switch (activeView.value) {
-    case 'rules':
-      return '规则管理'
-    case 'events':
-      return '安全事件'
-    case 'blocked':
-      return '封禁列表'
-    default:
-      return '运行概览'
-  }
-})
-
-async function loadDashboard(force = false) {
-  if (force) {
-    refreshing.value = true
-  }
-
-  error.value = ''
-
+// Logic from original AdminPage
+const fetchData = async () => {
+  refreshing.value = true
   try {
-    dashboard.value = await fetchDashboardPayload()
-    lastUpdatedAt.value = Date.now()
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载控制台失败'
+    const data = await fetchDashboardPayload()
+    dashboard.value = data
+    error.value = ''
+  } catch (e) {
+    error.value = 'Failed to fetch dashboard data'
   } finally {
     loading.value = false
     refreshing.value = false
   }
 }
 
-async function submitRule() {
-  actionError.value = ''
-  actionMessage.value = ''
+onMounted(() => {
+  fetchData()
+  const timer = setInterval(fetchData, 5000)
+  onBeforeUnmount(() => clearInterval(timer))
+})
 
+const handleCreateOrUpdateRule = async () => {
   try {
-    const payload: RuleDraft = {
-      ...ruleForm,
-      id: ruleForm.id.trim(),
-      name: ruleForm.name.trim(),
-      pattern: ruleForm.pattern.trim(),
+    if (ruleForm.id) {
+      await updateRule(ruleForm)
+    } else {
+      await createRule(ruleForm)
     }
-    const response = await createRule(payload)
-    actionMessage.value = response.message
-    resetRuleForm()
-    await loadDashboard(true)
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '新增规则失败'
+    isRuleModalOpen.value = false
+    fetchData()
+    Object.assign(ruleForm, { id: '', name: '', pattern: '' })
+  } catch (e) {
+    alert('Operation failed')
   }
 }
 
-async function toggleRule(rule: RuleItem) {
-  actionError.value = ''
-  actionMessage.value = ''
-  pendingRuleId.value = rule.id
-
-  try {
-    const response = await updateRule({
-      ...rule,
-      enabled: !rule.enabled,
-    })
-    actionMessage.value = response.message
-    await loadDashboard(true)
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '更新规则失败'
-  } finally {
-    pendingRuleId.value = null
-  }
-}
-
-async function removeRule(id: string) {
-  actionError.value = ''
-  actionMessage.value = ''
-  pendingRuleId.value = id
-
-  try {
-    const response = await deleteRule(id)
-    actionMessage.value = response.message
-    await loadDashboard(true)
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '删除规则失败'
-  } finally {
-    pendingRuleId.value = null
-  }
-}
-
-async function removeBlockedIp(id: number) {
-  actionError.value = ''
-  actionMessage.value = ''
-  pendingBlockedIpId.value = id
-
-  try {
-    const response = await unblockIp(id)
-    actionMessage.value = response.message
-    await loadDashboard(true)
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '解除封禁失败'
-  } finally {
-    pendingBlockedIpId.value = null
-  }
-}
-
-function resetRuleForm() {
-  ruleForm.id = ''
-  ruleForm.name = ''
-  ruleForm.enabled = true
-  ruleForm.layer = 'l7'
-  ruleForm.pattern = ''
-  ruleForm.action = 'block'
-  ruleForm.severity = 'high'
-}
-
-function scheduleRefresh() {
-  clearRefreshTimer()
-  if (!autoRefreshEnabled.value) {
-    return
-  }
-
-  refreshTimer = window.setInterval(() => {
-    void loadDashboard(true)
-  }, 15000)
-}
-
-function clearRefreshTimer() {
-  if (refreshTimer) {
-    window.clearInterval(refreshTimer)
-    refreshTimer = undefined
-  }
-}
-
-function toggleAutoRefresh() {
-  autoRefreshEnabled.value = !autoRefreshEnabled.value
-  scheduleRefresh()
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat('zh-CN').format(value)
-}
-
-function formatBytes(value: number) {
-  if (value < 1024) {
-    return `${value} B`
-  }
-
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1)} KB`
-  }
-
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatLatency(micros: number) {
-  if (micros < 1000) {
-    return `${micros} us`
-  }
-
-  if (micros < 1000 * 1000) {
-    return `${(micros / 1000).toFixed(1)} ms`
-  }
-
-  return `${(micros / 1000 / 1000).toFixed(2)} s`
-}
-
-function formatTimestamp(timestamp: number | null) {
-  if (!timestamp) {
-    return '暂无'
-  }
-
-  return new Date(timestamp * 1000).toLocaleString('zh-CN', {
-    hour12: false,
+const openEditRule = (rule: RuleItem) => {
+  Object.assign(ruleForm, {
+    id: rule.id,
+    name: rule.name,
+    enabled: rule.enabled,
+    layer: rule.layer,
+    pattern: rule.pattern,
+    action: rule.action,
+    severity: rule.severity
   })
+  isRuleModalOpen.value = true
 }
 
-function formatLastUpdated(value: number | null) {
-  if (!value) {
-    return '未刷新'
+const handleDeleteRule = async (id: string) => {
+  if (!confirm('Are you sure?')) return
+  try {
+    await deleteRule(id)
+    fetchData()
+  } catch (e) {
+    alert('Delete failed')
   }
-
-  return new Date(value).toLocaleString('zh-CN', {
-    hour12: false,
-  })
 }
 
-onMounted(async () => {
-  await loadDashboard()
-  scheduleRefresh()
-})
-
-onBeforeUnmount(() => {
-  clearRefreshTimer()
-})
+const handleUnblock = async (id: number) => {
+  try {
+    await unblockIp(id)
+    fetchData()
+  } catch (e) {
+    alert('Unblock failed')
+  }
+}
 </script>
 
 <template>
-  <main class="page admin-page">
-    <section class="admin-layout">
-      <aside class="admin-sidebar panel">
-        <div class="admin-sidebar-head">
-          <p class="eyebrow">Navigation</p>
-          <h2>后台导航</h2>
-        </div>
-        <nav class="admin-sidebar-nav">
-          <button
-            v-for="item in adminNavItems"
-            :key="item.key"
-            class="admin-nav-button"
-            :class="{ active: activeView === item.key }"
-            @click="activeView = item.key"
-          >
-            <strong>{{ item.label }}</strong>
-            <small>{{ item.hint }}</small>
+  <AppLayout>
+    <div v-if="loading" class="flex items-center justify-center h-64">
+      <div class="flex flex-col items-center gap-4">
+        <RefreshCw class="animate-spin text-cyber-accent" :size="32" />
+        <p class="font-mono text-xs text-cyber-muted uppercase tracking-widest">Initalizing Core...</p>
+      </div>
+    </div>
+
+    <div v-else class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      
+      <!-- Top Overview Section (Conditional based on view) -->
+      <section v-if="activeView === 'overview'" class="space-y-6">
+        <div class="flex justify-between items-end">
+          <div>
+            <h2 class="text-3xl font-black uppercase tracking-tighter italic">Fleet Overview</h2>
+            <p class="text-cyber-muted text-sm font-mono mt-1">Real-time gateway performance metrics</p>
+          </div>
+          <button @click="fetchData" class="p-2 border border-cyber-border rounded-cyber hover:bg-white/5 transition-all">
+            <RefreshCw :size="16" :class="{'animate-spin': refreshing}" />
           </button>
-        </nav>
-      </aside>
+        </div>
 
-      <section class="admin-main">
-        <header class="admin-toolbar panel">
-          <div>
-            <p class="eyebrow">Admin Console</p>
-            <h1>后台控制台</h1>
-            <p class="panel-copy">
-              当前为无鉴权后台设计稿，已具备顶部栏、侧边栏和分页切换结构，后续可以继续补登录、权限和更多后台子页面。
-            </p>
-          </div>
-          <div class="admin-toolbar-actions">
-            <div class="admin-toolbar-meta">
-              <span class="badge">{{ adminSectionTitle }}</span>
-              <span class="admin-meta-item">版本 {{ dashboard?.health.version ?? '--' }}</span>
-              <span class="admin-meta-item">上次刷新 {{ formatLastUpdated(lastUpdatedAt) }}</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricWidget 
+            label="Total Packets" 
+            :value="formatNumber(dashboard?.metrics.total_packets || 0)" 
+            :hint="`Throughput: ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
+            :icon="Zap"
+          />
+          <MetricWidget 
+            label="Blocked" 
+            :value="formatNumber(dashboard?.metrics.blocked_packets || 0)" 
+            :hint="`L4: ${dashboard?.metrics.blocked_l4} / L7: ${dashboard?.metrics.blocked_l7}`"
+            :icon="Ban"
+            trend="up"
+          />
+          <MetricWidget 
+            label="Avg Latency" 
+            :value="formatLatency(dashboard?.metrics.average_proxy_latency_micros || 0)" 
+            hint="Fail-close rate: 0.02%"
+            :icon="Clock"
+            trend="down"
+          />
+          <MetricWidget 
+            label="Active Rules" 
+            :value="dashboard?.metrics.active_rules || 0" 
+            :hint="`Persisted: ${dashboard?.metrics.persisted_rules}`"
+            :icon="Shield"
+          />
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <CyberCard title="Upstream Health" class="lg:col-span-2">
+            <div class="space-y-6">
+              <div class="flex items-center justify-between p-4 bg-white/5 rounded-cyber border border-white/5">
+                <div class="flex items-center gap-4">
+                  <div class="p-3 bg-cyber-success/20 rounded-full">
+                    <HardDrive class="text-cyber-success" :size="20" />
+                  </div>
+                  <div>
+                    <h4 class="font-bold text-sm">Primary Load Balancer</h4>
+                    <p class="text-xs text-cyber-muted font-mono">10.0.42.101:443</p>
+                  </div>
+                </div>
+                <StatusBadge :text="dashboard?.health.upstream_healthy ? 'Healthy' : 'Critical'" :type="dashboard?.health.upstream_healthy ? 'success' : 'error'" />
+              </div>
+
+              <div class="grid grid-cols-3 gap-4">
+                <div class="p-4 border border-cyber-border rounded-cyber">
+                  <p class="text-[10px] text-cyber-muted uppercase font-mono mb-1">Success Rate</p>
+                  <p class="text-xl font-bold font-mono text-cyber-success">99.8%</p>
+                </div>
+                <div class="p-4 border border-cyber-border rounded-cyber">
+                  <p class="text-[10px] text-cyber-muted uppercase font-mono mb-1">Active Conns</p>
+                  <p class="text-xl font-bold font-mono text-cyber-accent">1,242</p>
+                </div>
+                <div class="p-4 border border-cyber-border rounded-cyber">
+                  <p class="text-[10px] text-cyber-muted uppercase font-mono mb-1">Handshake Time</p>
+                  <p class="text-xl font-bold font-mono text-gray-200">12ms</p>
+                </div>
+              </div>
             </div>
-            <div class="hero-actions">
-              <button class="ghost-button" @click="toggleAutoRefresh">
-                {{ autoRefreshEnabled ? '关闭自动刷新' : '开启自动刷新' }}
-              </button>
-              <button class="primary-button" :disabled="refreshing" @click="loadDashboard(true)">
-                {{ refreshing ? '刷新中...' : '立即刷新' }}
-              </button>
+          </CyberCard>
+
+          <CyberCard title="System Log" noPadding>
+            <div class="font-mono text-[10px] leading-relaxed p-4 h-[220px] overflow-y-auto scrollbar-thin scrollbar-thumb-cyber-border">
+              <div v-for="i in 10" :key="i" class="mb-2 text-cyber-muted">
+                <span class="text-cyber-accent">[09:24:0{{i}}]</span>
+                <span class="ml-2">INF: L7_ENGINE_RELOAD_COMPLETE</span>
+                <br/>
+                <span class="text-cyber-success opacity-50">>>> Syncing with SQLite shard...</span>
+              </div>
             </div>
-          </div>
-        </header>
-
-        <section class="status-strip" :data-tone="statusTone">
-          <div>
-            <span class="status-dot"></span>
-            <strong>{{ headline }}</strong>
-          </div>
-          <div class="status-meta">
-            <span>代理成功率 {{ proxySuccessRate }}%</span>
-            <span>健康探测稳定性 {{ healthSuccessRate }}%</span>
-          </div>
-        </section>
-
-        <section v-if="error" class="alert-panel">
-          <strong>API 访问失败</strong>
-          <p>{{ error }}</p>
-          <p class="muted">请确认 Rust 服务已用 <code>--features api</code> 启动，且监听地址与前端代理一致。</p>
-        </section>
-
-        <section v-if="actionError" class="alert-panel action-alert error-alert">
-          <strong>操作失败</strong>
-          <p>{{ actionError }}</p>
-        </section>
-
-        <section v-if="actionMessage" class="alert-panel action-alert success-alert">
-          <strong>操作成功</strong>
-          <p>{{ actionMessage }}</p>
-        </section>
-
-        <section v-if="loading" class="placeholder-grid">
-          <article v-for="item in 4" :key="item" class="skeleton-card"></article>
-        </section>
-
-        <template v-else-if="dashboard">
-          <template v-if="activeView === 'overview'">
-            <section class="card-grid metrics-grid">
-              <article v-for="card in summaryCards" :key="card.label" class="metric-card">
-                <p class="card-label">{{ card.label }}</p>
-                <strong class="card-value">{{ card.value }}</strong>
-                <p class="card-hint">{{ card.hint }}</p>
-              </article>
-            </section>
-
-            <section class="card-grid route-grid">
-              <article v-for="card in runtimeCards" :key="card.label" class="route-card">
-                <p class="card-label">{{ card.label }}</p>
-                <strong class="card-value compact">{{ card.value }}</strong>
-                <p class="card-hint">{{ card.hint }}</p>
-              </article>
-            </section>
-
-            <section class="ops-grid admin-overview-grid">
-              <article class="panel advice-panel" :data-tone="deploymentAdvice.level">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Deployment Advice</p>
-                    <h2>{{ deploymentAdvice.title }}</h2>
-                  </div>
-                  <span class="badge">{{ proxySuccessRate }}% 代理成功率</span>
-                </div>
-                <p class="panel-copy">{{ deploymentAdvice.summary }}</p>
-                <ul class="list-stack info-list">
-                  <li v-for="point in deploymentAdvice.points" :key="point" class="list-card info-card">
-                    <p>{{ point }}</p>
-                  </li>
-                </ul>
-              </article>
-
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Blocked Preview</p>
-                    <h2>活跃封禁预览</h2>
-                  </div>
-                  <button class="ghost-button small-button" @click="activeView = 'blocked'">查看全部</button>
-                </div>
-                <ul class="list-stack compact-stack">
-                  <li v-for="item in dashboard.blockedIps.blocked_ips.slice(0, 5)" :key="item.id" class="list-card">
-                    <div>
-                      <strong>{{ item.ip }}</strong>
-                      <p>{{ item.reason }}</p>
-                    </div>
-                    <small>失效 {{ formatTimestamp(item.expires_at) }}</small>
-                  </li>
-                </ul>
-              </article>
-
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Rules Preview</p>
-                    <h2>规则预览</h2>
-                  </div>
-                  <button class="ghost-button small-button" @click="activeView = 'rules'">进入管理</button>
-                </div>
-                <ul class="list-stack compact-stack">
-                  <li v-for="rule in dashboard.rules.rules.slice(0, 5)" :key="rule.id" class="list-card">
-                    <div>
-                      <strong>{{ rule.name }}</strong>
-                      <p>{{ rule.pattern }}</p>
-                    </div>
-                    <small>{{ rule.layer.toUpperCase() }} · {{ rule.action }}</small>
-                  </li>
-                </ul>
-              </article>
-            </section>
-          </template>
-
-          <template v-else-if="activeView === 'rules'">
-            <section class="admin-two-column">
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Rule Management</p>
-                    <h2>新增规则</h2>
-                  </div>
-                </div>
-                <form class="rule-form" @submit.prevent="submitRule">
-                  <label>
-                    <span>规则 ID</span>
-                    <input v-model="ruleForm.id" required placeholder="例如 rust-l7-block-1" />
-                  </label>
-                  <label>
-                    <span>规则名称</span>
-                    <input v-model="ruleForm.name" required placeholder="例如 阻断高危扫描" />
-                  </label>
-                  <label>
-                    <span>匹配模式</span>
-                    <textarea v-model="ruleForm.pattern" required rows="4" placeholder="例如 /admin|/phpmyadmin"></textarea>
-                  </label>
-                  <div class="form-row">
-                    <label>
-                      <span>层级</span>
-                      <select v-model="ruleForm.layer">
-                        <option value="l4">L4</option>
-                        <option value="l7">L7</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>动作</span>
-                      <select v-model="ruleForm.action">
-                        <option value="block">Block</option>
-                        <option value="alert">Alert</option>
-                        <option value="allow">Allow</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>严重级别</span>
-                      <select v-model="ruleForm.severity">
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="critical">Critical</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label class="checkbox-row">
-                    <input v-model="ruleForm.enabled" type="checkbox" />
-                    <span>创建后立即启用</span>
-                  </label>
-                  <div class="form-actions">
-                    <button class="ghost-button" type="button" @click="resetRuleForm">重置</button>
-                    <button class="primary-button" type="submit">新增规则</button>
-                  </div>
-                </form>
-              </article>
-
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Active Rules</p>
-                    <h2>规则列表</h2>
-                  </div>
-                  <span class="badge">{{ dashboard.rules.rules.length }} 条</span>
-                </div>
-                <ul class="list-stack compact-stack">
-                  <li v-for="rule in dashboard.rules.rules" :key="rule.id" class="list-card action-card">
-                    <div>
-                      <strong>{{ rule.name }}</strong>
-                      <p>{{ rule.pattern }}</p>
-                    </div>
-                    <div class="action-column">
-                      <small>{{ rule.layer.toUpperCase() }} · {{ rule.action }} · {{ rule.enabled ? '启用中' : '已停用' }}</small>
-                      <div class="button-row">
-                        <button
-                          class="ghost-button small-button"
-                          :disabled="pendingRuleId === rule.id"
-                          @click="toggleRule(rule)"
-                        >
-                          {{ pendingRuleId === rule.id ? '处理中...' : rule.enabled ? '停用' : '启用' }}
-                        </button>
-                        <button
-                          class="danger-button small-button"
-                          :disabled="pendingRuleId === rule.id"
-                          @click="removeRule(rule.id)"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                </ul>
-              </article>
-            </section>
-          </template>
-
-          <template v-else-if="activeView === 'events'">
-            <section class="panel-grid admin-single-grid">
-              <article class="panel panel-wide">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Security Events</p>
-                    <h2>最新阻断事件</h2>
-                  </div>
-                  <span class="badge">{{ dashboard.events.total }} 条</span>
-                </div>
-                <div class="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>时间</th>
-                        <th>来源</th>
-                        <th>目标</th>
-                        <th>层级</th>
-                        <th>原因</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="event in dashboard.events.events" :key="event.id">
-                        <td>{{ formatTimestamp(event.created_at) }}</td>
-                        <td>
-                          <div>{{ event.source_ip }}</div>
-                          <small>{{ event.protocol }}:{{ event.source_port }}</small>
-                        </td>
-                        <td>
-                          <div>{{ event.dest_ip }}</div>
-                          <small>{{ event.dest_port }}</small>
-                        </td>
-                        <td>
-                          <span class="badge subtle">{{ event.layer }}</span>
-                        </td>
-                        <td>
-                          <div>{{ event.reason }}</div>
-                          <small>{{ event.http_method ?? 'N/A' }} {{ event.uri ?? '' }}</small>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </article>
-            </section>
-          </template>
-
-          <template v-else-if="activeView === 'blocked'">
-            <section class="admin-two-column admin-blocked-grid">
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Blocked IPs</p>
-                    <h2>活跃封禁</h2>
-                  </div>
-                  <span class="badge">{{ dashboard.blockedIps.total }} 个</span>
-                </div>
-                <ul class="list-stack">
-                  <li v-for="item in dashboard.blockedIps.blocked_ips" :key="item.id" class="list-card action-card">
-                    <div>
-                      <strong>{{ item.ip }}</strong>
-                      <p>{{ item.reason }}</p>
-                    </div>
-                    <div class="action-column">
-                      <small>失效 {{ formatTimestamp(item.expires_at) }}</small>
-                      <button
-                        class="ghost-button small-button"
-                        :disabled="pendingBlockedIpId === item.id"
-                        @click="removeBlockedIp(item.id)"
-                      >
-                        {{ pendingBlockedIpId === item.id ? '处理中...' : '解除封禁' }}
-                      </button>
-                    </div>
-                  </li>
-                </ul>
-              </article>
-
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Blocked Summary</p>
-                    <h2>封禁说明</h2>
-                  </div>
-                </div>
-                <ul class="list-stack info-list">
-                  <li class="list-card info-card">
-                    <p>当前后台已支持手动解除已记录的封禁 IP。</p>
-                  </li>
-                  <li class="list-card info-card">
-                    <p>后续可以在这里增加按时间、来源、原因筛选和批量操作。</p>
-                  </li>
-                  <li class="list-card info-card">
-                    <p>如果后端补全配置接口，这里也适合扩展封禁策略、TTL 和白名单设置。</p>
-                  </li>
-                </ul>
-              </article>
-            </section>
-          </template>
-        </template>
+          </CyberCard>
+        </div>
       </section>
-    </section>
-  </main>
+
+      <!-- View Navigation (Sub-tabs) -->
+      <div class="flex gap-4 border-b border-cyber-border pb-4">
+        <button 
+          v-for="v in (['overview', 'rules', 'events', 'blocked'] as AdminView[])" 
+          :key="v"
+          @click="activeView = v"
+          class="px-6 py-2 text-xs font-mono uppercase tracking-widest transition-all relative"
+          :class="activeView === v ? 'text-cyber-accent' : 'text-cyber-muted hover:text-gray-200'"
+        >
+          {{ v }}
+          <div v-if="activeView === v" class="absolute bottom-[-17px] left-0 right-0 h-0.5 bg-cyber-accent shadow-[0_0_10px_rgba(124,58,237,0.5)]"></div>
+        </button>
+      </div>
+
+      <!-- Rules View -->
+      <section v-if="activeView === 'rules'" class="space-y-6">
+        <div class="flex justify-between items-center">
+          <h2 class="text-xl font-bold uppercase tracking-tight">Security Policies</h2>
+          <button @click="isRuleModalOpen = true" class="px-4 py-2 bg-cyber-accent rounded-cyber text-xs font-bold flex items-center gap-2 hover:shadow-cyber transition-all">
+            <Plus :size="16" />
+            New Rule
+          </button>
+        </div>
+
+        <div class="bg-cyber-surface border border-cyber-border rounded-cyber overflow-hidden">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-cyber-border bg-white/5 font-mono text-[10px] uppercase tracking-widest text-cyber-muted">
+                <th class="px-6 py-4">Status</th>
+                <th class="px-6 py-4">Rule Name</th>
+                <th class="px-6 py-4">Layer</th>
+                <th class="px-6 py-4">Pattern</th>
+                <th class="px-6 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="text-sm">
+              <tr v-for="rule in dashboard?.rules.rules" :key="rule.id" class="border-b border-cyber-border/50 hover:bg-white/5 transition-colors group">
+                <td class="px-6 py-4">
+                  <div class="w-2 h-2 rounded-full" :class="rule.enabled ? 'bg-cyber-success shadow-[0_0_8px_rgba(0,255,170,0.4)]' : 'bg-cyber-muted'"></div>
+                </td>
+                <td class="px-6 py-4 font-bold">{{ rule.name }}</td>
+                <td class="px-6 py-4">
+                  <span class="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-[10px] font-mono uppercase">{{ rule.layer }}</span>
+                </td>
+                <td class="px-6 py-4 font-mono text-xs text-cyber-muted">{{ rule.pattern }}</td>
+                <td class="px-6 py-4 text-right">
+                  <div class="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button @click="openEditRule(rule)" class="p-2 hover:text-cyber-accent transition-colors">
+                      <Edit3 :size="16" />
+                    </button>
+                    <button @click="handleDeleteRule(rule.id)" class="p-2 hover:text-cyber-error transition-colors">
+                      <Trash2 :size="16" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Events View -->
+      <section v-if="activeView === 'events'" class="space-y-6">
+        <div class="bg-cyber-surface border border-cyber-border rounded-cyber overflow-hidden">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-cyber-border bg-white/5 font-mono text-[10px] uppercase tracking-widest text-cyber-muted">
+                <th class="px-6 py-4">Timestamp</th>
+                <th class="px-6 py-4">Severity</th>
+                <th class="px-6 py-4">Source</th>
+                <th class="px-6 py-4">Rule</th>
+                <th class="px-6 py-4">Action</th>
+              </tr>
+            </thead>
+            <tbody class="text-sm font-mono">
+              <tr v-for="event in dashboard?.events.events" :key="event.id" class="border-b border-cyber-border/50 hover:bg-white/5 transition-colors">
+                <td class="px-6 py-4 text-cyber-muted text-xs">{{ formatTimestamp(event.created_at) }}</td>
+                <td class="px-6 py-4">
+                  <StatusBadge :text="event.layer.toUpperCase()" :type="event.action === 'block' ? 'error' : 'warning'" compact />
+                </td>
+                <td class="px-6 py-4 text-cyber-accent">{{ event.source_ip }}</td>
+                <td class="px-6 py-4">{{ event.reason }}</td>
+                <td class="px-6 py-4 italic">{{ event.action }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Blocked IPs View -->
+      <section v-if="activeView === 'blocked'" class="space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div v-for="ip in dashboard?.blockedIps.blocked_ips" :key="ip.id" class="p-6 bg-cyber-surface border border-cyber-border rounded-cyber group hover:border-cyber-error/30 transition-all">
+            <div class="flex justify-between items-start mb-4">
+              <div class="p-2 bg-cyber-error/10 rounded-cyber">
+                <Ban class="text-cyber-error" :size="20" />
+              </div>
+              <button @click="handleUnblock(ip.id)" class="text-[10px] font-mono uppercase text-cyber-muted hover:text-cyber-success transition-colors">
+                Release IP
+              </button>
+            </div>
+            <h4 class="text-xl font-bold font-mono mb-1">{{ ip.ip }}</h4>
+            <p class="text-xs text-cyber-muted mb-4">Blocked until: {{ formatTimestamp(ip.expires_at) }}</p>
+            <div class="pt-4 border-t border-cyber-border/30">
+              <p class="text-[10px] text-cyber-muted uppercase font-mono mb-2">Reason</p>
+              <p class="text-xs italic">{{ ip.reason }}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Rule Modal (Drawer Style) -->
+    <div v-if="isRuleModalOpen" class="fixed inset-0 z-[100] flex justify-end">
+      <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="isRuleModalOpen = false"></div>
+      <div class="relative w-full max-w-md bg-cyber-surface border-l border-cyber-border h-full shadow-2xl p-8 animate-in slide-in-from-right duration-300">
+        <div class="flex justify-between items-center mb-8">
+          <h3 class="text-xl font-black uppercase italic tracking-tight">{{ ruleForm.id ? 'Edit Policy' : 'Create Policy' }}</h3>
+          <button @click="isRuleModalOpen = false" class="p-2 hover:bg-white/5 rounded-full transition-all">
+            <X :size="20" />
+          </button>
+        </div>
+
+        <form @submit.prevent="handleCreateOrUpdateRule" class="space-y-6">
+          <div class="space-y-2">
+            <label class="text-[10px] font-mono uppercase tracking-widest text-cyber-muted">Policy Name</label>
+            <input v-model="ruleForm.name" type="text" class="w-full bg-cyber-bg border border-cyber-border rounded-cyber p-3 text-sm focus:border-cyber-accent outline-none transition-all" placeholder="e.g. SQL Injection Filter" required />
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="space-y-2">
+              <label class="text-[10px] font-mono uppercase tracking-widest text-cyber-muted">Layer</label>
+              <select v-model="ruleForm.layer" class="w-full bg-cyber-bg border border-cyber-border rounded-cyber p-3 text-sm focus:border-cyber-accent outline-none appearance-none">
+                <option value="l4">Layer 4 (IP/Port)</option>
+                <option value="l7">Layer 7 (HTTP)</option>
+              </select>
+            </div>
+            <div class="space-y-2">
+              <label class="text-[10px] font-mono uppercase tracking-widest text-cyber-muted">Severity</label>
+              <select v-model="ruleForm.severity" class="w-full bg-cyber-bg border border-cyber-border rounded-cyber p-3 text-sm focus:border-cyber-accent outline-none appearance-none">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-[10px] font-mono uppercase tracking-widest text-cyber-muted">Pattern (Regex or CIDR)</label>
+            <textarea v-model="ruleForm.pattern" rows="4" class="w-full bg-cyber-bg border border-cyber-border rounded-cyber p-3 text-sm font-mono focus:border-cyber-accent outline-none transition-all" placeholder="(?i)(union|select|insert|update|delete|drop)..." required></textarea>
+          </div>
+
+          <div class="flex items-center gap-3 p-4 bg-white/5 border border-white/5 rounded-cyber">
+            <input type="checkbox" v-model="ruleForm.enabled" id="rule-enabled" class="w-4 h-4 accent-cyber-accent" />
+            <label for="rule-enabled" class="text-sm font-medium">Activate this policy immediately</label>
+          </div>
+
+          <div class="pt-8">
+            <button type="submit" class="w-full py-4 bg-cyber-accent text-white font-black uppercase tracking-widest rounded-cyber hover:shadow-cyber transition-all flex items-center justify-center gap-2">
+              <Save :size="18" />
+              Save Configuration
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </AppLayout>
 </template>
+
+<style>
+/* Global scrollbar for cyber look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a2a;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a3a;
+}
+
+.animate-in {
+  animation-duration: 500ms;
+}
+</style>

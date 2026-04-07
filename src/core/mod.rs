@@ -11,9 +11,17 @@ use anyhow::Result;
 use log::{info, warn};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use engine::WafEngine;
 pub use packet::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
+
+#[derive(Debug, Clone)]
+pub struct UpstreamHealthSnapshot {
+    pub healthy: bool,
+    pub last_check_at: Option<i64>,
+    pub last_error: Option<String>,
+}
 
 pub struct WafContext {
     pub config: Config,
@@ -22,6 +30,7 @@ pub struct WafContext {
     pub rule_engine: RwLock<Option<RuleEngine>>,
     pub metrics: Option<MetricsCollector>,
     pub sqlite_store: Option<Arc<SqliteStore>>,
+    upstream_health: RwLock<UpstreamHealthSnapshot>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -67,6 +76,11 @@ impl WafContext {
             rule_engine: RwLock::new(rule_engine),
             metrics,
             sqlite_store,
+            upstream_health: RwLock::new(UpstreamHealthSnapshot {
+                healthy: true,
+                last_check_at: None,
+                last_error: None,
+            }),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -75,6 +89,23 @@ impl WafContext {
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
         self.metrics.as_ref().map(MetricsCollector::get_stats)
+    }
+
+    pub fn upstream_health_snapshot(&self) -> UpstreamHealthSnapshot {
+        self.upstream_health
+            .read()
+            .expect("upstream_health lock poisoned")
+            .clone()
+    }
+
+    pub fn set_upstream_health(&self, healthy: bool, last_error: Option<String>) {
+        let mut guard = self
+            .upstream_health
+            .write()
+            .expect("upstream_health lock poisoned");
+        guard.healthy = healthy;
+        guard.last_error = last_error;
+        guard.last_check_at = Some(unix_timestamp());
     }
 
     pub async fn refresh_rules_from_storage(&self) -> Result<bool> {
@@ -116,6 +147,13 @@ impl WafContext {
     pub fn active_rule_count(&self) -> u64 {
         self.rule_count.load(Ordering::Relaxed)
     }
+}
+
+fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 async fn load_rule_engine_state(

@@ -260,6 +260,22 @@ impl Config {
             self.l4_config.state_ttl_secs = clamp_u64(self.l4_config.state_ttl_secs, 60, 1800, 180);
             self.l7_config.max_request_size =
                 clamp_or_default(self.l7_config.max_request_size, 4096);
+            self.l7_config.first_byte_timeout_ms =
+                clamp_u64(self.l7_config.first_byte_timeout_ms, 250, 10_000, 2_000);
+            self.l7_config.read_idle_timeout_ms =
+                clamp_u64(self.l7_config.read_idle_timeout_ms, 500, 15_000, 5_000);
+            self.l7_config.tls_handshake_timeout_ms =
+                clamp_u64(self.l7_config.tls_handshake_timeout_ms, 500, 10_000, 3_000);
+            self.l7_config.proxy_connect_timeout_ms =
+                clamp_u64(self.l7_config.proxy_connect_timeout_ms, 250, 10_000, 1_500);
+            self.l7_config.proxy_write_timeout_ms =
+                clamp_u64(self.l7_config.proxy_write_timeout_ms, 500, 15_000, 3_000);
+            self.l7_config.proxy_read_timeout_ms =
+                clamp_u64(self.l7_config.proxy_read_timeout_ms, 500, 30_000, 10_000);
+            self.l7_config.upstream_healthcheck_interval_secs =
+                clamp_u64(self.l7_config.upstream_healthcheck_interval_secs, 1, 60, 5);
+            self.l7_config.upstream_healthcheck_timeout_ms =
+                clamp_u64(self.l7_config.upstream_healthcheck_timeout_ms, 250, 10_000, 1_000);
             self.l4_config.bloom_filter_scale =
                 clamp_scale(self.l4_config.bloom_filter_scale, 0.5, 0.1, 1.0);
             self.l7_config.bloom_filter_scale =
@@ -270,11 +286,46 @@ impl Config {
             self.l4_config.state_ttl_secs = clamp_u64(self.l4_config.state_ttl_secs, 60, 3600, 300);
             self.l7_config.max_request_size =
                 clamp_or_default(self.l7_config.max_request_size, 8192);
+            self.l7_config.first_byte_timeout_ms =
+                clamp_u64(self.l7_config.first_byte_timeout_ms, 250, 30_000, 2_000);
+            self.l7_config.read_idle_timeout_ms =
+                clamp_u64(self.l7_config.read_idle_timeout_ms, 500, 30_000, 5_000);
+            self.l7_config.tls_handshake_timeout_ms =
+                clamp_u64(self.l7_config.tls_handshake_timeout_ms, 500, 15_000, 3_000);
+            self.l7_config.proxy_connect_timeout_ms =
+                clamp_u64(self.l7_config.proxy_connect_timeout_ms, 250, 15_000, 1_500);
+            self.l7_config.proxy_write_timeout_ms =
+                clamp_u64(self.l7_config.proxy_write_timeout_ms, 500, 30_000, 3_000);
+            self.l7_config.proxy_read_timeout_ms =
+                clamp_u64(self.l7_config.proxy_read_timeout_ms, 500, 60_000, 10_000);
+            self.l7_config.upstream_healthcheck_interval_secs =
+                clamp_u64(self.l7_config.upstream_healthcheck_interval_secs, 1, 120, 5);
+            self.l7_config.upstream_healthcheck_timeout_ms =
+                clamp_u64(self.l7_config.upstream_healthcheck_timeout_ms, 250, 15_000, 1_000);
             self.l4_config.bloom_filter_scale =
                 clamp_scale(self.l4_config.bloom_filter_scale, 1.0, 0.25, 1.0);
             self.l7_config.bloom_filter_scale =
                 clamp_scale(self.l7_config.bloom_filter_scale, 1.0, 0.25, 1.0);
         }
+
+        self.l7_config.real_ip_headers = self
+            .l7_config
+            .real_ip_headers
+            .iter()
+            .map(|header| header.trim().to_ascii_lowercase())
+            .filter(|header| !header.is_empty())
+            .collect();
+        if self.l7_config.real_ip_headers.is_empty() {
+            self.l7_config.real_ip_headers = l7::default_real_ip_headers();
+        }
+
+        self.l7_config.trusted_proxy_cidrs = self
+            .l7_config
+            .trusted_proxy_cidrs
+            .iter()
+            .map(|cidr| cidr.trim().to_string())
+            .filter(|cidr| !cidr.is_empty())
+            .collect();
 
         if !self.bloom_enabled {
             self.l4_bloom_false_positive_verification = false;
@@ -382,5 +433,35 @@ mod tests {
         .normalized();
 
         assert!(config.tcp_upstream_addr.is_none());
+    }
+
+    #[test]
+    fn normalized_cleans_real_ip_headers_and_trusted_proxy_cidrs() {
+        let config = Config {
+            l7_config: L7Config {
+                real_ip_headers: vec![
+                    " X-Forwarded-For ".to_string(),
+                    "".to_string(),
+                    "CF-Connecting-IP".to_string(),
+                ],
+                trusted_proxy_cidrs: vec![
+                    " 203.0.113.0/24 ".to_string(),
+                    "".to_string(),
+                    "198.51.100.10/32".to_string(),
+                ],
+                ..L7Config::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(
+            config.l7_config.real_ip_headers,
+            vec!["x-forwarded-for".to_string(), "cf-connecting-ip".to_string()]
+        );
+        assert_eq!(
+            config.l7_config.trusted_proxy_cidrs,
+            vec!["203.0.113.0/24".to_string(), "198.51.100.10/32".to_string()]
+        );
     }
 }

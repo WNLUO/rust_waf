@@ -21,6 +21,8 @@ impl Http1Handler {
         &self,
         reader: &mut R,
         max_size: usize,
+        first_byte_timeout_ms: u64,
+        read_idle_timeout_ms: u64,
     ) -> Result<UnifiedHttpRequest, ProtocolError>
     where
         R: AsyncReadExt + Unpin,
@@ -33,7 +35,17 @@ impl Http1Handler {
 
         // 读取HTTP头
         while !headers_complete && buffer.len() < max_size {
-            let bytes_read = reader.read(&mut temp_buffer).await?;
+            let timeout_ms = if buffer.is_empty() {
+                first_byte_timeout_ms
+            } else {
+                read_idle_timeout_ms
+            };
+            let bytes_read = tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                reader.read(&mut temp_buffer),
+            )
+            .await
+            .map_err(|_| ProtocolError::Timeout)??;
             if bytes_read == 0 {
                 break;
             }
@@ -88,7 +100,12 @@ impl Http1Handler {
                     let bytes_to_read = (expected_length - body_bytes_read - current_body_size)
                         .min(temp_buffer.len());
 
-                    let bytes_read = reader.read(&mut temp_buffer[..bytes_to_read]).await?;
+                    let bytes_read = tokio::time::timeout(
+                        std::time::Duration::from_millis(read_idle_timeout_ms),
+                        reader.read(&mut temp_buffer[..bytes_to_read]),
+                    )
+                    .await
+                    .map_err(|_| ProtocolError::Timeout)??;
                     if bytes_read == 0 {
                         break;
                     }
@@ -192,6 +209,7 @@ impl Default for Http1Handler {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use tokio::io::duplex;
 
     #[tokio::test]
     async fn test_simple_get_request() {
@@ -199,7 +217,7 @@ mod tests {
         let request_data = b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
         let mut cursor = Cursor::new(request_data);
 
-        let request = handler.read_request(&mut cursor, 1024).await.unwrap();
+        let request = handler.read_request(&mut cursor, 1024, 100, 100).await.unwrap();
 
         assert_eq!(request.version, HttpVersion::Http1_1);
         assert_eq!(request.method, "GET");
@@ -218,7 +236,7 @@ mod tests {
             {\"test\": true}";
         let mut cursor = Cursor::new(request_data);
 
-        let request = handler.read_request(&mut cursor, 1024).await.unwrap();
+        let request = handler.read_request(&mut cursor, 1024, 100, 100).await.unwrap();
 
         assert_eq!(request.method, "POST");
         assert_eq!(request.uri, "/api/data");
@@ -240,5 +258,14 @@ mod tests {
         assert!(response_str.contains("HTTP/1.1 200 OK"));
         assert!(response_str.contains("Content-Length: 13"));
         assert!(response_str.contains("Test response"));
+    }
+
+    #[tokio::test]
+    async fn test_read_request_times_out_when_client_stalls() {
+        let handler = Http1Handler::new();
+        let (_client, mut server) = duplex(64);
+
+        let result = handler.read_request(&mut server, 1024, 10, 10).await;
+        assert!(matches!(result, Err(ProtocolError::Timeout)));
     }
 }

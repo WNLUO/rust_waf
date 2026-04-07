@@ -1,4 +1,5 @@
 use anyhow::Result;
+use ipnet::IpNet;
 use log::{debug, info, warn};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig as RustlsServerConfig;
@@ -6,7 +7,9 @@ use std::fs::File;
 use std::io::BufReader;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
@@ -27,6 +30,7 @@ use quinn::{Endpoint as QuinnEndpoint, Incoming as QuinnIncoming};
 
 use super::WafContext;
 use crate::config::{Config, RuntimeProfile};
+use crate::config::l7::UpstreamFailureMode;
 use crate::core::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
@@ -34,6 +38,8 @@ use crate::protocol::{
     UnifiedHttpRequest,
 };
 use crate::storage::{BlockedIpRecord, SecurityEventRecord};
+
+static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub struct WafEngine {
     context: Arc<WafContext>,
@@ -87,6 +93,15 @@ impl WafEngine {
         #[cfg(not(feature = "api"))]
         if self.context.config.api_enabled {
             warn!("API support was requested but the binary was built without the 'api' feature");
+        }
+
+        if self.context.config.l7_config.upstream_healthcheck_enabled {
+            if let Some(upstream_addr) = self.context.config.tcp_upstream_addr.clone() {
+                let context = Arc::clone(&self.context);
+                tokio::spawn(async move {
+                    run_upstream_healthcheck_loop(context, upstream_addr).await;
+                });
+            }
         }
 
         let maintenance_interval = self.context.config.maintenance_interval_secs.max(5);
@@ -592,7 +607,12 @@ async fn handle_tls_connection(
         return Ok(());
     }
 
-    let tls_stream = tls_acceptor.accept(stream).await?;
+    let tls_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(context.config.l7_config.tls_handshake_timeout_ms),
+        tls_acceptor.accept(stream),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("TLS handshake timed out"))??;
     let alpn = tls_stream
         .get_ref()
         .1
@@ -670,7 +690,12 @@ async fn handle_http3_request(
     resolver: h3::server::RequestResolver<H3QuinnConnection, Bytes>,
 ) -> Result<()> {
     let (request, mut stream) = resolver.resolve_request().await?;
-    let body = read_http3_request_body(&mut stream, context.config.l7_config.max_request_size).await?;
+    let body = read_http3_request_body(
+        &mut stream,
+        context.config.l7_config.max_request_size,
+        context.config.l7_config.read_idle_timeout_ms,
+    )
+    .await?;
 
     let mut unified = http3_handler.request_to_unified(
         &request,
@@ -680,6 +705,12 @@ async fn handle_http3_request(
     );
     unified.add_metadata("udp.peer".to_string(), packet.source_ip.to_string());
     unified.add_metadata("udp.local".to_string(), packet.dest_ip.to_string());
+    apply_client_identity(
+        context.as_ref(),
+        std::net::SocketAddr::new(packet.source_ip, packet.source_port),
+        &mut unified,
+    );
+    prepare_request_for_proxy(&mut unified);
 
     let request_dump = unified.to_inspection_string();
     if let Some(metrics) = context.metrics.as_ref() {
@@ -705,13 +736,40 @@ async fn handle_http3_request(
     }
 
     if let Some(upstream_addr) = context.config.tcp_upstream_addr.as_deref() {
-        match proxy_http_request(&unified, upstream_addr).await {
+        if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_fail_close_rejection();
+            }
+            send_http3_response(&mut stream, 503, &[], reason.to_string().into_bytes()).await?;
+            return Ok(());
+        }
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_proxy_attempt();
+        }
+        let proxy_started_at = Instant::now();
+        match proxy_http_request(
+            context.as_ref(),
+            &unified,
+            upstream_addr,
+            context.config.l7_config.proxy_connect_timeout_ms,
+            context.config.l7_config.proxy_write_timeout_ms,
+            context.config.l7_config.proxy_read_timeout_ms,
+        )
+        .await
+        {
             Ok(response) => {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_proxy_success(proxy_started_at.elapsed());
+                }
                 send_http3_response(&mut stream, response.status_code, &response.headers, response.body)
                     .await?;
                 return Ok(());
             }
             Err(err) => {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_proxy_failure();
+                }
+                context.set_upstream_health(false, Some(err.to_string()));
                 warn!(
                     "Failed to proxy HTTP/3 request from {} to {}: {}",
                     unified.client_ip.as_deref().unwrap_or("unknown"),
@@ -753,10 +811,17 @@ async fn handle_http3_request(
 async fn read_http3_request_body(
     stream: &mut RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
     max_size: usize,
+    read_idle_timeout_ms: u64,
 ) -> Result<Vec<u8>> {
     let mut body = Vec::new();
 
-    while let Some(mut chunk) = stream.recv_data().await? {
+    while let Some(mut chunk) = tokio::time::timeout(
+        std::time::Duration::from_millis(read_idle_timeout_ms),
+        stream.recv_data(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("HTTP/3 body read timed out"))??
+    {
         let remaining = chunk.remaining();
         if body.len() + remaining > max_size {
             anyhow::bail!("HTTP/3 request body exceeded limit");
@@ -884,18 +949,45 @@ async fn forward_udp_payload(
 
 async fn forward_http1_request<W>(
     client_stream: &mut W,
+    context: &WafContext,
     request: &UnifiedHttpRequest,
     upstream_addr: &str,
+    connect_timeout_ms: u64,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
 ) -> Result<u64>
 where
     W: AsyncWrite + Unpin,
 {
-    let mut upstream_stream = TcpStream::connect(upstream_addr).await?;
-    upstream_stream.write_all(&request.to_http1_bytes()).await?;
-    upstream_stream.shutdown().await?;
+    let mut upstream_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        TcpStream::connect(upstream_addr),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+    let request_bytes = request.to_http1_bytes();
 
-    let copied = io::copy(&mut upstream_stream, client_stream).await?;
+    tokio::time::timeout(
+        std::time::Duration::from_millis(write_timeout_ms),
+        upstream_stream.write_all(&request_bytes),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
+    tokio::time::timeout(
+        std::time::Duration::from_millis(write_timeout_ms),
+        upstream_stream.shutdown(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream shutdown timed out"))??;
+
+    let copied = tokio::time::timeout(
+        std::time::Duration::from_millis(read_timeout_ms),
+        io::copy(&mut upstream_stream, client_stream),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream response relay timed out"))??;
     client_stream.flush().await?;
+    context.set_upstream_health(true, None);
     Ok(copied)
 }
 
@@ -907,17 +999,44 @@ struct UpstreamHttpResponse {
 }
 
 async fn proxy_http_request(
+    context: &WafContext,
     request: &UnifiedHttpRequest,
     upstream_addr: &str,
+    connect_timeout_ms: u64,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
 ) -> Result<UpstreamHttpResponse> {
-    let mut upstream_stream = TcpStream::connect(upstream_addr).await?;
-    upstream_stream.write_all(&request.to_http1_bytes()).await?;
-    upstream_stream.shutdown().await?;
+    let mut upstream_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        TcpStream::connect(upstream_addr),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+    let request_bytes = request.to_http1_bytes();
+    tokio::time::timeout(
+        std::time::Duration::from_millis(write_timeout_ms),
+        upstream_stream.write_all(&request_bytes),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
+    tokio::time::timeout(
+        std::time::Duration::from_millis(write_timeout_ms),
+        upstream_stream.shutdown(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream shutdown timed out"))??;
 
     let mut response_bytes = Vec::new();
-    upstream_stream.read_to_end(&mut response_bytes).await?;
+    tokio::time::timeout(
+        std::time::Duration::from_millis(read_timeout_ms),
+        upstream_stream.read_to_end(&mut response_bytes),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream read timed out"))??;
 
-    parse_http1_response(&response_bytes)
+    let parsed = parse_http1_response(&response_bytes)?;
+    context.set_upstream_health(true, None);
+    Ok(parsed)
 }
 
 fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
@@ -1020,7 +1139,7 @@ async fn detect_and_handle_protocol(
     // 尝试检测协议版本（读取初始字节）
     let mut initial_buffer = vec![0u8; 256];
     let bytes_read = tokio::time::timeout(
-        std::time::Duration::from_millis(100),
+        std::time::Duration::from_millis(context.config.l7_config.first_byte_timeout_ms),
         stream.peek(&mut initial_buffer),
     )
     .await??;
@@ -1066,15 +1185,21 @@ async fn handle_http1_connection(
 
     // 读取HTTP/1.1请求
     let mut request = http1_handler
-        .read_request(&mut stream, context.config.l7_config.max_request_size)
+        .read_request(
+            &mut stream,
+            context.config.l7_config.max_request_size,
+            context.config.l7_config.first_byte_timeout_ms,
+            context.config.l7_config.read_idle_timeout_ms,
+        )
         .await?;
 
-    request.set_client_ip(peer_addr.ip().to_string());
+    apply_client_identity(context.as_ref(), peer_addr, &mut request);
     request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
     request.add_metadata("protocol".to_string(), "HTTP/1.1".to_string());
     for (key, value) in extra_metadata {
         request.add_metadata(key, value);
     }
+    prepare_request_for_proxy(&mut request);
 
     if request.uri.is_empty() {
         debug!("Empty request from {}, ignoring", peer_addr);
@@ -1107,7 +1232,39 @@ async fn handle_http1_connection(
             .await?;
     } else {
         if let Some(upstream_addr) = context.config.tcp_upstream_addr.as_deref() {
-            if let Err(err) = forward_http1_request(&mut stream, &request, upstream_addr).await {
+            if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_fail_close_rejection();
+                }
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        503,
+                        "Service Unavailable",
+                        reason.to_string().as_bytes(),
+                    )
+                    .await?;
+                return Ok(());
+            }
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_proxy_attempt();
+            }
+            let proxy_started_at = Instant::now();
+            if let Err(err) = forward_http1_request(
+                &mut stream,
+                context.as_ref(),
+                &request,
+                upstream_addr,
+                context.config.l7_config.proxy_connect_timeout_ms,
+                context.config.l7_config.proxy_write_timeout_ms,
+                context.config.l7_config.proxy_read_timeout_ms,
+            )
+            .await
+            {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_proxy_failure();
+                }
+                context.set_upstream_health(false, Some(err.to_string()));
                 warn!(
                     "Failed to proxy HTTP/1.1 request from {} to {}: {}",
                     peer_addr, upstream_addr, err
@@ -1115,6 +1272,8 @@ async fn handle_http1_connection(
                 http1_handler
                     .write_response(&mut stream, 502, "Bad Gateway", b"upstream proxy failed")
                     .await?;
+            } else if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_proxy_success(proxy_started_at.elapsed());
             }
         } else {
             let metrics = context.metrics_snapshot();
@@ -1177,9 +1336,11 @@ async fn handle_http2_connection(
 
                 async move {
                     let mut request = request;
+                    apply_client_identity(context.as_ref(), peer_addr, &mut request);
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);
                     }
+                    prepare_request_for_proxy(&mut request);
                     debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
 
                     let request_dump = request.to_inspection_string();
@@ -1208,8 +1369,34 @@ async fn handle_http2_connection(
                     }
 
                     if let Some(upstream_addr) = upstream_addr.as_deref() {
-                        match proxy_http_request(&request, upstream_addr).await {
+                        if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                metrics.record_fail_close_rejection();
+                            }
+                            return Ok(Http2Response {
+                                status_code: 503,
+                                headers: vec![],
+                                body: reason.to_string().into_bytes(),
+                            });
+                        }
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_proxy_attempt();
+                        }
+                        let proxy_started_at = Instant::now();
+                        match proxy_http_request(
+                            context.as_ref(),
+                            &request,
+                            upstream_addr,
+                            context.config.l7_config.proxy_connect_timeout_ms,
+                            context.config.l7_config.proxy_write_timeout_ms,
+                            context.config.l7_config.proxy_read_timeout_ms,
+                        )
+                        .await
+                        {
                             Ok(response) => {
+                                if let Some(metrics) = context.metrics.as_ref() {
+                                    metrics.record_proxy_success(proxy_started_at.elapsed());
+                                }
                                 return Ok(Http2Response {
                                     status_code: response.status_code,
                                     headers: response.headers,
@@ -1217,6 +1404,10 @@ async fn handle_http2_connection(
                                 });
                             }
                             Err(err) => {
+                                if let Some(metrics) = context.metrics.as_ref() {
+                                    metrics.record_proxy_failure();
+                                }
+                                context.set_upstream_health(false, Some(err.to_string()));
                                 warn!(
                                     "Failed to proxy HTTP/2 request from {} to {}: {}",
                                     request.client_ip.as_deref().unwrap_or("unknown"),
@@ -1348,7 +1539,10 @@ fn persist_http_block_event(
         },
         "block",
         result.reason.clone(),
-        packet.source_ip.to_string(),
+        request
+            .client_ip
+            .clone()
+            .unwrap_or_else(|| packet.source_ip.to_string()),
         packet.dest_ip.to_string(),
         packet.source_port,
         packet.dest_port,
@@ -1359,6 +1553,228 @@ fn persist_http_block_event(
     event.http_version = Some(request.version.to_string());
 
     store.enqueue_security_event(event);
+}
+
+fn apply_client_identity(
+    context: &WafContext,
+    peer_addr: std::net::SocketAddr,
+    request: &mut UnifiedHttpRequest,
+) {
+    let resolved_client_ip = resolve_client_ip(context, peer_addr, request);
+    let used_forwarded_header = resolved_client_ip != peer_addr.ip();
+
+    request.set_client_ip(resolved_client_ip.to_string());
+    request.add_metadata("network.peer_ip".to_string(), peer_addr.ip().to_string());
+    request.add_metadata(
+        "network.client_ip".to_string(),
+        resolved_client_ip.to_string(),
+    );
+    request.add_metadata(
+        "network.client_ip_source".to_string(),
+        if used_forwarded_header {
+            "forwarded_header".to_string()
+        } else {
+            "socket_peer".to_string()
+        },
+    );
+
+    apply_proxy_headers(peer_addr, request, resolved_client_ip, used_forwarded_header);
+}
+
+fn prepare_request_for_proxy(request: &mut UnifiedHttpRequest) {
+    ensure_request_id(request);
+    apply_standard_forwarding_headers(request);
+}
+
+fn apply_proxy_headers(
+    peer_addr: std::net::SocketAddr,
+    request: &mut UnifiedHttpRequest,
+    resolved_client_ip: std::net::IpAddr,
+    preserve_forwarded_chain: bool,
+) {
+    request.add_header("x-real-ip".to_string(), resolved_client_ip.to_string());
+
+    let forwarded_for = match (preserve_forwarded_chain, request.get_header("x-forwarded-for")) {
+        (true, Some(existing)) if !existing.trim().is_empty() => {
+            let existing = existing.trim();
+            let peer_ip = peer_addr.ip().to_string();
+            if existing
+                .rsplit(',')
+                .next()
+                .map(|item| item.trim() == peer_ip)
+                .unwrap_or(false)
+            {
+                existing.to_string()
+            } else {
+                format!("{existing}, {peer_ip}")
+            }
+        }
+        (false, Some(existing)) if !existing.trim().is_empty() => {
+            resolved_client_ip.to_string()
+        }
+        _ => resolved_client_ip.to_string(),
+    };
+
+    request.add_header("x-forwarded-for".to_string(), forwarded_for);
+}
+
+fn ensure_request_id(request: &mut UnifiedHttpRequest) {
+    let request_id = request
+        .get_header("x-request-id")
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(generate_request_id);
+    request.add_header("x-request-id".to_string(), request_id.clone());
+    request.add_metadata("request_id".to_string(), request_id);
+}
+
+fn apply_standard_forwarding_headers(request: &mut UnifiedHttpRequest) {
+    let forwarded_proto = request
+        .get_header("x-forwarded-proto")
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| infer_forwarded_proto(request));
+    request.add_header("x-forwarded-proto".to_string(), forwarded_proto);
+
+    let forwarded_host = request
+        .get_header("x-forwarded-host")
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| request.get_header("host").cloned())
+        .or_else(|| request.get_metadata("authority").cloned());
+    if let Some(forwarded_host) = forwarded_host {
+        request.add_header("x-forwarded-host".to_string(), forwarded_host);
+    }
+
+    if let Some(port) = request
+        .get_header("x-forwarded-port")
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| request.get_metadata("listener_port").cloned())
+    {
+        request.add_header("x-forwarded-port".to_string(), port);
+    }
+}
+
+fn infer_forwarded_proto(request: &UnifiedHttpRequest) -> String {
+    if matches!(request.version, HttpVersion::Http3_0) {
+        return "https".to_string();
+    }
+
+    if request
+        .get_metadata("transport")
+        .map(|transport| {
+            transport.eq_ignore_ascii_case("tls") || transport.eq_ignore_ascii_case("quic")
+        })
+        .unwrap_or(false)
+    {
+        return "https".to_string();
+    }
+
+    "http".to_string()
+}
+
+fn generate_request_id() -> String {
+    let sequence = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{:x}-{:x}", unix_timestamp(), sequence)
+}
+
+fn enforce_upstream_policy(context: &WafContext) -> Result<()> {
+    let snapshot = context.upstream_health_snapshot();
+    if snapshot.healthy {
+        return Ok(());
+    }
+
+    match context.config.l7_config.upstream_failure_mode {
+        UpstreamFailureMode::FailOpen => Ok(()),
+        UpstreamFailureMode::FailClose => Err(anyhow::anyhow!(
+            "{}",
+            snapshot
+                .last_error
+                .unwrap_or_else(|| "Upstream health check reports unhealthy".to_string())
+        )),
+    }
+}
+
+async fn run_upstream_healthcheck_loop(context: Arc<WafContext>, upstream_addr: String) {
+    let interval_secs = context
+        .config
+        .l7_config
+        .upstream_healthcheck_interval_secs
+        .max(1);
+    let mut interval =
+        tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
+
+    loop {
+        interval.tick().await;
+        match probe_upstream_tcp(
+            &upstream_addr,
+            context.config.l7_config.upstream_healthcheck_timeout_ms,
+        )
+        .await
+        {
+            Ok(()) => {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_upstream_healthcheck(true);
+                }
+                context.set_upstream_health(true, None);
+            }
+            Err(err) => {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_upstream_healthcheck(false);
+                }
+                context.set_upstream_health(false, Some(err.to_string()));
+            }
+        }
+    }
+}
+
+async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> Result<()> {
+    tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        TcpStream::connect(upstream_addr),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream health check timed out"))??;
+    Ok(())
+}
+
+fn resolve_client_ip(
+    context: &WafContext,
+    peer_addr: std::net::SocketAddr,
+    request: &UnifiedHttpRequest,
+) -> std::net::IpAddr {
+    if !peer_is_trusted_proxy(context, peer_addr.ip()) {
+        return peer_addr.ip();
+    }
+
+    for header in &context.config.l7_config.real_ip_headers {
+        let Some(value) = request.get_header(header) else {
+            continue;
+        };
+
+        if let Some(ip) = extract_forwarded_ip(value) {
+            return ip;
+        }
+    }
+
+    peer_addr.ip()
+}
+
+fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> bool {
+    context
+        .config
+        .l7_config
+        .trusted_proxy_cidrs
+        .iter()
+        .filter_map(|cidr| cidr.parse::<IpNet>().ok())
+        .any(|network| network.contains(&peer_ip))
+}
+
+fn extract_forwarded_ip(value: &str) -> Option<std::net::IpAddr> {
+    value
+        .split(',')
+        .find_map(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
 }
 
 fn unix_timestamp() -> i64 {
@@ -1456,6 +1872,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn apply_client_identity_prefers_forwarded_ip_from_trusted_proxy() {
+        let mut config = test_config(vec![]);
+        config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
+        let context = WafContext::new(config).await.unwrap();
+        let peer_addr = std::net::SocketAddr::from(([203, 0, 113, 10], 443));
+
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_header(
+            "x-forwarded-for".to_string(),
+            "198.51.100.24, 203.0.113.10".to_string(),
+        );
+
+        apply_client_identity(&context, peer_addr, &mut request);
+
+        assert_eq!(request.client_ip.as_deref(), Some("198.51.100.24"));
+        assert_eq!(
+            request.get_metadata("network.client_ip_source").map(String::as_str),
+            Some("forwarded_header")
+        );
+        assert_eq!(
+            request.get_header("x-real-ip").map(String::as_str),
+            Some("198.51.100.24")
+        );
+        assert_eq!(
+            request.get_header("x-forwarded-for").map(String::as_str),
+            Some("198.51.100.24, 203.0.113.10")
+        );
+    }
+
+    #[tokio::test]
+    async fn apply_client_identity_ignores_forwarded_ip_from_untrusted_peer() {
+        let context = WafContext::new(test_config(vec![])).await.unwrap();
+        let peer_addr = std::net::SocketAddr::from(([198, 51, 100, 10], 443));
+
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_header("x-forwarded-for".to_string(), "192.0.2.44".to_string());
+
+        apply_client_identity(&context, peer_addr, &mut request);
+
+        assert_eq!(request.client_ip.as_deref(), Some("198.51.100.10"));
+        assert_eq!(
+            request.get_metadata("network.client_ip_source").map(String::as_str),
+            Some("socket_peer")
+        );
+    }
+
+    #[tokio::test]
     async fn forward_udp_payload_relays_upstream_response() {
         let upstream_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let upstream_addr = upstream_socket.local_addr().unwrap();
@@ -1495,6 +1960,7 @@ mod tests {
         let upstream_addr = upstream_listener.local_addr().unwrap();
         let front_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let front_addr = front_listener.local_addr().unwrap();
+        let context = WafContext::new(test_config(vec![])).await.unwrap();
 
         let client_task = tokio::spawn(async move {
             let mut stream = TcpStream::connect(front_addr).await.unwrap();
@@ -1527,8 +1993,12 @@ mod tests {
 
         forward_http1_request(
             &mut client_side_stream,
+            &context,
             &request,
             &upstream_addr.to_string(),
+            500,
+            500,
+            500,
         )
         .await
         .unwrap();
@@ -1538,6 +2008,83 @@ mod tests {
         let response = client_task.await.unwrap();
         assert!(String::from_utf8_lossy(&response).contains("HTTP/1.1 200 OK"));
         assert!(String::from_utf8_lossy(&response).ends_with("ok"));
+    }
+
+    #[test]
+    fn prepare_request_for_proxy_sets_request_id_and_forwarding_headers() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_header("host".to_string(), "example.com".to_string());
+        request.add_metadata("listener_port".to_string(), "8080".to_string());
+        request.add_metadata("transport".to_string(), "tls".to_string());
+
+        prepare_request_for_proxy(&mut request);
+
+        assert!(request.get_header("x-request-id").is_some());
+        assert_eq!(
+            request.get_header("x-forwarded-proto").map(String::as_str),
+            Some("https")
+        );
+        assert_eq!(
+            request.get_header("x-forwarded-host").map(String::as_str),
+            Some("example.com")
+        );
+        assert_eq!(
+            request.get_header("x-forwarded-port").map(String::as_str),
+            Some("8080")
+        );
+    }
+
+    #[test]
+    fn prepare_request_for_proxy_preserves_existing_request_id_and_forwarded_proto() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_header("x-request-id".to_string(), "req-123".to_string());
+        request.add_header("x-forwarded-proto".to_string(), "https".to_string());
+
+        prepare_request_for_proxy(&mut request);
+
+        assert_eq!(
+            request.get_header("x-request-id").map(String::as_str),
+            Some("req-123")
+        );
+        assert_eq!(
+            request.get_header("x-forwarded-proto").map(String::as_str),
+            Some("https")
+        );
+    }
+
+    #[tokio::test]
+    async fn enforce_upstream_policy_rejects_when_fail_close_and_unhealthy() {
+        let mut config = test_config(vec![]);
+        config.l7_config.upstream_failure_mode = UpstreamFailureMode::FailClose;
+        let context = WafContext::new(config).await.unwrap();
+        context.set_upstream_health(false, Some("downstream unavailable".to_string()));
+
+        let result = enforce_upstream_policy(&context);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("downstream unavailable"));
+    }
+
+    #[tokio::test]
+    async fn enforce_upstream_policy_allows_when_fail_open_and_unhealthy() {
+        let context = WafContext::new(test_config(vec![])).await.unwrap();
+        context.set_upstream_health(false, Some("temporary failure".to_string()));
+
+        assert!(enforce_upstream_policy(&context).is_ok());
+    }
+
+    #[tokio::test]
+    async fn probe_upstream_tcp_succeeds_for_listening_socket() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await.unwrap();
+        });
+
+        probe_upstream_tcp(&addr.to_string(), 500).await.unwrap();
+        accept_task.await.unwrap();
     }
 
     #[test]

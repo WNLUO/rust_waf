@@ -16,6 +16,9 @@ use tokio::net::TcpListener;
 pub struct HealthResponse {
     status: String,
     version: String,
+    upstream_healthy: bool,
+    upstream_last_check_at: Option<i64>,
+    upstream_last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,6 +28,14 @@ pub struct MetricsResponse {
     blocked_l4: u64,
     blocked_l7: u64,
     total_bytes: u64,
+    proxied_requests: u64,
+    proxy_successes: u64,
+    proxy_failures: u64,
+    proxy_fail_close_rejections: u64,
+    upstream_healthcheck_successes: u64,
+    upstream_healthcheck_failures: u64,
+    proxy_latency_micros_total: u64,
+    average_proxy_latency_micros: u64,
     active_rules: u64,
     sqlite_enabled: bool,
     persisted_security_events: u64,
@@ -159,10 +170,18 @@ impl ApiServer {
     }
 }
 
-async fn health_handler() -> Json<HealthResponse> {
+async fn health_handler(State(state): State<ApiState>) -> Json<HealthResponse> {
+    let upstream = state.context.upstream_health_snapshot();
     Json(HealthResponse {
-        status: "healthy".to_string(),
+        status: if upstream.healthy {
+            "healthy".to_string()
+        } else {
+            "degraded".to_string()
+        },
         version: env!("CARGO_PKG_VERSION").to_string(),
+        upstream_healthy: upstream.healthy,
+        upstream_last_check_at: upstream.last_check_at,
+        upstream_last_error: upstream.last_error,
     })
 }
 
@@ -264,6 +283,14 @@ fn build_metrics_response(
         blocked_l4: 0,
         blocked_l7: 0,
         total_bytes: 0,
+        proxied_requests: 0,
+        proxy_successes: 0,
+        proxy_failures: 0,
+        proxy_fail_close_rejections: 0,
+        upstream_healthcheck_successes: 0,
+        upstream_healthcheck_failures: 0,
+        proxy_latency_micros_total: 0,
+        average_proxy_latency_micros: 0,
     });
     let sqlite_enabled = storage_summary.is_some();
     let storage_summary = storage_summary.unwrap_or_default();
@@ -274,6 +301,14 @@ fn build_metrics_response(
         blocked_l4: snapshot.blocked_l4,
         blocked_l7: snapshot.blocked_l7,
         total_bytes: snapshot.total_bytes,
+        proxied_requests: snapshot.proxied_requests,
+        proxy_successes: snapshot.proxy_successes,
+        proxy_failures: snapshot.proxy_failures,
+        proxy_fail_close_rejections: snapshot.proxy_fail_close_rejections,
+        upstream_healthcheck_successes: snapshot.upstream_healthcheck_successes,
+        upstream_healthcheck_failures: snapshot.upstream_healthcheck_failures,
+        proxy_latency_micros_total: snapshot.proxy_latency_micros_total,
+        average_proxy_latency_micros: snapshot.average_proxy_latency_micros,
         active_rules,
         sqlite_enabled,
         persisted_security_events: storage_summary.security_events,
@@ -509,6 +544,14 @@ mod tests {
                 blocked_l4: 1,
                 blocked_l7: 2,
                 total_bytes: 1024,
+                proxied_requests: 10,
+                proxy_successes: 8,
+                proxy_failures: 2,
+                proxy_fail_close_rejections: 1,
+                upstream_healthcheck_successes: 5,
+                upstream_healthcheck_failures: 1,
+                proxy_latency_micros_total: 40_000,
+                average_proxy_latency_micros: 5_000,
             }),
             4,
             Some(crate::storage::StorageMetricsSummary {
@@ -525,6 +568,14 @@ mod tests {
         assert_eq!(response.blocked_l4, 1);
         assert_eq!(response.blocked_l7, 2);
         assert_eq!(response.total_bytes, 1024);
+        assert_eq!(response.proxied_requests, 10);
+        assert_eq!(response.proxy_successes, 8);
+        assert_eq!(response.proxy_failures, 2);
+        assert_eq!(response.proxy_fail_close_rejections, 1);
+        assert_eq!(response.upstream_healthcheck_successes, 5);
+        assert_eq!(response.upstream_healthcheck_failures, 1);
+        assert_eq!(response.proxy_latency_micros_total, 40_000);
+        assert_eq!(response.average_proxy_latency_micros, 5_000);
         assert_eq!(response.active_rules, 4);
         assert!(response.sqlite_enabled);
         assert_eq!(response.persisted_security_events, 7);

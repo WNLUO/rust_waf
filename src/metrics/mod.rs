@@ -112,6 +112,7 @@ impl MetricsCollector {
     }
 }
 
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub struct MetricsSnapshot {
     pub total_packets: u64,

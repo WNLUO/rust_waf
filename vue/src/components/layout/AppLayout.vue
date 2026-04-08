@@ -3,71 +3,74 @@ import { RouterLink } from 'vue-router'
 import { LayoutDashboard, Shield, ListFilter, Ban, Activity, Cpu } from 'lucide-vue-next'
 
 const navItems = [
-  { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-  { name: 'Rules', path: '/admin/rules', icon: Shield },
-  { name: 'Events', path: '/admin/events', icon: Activity },
-  { name: 'Blocked IPs', path: '/admin/blocked', icon: Ban },
+  { name: '总览', path: '/admin', icon: LayoutDashboard },
+  { name: '规则中心', path: '/admin/rules', icon: Shield },
+  { name: '事件记录', path: '/admin/events', icon: Activity },
+  { name: '封禁名单', path: '/admin/blocked', icon: Ban },
 ]
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-cyber-bg text-gray-200">
-    <!-- Sidebar -->
-    <aside class="w-64 bg-cyber-surface border-r border-cyber-border flex flex-col fixed h-full transition-all duration-300">
-      <div class="p-6 flex items-center gap-3 border-b border-cyber-border">
-        <div class="p-2 bg-cyber-accent rounded-cyber shadow-cyber">
-          <Cpu :size="24" class="text-white" />
+  <div class="min-h-screen bg-transparent text-stone-900 lg:flex">
+    <aside class="border-b border-cyber-border/80 bg-white/70 backdrop-blur lg:fixed lg:flex lg:h-full lg:w-72 lg:flex-col lg:border-b-0 lg:border-r">
+      <div class="flex items-center gap-3 border-b border-cyber-border/70 px-6 py-6">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyber-accent text-white shadow-cyber">
+          <Cpu :size="22" />
         </div>
         <div>
-          <h1 class="font-bold text-lg tracking-tight uppercase">Rust WAF</h1>
-          <p class="text-[10px] text-cyber-muted tracking-widest font-mono">CORE v0.9.0</p>
+          <h1 class="font-display text-2xl font-semibold tracking-[0.1em] text-cyber-accent-strong">玄枢控制台</h1>
+          <p class="mt-1 text-xs tracking-[0.2em] text-cyber-muted">安全网关运行面板</p>
         </div>
       </div>
 
-      <nav class="flex-1 p-4 space-y-2 mt-4">
-        <RouterLink 
-          v-for="item in navItems" 
-          :key="item.path" 
+      <nav class="grid gap-2 px-4 py-5 lg:flex-1 lg:content-start">
+        <RouterLink
+          v-for="item in navItems"
+          :key="item.path"
           :to="item.path"
-          class="flex items-center gap-3 px-4 py-3 rounded-cyber transition-all duration-200 group"
+          class="flex items-center gap-3 rounded-[20px] border px-4 py-3 transition-all duration-200"
           :class="[
-            $route.path === item.path 
-              ? 'bg-cyber-accent/10 border border-cyber-accent/30 text-cyber-accent' 
-              : 'hover:bg-white/5 text-cyber-muted hover:text-gray-200 border border-transparent'
+            $route.path === item.path
+              ? 'border-cyber-accent/30 bg-cyber-accent/10 text-cyber-accent-strong shadow-[0_12px_30px_rgba(179,84,30,0.10)]'
+              : 'border-transparent text-cyber-muted hover:border-cyber-border hover:bg-white/70 hover:text-stone-900'
           ]"
         >
           <component :is="item.icon" :size="18" />
-          <span class="font-medium text-sm">{{ item.name }}</span>
+          <span class="text-sm font-medium">{{ item.name }}</span>
         </RouterLink>
       </nav>
 
-      <div class="p-6 border-t border-cyber-border space-y-4">
-        <RouterLink to="/" class="flex items-center gap-2 text-xs text-cyber-muted hover:text-cyber-accent transition-colors">
+      <div class="space-y-4 border-t border-cyber-border/70 px-6 py-6">
+        <div class="rounded-[24px] bg-cyber-surface-strong p-4">
+          <p class="text-xs tracking-[0.18em] text-cyber-muted">当前界面</p>
+          <p class="mt-2 text-lg font-semibold text-stone-900">边界防护工作台</p>
+          <p class="mt-2 text-sm leading-6 text-stone-700">适合在值班、排障和规则调整时持续打开。</p>
+        </div>
+        <RouterLink to="/" class="flex items-center gap-2 text-sm text-cyber-muted transition-colors hover:text-cyber-accent-strong">
           <ListFilter :size="14" />
-          <span>返回门户网站</span>
+          <span>返回首页</span>
         </RouterLink>
       </div>
     </aside>
 
-    <!-- Main Content -->
-    <main class="flex-1 ml-64 min-h-screen">
-      <header class="h-16 border-b border-cyber-border bg-cyber-surface/50 backdrop-blur-md sticky top-0 z-50 flex items-center justify-between px-8">
+    <main class="min-h-screen flex-1 lg:ml-72">
+      <header class="sticky top-0 z-50 flex flex-col gap-4 border-b border-cyber-border/70 bg-[#f8f1e8]/85 px-6 py-4 backdrop-blur md:flex-row md:items-center md:justify-between md:px-8">
         <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full bg-cyber-success animate-pulse"></div>
-          <span class="text-xs font-mono uppercase tracking-widest text-cyber-success">Gateway Status: Online</span>
+          <div class="h-2.5 w-2.5 rounded-full bg-cyber-success animate-pulse"></div>
+          <span class="text-sm tracking-[0.2em] text-cyber-success">网关在线</span>
         </div>
-        
+
         <div class="flex items-center gap-6">
-          <div class="flex flex-col items-end">
-            <span class="text-[10px] text-cyber-muted uppercase font-mono">System Load</span>
-            <div class="w-24 h-1 bg-cyber-border rounded-full mt-1 overflow-hidden">
-              <div class="h-full bg-cyber-accent w-[35%]"></div>
+          <div class="flex flex-col items-start md:items-end">
+            <span class="text-xs tracking-[0.18em] text-cyber-muted">界面节奏</span>
+            <div class="mt-2 h-2 w-28 overflow-hidden rounded-full bg-cyber-border/70">
+              <div class="h-full w-[68%] rounded-full bg-gradient-to-r from-cyber-accent to-cyber-success"></div>
             </div>
           </div>
         </div>
       </header>
 
-      <div class="p-8">
+      <div class="px-6 py-6 md:px-8 md:py-8">
         <slot></slot>
       </div>
     </main>

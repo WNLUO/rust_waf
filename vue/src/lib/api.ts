@@ -22,7 +22,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    let message = `Request failed: ${response.status}`
+    let message = `请求失败：${response.status}`
 
     try {
       const payload = (await response.json()) as { error?: string }
@@ -43,7 +43,7 @@ export async function fetchDashboardPayload(): Promise<DashboardPayload> {
   const [health, metrics, events, blockedIps, rules] = await Promise.all([
     apiRequest<HealthResponse>('/health'),
     apiRequest<MetricsResponse>('/metrics'),
-    apiRequest<SecurityEventsResponse>('/events?limit=8&blocked_only=true'),
+    apiRequest<SecurityEventsResponse>('/events?limit=8'),
     apiRequest<BlockedIpsResponse>('/blocked-ips?limit=8&active_only=true'),
     apiRequest<RulesResponse>('/rules'),
   ])

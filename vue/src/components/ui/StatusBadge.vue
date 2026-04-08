@@ -18,15 +18,15 @@ const iconMap = {
 const styles = {
   success: 'bg-cyber-success/10 border-cyber-success/30 text-cyber-success',
   error: 'bg-cyber-error/10 border-cyber-error/30 text-cyber-error',
-  warning: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-500',
-  info: 'bg-cyber-accent/10 border-cyber-accent/30 text-cyber-accent',
-  muted: 'bg-white/5 border-white/10 text-cyber-muted',
+  warning: 'bg-amber-500/10 border-amber-500/30 text-amber-700',
+  info: 'bg-cyber-accent/10 border-cyber-accent/30 text-cyber-accent-strong',
+  muted: 'bg-stone-500/5 border-stone-300 text-cyber-muted',
 }
 </script>
 
 <template>
-  <div 
-    class="inline-flex items-center gap-2 px-3 py-1 rounded-full border text-[11px] font-mono uppercase tracking-wider transition-all duration-300"
+  <div
+    class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs tracking-[0.12em] transition-all duration-300"
     :class="[styles[type || 'info'], compact ? 'px-2 py-0.5' : '']"
   >
     <component :is="iconMap[type || 'info']" v-if="!compact" :size="12" />

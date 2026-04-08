@@ -12,24 +12,23 @@ defineProps<{
 </script>
 
 <template>
-  <div class="bg-cyber-surface border border-cyber-border p-5 rounded-cyber relative group hover:border-cyber-accent/50 transition-all duration-300">
-    <div class="absolute top-0 right-0 p-3 opacity-20 group-hover:opacity-100 transition-opacity">
-      <component :is="icon" v-if="icon" :size="24" class="text-cyber-accent" />
+  <div class="group relative overflow-hidden rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_22px_50px_rgba(127,47,18,0.14)]">
+    <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyber-accent to-cyber-success opacity-70"></div>
+    <div class="absolute right-0 top-0 p-4 opacity-25 transition-opacity group-hover:opacity-90">
+      <component :is="icon" v-if="icon" :size="24" class="text-cyber-accent-strong" />
     </div>
-    
-    <div class="space-y-1">
-      <p class="text-[10px] uppercase font-mono tracking-widest text-cyber-muted">{{ label }}</p>
+
+    <div class="space-y-2">
+      <p class="text-xs tracking-[0.2em] text-cyber-muted">{{ label }}</p>
       <div class="flex items-end gap-3">
-        <h3 class="text-2xl font-bold text-gray-100 font-mono">{{ value }}</h3>
-        <div v-if="trend" class="flex items-center gap-1 text-[10px] mb-1.5" :class="[trend === 'up' ? 'text-cyber-error' : 'text-cyber-success']">
+        <h3 class="font-mono text-3xl font-bold text-stone-900">{{ value }}</h3>
+        <div v-if="trend" class="mb-1.5 flex items-center gap-1 text-xs" :class="[trend === 'up' ? 'text-cyber-error' : 'text-cyber-success']">
           <TrendingUp v-if="trend === 'up'" :size="10" />
           <TrendingDown v-if="trend === 'down'" :size="10" />
-          <span>{{ trend === 'up' ? '+2.4%' : '-1.2%' }}</span>
+          <span>{{ trend === 'up' ? '上升' : '下降' }}</span>
         </div>
       </div>
-      <p v-if="hint" class="text-[10px] text-cyber-muted/60 pt-2 border-t border-cyber-border/30 mt-2 truncate">{{ hint }}</p>
+      <p v-if="hint" class="mt-3 border-t border-cyber-border/40 pt-3 text-sm leading-6 text-cyber-muted">{{ hint }}</p>
     </div>
-    
-    <div class="absolute bottom-0 left-0 h-[2px] bg-cyber-accent w-0 group-hover:w-full transition-all duration-500"></div>
   </div>
 </template>

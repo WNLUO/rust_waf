@@ -7,11 +7,11 @@ defineProps<{
 </script>
 
 <template>
-  <div class="bg-cyber-surface border border-cyber-border rounded-cyber overflow-hidden shadow-lg shadow-black/20">
-    <div v-if="title" class="px-6 py-4 border-b border-cyber-border flex justify-between items-center bg-gradient-to-r from-white/5 to-transparent">
+  <div class="overflow-hidden rounded-[30px] border border-white/80 bg-white/75 shadow-[0_18px_48px_rgba(90,60,30,0.08)]">
+    <div v-if="title" class="flex items-center justify-between border-b border-cyber-border/60 bg-gradient-to-r from-cyber-surface-strong to-white px-6 py-4">
       <div>
-        <h3 class="font-bold text-sm uppercase tracking-widest text-gray-100">{{ title }}</h3>
-        <p v-if="subTitle" class="text-[10px] text-cyber-muted mt-0.5 font-mono">{{ subTitle }}</p>
+        <h3 class="text-lg font-semibold text-stone-900">{{ title }}</h3>
+        <p v-if="subTitle" class="mt-1 text-sm text-cyber-muted">{{ subTitle }}</p>
       </div>
       <slot name="header-action"></slot>
     </div>

@@ -1,27 +1,77 @@
 @import "tailwindcss";
 
 @theme {
-  --color-cyber-bg: #0a0a0a;
-  --color-cyber-surface: #121212;
-  --color-cyber-border: #2a2a2a;
-  --color-cyber-accent: #7c3aed;
-  --color-cyber-success: #00ffaa;
-  --color-cyber-error: #ff3333;
-  --color-cyber-muted: #888888;
-  
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-sans: 'Inter', 'SF Pro Display', system-ui, sans-serif;
-  
-  --radius-cyber: 4px;
-  
-  --shadow-cyber: 0 0 15px rgba(0, 255, 170, 0.1);
-  --shadow-cyber-error: 0 0 15px rgba(255, 51, 51, 0.1);
+  --color-cyber-bg: #f4efe7;
+  --color-cyber-surface: #fffaf4;
+  --color-cyber-surface-strong: #f7efe1;
+  --color-cyber-border: #dbc8b0;
+  --color-cyber-accent: #b3541e;
+  --color-cyber-accent-strong: #7f2f12;
+  --color-cyber-success: #2d6a4f;
+  --color-cyber-error: #a61e4d;
+  --color-cyber-muted: #7a6c5d;
+
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', monospace;
+  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-display: 'STSong', 'Songti SC', 'Noto Serif SC', serif;
+
+  --radius-cyber: 24px;
+
+  --shadow-cyber: 0 22px 60px rgba(127, 47, 18, 0.12);
+  --shadow-cyber-error: 0 18px 40px rgba(166, 30, 77, 0.12);
 }
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     background-color: var(--color-cyber-bg);
-    color: #e5e7eb; /* text-gray-200 */
+    color: #2b2118;
     font-family: var(--font-sans);
+    background-image:
+      radial-gradient(circle at top left, rgba(179, 84, 30, 0.14), transparent 30%),
+      radial-gradient(circle at right 20%, rgba(45, 106, 79, 0.12), transparent 28%),
+      linear-gradient(180deg, #f9f4ec 0%, #f3ebe0 100%);
+    min-width: 320px;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.34;
+    background-image:
+      linear-gradient(rgba(127, 47, 18, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(127, 47, 18, 0.05) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(circle at center, black 35%, transparent 85%);
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: rgba(179, 84, 30, 0.2);
+    color: #2b2118;
   }
 }

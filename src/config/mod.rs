@@ -188,6 +188,8 @@ impl Config {
 
         if !self.sqlite_enabled {
             self.sqlite_rules_enabled = false;
+        } else {
+            self.sqlite_auto_migrate = true;
         }
 
         // 确保至少有一个监听地址

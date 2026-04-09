@@ -13,7 +13,14 @@ import {
   unblockIp,
   updateRule,
 } from '../lib/api'
-import type { DashboardPayload, RuleDraft, RuleItem, SecurityEventItem } from '../lib/types'
+import type {
+  DashboardPayload,
+  RuleDraft,
+  RuleItem,
+  SecurityEventItem,
+  SecurityEventsResponse,
+  BlockedIpsResponse,
+} from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
@@ -44,7 +51,11 @@ const route = useRoute()
 const router = useRouter()
 const dashboard = ref<DashboardPayload | null>(null)
 const loading = ref(true)
-const refreshing = ref(false)
+const refreshing = reactive({
+  core: false,
+  events: false,
+  blocked: false,
+})
 const error = ref('')
 const isRuleModalOpen = ref(false)
 const lastUpdated = ref<number | null>(null)
@@ -150,6 +161,20 @@ const blockedQueryParams = computed(() => ({
   sort_direction: blockedFilters.sort_direction,
 }))
 
+const emptyEventsResponse = (): SecurityEventsResponse => ({
+  total: 0,
+  limit: 0,
+  offset: 0,
+  events: [],
+})
+
+const emptyBlockedResponse = (): BlockedIpsResponse => ({
+  total: 0,
+  limit: 0,
+  offset: 0,
+  blocked_ips: [],
+})
+
 const healthSummary = computed(() => {
   if (!dashboard.value) return '正在读取运行状态'
   return dashboard.value.health.upstream_healthy ? '上游服务连接正常' : '上游服务需要关注'
@@ -194,7 +219,7 @@ const overviewMoments = computed(() => {
 })
 
 const requestStatus = computed(() => {
-  if (refreshing.value) return '实时同步中...'
+  if (refreshing.core || refreshing.events || refreshing.blocked) return '实时同步中...'
   if (lastUpdated.value) {
     return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
       hour: '2-digit',
@@ -229,57 +254,57 @@ const filteredRules = computed(() => {
   })
 })
 
-const fetchData = async (arg?: boolean | Event) => {
-  const showLoader = typeof arg === 'boolean' ? arg : false
+const refreshCore = async (showLoader = false) => {
   if (showLoader) loading.value = true
-  refreshing.value = true
+  refreshing.core = true
   try {
-    const [health, metrics, events, blockedIps, rules] = await Promise.all([
-      fetchHealth(),
-      fetchMetrics(),
-      fetchSecurityEvents(eventsQueryParams.value),
-      fetchBlockedIps(blockedQueryParams.value),
-      fetchRulesList(),
-    ])
-    dashboard.value = { health, metrics, events, blockedIps, rules }
+    const [health, metrics, rules] = await Promise.all([fetchHealth(), fetchMetrics(), fetchRulesList()])
+    const existingEvents = dashboard.value?.events ?? emptyEventsResponse()
+    const existingBlocked = dashboard.value?.blockedIps ?? emptyBlockedResponse()
+    dashboard.value = {
+      health,
+      metrics,
+      events: existingEvents,
+      blockedIps: existingBlocked,
+      rules,
+    }
     pushHistory('totalPackets', metrics.total_packets)
     const rate = metrics.total_packets ? (metrics.blocked_packets / metrics.total_packets) * 100 : 0
     pushHistory('blockRate', Number(rate.toFixed(2)))
     pushHistory('latency', metrics.average_proxy_latency_micros)
     lastUpdated.value = Date.now()
     error.value = ''
-    filtersReady.value = true
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取控制台数据失败'
   } finally {
-    loading.value = false
-    refreshing.value = false
+    if (showLoader) loading.value = false
+    refreshing.core = false
   }
 }
 
-const refreshEvents = async () => {
+const refreshEvents = async (suppressSpinner = false) => {
   if (!dashboard.value) return
-  refreshing.value = true
+  if (!suppressSpinner) refreshing.events = true
   try {
     const events = await fetchSecurityEvents(eventsQueryParams.value)
     dashboard.value = { ...dashboard.value, events }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取事件失败'
   } finally {
-    refreshing.value = false
+    if (!suppressSpinner) refreshing.events = false
   }
 }
 
-const refreshBlockedIps = async () => {
+const refreshBlockedIps = async (suppressSpinner = false) => {
   if (!dashboard.value) return
-  refreshing.value = true
+  if (!suppressSpinner) refreshing.blocked = true
   try {
     const blockedIps = await fetchBlockedIps(blockedQueryParams.value)
     dashboard.value = { ...dashboard.value, blockedIps }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取封禁名单失败'
   } finally {
-    refreshing.value = false
+    if (!suppressSpinner) refreshing.blocked = false
   }
 }
 
@@ -293,9 +318,16 @@ const refreshRules = async () => {
   }
 }
 
+const fetchData = async (arg?: boolean | Event) => {
+  const showLoader = typeof arg === 'boolean' ? arg : false
+  await refreshCore(showLoader)
+  await Promise.all([refreshEvents(true), refreshBlockedIps(true)])
+  filtersReady.value = true
+}
+
 onMounted(() => {
   fetchData(true)
-  refreshTimer.value = window.setInterval(() => fetchData(), 5000)
+  refreshTimer.value = window.setInterval(() => refreshCore(), 5000)
 })
 
 onBeforeUnmount(() => {
@@ -423,9 +455,9 @@ const copyToClipboard = async (text: string) => {
         <button
           @click="fetchData"
           class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
-          :disabled="refreshing"
+          :disabled="refreshing.core"
         >
-          <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
+          <RefreshCw :size="14" :class="{ 'animate-spin': refreshing.core }" />
           同步
         </button>
       </div>

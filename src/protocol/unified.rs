@@ -204,9 +204,8 @@ impl UnifiedHttpRequest {
         request.extend_from_slice(b"connection: close\r\n");
 
         if !self.body.is_empty() && !has_content_length {
-            request.extend_from_slice(
-                format!("content-length: {}\r\n", self.body.len()).as_bytes(),
-            );
+            request
+                .extend_from_slice(format!("content-length: {}\r\n", self.body.len()).as_bytes());
         }
 
         request.extend_from_slice(b"\r\n");

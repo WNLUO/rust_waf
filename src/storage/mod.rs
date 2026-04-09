@@ -3,9 +3,9 @@ use anyhow::Result;
 use log::{debug, warn};
 use serde_json;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::SqlitePool;
 #[cfg(any(feature = "api", test))]
 use sqlx::{QueryBuilder, Sqlite};
-use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -39,6 +39,7 @@ pub struct SecurityEventQuery {
     pub source_ip: Option<String>,
     pub action: Option<String>,
     pub blocked_only: bool,
+    pub handled_only: Option<bool>,
     pub created_from: Option<i64>,
     pub created_to: Option<i64>,
     pub sort_by: EventSortField,
@@ -109,6 +110,8 @@ pub struct SecurityEventEntry {
     pub uri: Option<String>,
     pub http_version: Option<String>,
     pub created_at: i64,
+    pub handled: bool,
+    pub handled_at: Option<i64>,
 }
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
@@ -135,6 +138,8 @@ pub struct SecurityEventRecord {
     pub uri: Option<String>,
     pub http_version: Option<String>,
     pub created_at: i64,
+    pub handled: bool,
+    pub handled_at: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -354,7 +359,7 @@ impl SqliteStore {
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
             SELECT id, layer, action, reason, source_ip, dest_ip, source_port, dest_port,
-                   protocol, http_method, uri, http_version, created_at
+                   protocol, http_method, uri, http_version, created_at, handled, handled_at
             FROM security_events
             WHERE 1=1
             "#,
@@ -505,6 +510,28 @@ impl SqliteStore {
             .await?;
         Ok(result.rows_affected() > 0)
     }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn mark_security_event_handled(&self, id: i64, handled: bool) -> Result<bool> {
+        let handled_at = if handled {
+            Some(unix_timestamp())
+        } else {
+            None
+        };
+        let result = sqlx::query(
+            r#"
+            UPDATE security_events
+            SET handled = ?, handled_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(if handled { 1 } else { 0 })
+        .bind(handled_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
 }
 
 impl SecurityEventRecord {
@@ -531,6 +558,8 @@ impl SecurityEventRecord {
             uri: None,
             http_version: None,
             created_at: unix_timestamp(),
+            handled: false,
+            handled_at: None,
         }
     }
 }
@@ -567,7 +596,9 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             http_method TEXT,
             uri TEXT,
             http_version TEXT,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            handled INTEGER NOT NULL DEFAULT 0,
+            handled_at INTEGER
         );
 
         CREATE INDEX IF NOT EXISTS idx_security_events_created_at
@@ -612,6 +643,24 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
+    if let Err(err) =
+        sqlx::query("ALTER TABLE security_events ADD COLUMN handled INTEGER NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await
+    {
+        if !err.to_string().contains("duplicate column name") {
+            return Err(err.into());
+        }
+    }
+    if let Err(err) = sqlx::query("ALTER TABLE security_events ADD COLUMN handled_at INTEGER")
+        .execute(pool)
+        .await
+    {
+        if !err.to_string().contains("duplicate column name") {
+            return Err(err.into());
+        }
+    }
+
     Ok(())
 }
 
@@ -623,9 +672,9 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
                     r#"
                     INSERT INTO security_events (
                         layer, action, reason, source_ip, dest_ip, source_port, dest_port,
-                        protocol, http_method, uri, http_version, created_at
+                        protocol, http_method, uri, http_version, created_at, handled, handled_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(event.layer)
@@ -640,6 +689,8 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
                 .bind(event.uri)
                 .bind(event.http_version)
                 .bind(event.created_at)
+                .bind(if event.handled { 1 } else { 0 })
+                .bind(event.handled_at)
                 .execute(&pool)
                 .await
             }
@@ -711,6 +762,10 @@ fn append_security_event_filters<'a>(
     } else if let Some(action) = query.action.as_deref() {
         builder.push(" AND action = ");
         builder.push_bind(action);
+    }
+    if let Some(handled_only) = query.handled_only {
+        builder.push(" AND handled = ");
+        builder.push_bind(if handled_only { 1 } else { 0 });
     }
     if let Some(created_from) = query.created_from {
         builder.push(" AND created_at >= ");
@@ -911,6 +966,8 @@ mod tests {
             uri: Some("/".to_string()),
             http_version: Some("HTTP/1.1".to_string()),
             created_at: unix_timestamp(),
+            handled: false,
+            handled_at: None,
         });
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             "127.0.0.1",
@@ -1085,6 +1142,8 @@ mod tests {
             uri: Some("/login".to_string()),
             http_version: Some("HTTP/1.1".to_string()),
             created_at: now - 10,
+            handled: false,
+            handled_at: None,
         });
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L4".to_string(),
@@ -1099,6 +1158,8 @@ mod tests {
             uri: None,
             http_version: None,
             created_at: now - 5,
+            handled: false,
+            handled_at: None,
         });
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             "10.0.0.1",

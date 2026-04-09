@@ -100,7 +100,10 @@ impl Http3Handler {
             "quic.header_form".to_string(),
             packet_info.header_form.to_string(),
         );
-        request.add_metadata("quic.packet_type".to_string(), packet_info.packet_type.clone());
+        request.add_metadata(
+            "quic.packet_type".to_string(),
+            packet_info.packet_type.clone(),
+        );
         request.add_metadata(
             "quic.version".to_string(),
             packet_info.version_label.clone(),
@@ -156,7 +159,10 @@ impl Http3Handler {
     }
 
     fn is_long_header(&self, payload: &[u8]) -> bool {
-        payload.first().map(|first| (first & 0x80) != 0).unwrap_or(false)
+        payload
+            .first()
+            .map(|first| (first & 0x80) != 0)
+            .unwrap_or(false)
     }
 
     #[allow(dead_code)]
@@ -319,10 +325,7 @@ impl Http3StreamManager {
     }
 }
 
-fn parse_long_header_packet(
-    first: u8,
-    payload: &[u8],
-) -> Result<QuicPacketInfo, ProtocolError> {
+fn parse_long_header_packet(first: u8, payload: &[u8]) -> Result<QuicPacketInfo, ProtocolError> {
     if payload.len() < 6 {
         return Err(ProtocolError::ParseError(
             "QUIC long header too short".to_string(),
@@ -425,8 +428,8 @@ mod tests {
             ..Http3Config::default()
         });
         let payload = [
-            0xc0, 0x00, 0x00, 0x00, 0x01, 0x08, 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe,
-            0xef, 0x04, 0xca, 0xfe, 0xba, 0xbe, 0x00, 0x01,
+            0xc0, 0x00, 0x00, 0x00, 0x01, 0x08, 0xde, 0xad, 0xbe, 0xef, 0xde, 0xad, 0xbe, 0xef,
+            0x04, 0xca, 0xfe, 0xba, 0xbe, 0x00, 0x01,
         ];
 
         let packet = handler.parse_quic_packet(&payload).unwrap().unwrap();

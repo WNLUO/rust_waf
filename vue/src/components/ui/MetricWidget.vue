@@ -1,14 +1,32 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Component } from 'vue'
 import { TrendingUp, TrendingDown } from 'lucide-vue-next'
 
-defineProps<{
+const props = defineProps<{
   label: string
   value: string | number
   hint?: string
   trend?: 'up' | 'down' | 'neutral'
   icon?: Component
+  series?: number[]
 }>()
+
+const chartPath = computed(() => {
+  if (!props.series || props.series.length < 2) return ''
+  const max = Math.max(...props.series)
+  const min = Math.min(...props.series)
+  const range = max - min || 1
+  const step = 100 / (props.series.length - 1)
+
+  return props.series
+    .map((value, index) => {
+      const x = index * step
+      const normalized = 100 - ((value - min) / range) * 100
+      return `${x},${normalized}`
+    })
+    .join(' ')
+})
 </script>
 
 <template>
@@ -20,7 +38,7 @@ defineProps<{
 
     <div class="space-y-2">
       <p class="text-xs tracking-[0.2em] text-cyber-muted">{{ label }}</p>
-      <div class="flex items-end gap-3">
+      <div class="flex flex-wrap items-end gap-3">
         <h3 class="font-mono text-3xl font-bold text-stone-900">{{ value }}</h3>
         <div v-if="trend" class="mb-1.5 flex items-center gap-1 text-xs" :class="[trend === 'up' ? 'text-cyber-error' : 'text-cyber-success']">
           <TrendingUp v-if="trend === 'up'" :size="10" />
@@ -28,6 +46,28 @@ defineProps<{
           <span>{{ trend === 'up' ? '上升' : '下降' }}</span>
         </div>
       </div>
+      <svg
+        v-if="chartPath"
+        class="h-10 w-full text-cyber-accent-strong/70"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <polyline
+          :points="chartPath"
+          fill="none"
+          class="stroke-current"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <polyline
+          :points="`${chartPath.split(' ')[0]} ${chartPath.split(' ').slice(-1)[0]}`"
+          fill="none"
+          class="stroke-cyber-accent/30"
+          stroke-width="2"
+        />
+      </svg>
       <p v-if="hint" class="mt-3 border-t border-cyber-border/40 pt-3 text-sm leading-6 text-cyber-muted">{{ hint }}</p>
     </div>
   </div>

@@ -195,49 +195,43 @@ impl Config {
             self.listen_addrs = vec!["0.0.0.0:8080".to_string()];
         }
 
-        self.udp_upstream_addr = self
-            .udp_upstream_addr
-            .take()
-            .and_then(|addr| {
-                let trimmed = addr.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    match trimmed.parse::<SocketAddr>() {
-                        Ok(_) => Some(trimmed.to_string()),
-                        Err(err) => {
-                            log::warn!(
-                                "Invalid udp_upstream_addr '{}': {}, disabling UDP forwarding",
-                                trimmed,
-                                err
-                            );
-                            None
-                        }
+        self.udp_upstream_addr = self.udp_upstream_addr.take().and_then(|addr| {
+            let trimmed = addr.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                match trimmed.parse::<SocketAddr>() {
+                    Ok(_) => Some(trimmed.to_string()),
+                    Err(err) => {
+                        log::warn!(
+                            "Invalid udp_upstream_addr '{}': {}, disabling UDP forwarding",
+                            trimmed,
+                            err
+                        );
+                        None
                     }
                 }
-            });
+            }
+        });
 
-        self.tcp_upstream_addr = self
-            .tcp_upstream_addr
-            .take()
-            .and_then(|addr| {
-                let trimmed = addr.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    match trimmed.parse::<SocketAddr>() {
-                        Ok(_) => Some(trimmed.to_string()),
-                        Err(err) => {
-                            log::warn!(
-                                "Invalid tcp_upstream_addr '{}': {}, disabling TCP forwarding",
-                                trimmed,
-                                err
-                            );
-                            None
-                        }
+        self.tcp_upstream_addr = self.tcp_upstream_addr.take().and_then(|addr| {
+            let trimmed = addr.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                match trimmed.parse::<SocketAddr>() {
+                    Ok(_) => Some(trimmed.to_string()),
+                    Err(err) => {
+                        log::warn!(
+                            "Invalid tcp_upstream_addr '{}': {}, disabling TCP forwarding",
+                            trimmed,
+                            err
+                        );
+                        None
                     }
                 }
-            });
+            }
+        });
 
         // 多端口配置需要标准模式
         if self.listen_addrs.len() > 1 && self.runtime_profile.is_minimal() {
@@ -274,8 +268,12 @@ impl Config {
                 clamp_u64(self.l7_config.proxy_read_timeout_ms, 500, 30_000, 10_000);
             self.l7_config.upstream_healthcheck_interval_secs =
                 clamp_u64(self.l7_config.upstream_healthcheck_interval_secs, 1, 60, 5);
-            self.l7_config.upstream_healthcheck_timeout_ms =
-                clamp_u64(self.l7_config.upstream_healthcheck_timeout_ms, 250, 10_000, 1_000);
+            self.l7_config.upstream_healthcheck_timeout_ms = clamp_u64(
+                self.l7_config.upstream_healthcheck_timeout_ms,
+                250,
+                10_000,
+                1_000,
+            );
             self.l4_config.bloom_filter_scale =
                 clamp_scale(self.l4_config.bloom_filter_scale, 0.5, 0.1, 1.0);
             self.l7_config.bloom_filter_scale =
@@ -300,8 +298,12 @@ impl Config {
                 clamp_u64(self.l7_config.proxy_read_timeout_ms, 500, 60_000, 10_000);
             self.l7_config.upstream_healthcheck_interval_secs =
                 clamp_u64(self.l7_config.upstream_healthcheck_interval_secs, 1, 120, 5);
-            self.l7_config.upstream_healthcheck_timeout_ms =
-                clamp_u64(self.l7_config.upstream_healthcheck_timeout_ms, 250, 15_000, 1_000);
+            self.l7_config.upstream_healthcheck_timeout_ms = clamp_u64(
+                self.l7_config.upstream_healthcheck_timeout_ms,
+                250,
+                15_000,
+                1_000,
+            );
             self.l4_config.bloom_filter_scale =
                 clamp_scale(self.l4_config.bloom_filter_scale, 1.0, 0.25, 1.0);
             self.l7_config.bloom_filter_scale =
@@ -395,7 +397,10 @@ pub fn apply_env_overrides(mut config: Config) -> Config {
         match value.trim().to_ascii_lowercase().as_str() {
             "minimal" => config.runtime_profile = RuntimeProfile::Minimal,
             "standard" => config.runtime_profile = RuntimeProfile::Standard,
-            other => log::warn!("Unsupported WAF_RUNTIME_PROFILE '{}', keeping SQLite value", other),
+            other => log::warn!(
+                "Unsupported WAF_RUNTIME_PROFILE '{}', keeping SQLite value",
+                other
+            ),
         }
     }
 
@@ -403,7 +408,10 @@ pub fn apply_env_overrides(mut config: Config) -> Config {
         if let Some(parsed) = parse_bool_env(&value) {
             config.api_enabled = parsed;
         } else {
-            log::warn!("Unsupported WAF_API_ENABLED '{}', keeping SQLite value", value);
+            log::warn!(
+                "Unsupported WAF_API_ENABLED '{}', keeping SQLite value",
+                value
+            );
         }
     }
 
@@ -531,7 +539,10 @@ mod tests {
 
         assert_eq!(
             config.l7_config.real_ip_headers,
-            vec!["x-forwarded-for".to_string(), "cf-connecting-ip".to_string()]
+            vec![
+                "x-forwarded-for".to_string(),
+                "cf-connecting-ip".to_string()
+            ]
         );
         assert_eq!(
             config.l7_config.trusted_proxy_cidrs,

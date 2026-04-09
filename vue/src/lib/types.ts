@@ -53,6 +53,8 @@ export interface RulesResponse {
   rules: RuleItem[]
 }
 
+export type ApiQueryValue = string | number | boolean | null | undefined
+
 export interface SecurityEventItem {
   id: number
   layer: string
@@ -67,6 +69,8 @@ export interface SecurityEventItem {
   uri: string | null
   http_version: string | null
   created_at: number
+  handled: boolean
+  handled_at: number | null
 }
 
 export interface SecurityEventsResponse {
@@ -74,6 +78,18 @@ export interface SecurityEventsResponse {
   limit: number
   offset: number
   events: SecurityEventItem[]
+}
+
+export interface EventsQuery extends Record<string, ApiQueryValue> {
+  limit?: number
+  offset?: number
+  layer?: string
+  source_ip?: string
+  action?: string
+  blocked_only?: boolean
+  handled_only?: boolean
+  sort_by?: string
+  sort_direction?: 'asc' | 'desc'
 }
 
 export interface BlockedIpItem {
@@ -91,6 +107,17 @@ export interface BlockedIpsResponse {
   blocked_ips: BlockedIpItem[]
 }
 
+export interface BlockedIpsQuery extends Record<string, ApiQueryValue> {
+  limit?: number
+  offset?: number
+  ip?: string
+  active_only?: boolean
+  blocked_from?: number
+  blocked_to?: number
+  sort_by?: string
+  sort_direction?: 'asc' | 'desc'
+}
+
 export interface WriteStatusResponse {
   success: boolean
   message: string
@@ -102,4 +129,9 @@ export interface DashboardPayload {
   events: SecurityEventsResponse
   blockedIps: BlockedIpsResponse
   rules: RulesResponse
+}
+
+export interface DashboardQueryOptions {
+  events?: EventsQuery
+  blockedIps?: BlockedIpsQuery
 }

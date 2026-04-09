@@ -217,7 +217,10 @@ mod tests {
         let request_data = b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n";
         let mut cursor = Cursor::new(request_data);
 
-        let request = handler.read_request(&mut cursor, 1024, 100, 100).await.unwrap();
+        let request = handler
+            .read_request(&mut cursor, 1024, 100, 100)
+            .await
+            .unwrap();
 
         assert_eq!(request.version, HttpVersion::Http1_1);
         assert_eq!(request.method, "GET");
@@ -236,7 +239,10 @@ mod tests {
             {\"test\": true}";
         let mut cursor = Cursor::new(request_data);
 
-        let request = handler.read_request(&mut cursor, 1024, 100, 100).await.unwrap();
+        let request = handler
+            .read_request(&mut cursor, 1024, 100, 100)
+            .await
+            .unwrap();
 
         assert_eq!(request.method, "POST");
         assert_eq!(request.uri, "/api/data");

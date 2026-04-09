@@ -82,9 +82,7 @@ impl ProtocolDetector {
     pub fn is_http2_upgrade_request(&self, bytes: &[u8]) -> bool {
         let request_str = String::from_utf8_lossy(bytes);
 
-        if request_str.contains("Upgrade: h2c")
-            || request_str.contains("Upgrade: h2")
-        {
+        if request_str.contains("Upgrade: h2c") || request_str.contains("Upgrade: h2") {
             return true;
         }
 
@@ -138,7 +136,10 @@ mod tests {
         let detector = ProtocolDetector::new(100);
         let upgrade_request = b"GET / HTTP/1.1\r\nHost: example.com\r\nUpgrade: h2c\r\nConnection: Upgrade, HTTP2-Settings\r\n";
 
-        assert_eq!(detector.detect_version(upgrade_request), HttpVersion::Http1_1);
+        assert_eq!(
+            detector.detect_version(upgrade_request),
+            HttpVersion::Http1_1
+        );
         assert!(detector.is_http2_upgrade_request(upgrade_request));
     }
 

@@ -37,8 +37,8 @@ pub struct WafContext {
 
 impl WafContext {
     pub async fn new(config: Config) -> Result<Self> {
-        let l4_enabled = config.l4_config.ddos_protection_enabled
-            || config.l4_config.connection_rate_limit > 0;
+        let l4_enabled =
+            config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
         let l7_enabled = config.l7_config.http_inspection_enabled;
         let bloom_enabled = config.bloom_enabled;
         let l4_bloom_verification = config.l4_bloom_false_positive_verification;

@@ -2,8 +2,8 @@ use crate::config::L4Config;
 use log::info;
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub struct ConnectionTracker {

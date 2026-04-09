@@ -1,6 +1,10 @@
 import type {
+  ApiQueryValue,
+  BlockedIpsQuery,
   BlockedIpsResponse,
   DashboardPayload,
+  DashboardQueryOptions,
+  EventsQuery,
   HealthResponse,
   MetricsResponse,
   RuleDraft,
@@ -39,12 +43,41 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
-export async function fetchDashboardPayload(): Promise<DashboardPayload> {
+type QueryParams = Record<string, ApiQueryValue>
+
+const buildQuery = (params?: QueryParams) => {
+  if (!params) return ''
+  const search = new URLSearchParams()
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '' || value === 'all') return
+    search.append(key, String(value))
+  })
+  const query = search.toString()
+  return query ? `?${query}` : ''
+}
+
+const withDefaults = <T extends QueryParams>(defaults: T, overrides?: Partial<T>): T => ({
+  ...defaults,
+  ...(overrides || {}),
+})
+
+export async function fetchDashboardPayload(options: DashboardQueryOptions = {}): Promise<DashboardPayload> {
+  const eventsQuery = withDefaults<EventsQuery>(
+    { limit: 8, sort_direction: 'desc', sort_by: 'created_at' },
+    options.events,
+  )
+  const blockedQuery = withDefaults<BlockedIpsQuery>(
+    { limit: 8, active_only: true, sort_direction: 'desc', sort_by: 'blocked_at' },
+    options.blockedIps,
+  )
+  const eventsPath = `/events${buildQuery(eventsQuery)}`
+  const blockedPath = `/blocked-ips${buildQuery(blockedQuery)}`
+
   const [health, metrics, events, blockedIps, rules] = await Promise.all([
     apiRequest<HealthResponse>('/health'),
     apiRequest<MetricsResponse>('/metrics'),
-    apiRequest<SecurityEventsResponse>('/events?limit=8'),
-    apiRequest<BlockedIpsResponse>('/blocked-ips?limit=8&active_only=true'),
+    apiRequest<SecurityEventsResponse>(eventsPath),
+    apiRequest<BlockedIpsResponse>(blockedPath),
     apiRequest<RulesResponse>('/rules'),
   ])
 
@@ -74,5 +107,32 @@ export function deleteRule(id: string) {
 export function unblockIp(id: number) {
   return apiRequest<WriteStatusResponse>(`/blocked-ips/${id}`, {
     method: 'DELETE',
+  })
+}
+
+export function fetchSecurityEvents(query?: EventsQuery) {
+  return apiRequest<SecurityEventsResponse>(`/events${buildQuery(query)}`)
+}
+
+export function fetchBlockedIps(query?: BlockedIpsQuery) {
+  return apiRequest<BlockedIpsResponse>(`/blocked-ips${buildQuery(query)}`)
+}
+
+export function fetchRulesList() {
+  return apiRequest<RulesResponse>('/rules')
+}
+
+export function fetchHealth() {
+  return apiRequest<HealthResponse>('/health')
+}
+
+export function fetchMetrics() {
+  return apiRequest<MetricsResponse>('/metrics')
+}
+
+export function markSecurityEventHandled(id: number, handled: boolean) {
+  return apiRequest<WriteStatusResponse>(`/events/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ handled }),
   })
 }

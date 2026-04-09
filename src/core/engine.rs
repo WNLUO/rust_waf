@@ -16,9 +16,9 @@ use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_rustls::TlsAcceptor;
 
 #[cfg(feature = "http3")]
-use bytes::Bytes;
-#[cfg(feature = "http3")]
 use bytes::Buf;
+#[cfg(feature = "http3")]
+use bytes::Bytes;
 #[cfg(feature = "http3")]
 use h3::server::RequestStream;
 #[cfg(feature = "http3")]
@@ -29,8 +29,8 @@ use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{Endpoint as QuinnEndpoint, Incoming as QuinnIncoming};
 
 use super::WafContext;
-use crate::config::{Config, RuntimeProfile};
 use crate::config::l7::UpstreamFailureMode;
+use crate::config::{Config, RuntimeProfile};
 use crate::core::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
@@ -160,7 +160,9 @@ impl WafEngine {
 
         #[cfg(not(feature = "http3"))]
         if self.context.config.http3_config.enabled {
-            warn!("HTTP/3 support was requested but the binary was built without the 'http3' feature");
+            warn!(
+                "HTTP/3 support was requested but the binary was built without the 'http3' feature"
+            );
         }
 
         #[cfg(feature = "http3")]
@@ -449,10 +451,7 @@ impl WafEngine {
                     for (port, port_stats) in &stats.per_port_stats {
                         debug!(
                             "Port {}: connections={}, blocks={}, ddos_events={}",
-                            port,
-                            port_stats.connections,
-                            port_stats.blocks,
-                            port_stats.ddos_events
+                            port, port_stats.connections, port_stats.blocks, port_stats.ddos_events
                         );
                     }
                     debug!("=============================");
@@ -462,9 +461,7 @@ impl WafEngine {
     }
 }
 
-fn build_tls_acceptor(
-    config: &crate::config::Http3Config,
-) -> Result<Option<TlsAcceptor>> {
+fn build_tls_acceptor(config: &crate::config::Http3Config) -> Result<Option<TlsAcceptor>> {
     if !config.enable_tls13 {
         return Ok(None);
     }
@@ -489,9 +486,7 @@ fn build_tls_acceptor(
 }
 
 #[cfg(feature = "http3")]
-fn build_http3_endpoint(
-    config: &crate::config::Http3Config,
-) -> Result<Option<QuinnEndpoint>> {
+fn build_http3_endpoint(config: &crate::config::Http3Config) -> Result<Option<QuinnEndpoint>> {
     if !config.enabled {
         return Ok(None);
     }
@@ -655,7 +650,9 @@ async fn handle_http3_quic_connection(
         return Ok(());
     }
 
-    let mut h3_connection = h3::server::builder().build(H3QuinnConnection::new(connection)).await?;
+    let mut h3_connection = h3::server::builder()
+        .build(H3QuinnConnection::new(connection))
+        .await?;
 
     loop {
         match h3_connection.accept().await {
@@ -761,8 +758,13 @@ async fn handle_http3_request(
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_proxy_success(proxy_started_at.elapsed());
                 }
-                send_http3_response(&mut stream, response.status_code, &response.headers, response.body)
-                    .await?;
+                send_http3_response(
+                    &mut stream,
+                    response.status_code,
+                    &response.headers,
+                    response.body,
+                )
+                .await?;
                 return Ok(());
             }
             Err(err) => {
@@ -1043,7 +1045,9 @@ fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
     let headers_end = response
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
-        .ok_or_else(|| anyhow::anyhow!("Invalid upstream HTTP/1 response: missing header terminator"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("Invalid upstream HTTP/1 response: missing header terminator")
+        })?;
     let header_block = &response[..headers_end];
     let body_offset = headers_end + 4;
     let header_text = String::from_utf8_lossy(header_block);
@@ -1099,7 +1103,9 @@ fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>> {
         let line_end = body[cursor..]
             .windows(2)
             .position(|window| window == b"\r\n")
-            .ok_or_else(|| anyhow::anyhow!("Invalid chunked response: missing chunk size terminator"))?
+            .ok_or_else(|| {
+                anyhow::anyhow!("Invalid chunked response: missing chunk size terminator")
+            })?
             + cursor;
         let size_line = std::str::from_utf8(&body[cursor..line_end])?;
         let size_hex = size_line.split(';').next().unwrap_or(size_line).trim();
@@ -1167,9 +1173,7 @@ async fn detect_and_handle_protocol(
         HttpVersion::Http2_0 if context.config.l7_config.http2_config.enabled => {
             handle_http2_connection(context, stream, peer_addr, packet, Vec::new()).await
         }
-        _ => {
-            handle_http1_connection(context, stream, peer_addr, packet, Vec::new()).await
-        }
+        _ => handle_http1_connection(context, stream, peer_addr, packet, Vec::new()).await,
     }
 }
 
@@ -1348,8 +1352,12 @@ async fn handle_http2_connection(
                         metrics.record_packet(request_dump.len());
                     }
 
-                    let inspection_result =
-                        inspect_application_layers(context.as_ref(), &packet, &request, &request_dump);
+                    let inspection_result = inspect_application_layers(
+                        context.as_ref(),
+                        &packet,
+                        &request,
+                        &request_dump,
+                    );
 
                     if inspection_result.blocked {
                         if let Some(metrics) = context.metrics.as_ref() {
@@ -1578,7 +1586,12 @@ fn apply_client_identity(
         },
     );
 
-    apply_proxy_headers(peer_addr, request, resolved_client_ip, used_forwarded_header);
+    apply_proxy_headers(
+        peer_addr,
+        request,
+        resolved_client_ip,
+        used_forwarded_header,
+    );
 }
 
 fn prepare_request_for_proxy(request: &mut UnifiedHttpRequest) {
@@ -1594,7 +1607,10 @@ fn apply_proxy_headers(
 ) {
     request.add_header("x-real-ip".to_string(), resolved_client_ip.to_string());
 
-    let forwarded_for = match (preserve_forwarded_chain, request.get_header("x-forwarded-for")) {
+    let forwarded_for = match (
+        preserve_forwarded_chain,
+        request.get_header("x-forwarded-for"),
+    ) {
         (true, Some(existing)) if !existing.trim().is_empty() => {
             let existing = existing.trim();
             let peer_ip = peer_addr.ip().to_string();
@@ -1609,9 +1625,7 @@ fn apply_proxy_headers(
                 format!("{existing}, {peer_ip}")
             }
         }
-        (false, Some(existing)) if !existing.trim().is_empty() => {
-            resolved_client_ip.to_string()
-        }
+        (false, Some(existing)) if !existing.trim().is_empty() => resolved_client_ip.to_string(),
         _ => resolved_client_ip.to_string(),
     };
 
@@ -1702,8 +1716,7 @@ async fn run_upstream_healthcheck_loop(context: Arc<WafContext>, upstream_addr: 
         .l7_config
         .upstream_healthcheck_interval_secs
         .max(1);
-    let mut interval =
-        tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
 
     loop {
         interval.tick().await;
@@ -1889,7 +1902,9 @@ mod tests {
 
         assert_eq!(request.client_ip.as_deref(), Some("198.51.100.24"));
         assert_eq!(
-            request.get_metadata("network.client_ip_source").map(String::as_str),
+            request
+                .get_metadata("network.client_ip_source")
+                .map(String::as_str),
             Some("forwarded_header")
         );
         assert_eq!(
@@ -1915,7 +1930,9 @@ mod tests {
 
         assert_eq!(request.client_ip.as_deref(), Some("198.51.100.10"));
         assert_eq!(
-            request.get_metadata("network.client_ip_source").map(String::as_str),
+            request
+                .get_metadata("network.client_ip_source")
+                .map(String::as_str),
             Some("socket_peer")
         );
     }
@@ -1979,16 +1996,17 @@ mod tests {
                 .unwrap();
             assert!(String::from_utf8_lossy(&request).contains("GET /proxy HTTP/1.1"));
             upstream_stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                )
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
                 .await
                 .unwrap();
         });
 
         let (mut client_side_stream, _) = front_listener.accept().await.unwrap();
-        let mut request =
-            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/proxy".to_string());
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/proxy".to_string(),
+        );
         request.add_header("Host".to_string(), "example.com".to_string());
 
         forward_http1_request(
@@ -2063,7 +2081,10 @@ mod tests {
 
         let result = enforce_upstream_policy(&context);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("downstream unavailable"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("downstream unavailable"));
     }
 
     #[tokio::test]
@@ -2094,11 +2115,9 @@ mod tests {
         let parsed = parse_http1_response(response).unwrap();
         assert_eq!(parsed.status_code, 200);
         assert_eq!(parsed.body, b"test".to_vec());
-        assert!(
-            parsed
-                .headers
-                .iter()
-                .all(|(name, _)| !name.eq_ignore_ascii_case("transfer-encoding"))
-        );
+        assert!(parsed
+            .headers
+            .iter()
+            .all(|(name, _)| !name.eq_ignore_ascii_case("transfer-encoding")));
     }
 }

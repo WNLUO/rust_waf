@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{delete, get},
+    routing::{delete, get, patch},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -102,6 +102,13 @@ pub struct SecurityEventResponse {
     uri: Option<String>,
     http_version: Option<String>,
     created_at: i64,
+    handled: bool,
+    handled_at: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EventUpdateRequest {
+    handled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,6 +136,7 @@ pub struct EventsQueryParams {
     source_ip: Option<String>,
     action: Option<String>,
     blocked_only: Option<bool>,
+    handled_only: Option<bool>,
     created_from: Option<i64>,
     created_to: Option<i64>,
     sort_by: Option<String>,
@@ -175,6 +183,7 @@ impl ApiServer {
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
             .route("/events", get(list_security_events_handler))
+            .route("/events/:id", patch(update_security_event_handler))
             .route("/blocked-ips", get(list_blocked_ips_handler))
             .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
@@ -252,6 +261,38 @@ async fn list_security_events_handler(
     }))
 }
 
+async fn update_security_event_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    ExtractJson(payload): ExtractJson<EventUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let updated = store
+        .mark_security_event_handled(id, payload.handled)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if updated {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!(
+                "Security event {} marked as {}",
+                id,
+                if payload.handled {
+                    "handled"
+                } else {
+                    "unhandled"
+                }
+            ),
+        }))
+    } else {
+        Err(ApiError::not_found(format!(
+            "Security event '{}' not found",
+            id
+        )))
+    }
+}
+
 async fn list_blocked_ips_handler(
     State(state): State<ApiState>,
     Query(params): Query<BlockedIpsQueryParams>,
@@ -313,7 +354,10 @@ async fn create_rule_handler(
             }),
         ))
     } else {
-        Err(ApiError::conflict(format!("Rule '{}' already exists", rule.id)))
+        Err(ApiError::conflict(format!(
+            "Rule '{}' already exists",
+            rule.id
+        )))
     }
 }
 
@@ -323,7 +367,9 @@ async fn update_rule_handler(
     ExtractJson(payload): ExtractJson<RuleUpsertRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = rules_store(&state)?;
-    let rule = payload.into_rule_with_id(id).map_err(ApiError::bad_request)?;
+    let rule = payload
+        .into_rule_with_id(id)
+        .map_err(ApiError::bad_request)?;
     store.upsert_rule(&rule).await.map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
@@ -457,8 +503,7 @@ impl RuleUpsertRequest {
             id,
             name,
             enabled: self.enabled,
-            layer: crate::config::RuleLayer::parse(&self.layer)
-                .map_err(|err| err.to_string())?,
+            layer: crate::config::RuleLayer::parse(&self.layer).map_err(|err| err.to_string())?,
             pattern,
             action: crate::config::RuleAction::parse(&self.action)
                 .map_err(|err| err.to_string())?,
@@ -490,6 +535,8 @@ impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
             uri: event.uri,
             http_version: event.http_version,
             created_at: event.created_at,
+            handled: event.handled,
+            handled_at: event.handled_at,
         }
     }
 }
@@ -515,6 +562,7 @@ impl EventsQueryParams {
             source_ip: self.source_ip,
             action: self.action,
             blocked_only: self.blocked_only.unwrap_or(false),
+            handled_only: self.handled_only,
             created_from: self.created_from,
             created_to: self.created_to,
             sort_by: parse_event_sort_field(self.sort_by.as_deref())?,
@@ -747,6 +795,7 @@ mod tests {
             source_ip: Some("10.0.0.1".to_string()),
             action: Some("block".to_string()),
             blocked_only: Some(true),
+            handled_only: Some(true),
             created_from: Some(100),
             created_to: Some(200),
             sort_by: Some("source_ip".to_string()),

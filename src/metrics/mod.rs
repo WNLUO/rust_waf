@@ -82,8 +82,7 @@ impl MetricsCollector {
 
     pub fn get_stats(&self) -> MetricsSnapshot {
         let proxy_successes = self.proxy_successes.load(Ordering::Relaxed);
-        let proxy_latency_micros_total =
-            self.proxy_latency_micros_total.load(Ordering::Relaxed);
+        let proxy_latency_micros_total = self.proxy_latency_micros_total.load(Ordering::Relaxed);
         MetricsSnapshot {
             total_packets: self.total_packets.load(Ordering::Relaxed),
             blocked_packets: self.blocked_packets.load(Ordering::Relaxed),
@@ -93,9 +92,7 @@ impl MetricsCollector {
             proxied_requests: self.proxied_requests.load(Ordering::Relaxed),
             proxy_successes,
             proxy_failures: self.proxy_failures.load(Ordering::Relaxed),
-            proxy_fail_close_rejections: self
-                .proxy_fail_close_rejections
-                .load(Ordering::Relaxed),
+            proxy_fail_close_rejections: self.proxy_fail_close_rejections.load(Ordering::Relaxed),
             upstream_healthcheck_successes: self
                 .upstream_healthcheck_successes
                 .load(Ordering::Relaxed),

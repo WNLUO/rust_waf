@@ -33,7 +33,11 @@ mod tests {
         request.add_header("accept".to_string(), "*/*".to_string());
 
         let result = inspector.inspect_unified_request(&test_packet(), &request);
-        assert!(!result.blocked, "unexpected block reason: {}", result.reason);
+        assert!(
+            !result.blocked,
+            "unexpected block reason: {}",
+            result.reason
+        );
     }
 
     #[test]
@@ -44,7 +48,11 @@ mod tests {
         request.body = vec![b'a'; L7Config::default().max_request_size + 1];
 
         let result = inspector.inspect_unified_request(&test_packet(), &request);
-        assert!(!result.blocked, "unexpected block reason: {}", result.reason);
+        assert!(
+            !result.blocked,
+            "unexpected block reason: {}",
+            result.reason
+        );
     }
 }
 

@@ -60,13 +60,14 @@ const navItems = [
           <span class="text-sm tracking-[0.2em] text-cyber-success">网关在线</span>
         </div>
 
-        <div class="flex items-center gap-6">
+        <div class="flex flex-wrap items-center gap-4 md:gap-6">
           <div class="flex flex-col items-start md:items-end">
             <span class="text-xs tracking-[0.18em] text-cyber-muted">界面节奏</span>
             <div class="mt-2 h-2 w-28 overflow-hidden rounded-full bg-cyber-border/70">
               <div class="h-full w-[68%] rounded-full bg-gradient-to-r from-cyber-accent to-cyber-success"></div>
             </div>
           </div>
+          <slot name="header-extra"></slot>
         </div>
       </header>
 

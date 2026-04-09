@@ -1,12 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createRule, deleteRule, fetchDashboardPayload, unblockIp, updateRule } from '../lib/api'
-import type { DashboardPayload, RuleDraft, RuleItem } from '../lib/types'
+import {
+  createRule,
+  deleteRule,
+  fetchBlockedIps,
+  fetchHealth,
+  fetchMetrics,
+  fetchRulesList,
+  fetchSecurityEvents,
+  markSecurityEventHandled,
+  unblockIp,
+  updateRule,
+} from '../lib/api'
+import type { DashboardPayload, RuleDraft, RuleItem, SecurityEventItem } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
+import { useFormatters } from '../composables/useFormatters'
 import {
   Shield,
   Ban,
@@ -21,6 +33,9 @@ import {
   Radar,
   ArrowUpRight,
   Activity,
+  Copy,
+  Check,
+  Search,
 } from 'lucide-vue-next'
 
 type AdminView = 'overview' | 'rules' | 'events' | 'blocked'
@@ -32,6 +47,26 @@ const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
 const isRuleModalOpen = ref(false)
+const lastUpdated = ref<number | null>(null)
+const filtersReady = ref(false)
+const refreshTimer = ref<number | null>(null)
+
+const metricsHistory = reactive({
+  totalPackets: [] as number[],
+  blockRate: [] as number[],
+  latency: [] as number[],
+})
+
+const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
+  const series = metricsHistory[key]
+  series.push(Number.isFinite(value) ? value : 0)
+  if (series.length > 12) {
+    series.shift()
+  }
+}
+
+const { formatBytes, formatNumber, formatLatency, formatTimestamp, severityLabel, actionLabel, layerLabel, timeRemaining } =
+  useFormatters()
 
 const viewPaths: Record<AdminView, string> = {
   overview: '/admin',
@@ -70,52 +105,50 @@ const ruleForm = reactive<RuleDraft>({
   severity: 'high',
 })
 
-const formatBytes = (b: number) => {
-  if (b < 1024) return `${b} B`
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}
+const ruleFilters = reactive({
+  search: '',
+  layer: 'all',
+  action: 'all',
+  severity: 'all',
+  status: 'all',
+})
 
-const formatNumber = (n: number) => n.toLocaleString('zh-CN')
+const eventsFilters = reactive({
+  layer: 'all',
+  action: 'all',
+  blocked_only: false,
+  handled: 'all' as 'all' | 'handled' | 'unhandled',
+  sort_by: 'created_at',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
 
-const formatLatency = (micros: number) => {
-  if (micros < 1000) return `${micros} 微秒`
-  return `${(micros / 1000).toFixed(2)} 毫秒`
-}
+const blockedFilters = reactive({
+  active_only: true,
+  sort_by: 'blocked_at',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
 
-const formatTimestamp = (timestamp: number | null | undefined) => {
-  if (!timestamp) return '暂无'
+const eventsQueryParams = computed(() => ({
+  limit: 8,
+  sort_by: eventsFilters.sort_by,
+  sort_direction: eventsFilters.sort_direction,
+  blocked_only: eventsFilters.blocked_only,
+  layer: eventsFilters.layer === 'all' ? undefined : eventsFilters.layer,
+  action: eventsFilters.action === 'all' ? undefined : eventsFilters.action,
+  handled_only:
+    eventsFilters.handled === 'all'
+      ? undefined
+      : eventsFilters.handled === 'handled'
+        ? true
+        : false,
+}))
 
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(new Date(timestamp * 1000))
-}
-
-const layerLabel = (layer: string) => {
-  if (layer === 'l4') return '四层'
-  if (layer === 'l7') return '七层'
-  return layer
-}
-
-const severityLabel = (severity: string) => {
-  if (severity === 'low') return '低'
-  if (severity === 'medium') return '中'
-  if (severity === 'high') return '高'
-  return severity
-}
-
-const actionLabel = (action: string) => {
-  if (action === 'block') return '拦截'
-  if (action === 'allow') return '放行'
-  if (action === 'log') return '记录'
-  return action
-}
+const blockedQueryParams = computed(() => ({
+  limit: 8,
+  active_only: blockedFilters.active_only,
+  sort_by: blockedFilters.sort_by,
+  sort_direction: blockedFilters.sort_direction,
+}))
 
 const healthSummary = computed(() => {
   if (!dashboard.value) return '正在读取运行状态'
@@ -125,7 +158,6 @@ const healthSummary = computed(() => {
 const successRate = computed(() => {
   const metrics = dashboard.value?.metrics
   if (!metrics) return '暂无'
-
   const total = metrics.proxy_successes + metrics.proxy_failures
   if (total === 0) return '暂无'
   return `${((metrics.proxy_successes / total) * 100).toFixed(1)}%`
@@ -161,12 +193,62 @@ const overviewMoments = computed(() => {
   ]
 })
 
-const fetchData = async () => {
+const requestStatus = computed(() => {
+  if (refreshing.value) return '实时同步中...'
+  if (lastUpdated.value) {
+    return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(lastUpdated.value))}`
+  }
+  return '等待首次同步'
+})
+
+const filteredRules = computed(() => {
+  const rules = dashboard.value?.rules.rules ?? []
+  return rules.filter((rule) => {
+    if (ruleFilters.layer !== 'all' && rule.layer !== ruleFilters.layer) return false
+    if (ruleFilters.action !== 'all' && rule.action !== ruleFilters.action) return false
+    if (ruleFilters.severity !== 'all' && rule.severity !== ruleFilters.severity) return false
+    if (ruleFilters.status !== 'all') {
+      const shouldEnable = ruleFilters.status === 'enabled'
+      if (rule.enabled !== shouldEnable) return false
+    }
+    if (ruleFilters.search) {
+      const keyword = ruleFilters.search.trim().toLowerCase()
+      if (
+        !rule.name.toLowerCase().includes(keyword) &&
+        !rule.id.toLowerCase().includes(keyword) &&
+        !rule.pattern.toLowerCase().includes(keyword)
+      ) {
+        return false
+      }
+    }
+    return true
+  })
+})
+
+const fetchData = async (arg?: boolean | Event) => {
+  const showLoader = typeof arg === 'boolean' ? arg : false
+  if (showLoader) loading.value = true
   refreshing.value = true
   try {
-    const data = await fetchDashboardPayload()
-    dashboard.value = data
+    const [health, metrics, events, blockedIps, rules] = await Promise.all([
+      fetchHealth(),
+      fetchMetrics(),
+      fetchSecurityEvents(eventsQueryParams.value),
+      fetchBlockedIps(blockedQueryParams.value),
+      fetchRulesList(),
+    ])
+    dashboard.value = { health, metrics, events, blockedIps, rules }
+    pushHistory('totalPackets', metrics.total_packets)
+    const rate = metrics.total_packets ? (metrics.blocked_packets / metrics.total_packets) * 100 : 0
+    pushHistory('blockRate', Number(rate.toFixed(2)))
+    pushHistory('latency', metrics.average_proxy_latency_micros)
+    lastUpdated.value = Date.now()
     error.value = ''
+    filtersReady.value = true
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取控制台数据失败'
   } finally {
@@ -175,11 +257,70 @@ const fetchData = async () => {
   }
 }
 
+const refreshEvents = async () => {
+  if (!dashboard.value) return
+  refreshing.value = true
+  try {
+    const events = await fetchSecurityEvents(eventsQueryParams.value)
+    dashboard.value = { ...dashboard.value, events }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取事件失败'
+  } finally {
+    refreshing.value = false
+  }
+}
+
+const refreshBlockedIps = async () => {
+  if (!dashboard.value) return
+  refreshing.value = true
+  try {
+    const blockedIps = await fetchBlockedIps(blockedQueryParams.value)
+    dashboard.value = { ...dashboard.value, blockedIps }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取封禁名单失败'
+  } finally {
+    refreshing.value = false
+  }
+}
+
+const refreshRules = async () => {
+  if (!dashboard.value) return
+  try {
+    const rules = await fetchRulesList()
+    dashboard.value = { ...dashboard.value, rules }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取规则失败'
+  }
+}
+
 onMounted(() => {
-  fetchData()
-  const timer = setInterval(fetchData, 5000)
-  onBeforeUnmount(() => clearInterval(timer))
+  fetchData(true)
+  refreshTimer.value = window.setInterval(() => fetchData(), 5000)
 })
+
+onBeforeUnmount(() => {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+  }
+})
+
+watch(
+  () => ({ ...eventsFilters }),
+  () => {
+    if (!filtersReady.value) return
+    refreshEvents()
+  },
+  { deep: true },
+)
+
+watch(
+  () => ({ ...blockedFilters }),
+  () => {
+    if (!filtersReady.value) return
+    refreshBlockedIps()
+  },
+  { deep: true },
+)
 
 const openView = (view: AdminView) => {
   router.push(viewPaths[view])
@@ -206,7 +347,7 @@ const handleCreateOrUpdateRule = async () => {
       await createRule(ruleForm)
     }
     isRuleModalOpen.value = false
-    await fetchData()
+    await refreshRules()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '规则保存失败'
   }
@@ -225,11 +366,23 @@ const openEditRule = (rule: RuleItem) => {
   isRuleModalOpen.value = true
 }
 
+const toggleRuleStatus = async (rule: RuleItem) => {
+  try {
+    await updateRule({
+      ...rule,
+      enabled: !rule.enabled,
+    })
+    await refreshRules()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '更新规则状态失败'
+  }
+}
+
 const handleDeleteRule = async (id: string) => {
   if (!window.confirm('确认删除这条规则吗？')) return
   try {
     await deleteRule(id)
-    await fetchData()
+    await refreshRules()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '规则删除失败'
   }
@@ -238,15 +391,45 @@ const handleDeleteRule = async (id: string) => {
 const handleUnblock = async (id: number) => {
   try {
     await unblockIp(id)
-    await fetchData()
+    await refreshBlockedIps()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '解除封禁失败'
+  }
+}
+
+const toggleEventHandled = async (event: SecurityEventItem) => {
+  try {
+    await markSecurityEventHandled(event.id, !event.handled)
+    await refreshEvents()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '更新事件状态失败'
+  }
+}
+
+const copyToClipboard = async (text: string) => {
+  try {
+    await navigator.clipboard?.writeText(text)
+  } catch {
+    // fall back silently
   }
 }
 </script>
 
 <template>
   <AppLayout>
+    <template #header-extra>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-cyber-muted whitespace-nowrap">{{ requestStatus }}</span>
+        <button
+          @click="fetchData"
+          class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
+          :disabled="refreshing"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
+          同步
+        </button>
+      </div>
+    </template>
     <div v-if="loading" class="flex h-72 items-center justify-center">
       <div class="flex flex-col items-center gap-4 rounded-[28px] border border-white/80 bg-white/75 px-8 py-10 shadow-cyber">
         <RefreshCw class="animate-spin text-cyber-accent-strong" :size="30" />
@@ -273,13 +456,9 @@ const handleUnblock = async (id: number) => {
               </p>
             </div>
 
-            <button
-              @click="fetchData"
-              class="inline-flex items-center justify-center gap-2 self-start rounded-full border border-cyber-border bg-white/75 px-5 py-3 text-sm text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-            >
-              <RefreshCw :size="16" :class="{ 'animate-spin': refreshing }" />
-              立即刷新
-            </button>
+            <div class="rounded-full border border-white/80 bg-white/70 px-4 py-2 text-xs text-cyber-muted shadow-sm">
+              {{ requestStatus }}
+            </div>
           </div>
 
           <div class="mt-8 grid gap-4 md:grid-cols-3">
@@ -361,6 +540,7 @@ const handleUnblock = async (id: number) => {
             :value="formatNumber(dashboard?.metrics.total_packets || 0)"
             :hint="`累计流量 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
             :icon="Activity"
+            :series="metricsHistory.totalPackets"
           />
           <MetricWidget
             label="累计拦截次数"
@@ -368,6 +548,7 @@ const handleUnblock = async (id: number) => {
             :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / 七层 ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
             :icon="Shield"
             trend="up"
+            :series="metricsHistory.blockRate"
           />
           <MetricWidget
             label="平均代理延迟"
@@ -375,6 +556,7 @@ const handleUnblock = async (id: number) => {
             :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"
             :icon="Gauge"
             trend="down"
+            :series="metricsHistory.latency"
           />
           <MetricWidget
             label="启用规则"
@@ -476,6 +658,42 @@ const handleUnblock = async (id: number) => {
           </button>
         </div>
 
+        <div class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4">
+          <label class="flex flex-1 min-w-[200px] items-center gap-2 rounded-[20px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-cyber-muted">
+            <Search :size="14" />
+            <input
+              v-model="ruleFilters.search"
+              type="text"
+              class="w-full bg-transparent text-stone-800 outline-none"
+              placeholder="搜索名称 / ID / 匹配内容"
+            />
+          </label>
+          <select v-model="ruleFilters.layer" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部层级</option>
+            <option value="l4">四层</option>
+            <option value="l7">七层</option>
+          </select>
+          <select v-model="ruleFilters.action" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部动作</option>
+            <option value="block">拦截</option>
+            <option value="allow">放行</option>
+            <option value="alert">告警</option>
+            <option value="log">记录</option>
+          </select>
+          <select v-model="ruleFilters.severity" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部级别</option>
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+            <option value="critical">紧急</option>
+          </select>
+          <select v-model="ruleFilters.status" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部状态</option>
+            <option value="enabled">启用</option>
+            <option value="disabled">停用</option>
+          </select>
+        </div>
+
         <div class="overflow-hidden rounded-[30px] border border-white/80 bg-white/78 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
           <div class="overflow-x-auto">
             <table class="min-w-full border-collapse text-left">
@@ -492,7 +710,7 @@ const handleUnblock = async (id: number) => {
               </thead>
               <tbody>
                 <tr
-                  v-for="rule in dashboard?.rules.rules"
+                  v-for="rule in filteredRules"
                   :key="rule.id"
                   class="border-t border-cyber-border/50 text-sm text-stone-800 transition hover:bg-[#fff8ef]"
                 >
@@ -512,6 +730,13 @@ const handleUnblock = async (id: number) => {
                       >
                         <Edit3 :size="14" />
                         编辑
+                      </button>
+                      <button
+                        @click="toggleRuleStatus(rule)"
+                        class="inline-flex items-center gap-1 rounded-full border border-cyber-border px-3 py-2 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                      >
+                        <Check :size="14" />
+                        {{ rule.enabled ? '停用' : '启用' }}
                       </button>
                       <button
                         @click="handleDeleteRule(rule.id)"
@@ -538,11 +763,45 @@ const handleUnblock = async (id: number) => {
           <p class="mt-2 text-sm text-cyber-muted">展示最近的安全事件，帮助判断攻击来源与处置效果。</p>
         </div>
 
+        <div class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4">
+          <select v-model="eventsFilters.layer" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部层级</option>
+            <option value="l4">四层</option>
+            <option value="l7">七层</option>
+          </select>
+          <select v-model="eventsFilters.action" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部动作</option>
+            <option value="block">拦截</option>
+            <option value="allow">放行</option>
+            <option value="alert">告警</option>
+            <option value="log">记录</option>
+          </select>
+          <label class="inline-flex items-center gap-2 rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <input v-model="eventsFilters.blocked_only" type="checkbox" class="accent-[var(--color-cyber-accent)]" />
+            仅显示拦截
+          </label>
+          <select v-model="eventsFilters.handled" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="all">全部状态</option>
+            <option value="unhandled">仅未处理</option>
+            <option value="handled">仅已处理</option>
+          </select>
+          <select v-model="eventsFilters.sort_by" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="created_at">时间排序</option>
+            <option value="source_ip">按来源 IP</option>
+            <option value="dest_port">按目标端口</option>
+          </select>
+          <select v-model="eventsFilters.sort_direction" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
+          </select>
+        </div>
+
         <div class="grid gap-4">
           <article
             v-for="event in dashboard?.events.events"
             :key="event.id"
-            class="rounded-[30px] border border-white/80 bg-white/78 p-6 shadow-[0_14px_40px_rgba(90,60,30,0.07)]"
+            class="rounded-[30px] border border-white/80 bg-white/78 p-6 shadow-[0_14px_40px_rgba(90,60,30,0.07)] transition"
+            :class="{ 'opacity-65': event.handled }"
           >
             <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div class="space-y-3">
@@ -555,6 +814,7 @@ const handleUnblock = async (id: number) => {
                     :text="actionLabel(event.action)"
                     :type="event.action === 'block' ? 'error' : 'warning'"
                   />
+                  <StatusBadge v-if="event.handled" text="已处理" type="success" compact />
                   <span class="text-sm font-medium text-stone-900">{{ event.reason }}</span>
                 </div>
                 <div class="grid gap-2 text-sm text-stone-700 md:grid-cols-2">
@@ -569,6 +829,29 @@ const handleUnblock = async (id: number) => {
                 {{ formatTimestamp(event.created_at) }}
               </div>
             </div>
+            <div class="mt-4 flex flex-wrap gap-3 text-xs text-cyber-muted">
+              <button
+                class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 px-3 py-1 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                @click="copyToClipboard(`${event.source_ip}`)"
+              >
+                <Copy :size="12" />
+                复制来源 IP
+              </button>
+              <button
+                class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 px-3 py-1 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                @click="copyToClipboard(event.uri || '')"
+              >
+                <Copy :size="12" />
+                复制 URL
+              </button>
+              <button
+                class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 px-3 py-1 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                @click="toggleEventHandled(event)"
+              >
+                <Check :size="12" />
+                {{ event.handled ? '标记未处理' : '标记已处理' }}
+              </button>
+            </div>
           </article>
           <p v-if="!dashboard?.events.events.length" class="text-sm text-cyber-muted">当前没有可显示的安全事件。</p>
         </div>
@@ -578,6 +861,22 @@ const handleUnblock = async (id: number) => {
         <div>
           <h2 class="text-2xl font-semibold text-stone-900">封禁名单</h2>
           <p class="mt-2 text-sm text-cyber-muted">这里集中展示当前封禁的来源地址与封禁原因。</p>
+        </div>
+
+        <div class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4">
+          <label class="inline-flex items-center gap-2 rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <input v-model="blockedFilters.active_only" type="checkbox" class="accent-[var(--color-cyber-accent)]" />
+            仅显示有效封禁
+          </label>
+          <select v-model="blockedFilters.sort_by" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="blocked_at">按封禁时间</option>
+            <option value="expires_at">按到期时间</option>
+            <option value="ip">按 IP</option>
+          </select>
+          <select v-model="blockedFilters.sort_direction" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
+          </select>
         </div>
 
         <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -601,6 +900,7 @@ const handleUnblock = async (id: number) => {
             <h3 class="mt-5 font-mono text-2xl font-semibold text-stone-900">{{ ip.ip }}</h3>
             <p class="mt-3 text-sm text-cyber-muted">封禁时间：{{ formatTimestamp(ip.blocked_at) }}</p>
             <p class="mt-2 text-sm text-cyber-muted">到期时间：{{ formatTimestamp(ip.expires_at) }}</p>
+            <p class="mt-1 text-xs text-cyber-muted">剩余：{{ timeRemaining(ip.expires_at) }}</p>
 
             <div class="mt-5 rounded-[22px] bg-cyber-surface-strong p-4">
               <p class="text-xs tracking-[0.18em] text-cyber-muted">封禁原因</p>

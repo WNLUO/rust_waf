@@ -1,8 +1,8 @@
 use crate::config::L4Config;
 use crate::core::{InspectionResult, PacketInfo, WafContext};
 use crate::l4::bloom_filter::L4BloomFilterManager;
-use crate::l4::connection::ConnectionManager;
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
+use crate::l4::connection::ConnectionManager;
 use log::{debug, info};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -345,5 +345,4 @@ mod tests {
         assert_eq!(result.layer, InspectionLayer::L4);
         assert!(result.reason.contains("DDoS attack detected"));
     }
-
 }

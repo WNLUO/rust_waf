@@ -267,7 +267,9 @@ impl Http2StreamManager {
         let stream_id = self.next_stream_id;
         self.next_stream_id += 2;
 
-        let state = StreamState { window_size: 65_535 };
+        let state = StreamState {
+            window_size: 65_535,
+        };
         self.active_streams.insert(stream_id, state);
         debug!("Created new HTTP/2.0 stream: {}", stream_id);
         Some(stream_id)
@@ -302,13 +304,16 @@ impl Http2StreamManager {
     }
 }
 
-fn extract_trailer_metadata(
-    extensions: &http::Extensions,
-) -> Option<Vec<(String, String)>> {
+fn extract_trailer_metadata(extensions: &http::Extensions) -> Option<Vec<(String, String)>> {
     let trailers = extensions.get::<http::HeaderMap>()?;
     let values = trailers
         .iter()
-        .filter_map(|(key, value)| value.to_str().ok().map(|value| (key.to_string(), value.to_string())))
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (key.to_string(), value.to_string()))
+        })
         .collect::<Vec<_>>();
 
     (!values.is_empty()).then_some(values)
@@ -374,10 +379,7 @@ mod tests {
             Some(&"example.com".to_string())
         );
         assert_eq!(unified.get_header("host"), Some(&"example.com".to_string()));
-        assert_eq!(
-            unified.get_metadata("scheme"),
-            Some(&"https".to_string())
-        );
+        assert_eq!(unified.get_metadata("scheme"), Some(&"https".to_string()));
         assert_eq!(unified.body, br#"{"ok":true}"#.to_vec());
     }
 

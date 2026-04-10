@@ -297,14 +297,14 @@ onMounted(loadRules);
 
     <div
       v-if="isRuleModalOpen"
-      class="fixed inset-0 z-[100] flex items-stretch justify-end"
+      class="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6"
     >
       <div
         class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
         @click="isRuleModalOpen = false"
       ></div>
       <div
-        class="relative h-full w-full max-w-3xl overflow-y-auto border-l border-slate-200 bg-[#fffaf4] p-5 shadow-[0_24px_80px_rgba(60,40,20,0.24)]"
+        class="relative max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-slate-200 bg-[#fffaf4] p-5 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:max-h-[calc(100vh-3rem)] md:p-6"
       >
         <div class="flex items-center justify-between">
           <div>

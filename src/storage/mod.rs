@@ -1518,7 +1518,7 @@ impl TryFrom<StoredAppConfigRow> for Config {
     type Error = anyhow::Error;
 
     fn try_from(value: StoredAppConfigRow) -> Result<Self, Self::Error> {
-        Ok(serde_json::from_str(&value.config_json)?)
+        Ok(serde_json::from_str::<Config>(&value.config_json)?.normalized())
     }
 }
 
@@ -1537,6 +1537,7 @@ fn parse_severity(value: &str) -> Result<Severity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::RuntimeProfile;
     use crate::config::{RuleAction, RuleLayer, Severity};
 
     fn unique_test_db_path(name: &str) -> String {
@@ -1749,6 +1750,7 @@ mod tests {
         let path = unique_test_db_path("app_config");
         let store = SqliteStore::new(path, true).await.unwrap();
         let initial = Config {
+            runtime_profile: RuntimeProfile::Standard,
             api_enabled: true,
             sqlite_enabled: true,
             sqlite_path: "data/custom.db".to_string(),
@@ -1776,6 +1778,30 @@ mod tests {
         let loaded_updated = store.load_app_config().await.unwrap().unwrap();
         assert!(!loaded_updated.api_enabled);
         assert_eq!(loaded_updated.max_concurrent_tasks, 654);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_loads_legacy_app_config_with_default_safeline() {
+        let path = unique_test_db_path("legacy_app_config");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO app_config (id, config_json, updated_at)
+            VALUES (?, ?, ?)
+            "#,
+        )
+        .bind(1_i64)
+        .bind(r#"{"interface":"eth0","listen_addrs":["0.0.0.0:8080"],"runtime_profile":"minimal","api_enabled":false,"api_bind":"127.0.0.1:3000","bloom_enabled":false,"l4_bloom_false_positive_verification":false,"l7_bloom_false_positive_verification":false,"maintenance_interval_secs":60,"l4_config":{"ddos_protection_enabled":true,"advanced_ddos_enabled":false,"connection_rate_limit":64,"syn_flood_threshold":32,"max_tracked_ips":512,"max_blocked_ips":128,"state_ttl_secs":180,"bloom_filter_scale":1.0},"l7_config":{"http_inspection_enabled":true,"max_request_size":4096,"http2_config":{"enabled":false,"max_concurrent_streams":50,"max_frame_size":16384,"enable_priorities":true,"initial_window_size":65535},"bloom_filter_scale":1.0},"http3_config":{"enabled":false,"listen_addr":"0.0.0.0:8443","max_concurrent_streams":50,"idle_timeout_secs":60,"mtu":1200,"max_frame_size":65536,"enable_connection_migration":false,"qpack_table_size":2048,"certificate_path":null,"private_key_path":null,"enable_tls13":true},"rules":[],"metrics_enabled":true,"sqlite_enabled":true,"sqlite_path":"data/waf.db","sqlite_auto_migrate":true,"sqlite_rules_enabled":false,"max_concurrent_tasks":128}"#)
+        .bind(unix_timestamp())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let loaded = store.load_app_config().await.unwrap().unwrap();
+        assert!(!loaded.integrations.safeline.enabled);
+        assert_eq!(loaded.integrations.safeline.auth_probe_path, "/api/open/system/key");
+        assert_eq!(loaded.console_settings.gateway_name, "玄枢防护网关");
     }
 
     #[tokio::test]

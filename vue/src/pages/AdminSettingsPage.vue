@@ -56,6 +56,37 @@ const systemSettings = reactive<SystemSettingsForm>({
   },
 })
 
+function toPlainSafeLineSettings() {
+  return {
+    enabled: systemSettings.safeline.enabled,
+    base_url: systemSettings.safeline.base_url,
+    api_token: systemSettings.safeline.api_token,
+    verify_tls: systemSettings.safeline.verify_tls,
+    openapi_doc_path: systemSettings.safeline.openapi_doc_path,
+    auth_probe_path: systemSettings.safeline.auth_probe_path,
+    site_list_path: systemSettings.safeline.site_list_path,
+    event_list_path: systemSettings.safeline.event_list_path,
+    blocklist_sync_path: systemSettings.safeline.blocklist_sync_path,
+    blocklist_delete_path: systemSettings.safeline.blocklist_delete_path,
+  }
+}
+
+function toPlainSettingsPayload(): SettingsPayload {
+  return {
+    gateway_name: systemSettings.gateway_name,
+    auto_refresh_seconds: systemSettings.auto_refresh_seconds,
+    upstream_endpoint: systemSettings.upstream_endpoint,
+    api_endpoint: systemSettings.api_endpoint,
+    emergency_mode: systemSettings.emergency_mode,
+    sqlite_persistence: systemSettings.sqlite_persistence,
+    notify_by_sound: systemSettings.notify_by_sound,
+    notification_level: systemSettings.notification_level,
+    retain_days: systemSettings.retain_days,
+    notes: systemSettings.notes,
+    safeline: toPlainSafeLineSettings(),
+  }
+}
+
 async function loadSettings() {
   loading.value = true
   error.value = ''
@@ -92,7 +123,7 @@ async function saveSettings() {
       ? Math.min(Math.max(systemSettings.retain_days, 1), 365)
       : 30
 
-    const response = await updateSettings(structuredClone(systemSettings))
+    const response = await updateSettings(toPlainSettingsPayload())
     successMessage.value = response.message
   } catch (e) {
     error.value = e instanceof Error ? e.message : '系统设置保存失败'
@@ -106,7 +137,7 @@ async function runSafeLineTest() {
   error.value = ''
 
   try {
-    testResult.value = await testSafeLineConnection(structuredClone(systemSettings.safeline))
+    testResult.value = await testSafeLineConnection(toPlainSafeLineSettings())
   } catch (e) {
     error.value = e instanceof Error ? e.message : '雷池连通性测试失败'
     testResult.value = null
@@ -120,7 +151,7 @@ async function loadSafeLineSites() {
   error.value = ''
 
   try {
-    const response = await fetchSafeLineSites(structuredClone(systemSettings.safeline))
+    const response = await fetchSafeLineSites(toPlainSafeLineSettings())
     sites.value = response.sites
     sitesLoadedAt.value = Math.floor(Date.now() / 1000)
   } catch (e) {

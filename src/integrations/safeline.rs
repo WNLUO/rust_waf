@@ -1059,11 +1059,12 @@ fn extract_security_events(payload: &Value) -> Result<Vec<SafeLineSecurityEventS
 fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlockedIpSummary>> {
     let candidates = find_array_candidates(payload);
     for candidate in candidates {
+        let recognized_candidate = candidate.iter().any(looks_like_blocked_ip_summary);
         let records = candidate
             .iter()
-            .filter_map(parse_blocked_ip_summary)
+            .flat_map(parse_blocked_ip_summaries)
             .collect::<Vec<_>>();
-        if !records.is_empty() {
+        if !records.is_empty() || recognized_candidate {
             return Ok(records);
         }
     }
@@ -1229,21 +1230,68 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
     })
 }
 
-fn parse_blocked_ip_summary(value: &Value) -> Option<SafeLineBlockedIpSummary> {
-    let object = value.as_object()?;
-    let ip = pick_string(object, &["ip", "ip_addr", "address"])
-        .or_else(|| pick_first_array_string(object, &["ips"]))?;
+fn parse_blocked_ip_summaries(value: &Value) -> Vec<SafeLineBlockedIpSummary> {
+    let Some(object) = value.as_object() else {
+        return Vec::new();
+    };
+    let Some(ips) = pick_array_strings(object, &["ips"]) else {
+        return parse_flat_blocked_ip_summary(value).into_iter().collect();
+    };
+
     let reason = pick_string(object, &["reason", "message", "description"])
         .or_else(|| pick_string(object, &["reference", "comment"]))
         .unwrap_or_else(|| "safeline_blocked_ip".to_string());
-    let blocked_at = pick_i64(object, &["blocked_at", "created_at", "timestamp", "time"])
-        .map(normalize_timestamp)
-        .unwrap_or_else(unix_timestamp);
-    let expires_at = pick_i64(
+    let blocked_at = pick_timestamp(
+        object,
+        &[
+            "blocked_at",
+            "updated_at",
+            "created_at",
+            "timestamp",
+            "time",
+        ],
+    )
+    .unwrap_or_else(unix_timestamp);
+    let expires_at = pick_timestamp(
         object,
         &["expires_at", "expired_at", "expire_at", "ttl_until"],
     )
-    .map(normalize_timestamp)
+    .unwrap_or(blocked_at + 3600);
+    let remote_id = pick_string(object, &["id", "uuid", "uid"]);
+
+    ips.into_iter()
+        .map(|ip| SafeLineBlockedIpSummary {
+            remote_id: remote_id.clone(),
+            ip,
+            reason: format!("safeline:{reason}"),
+            blocked_at,
+            expires_at,
+            raw: value.clone(),
+        })
+        .collect()
+}
+
+fn parse_flat_blocked_ip_summary(value: &Value) -> Option<SafeLineBlockedIpSummary> {
+    let object = value.as_object()?;
+    let ip = pick_string(object, &["ip", "ip_addr", "address"])?;
+    let reason = pick_string(object, &["reason", "message", "description"])
+        .or_else(|| pick_string(object, &["reference", "comment"]))
+        .unwrap_or_else(|| "safeline_blocked_ip".to_string());
+    let blocked_at = pick_timestamp(
+        object,
+        &[
+            "blocked_at",
+            "updated_at",
+            "created_at",
+            "timestamp",
+            "time",
+        ],
+    )
+    .unwrap_or_else(unix_timestamp);
+    let expires_at = pick_timestamp(
+        object,
+        &["expires_at", "expired_at", "expire_at", "ttl_until"],
+    )
     .unwrap_or(blocked_at + 3600);
     let remote_id = pick_string(object, &["id", "uuid", "uid"]);
 
@@ -1255,6 +1303,17 @@ fn parse_blocked_ip_summary(value: &Value) -> Option<SafeLineBlockedIpSummary> {
         expires_at,
         raw: value.clone(),
     })
+}
+
+fn looks_like_blocked_ip_summary(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+
+    object.contains_key("ips")
+        || object.contains_key("ip")
+        || object.contains_key("ip_addr")
+        || object.contains_key("address")
 }
 
 fn pick_string(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
@@ -1280,19 +1339,30 @@ fn pick_first_array_string(
     object: &serde_json::Map<String, Value>,
     keys: &[&str],
 ) -> Option<String> {
+    pick_array_strings(object, keys)?.into_iter().next()
+}
+
+fn pick_array_strings(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<Vec<String>> {
     for key in keys {
         let Some(value) = object.get(*key) else {
             continue;
         };
 
         if let Some(array) = value.as_array() {
+            let mut values = Vec::new();
             for item in array {
                 if let Some(inner) = item.as_str() {
                     let trimmed = inner.trim();
                     if !trimmed.is_empty() {
-                        return Some(trimmed.to_string());
+                        values.push(trimmed.to_string());
                     }
                 }
+            }
+            if !values.is_empty() {
+                return Some(values);
             }
         }
     }
@@ -1320,12 +1390,112 @@ fn pick_i64(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i6
     None
 }
 
+fn pick_timestamp(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
+    for key in keys {
+        let Some(value) = object.get(*key) else {
+            continue;
+        };
+
+        match value {
+            Value::Number(number) => {
+                if let Some(parsed) = number.as_i64() {
+                    return Some(normalize_timestamp(parsed));
+                }
+            }
+            Value::String(inner) => {
+                let trimmed = inner.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(parsed) = trimmed.parse::<i64>() {
+                    return Some(normalize_timestamp(parsed));
+                }
+                if let Some(parsed) = parse_rfc3339_timestamp(trimmed) {
+                    return Some(parsed);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 fn normalize_timestamp(value: i64) -> i64 {
     if value > 10_000_000_000 {
         value / 1000
     } else {
         value
     }
+}
+
+fn parse_rfc3339_timestamp(value: &str) -> Option<i64> {
+    let (date_part, rest) = value.split_once('T')?;
+    let (year, month, day) = parse_date(date_part)?;
+    let (time_part, offset_seconds) = parse_time_and_offset(rest)?;
+    let (hour, minute, second) = parse_time(time_part)?;
+    let days = days_from_civil(year, month, day);
+    Some(days * 86_400 + hour as i64 * 3_600 + minute as i64 * 60 + second as i64 - offset_seconds)
+}
+
+fn parse_date(value: &str) -> Option<(i32, u32, u32)> {
+    let mut parts = value.split('-');
+    let year = parts.next()?.parse::<i32>().ok()?;
+    let month = parts.next()?.parse::<u32>().ok()?;
+    let day = parts.next()?.parse::<u32>().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+fn parse_time_and_offset(value: &str) -> Option<(&str, i64)> {
+    if let Some(time_part) = value.strip_suffix('Z') {
+        return Some((time_part, 0));
+    }
+
+    let tz_index = value
+        .char_indices()
+        .skip(8)
+        .find_map(|(index, ch)| matches!(ch, '+' | '-').then_some(index))?;
+    let (time_part, offset_part) = value.split_at(tz_index);
+    let sign = if offset_part.starts_with('-') { -1 } else { 1 };
+    let offset = &offset_part[1..];
+    let (hours, minutes) = offset.split_once(':')?;
+    let hours = hours.parse::<i64>().ok()?;
+    let minutes = minutes.parse::<i64>().ok()?;
+    Some((time_part, sign * (hours * 3_600 + minutes * 60)))
+}
+
+fn parse_time(value: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = value.split(':');
+    let hour = parts.next()?.parse::<u32>().ok()?;
+    let minute = parts.next()?.parse::<u32>().ok()?;
+    let second_part = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let second = second_part
+        .split_once('.')
+        .map(|(whole, _)| whole)
+        .unwrap_or(second_part)
+        .parse::<u32>()
+        .ok()?;
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    Some((hour, minute, second))
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let year = year - i32::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month = month as i32;
+    let day = day as i32;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    (era * 146_097 + day_of_era - 719_468) as i64
 }
 
 fn unix_timestamp() -> i64 {
@@ -1549,6 +1719,67 @@ mod tests {
         assert_eq!(ips.len(), 1);
         assert_eq!(ips[0].ip, "198.51.100.10");
         assert_eq!(ips[0].remote_id.as_deref(), Some("12"));
+    }
+
+    #[test]
+    fn extract_blocked_ips_supports_nested_open_ipgroup_payload_with_multiple_ips() {
+        let payload = json!({
+            "data": {
+                "nodes": [
+                    {
+                        "id": 7,
+                        "comment": "manual",
+                        "ips": ["198.51.100.10", "198.51.100.11"],
+                        "updated_at": "2026-04-10T01:03:27.134874+08:00"
+                    }
+                ],
+                "total": 1
+            },
+            "err": null,
+            "msg": ""
+        });
+
+        let ips = extract_blocked_ips(&payload).unwrap();
+        assert_eq!(ips.len(), 2);
+        assert_eq!(ips[0].ip, "198.51.100.10");
+        assert_eq!(ips[1].ip, "198.51.100.11");
+        assert_eq!(ips[0].remote_id.as_deref(), Some("7"));
+        assert_eq!(ips[0].reason, "safeline:manual");
+        assert_eq!(ips[0].blocked_at, 1775754207);
+    }
+
+    #[test]
+    fn extract_blocked_ips_supports_open_ipgroup_payload_with_empty_ips() {
+        let payload = json!({
+            "data": {
+                "nodes": [
+                    {
+                        "id": 1,
+                        "comment": "雷池社区恶意 IP 情报",
+                        "ips": [],
+                        "reference": "",
+                        "builtin": true,
+                        "updated_at": "2026-04-10T01:03:27.134874+08:00",
+                        "total": 0
+                    },
+                    {
+                        "id": 2,
+                        "comment": "搜索引擎爬虫 IP",
+                        "ips": [],
+                        "reference": "",
+                        "builtin": true,
+                        "updated_at": "2026-04-10T02:07:31.105448+08:00",
+                        "total": 0
+                    }
+                ],
+                "total": 2
+            },
+            "err": null,
+            "msg": ""
+        });
+
+        let ips = extract_blocked_ips(&payload).unwrap();
+        assert!(ips.is_empty());
     }
 
     #[test]

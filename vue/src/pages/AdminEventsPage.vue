@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchSecurityEvents, markSecurityEventHandled, syncSafeLineEvents } from '../lib/api'
+import { fetchSecurityEvents, syncSafeLineEvents } from '../lib/api'
 import type { SecurityEventItem, SecurityEventsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useFormatters } from '../composables/useFormatters'
-import { Check, Copy, Eye, RefreshCw, X } from 'lucide-vue-next'
+import { Copy, Eye, RefreshCw, X } from 'lucide-vue-next'
 
 const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
 const loading = ref(true)
@@ -72,15 +72,6 @@ const runSafeLineSync = async () => {
     error.value = e instanceof Error ? e.message : '同步雷池事件失败'
   } finally {
     syncing.value = false
-  }
-}
-
-const toggleEventHandled = async (event: SecurityEventItem) => {
-  try {
-    await markSecurityEventHandled(event.id, !event.handled)
-    await loadEvents()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '更新事件状态失败'
   }
 }
 
@@ -208,14 +199,6 @@ const siteOptions = computed(() => {
     </template>
 
     <div class="min-w-0 space-y-6">
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
-        <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">事件记录</p>
-        <h2 class="mt-3 font-display text-4xl font-semibold text-stone-900">攻击与处置轨迹</h2>
-        <p class="mt-4 max-w-2xl text-sm leading-7 text-stone-700">
-          事件页单独承担排查工作，你可以在这里过滤高风险事件、标记处理状态，并快速复制来源 IP 与 URL 做进一步分析。
-        </p>
-      </section>
-
       <div
         v-if="error"
         class="rounded-[24px] border border-cyber-error/25 bg-cyber-error/8 px-5 py-4 text-sm text-cyber-error shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
@@ -275,32 +258,15 @@ const siteOptions = computed(() => {
       <div v-if="loading" class="text-sm text-cyber-muted">正在加载事件...</div>
 
       <div v-else class="min-w-0 space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/70 bg-white/55 px-5 py-4">
-          <div>
-            <p class="text-xs tracking-[0.18em] text-cyber-accent-strong">事件列表</p>
-            <p class="mt-1 text-sm text-stone-700">当前展示 {{ eventsPayload.events.length }} 条，累计 {{ eventsPayload.total }} 条。</p>
-          </div>
-          <p class="text-xs tracking-[0.14em] text-cyber-muted">
-            按 {{ eventsFilters.sort_by === 'created_at' ? '时间' : eventsFilters.sort_by === 'source_ip' ? '来源 IP' : '目标端口' }}
-            {{ eventsFilters.sort_direction === 'desc' ? '降序' : '升序' }}
-          </p>
-        </div>
-
         <div class="max-w-full overflow-hidden rounded-[30px] border border-white/80 bg-white/78 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
-          <div class="flex items-center justify-between gap-3 border-b border-cyber-border/60 px-5 py-3 text-xs text-cyber-muted">
-            <p class="tracking-[0.14em]">表格内容较多时会保持在卡片内滚动，不再撑出页面。</p>
-            <p class="whitespace-nowrap">左右滑动查看更多列</p>
-          </div>
           <div class="max-w-full overflow-x-auto overscroll-x-contain">
-            <table class="w-full min-w-[1040px] border-collapse text-left">
+            <table class="w-full min-w-[760px] border-collapse text-left">
               <thead class="bg-cyber-surface-strong text-sm text-cyber-muted">
                 <tr>
                   <th class="whitespace-nowrap px-5 py-4 font-medium">时间</th>
                   <th class="whitespace-nowrap px-5 py-4 font-medium">分类</th>
                   <th class="whitespace-nowrap px-5 py-4 font-medium">原因</th>
                   <th class="whitespace-nowrap px-5 py-4 font-medium">来源</th>
-                  <th class="whitespace-nowrap px-5 py-4 font-medium">目标</th>
-                  <th class="whitespace-nowrap px-5 py-4 text-right font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -340,33 +306,9 @@ const siteOptions = computed(() => {
                       <p class="truncate font-mono text-[13px] whitespace-nowrap text-stone-900" :title="event.source_ip">{{ event.source_ip }}</p>
                     </div>
                   </td>
-                  <td class="px-5 py-4">
-                    <div class="w-[210px] min-w-[210px] max-w-[210px]">
-                      <p class="truncate font-mono text-[13px] whitespace-nowrap text-stone-900" :title="event.dest_ip">{{ event.dest_ip }}</p>
-                      <p class="mt-1 whitespace-nowrap text-xs text-cyber-muted">端口 {{ event.dest_port }}</p>
-                    </div>
-                  </td>
-                  <td class="px-5 py-4">
-                    <div class="flex min-w-[170px] flex-nowrap justify-end gap-2 whitespace-nowrap">
-                      <button
-                        class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-cyber-border px-3 py-2 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-                        @click="copyToClipboard(`${event.source_ip}`)"
-                      >
-                        <Copy :size="12" />
-                        来源 IP
-                      </button>
-                      <button
-                        class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-cyber-border px-3 py-2 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-                        @click="toggleEventHandled(event)"
-                      >
-                        <Check :size="12" />
-                        {{ event.handled ? '撤销' : '处理' }}
-                      </button>
-                    </div>
-                  </td>
                 </tr>
                 <tr v-if="!eventsPayload.events.length">
-                  <td colspan="6" class="px-6 py-10 text-center text-sm text-cyber-muted">
+                  <td colspan="4" class="px-6 py-10 text-center text-sm text-cyber-muted">
                     当前没有可显示的安全事件。
                   </td>
                 </tr>

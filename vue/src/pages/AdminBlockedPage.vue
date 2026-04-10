@@ -133,14 +133,6 @@ watch(
     </template>
 
     <div class="space-y-6">
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
-        <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">封禁名单</p>
-        <h2 class="mt-3 font-display text-4xl font-semibold text-stone-900">来源地址封控面板</h2>
-        <p class="mt-4 max-w-2xl text-sm leading-7 text-stone-700">
-          封禁页单独展示当前被限制访问的地址与原因，适合排查误封、手动解封和观察封禁过期节奏。
-        </p>
-      </section>
-
       <div
         v-if="error"
         class="rounded-[24px] border border-cyber-error/25 bg-cyber-error/8 px-5 py-4 text-sm text-cyber-error shadow-[0_14px_30px_rgba(166,30,77,0.08)]"

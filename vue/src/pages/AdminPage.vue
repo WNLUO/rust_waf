@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { fetchBlockedIps, fetchHealth, fetchMetrics, fetchRulesList, fetchSecurityEvents } from '../lib/api'
-import type { DashboardPayload, SecurityEventsResponse, BlockedIpsResponse } from '../lib/types'
+import type { DashboardPayload, SecurityEventsResponse, BlockedIpsResponse, SecurityEventItem } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
@@ -31,6 +31,29 @@ const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
 }
 
 const { formatBytes, formatNumber, formatLatency, formatTimestamp } = useFormatters()
+
+const urlLikePattern = /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/i
+
+const formatSiteLabel = (value: string | null | undefined): string => {
+  const raw = value?.trim()
+  if (!raw) return ''
+
+  const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
+  const looksLikeUrl = hasProtocol || urlLikePattern.test(raw)
+  if (!looksLikeUrl) return raw
+
+  try {
+    const parsed = new URL(hasProtocol ? raw : `https://${raw}`)
+    return hasProtocol ? `${parsed.protocol}//${parsed.hostname}` : parsed.hostname
+  } catch {
+    return raw
+      .replace(/^([a-z][a-z\d+.-]*:\/\/[^/:?#]+).*/i, '$1')
+      .replace(/^([^/:?#]+).*/i, '$1')
+  }
+}
+
+const eventSiteLabel = (event: SecurityEventItem): string =>
+  formatSiteLabel(event.provider_site_name) || formatSiteLabel(event.provider_site_domain)
 
 const emptyEventsResponse = (): SecurityEventsResponse => ({
   total: 0,
@@ -194,8 +217,8 @@ onBeforeUnmount(() => {
                 <p>目标地址：{{ event.dest_ip }}:{{ event.dest_port }}</p>
                 <p>协议：{{ event.protocol }}</p>
                 <p>请求：{{ event.http_method || '无' }} {{ event.uri || '' }}</p>
-                <p v-if="event.provider_site_name || event.provider_site_domain" class="md:col-span-2">
-                  归属站点：{{ event.provider_site_name || event.provider_site_domain }}
+                <p v-if="eventSiteLabel(event)" class="md:col-span-2">
+                  归属站点：{{ eventSiteLabel(event) }}
                 </p>
               </div>
             </div>

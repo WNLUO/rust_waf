@@ -76,6 +76,14 @@ pub struct SafeLineConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
+    pub auto_sync_events: bool,
+    #[serde(default)]
+    pub auto_sync_blocked_ips_push: bool,
+    #[serde(default)]
+    pub auto_sync_blocked_ips_pull: bool,
+    #[serde(default = "default_safeline_auto_sync_interval_secs")]
+    pub auto_sync_interval_secs: u64,
+    #[serde(default)]
     pub base_url: String,
     #[serde(default)]
     pub api_token: String,
@@ -441,6 +449,12 @@ impl Config {
 
         self.integrations.safeline.base_url =
             normalize_base_url(&self.integrations.safeline.base_url);
+        self.integrations.safeline.auto_sync_interval_secs = clamp_u64(
+            self.integrations.safeline.auto_sync_interval_secs,
+            15,
+            86_400,
+            default_safeline_auto_sync_interval_secs(),
+        );
         self.integrations.safeline.api_token =
             self.integrations.safeline.api_token.trim().to_string();
         self.integrations.safeline.username =
@@ -496,6 +510,10 @@ impl Default for SafeLineConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            auto_sync_events: false,
+            auto_sync_blocked_ips_push: false,
+            auto_sync_blocked_ips_pull: false,
+            auto_sync_interval_secs: default_safeline_auto_sync_interval_secs(),
             base_url: String::new(),
             api_token: String::new(),
             username: String::new(),
@@ -576,6 +594,10 @@ fn default_blocklist_sync_path() -> String {
 
 fn default_blocklist_delete_path() -> String {
     "/api/open/ipgroup".to_string()
+}
+
+const fn default_safeline_auto_sync_interval_secs() -> u64 {
+    300
 }
 
 fn normalize_notification_level(value: &str) -> String {

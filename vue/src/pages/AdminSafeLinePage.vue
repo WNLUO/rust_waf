@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { RouterLink } from 'vue-router'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import {
@@ -25,7 +24,6 @@ import type {
 import { useFormatters } from '../composables/useFormatters'
 import {
   Download,
-  Link2,
   PlugZap,
   RefreshCw,
   Save,
@@ -139,14 +137,6 @@ const authMode = computed(() => {
   }
   return '未配置鉴权'
 })
-
-const blocklistPathNeedsUpgrade = computed(() =>
-  Boolean(settings.value?.safeline.blocklist_sync_path.includes('/open/ipgroup')),
-)
-
-const hasBlocklistIpGroupIds = computed(
-  () => Boolean(settings.value?.safeline.blocklist_ip_group_ids.length),
-)
 
 const sortedDrafts = computed(() =>
   [...mappingDrafts.value].sort((left, right) => {
@@ -347,25 +337,6 @@ onMounted(loadPageData)
     </template>
 
     <div class="space-y-6">
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
-        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">雷池联动</p>
-            <h2 class="mt-3 font-display text-4xl font-semibold text-stone-900">外部 WAF 集成控制台</h2>
-            <p class="mt-4 max-w-3xl text-sm leading-7 text-stone-700">
-              这里集中处理雷池同步、站点映射和联动状态。连接参数仍以系统设置里保存的配置为准，改完后回到这里执行联调即可。
-            </p>
-          </div>
-          <RouterLink
-            to="/admin/settings"
-            class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/20 bg-white/80 px-4 py-2 text-sm text-cyber-accent-strong transition hover:bg-white"
-          >
-            <Link2 :size="14" />
-            前往系统设置
-          </RouterLink>
-        </div>
-      </section>
-
       <div
         v-if="error"
         class="rounded-[24px] border border-cyber-error/25 bg-cyber-error/8 px-5 py-4 text-sm text-cyber-error shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
@@ -380,19 +351,26 @@ onMounted(loadPageData)
         {{ successMessage }}
       </div>
 
-      <div v-if="loading" class="rounded-[24px] border border-white/80 bg-white/75 px-5 py-10 text-center text-sm text-cyber-muted shadow-cyber">
+      <div
+        v-if="loading"
+        class="rounded-[24px] border border-white/80 bg-white/75 px-5 py-10 text-center text-sm text-cyber-muted shadow-cyber"
+      >
         正在加载雷池联动面板...
       </div>
 
       <template v-else>
-        <section class="grid gap-6 xl:grid-cols-[1fr_1.1fr]">
+        <section class="grid gap-6 xl:grid-cols-[1fr_1.1fr] xl:items-start">
           <div class="rounded-[30px] border border-white/80 bg-white/78 p-6 shadow-[0_14px_40px_rgba(90,60,30,0.07)]">
             <div class="flex items-center justify-between gap-3">
               <div>
                 <p class="text-sm font-semibold text-stone-900">接入概况</p>
                 <p class="mt-1 text-xs leading-5 text-cyber-muted">当前展示的是已保存到后端数据库的雷池配置。</p>
               </div>
-              <StatusBadge :text="settings?.safeline.enabled ? '已启用' : '未启用'" :type="settings?.safeline.enabled ? 'success' : 'warning'" compact />
+              <StatusBadge
+                :text="settings?.safeline.enabled ? '已启用' : '未启用'"
+                :type="settings?.safeline.enabled ? 'success' : 'warning'"
+                compact
+              />
             </div>
 
             <div class="mt-4 grid gap-3 md:grid-cols-2">
@@ -418,28 +396,13 @@ onMounted(loadPageData)
                   {{ settings?.safeline.event_list_path || '未配置' }}
                 </p>
               </div>
-              <div class="rounded-[20px] bg-cyber-surface-strong p-4 md:col-span-2">
-                <p class="text-xs text-cyber-muted">封禁目标 IP 组</p>
-                <p class="mt-2 break-all text-sm font-medium text-stone-900">
-                  {{
-                    settings?.safeline.blocklist_ip_group_ids.length
-                      ? settings?.safeline.blocklist_ip_group_ids.join(', ')
-                      : '未配置'
-                  }}
-                </p>
-              </div>
             </div>
 
-            <div v-if="!hasSavedConfig" class="mt-4 rounded-[20px] border border-dashed border-cyber-border/70 bg-white px-4 py-4 text-sm text-cyber-muted">
-              还没有保存雷池地址。请先到“系统设置”填写连接参数并保存，再回来执行联调。
-            </div>
-
-            <div v-if="blocklistPathNeedsUpgrade && !hasBlocklistIpGroupIds" class="mt-4 rounded-[20px] border border-amber-300/60 bg-amber-50 px-4 py-4 text-sm text-amber-800">
-              当前封禁路径使用新版 IP 组接口，但还没有配置目标 `IP 组 ID`。请先到系统设置里填写后再执行推送封禁或远端解封。
-            </div>
-
-            <div v-else-if="blocklistPathNeedsUpgrade" class="mt-4 rounded-[20px] border border-emerald-300/60 bg-emerald-50 px-4 py-4 text-sm text-emerald-800">
-              当前封禁路径已切到新版 IP 组接口，后端会基于已配置的 `IP 组 ID` 执行 append/remove 联动。
+            <div
+              v-if="!hasSavedConfig"
+              class="mt-4 rounded-[20px] border border-dashed border-cyber-border/70 bg-white px-4 py-4 text-sm text-cyber-muted"
+            >
+              还没有保存雷池地址。请先到系统设置填写连接参数并保存，再回来执行联调。
             </div>
 
             <div class="mt-4 flex flex-wrap gap-2.5">
@@ -461,7 +424,10 @@ onMounted(loadPageData)
               </button>
             </div>
 
-            <div v-if="testResult" class="mt-4 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
+            <div
+              v-if="testResult"
+              class="mt-4 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-4"
+            >
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p class="text-sm font-medium text-stone-900">最近一次测试结果</p>
@@ -606,8 +572,11 @@ onMounted(loadPageData)
             </div>
           </div>
 
-          <div v-if="!sortedDrafts.length" class="mt-4 rounded-[20px] border border-dashed border-cyber-border/70 bg-white px-4 py-8 text-sm text-cyber-muted">
-            还没有可编辑的站点映射。先点击上方“读取远端站点”，或确认数据库里已经有历史映射。
+          <div
+            v-if="!sortedDrafts.length"
+            class="mt-4 rounded-[20px] border border-dashed border-cyber-border/70 bg-white px-4 py-8 text-sm text-cyber-muted"
+          >
+            还没有可编辑的站点映射。先点击上方"读取远端站点"，或确认数据库里已经有历史映射。
           </div>
 
           <div v-else class="mt-4 grid gap-4">
@@ -648,7 +617,11 @@ onMounted(loadPageData)
                     />
                   </label>
                   <label class="flex items-center gap-2 rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
-                    <input v-model="draft.enabled" type="checkbox" class="accent-[var(--color-cyber-accent)]" />
+                    <input
+                      v-model="draft.enabled"
+                      type="checkbox"
+                      class="accent-[var(--color-cyber-accent)]"
+                    />
                     启用该映射
                   </label>
                   <label class="flex items-center gap-2 rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">

@@ -35,6 +35,9 @@ const isDesktop = ref(false)
 const desktopCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
 
+const isRouteActive = (path: string) =>
+  route.path === path || route.path.startsWith(`${path}/`)
+
 const syncViewport = () => {
   const nextIsDesktop = window.innerWidth >= DESKTOP_BREAKPOINT
   isDesktop.value = nextIsDesktop
@@ -55,7 +58,7 @@ const toggleSidebar = () => {
 const shouldShowNav = computed(() => isDesktop.value || mobileMenuOpen.value)
 const sidebarExpanded = computed(() => !isDesktop.value || !desktopCollapsed.value)
 const currentPageName = computed(
-  () => navItems.find((item) => item.path === route.path)?.name ?? '控制台',
+  () => navItems.find((item) => isRouteActive(item.path))?.name ?? '控制台',
 )
 const sidebarWidth = computed(() =>
   desktopCollapsed.value ? '5.5rem' : 'clamp(15.5rem, 20vw, 18rem)',
@@ -133,7 +136,7 @@ watch(
             sidebarExpanded
               ? 'gap-3 px-4 py-3'
               : 'justify-center px-3 py-3 lg:min-h-[52px]',
-            $route.path === item.path
+            isRouteActive(item.path)
               ? 'border-cyber-accent/30 bg-cyber-accent/10 text-cyber-accent-strong shadow-[0_12px_30px_rgba(179,84,30,0.10)]'
               : 'border-transparent text-cyber-muted hover:border-cyber-border hover:bg-white/70 hover:text-stone-900'
           ]"

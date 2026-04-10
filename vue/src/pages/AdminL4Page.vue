@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import AppLayout from '../components/layout/AppLayout.vue'
+import L4SectionNav from '../components/l4/L4SectionNav.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
 import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
@@ -193,6 +195,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="space-y-8">
+      <L4SectionNav />
+
       <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
         <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div class="max-w-3xl">
@@ -460,6 +464,33 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </CyberCard>
+      </section>
+
+      <section class="grid gap-4 lg:grid-cols-3">
+        <RouterLink
+          to="/admin/l4/rules"
+          class="rounded-[28px] border border-white/80 bg-white/75 p-6 shadow-[0_16px_44px_rgba(90,60,30,0.08)] transition hover:-translate-y-1 hover:shadow-[0_22px_50px_rgba(127,47,18,0.12)]"
+        >
+          <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">L4 规则</p>
+          <h3 class="mt-3 text-2xl font-semibold text-stone-900">按四层条件维护策略</h3>
+          <p class="mt-3 text-sm leading-7 text-cyber-muted">聚焦 TCP/UDP 维度的阻断、放行和告警规则，避免和 L7 规则混看。</p>
+        </RouterLink>
+        <RouterLink
+          to="/admin/l4/blocklist"
+          class="rounded-[28px] border border-white/80 bg-white/75 p-6 shadow-[0_16px_44px_rgba(90,60,30,0.08)] transition hover:-translate-y-1 hover:shadow-[0_22px_50px_rgba(127,47,18,0.12)]"
+        >
+          <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">L4 黑名单</p>
+          <h3 class="mt-3 text-2xl font-semibold text-stone-900">查看本地封禁与容量</h3>
+          <p class="mt-3 text-sm leading-7 text-cyber-muted">优先聚焦连接限流器生成的本地封禁，也能切换查看远端同步项。</p>
+        </RouterLink>
+        <RouterLink
+          to="/admin/l4/ports"
+          class="rounded-[28px] border border-white/80 bg-white/75 p-6 shadow-[0_16px_44px_rgba(90,60,30,0.08)] transition hover:-translate-y-1 hover:shadow-[0_22px_50px_rgba(127,47,18,0.12)]"
+        >
+          <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">端口画像</p>
+          <h3 class="mt-3 text-2xl font-semibold text-stone-900">定位热点端口与拦截热点</h3>
+          <p class="mt-3 text-sm leading-7 text-cyber-muted">按连接数、拦截数和 DDoS 事件观察端口热点，快速定位需要重点盯防的入口。</p>
+        </RouterLink>
       </section>
     </div>
   </AppLayout>

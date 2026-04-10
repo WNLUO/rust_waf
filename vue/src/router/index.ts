@@ -3,6 +3,9 @@ import HomePage from '../pages/HomePage.vue'
 import AdminPage from '../pages/AdminPage.vue'
 import AdminRulesPage from '../pages/AdminRulesPage.vue'
 import AdminL4Page from '../pages/AdminL4Page.vue'
+import AdminL4RulesPage from '../pages/AdminL4RulesPage.vue'
+import AdminL4BlocklistPage from '../pages/AdminL4BlocklistPage.vue'
+import AdminL4PortsPage from '../pages/AdminL4PortsPage.vue'
 import AdminEventsPage from '../pages/AdminEventsPage.vue'
 import AdminBlockedPage from '../pages/AdminBlockedPage.vue'
 import AdminSettingsPage from '../pages/AdminSettingsPage.vue'
@@ -30,6 +33,21 @@ const router = createRouter({
       path: '/admin/l4',
       name: 'admin-l4',
       component: AdminL4Page,
+    },
+    {
+      path: '/admin/l4/rules',
+      name: 'admin-l4-rules',
+      component: AdminL4RulesPage,
+    },
+    {
+      path: '/admin/l4/blocklist',
+      name: 'admin-l4-blocklist',
+      component: AdminL4BlocklistPage,
+    },
+    {
+      path: '/admin/l4/ports',
+      name: 'admin-l4-ports',
+      component: AdminL4PortsPage,
     },
     {
       path: '/admin/events',

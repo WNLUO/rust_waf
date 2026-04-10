@@ -100,6 +100,8 @@ export interface EventsQuery extends Record<string, ApiQueryValue> {
 
 export interface BlockedIpItem {
   id: number
+  provider: string | null
+  provider_remote_id: string | null
   ip: string
   reason: string
   blocked_at: number
@@ -116,6 +118,7 @@ export interface BlockedIpsResponse {
 export interface BlockedIpsQuery extends Record<string, ApiQueryValue> {
   limit?: number
   offset?: number
+  provider?: string
   ip?: string
   active_only?: boolean
   blocked_from?: number
@@ -139,6 +142,7 @@ export interface SafeLineSettings {
   site_list_path: string
   event_list_path: string
   blocklist_sync_path: string
+  blocklist_delete_path: string
 }
 
 export interface SettingsPayload {
@@ -228,6 +232,14 @@ export interface SafeLineBlocklistSyncResponse {
   synced: number
   skipped: number
   failed: number
+  last_cursor: number | null
+  message: string
+}
+
+export interface SafeLineBlocklistPullResponse {
+  success: boolean
+  imported: number
+  skipped: number
   last_cursor: number | null
   message: string
 }

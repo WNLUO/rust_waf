@@ -91,6 +91,8 @@ pub struct SafeLineConfig {
     pub event_list_path: String,
     #[serde(default = "default_blocklist_sync_path")]
     pub blocklist_sync_path: String,
+    #[serde(default = "default_blocklist_delete_path")]
+    pub blocklist_delete_path: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -445,6 +447,8 @@ impl Config {
             normalize_path(&self.integrations.safeline.event_list_path, "/api/AttackLogAPI");
         self.integrations.safeline.blocklist_sync_path =
             normalize_path(&self.integrations.safeline.blocklist_sync_path, "/api/IPGroupAPI");
+        self.integrations.safeline.blocklist_delete_path =
+            normalize_path(&self.integrations.safeline.blocklist_delete_path, "/api/IPGroupAPI");
 
         self
     }
@@ -476,6 +480,7 @@ impl Default for SafeLineConfig {
             site_list_path: default_site_list_path(),
             event_list_path: default_event_list_path(),
             blocklist_sync_path: default_blocklist_sync_path(),
+            blocklist_delete_path: default_blocklist_delete_path(),
         }
     }
 }
@@ -539,6 +544,10 @@ fn default_event_list_path() -> String {
 }
 
 fn default_blocklist_sync_path() -> String {
+    "/api/IPGroupAPI".to_string()
+}
+
+fn default_blocklist_delete_path() -> String {
     "/api/IPGroupAPI".to_string()
 }
 

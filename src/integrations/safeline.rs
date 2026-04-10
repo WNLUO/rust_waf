@@ -1,5 +1,5 @@
 use crate::config::SafeLineConfig;
-use crate::storage::{BlockedIpEntry, SecurityEventRecord};
+use crate::storage::{BlockedIpEntry, BlockedIpRecord, SecurityEventRecord};
 use anyhow::{anyhow, Result};
 use reqwest::{Client, StatusCode};
 use serde::Serialize;
@@ -50,6 +50,24 @@ pub struct SafeLineBlockedIpSyncSummary {
     pub accepted: bool,
     pub status_code: u16,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineBlockedIpDeleteSummary {
+    pub ip: String,
+    pub accepted: bool,
+    pub status_code: u16,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineBlockedIpSummary {
+    pub remote_id: Option<String>,
+    pub ip: String,
+    pub reason: String,
+    pub blocked_at: i64,
+    pub expires_at: i64,
+    pub raw: Value,
 }
 
 pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
@@ -199,6 +217,109 @@ pub async fn push_blocked_ip(
     })
 }
 
+pub async fn list_blocked_ips(config: &SafeLineConfig) -> Result<Vec<SafeLineBlockedIpSummary>> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if config.api_token.trim().is_empty() {
+        return Err(anyhow!("未填写 API Token，无法读取雷池封禁列表"));
+    }
+
+    let client = build_client(config)?;
+    let url = format!("{base_url}{}", config.blocklist_sync_path);
+    let response = client
+        .get(&url)
+        .header("API-TOKEN", config.api_token.trim())
+        .send()
+        .await?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow!(
+            "雷池封禁列表接口返回 HTTP {}，请检查 blocklist_sync_path 是否与目标实例版本匹配",
+            status
+        ));
+    }
+
+    let payload = response.json::<Value>().await?;
+    extract_blocked_ips(&payload)
+}
+
+pub async fn delete_blocked_ip(
+    config: &SafeLineConfig,
+    blocked_ip: &BlockedIpEntry,
+) -> Result<SafeLineBlockedIpDeleteSummary> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if config.api_token.trim().is_empty() {
+        return Err(anyhow!("未填写 API Token，无法调用雷池远端解封"));
+    }
+
+    let client = build_client(config)?;
+    let path = if config.blocklist_delete_path.trim().is_empty() {
+        &config.blocklist_sync_path
+    } else {
+        &config.blocklist_delete_path
+    };
+    let url = format!("{base_url}{path}");
+
+    let payload = serde_json::json!({
+        "id": blocked_ip.provider_remote_id.as_deref(),
+        "remote_id": blocked_ip.provider_remote_id.as_deref(),
+        "ip": &blocked_ip.ip,
+        "address": &blocked_ip.ip,
+        "reason": &blocked_ip.reason,
+        "blocked_at": blocked_ip.blocked_at,
+        "expires_at": blocked_ip.expires_at,
+    });
+
+    let mut attempts = Vec::new();
+    if let Some(remote_id) = blocked_ip.provider_remote_id.as_deref() {
+        attempts.push(client.delete(format!("{url}/{remote_id}")));
+    }
+    attempts.push(client.delete(&url).json(&payload));
+    attempts.push(client.post(&url).json(&serde_json::json!({
+        "action": "delete",
+        "id": blocked_ip.provider_remote_id.as_deref(),
+        "remote_id": blocked_ip.provider_remote_id.as_deref(),
+        "ip": &blocked_ip.ip,
+    })));
+
+    let mut last_status = StatusCode::BAD_GATEWAY;
+    let mut last_message = String::new();
+
+    for request in attempts {
+        let response = request
+            .header("API-TOKEN", config.api_token.trim())
+            .send()
+            .await?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if status.is_success() || status == StatusCode::NOT_FOUND {
+            return Ok(SafeLineBlockedIpDeleteSummary {
+                ip: blocked_ip.ip.clone(),
+                accepted: true,
+                status_code: status.as_u16(),
+                message: if body.trim().is_empty() {
+                    status.to_string()
+                } else {
+                    body
+                },
+            });
+        }
+
+        last_status = status;
+        last_message = if body.trim().is_empty() {
+            status.to_string()
+        } else {
+            body
+        };
+    }
+
+    Ok(SafeLineBlockedIpDeleteSummary {
+        ip: blocked_ip.ip.clone(),
+        accepted: false,
+        status_code: last_status.as_u16(),
+        message: last_message,
+    })
+}
+
 fn build_client(config: &SafeLineConfig) -> Result<Client> {
     Ok(Client::builder()
         .danger_accept_invalid_certs(!config.verify_tls)
@@ -314,6 +435,23 @@ fn extract_security_events(payload: &Value) -> Result<Vec<SafeLineSecurityEventS
 
     Err(anyhow!(
         "已拿到雷池响应，但未能从 JSON 中识别事件数组。请检查 event_list_path 是否正确，或根据目标实例实际返回结构补充解析规则。"
+    ))
+}
+
+fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlockedIpSummary>> {
+    let candidates = find_array_candidates(payload);
+    for candidate in candidates {
+        let records = candidate
+            .iter()
+            .filter_map(parse_blocked_ip_summary)
+            .collect::<Vec<_>>();
+        if !records.is_empty() {
+            return Ok(records);
+        }
+    }
+
+    Err(anyhow!(
+        "已拿到雷池响应，但未能从 JSON 中识别封禁列表数组。请检查 blocklist_sync_path 是否正确，或根据目标实例实际返回结构补充解析规则。"
     ))
 }
 
@@ -451,6 +589,29 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
     })
 }
 
+fn parse_blocked_ip_summary(value: &Value) -> Option<SafeLineBlockedIpSummary> {
+    let object = value.as_object()?;
+    let ip = pick_string(object, &["ip", "ip_addr", "address"])?;
+    let reason = pick_string(object, &["reason", "message", "description"])
+        .unwrap_or_else(|| "safeline_blocked_ip".to_string());
+    let blocked_at = pick_i64(object, &["blocked_at", "created_at", "timestamp", "time"])
+        .map(normalize_timestamp)
+        .unwrap_or_else(unix_timestamp);
+    let expires_at = pick_i64(object, &["expires_at", "expired_at", "expire_at", "ttl_until"])
+        .map(normalize_timestamp)
+        .unwrap_or(blocked_at + 3600);
+    let remote_id = pick_string(object, &["id", "uuid", "uid"]);
+
+    Some(SafeLineBlockedIpSummary {
+        remote_id,
+        ip,
+        reason: format!("safeline:{reason}"),
+        blocked_at,
+        expires_at,
+        raw: value.clone(),
+    })
+}
+
 fn pick_string(
     object: &serde_json::Map<String, Value>,
     keys: &[&str],
@@ -539,6 +700,19 @@ impl From<SafeLineSecurityEventSummary> for SecurityEventRecord {
             created_at: value.created_at,
             handled: false,
             handled_at: None,
+        }
+    }
+}
+
+impl From<SafeLineBlockedIpSummary> for BlockedIpRecord {
+    fn from(value: SafeLineBlockedIpSummary) -> Self {
+        Self {
+            provider: Some("safeline".to_string()),
+            provider_remote_id: value.remote_id,
+            ip: value.ip,
+            reason: value.reason,
+            blocked_at: value.blocked_at,
+            expires_at: value.expires_at,
         }
     }
 }

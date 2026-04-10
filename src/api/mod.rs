@@ -49,6 +49,7 @@ pub struct SafeLineSettingsResponse {
     site_list_path: String,
     event_list_path: String,
     blocklist_sync_path: String,
+    blocklist_delete_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +78,7 @@ pub struct SafeLineSettingsRequest {
     site_list_path: String,
     event_list_path: String,
     blocklist_sync_path: String,
+    blocklist_delete_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,6 +91,7 @@ pub struct SafeLineTestRequest {
     site_list_path: String,
     event_list_path: String,
     blocklist_sync_path: String,
+    blocklist_delete_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -176,6 +179,15 @@ pub struct SafeLineBlocklistSyncResponse {
     synced: u32,
     skipped: u32,
     failed: u32,
+    last_cursor: Option<i64>,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineBlocklistPullResponse {
+    success: bool,
+    imported: u32,
+    skipped: u32,
     last_cursor: Option<i64>,
     message: String,
 }
@@ -284,6 +296,8 @@ pub struct BlockedIpsResponse {
 #[derive(Debug, Serialize)]
 pub struct BlockedIpResponse {
     id: i64,
+    provider: Option<String>,
+    provider_remote_id: Option<String>,
     ip: String,
     reason: String,
     blocked_at: i64,
@@ -311,6 +325,7 @@ pub struct EventsQueryParams {
 pub struct BlockedIpsQueryParams {
     limit: Option<u32>,
     offset: Option<u32>,
+    provider: Option<String>,
     ip: Option<String>,
     active_only: Option<bool>,
     blocked_from: Option<i64>,
@@ -369,6 +384,10 @@ impl ApiServer {
             .route(
                 "/integrations/safeline/sync/blocked-ips",
                 axum::routing::post(sync_safeline_blocked_ips_handler),
+            )
+            .route(
+                "/integrations/safeline/pull/blocked-ips",
+                axum::routing::post(pull_safeline_blocked_ips_handler),
             )
             .route(
                 "/rules/:id",
@@ -607,6 +626,41 @@ async fn sync_safeline_blocked_ips_handler(
     }))
 }
 
+async fn pull_safeline_blocked_ips_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineBlocklistPullResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let records = crate::integrations::safeline::list_blocked_ips(safeline)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?
+        .into_iter()
+        .map(crate::storage::BlockedIpRecord::from)
+        .collect::<Vec<_>>();
+
+    let result = store
+        .import_safeline_blocked_ips_pull(&records)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(SafeLineBlocklistPullResponse {
+        success: true,
+        imported: result.imported as u32,
+        skipped: result.skipped as u32,
+        last_cursor: result.last_cursor,
+        message: format!(
+            "封禁回流完成，新增 {} 条，跳过 {} 条重复记录。",
+            result.imported, result.skipped
+        ),
+    }))
+}
+
 async fn list_security_events_handler(
     State(state): State<ApiState>,
     Query(params): Query<EventsQueryParams>,
@@ -768,15 +822,41 @@ async fn delete_blocked_ip_handler(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let deleted = store
-        .delete_blocked_ip(id)
-        .await
-        .map_err(ApiError::internal)?;
+    let Some(entry) = store.load_blocked_ip(id).await.map_err(ApiError::internal)? else {
+        return Err(ApiError::not_found(format!(
+            "Blocked IP record '{}' not found",
+            id
+        )));
+    };
+
+    if entry.provider.as_deref() == Some("safeline") {
+        let config = persisted_config(&state).await?;
+        let safeline = &config.integrations.safeline;
+        if !safeline.enabled {
+            return Err(ApiError::conflict("雷池集成尚未启用，无法执行远端解封".to_string()));
+        }
+
+        let result = crate::integrations::safeline::delete_blocked_ip(safeline, &entry)
+            .await
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
+        if !result.accepted {
+            return Err(ApiError::conflict(format!(
+                "雷池远端解封失败，HTTP {}：{}",
+                result.status_code, result.message
+            )));
+        }
+    }
+
+    let deleted = store.delete_blocked_ip(id).await.map_err(ApiError::internal)?;
 
     if deleted {
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("Blocked IP record '{}' removed", id),
+            message: if entry.provider.as_deref() == Some("safeline") {
+                format!("雷池封禁记录 '{}' 已完成远端解封并从本地缓存移除。", id)
+            } else {
+                format!("Blocked IP record '{}' removed", id)
+            },
         }))
     } else {
         Err(ApiError::not_found(format!(
@@ -877,6 +957,7 @@ impl SafeLineSettingsResponse {
             site_list_path: config.site_list_path.clone(),
             event_list_path: config.event_list_path.clone(),
             blocklist_sync_path: config.blocklist_sync_path.clone(),
+            blocklist_delete_path: config.blocklist_delete_path.clone(),
         }
     }
 }
@@ -918,6 +999,7 @@ impl SafeLineSettingsRequest {
             site_list_path: self.site_list_path,
             event_list_path: self.event_list_path,
             blocklist_sync_path: self.blocklist_sync_path,
+            blocklist_delete_path: self.blocklist_delete_path,
         }
     }
 }
@@ -934,6 +1016,7 @@ impl SafeLineTestRequest {
             site_list_path: self.site_list_path,
             event_list_path: self.event_list_path,
             blocklist_sync_path: self.blocklist_sync_path,
+            blocklist_delete_path: self.blocklist_delete_path,
         }
     }
 }
@@ -1105,6 +1188,8 @@ impl From<crate::storage::BlockedIpEntry> for BlockedIpResponse {
     fn from(entry: crate::storage::BlockedIpEntry) -> Self {
         Self {
             id: entry.id,
+            provider: entry.provider,
+            provider_remote_id: entry.provider_remote_id,
             ip: entry.ip,
             reason: entry.reason,
             blocked_at: entry.blocked_at,
@@ -1169,6 +1254,7 @@ impl BlockedIpsQueryParams {
         Ok(crate::storage::BlockedIpQuery {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
+            provider: self.provider,
             ip: self.ip,
             active_only: self.active_only.unwrap_or(false),
             blocked_from: self.blocked_from,
@@ -1442,6 +1528,7 @@ mod tests {
         let query = BlockedIpsQueryParams {
             limit: Some(5),
             offset: Some(2),
+            provider: Some("safeline".to_string()),
             ip: Some("10.0.0.2".to_string()),
             active_only: Some(true),
             blocked_from: Some(300),
@@ -1454,6 +1541,7 @@ mod tests {
         let query = query.unwrap();
         assert_eq!(query.limit, 5);
         assert_eq!(query.offset, 2);
+        assert_eq!(query.provider.as_deref(), Some("safeline"));
         assert_eq!(query.ip.as_deref(), Some("10.0.0.2"));
         assert!(query.active_only);
         assert_eq!(query.blocked_from, Some(300));

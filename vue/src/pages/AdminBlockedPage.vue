@@ -9,11 +9,13 @@ import { Ban, RefreshCw } from 'lucide-vue-next'
 const { formatTimestamp, timeRemaining } = useFormatters()
 const loading = ref(true)
 const refreshing = ref(false)
+const mutatingId = ref<number | null>(null)
 const filtersReady = ref(false)
 const error = ref('')
 const blockedPayload = ref<BlockedIpsResponse>({ total: 0, limit: 0, offset: 0, blocked_ips: [] })
 
 const blockedFilters = reactive({
+  provider: 'all',
   active_only: true,
   sort_by: 'blocked_at',
   sort_direction: 'desc' as 'asc' | 'desc',
@@ -25,6 +27,7 @@ const loadBlockedIps = async (showLoader = false) => {
   try {
     blockedPayload.value = await fetchBlockedIps({
       limit: 30,
+      provider: blockedFilters.provider === 'all' ? undefined : blockedFilters.provider,
       active_only: blockedFilters.active_only,
       sort_by: blockedFilters.sort_by,
       sort_direction: blockedFilters.sort_direction,
@@ -39,11 +42,14 @@ const loadBlockedIps = async (showLoader = false) => {
 }
 
 const handleUnblock = async (id: number) => {
+  mutatingId.value = id
   try {
     await unblockIp(id)
     await loadBlockedIps()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '解除封禁失败'
+  } finally {
+    mutatingId.value = null
   }
 }
 
@@ -96,6 +102,10 @@ watch(
           <input v-model="blockedFilters.active_only" type="checkbox" class="accent-[var(--color-cyber-accent)]" />
           仅显示有效封禁
         </label>
+        <select v-model="blockedFilters.provider" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+          <option value="all">全部来源</option>
+          <option value="safeline">雷池</option>
+        </select>
         <select v-model="blockedFilters.sort_by" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
           <option value="blocked_at">按封禁时间</option>
           <option value="expires_at">按到期时间</option>
@@ -120,14 +130,26 @@ watch(
               <Ban :size="22" />
             </div>
             <button
+              v-if="!ip.provider || ip.provider === 'safeline'"
               @click="handleUnblock(ip.id)"
+              :disabled="mutatingId === ip.id"
               class="rounded-full border border-cyber-success/20 px-3 py-2 text-xs text-cyber-success transition hover:bg-cyber-success/10"
             >
-              解除封禁
+              {{ mutatingId === ip.id ? '处理中...' : ip.provider === 'safeline' ? '雷池解封' : '解除封禁' }}
             </button>
+            <span
+              v-else
+              class="rounded-full border border-cyber-border/60 px-3 py-2 text-xs text-cyber-muted"
+            >
+              外部回流
+            </span>
           </div>
 
           <h3 class="mt-5 font-mono text-2xl font-semibold text-stone-900">{{ ip.ip }}</h3>
+          <p v-if="ip.provider" class="mt-2 text-xs text-cyber-accent-strong">
+            来源：{{ ip.provider }}
+            <span v-if="ip.provider_remote_id"> / 远端 ID：{{ ip.provider_remote_id }}</span>
+          </p>
           <p class="mt-3 text-sm text-cyber-muted">封禁时间：{{ formatTimestamp(ip.blocked_at) }}</p>
           <p class="mt-2 text-sm text-cyber-muted">到期时间：{{ formatTimestamp(ip.expires_at) }}</p>
           <p class="mt-1 text-xs text-cyber-muted">剩余：{{ timeRemaining(ip.expires_at) }}</p>

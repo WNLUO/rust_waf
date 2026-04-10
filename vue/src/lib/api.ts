@@ -9,6 +9,7 @@ import type {
   MetricsResponse,
   RuleDraft,
   RulesResponse,
+  SafeLineBlocklistPullResponse,
   SafeLineBlocklistSyncResponse,
   SafeLineEventSyncResponse,
   SafeLineMappingsResponse,
@@ -193,6 +194,12 @@ export function fetchSafeLineSyncState() {
 
 export function syncSafeLineBlockedIps() {
   return apiRequest<SafeLineBlocklistSyncResponse>('/integrations/safeline/sync/blocked-ips', {
+    method: 'POST',
+  })
+}
+
+export function pullSafeLineBlockedIps() {
+  return apiRequest<SafeLineBlocklistPullResponse>('/integrations/safeline/pull/blocked-ips', {
     method: 'POST',
   })
 }

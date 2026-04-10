@@ -54,6 +54,7 @@ pub struct SecurityEventQuery {
 pub struct BlockedIpQuery {
     pub limit: u32,
     pub offset: u32,
+    pub provider: Option<String>,
     pub ip: Option<String>,
     pub active_only: bool,
     pub blocked_from: Option<i64>,
@@ -125,6 +126,8 @@ pub struct SecurityEventEntry {
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct BlockedIpEntry {
     pub id: i64,
+    pub provider: Option<String>,
+    pub provider_remote_id: Option<String>,
     pub ip: String,
     pub reason: String,
     pub blocked_at: i64,
@@ -157,10 +160,24 @@ pub struct SafeLineSyncStateEntry {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct SafeLineDeleteResult {
+    pub success: usize,
+    pub failed: usize,
+    pub last_cursor: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct SafeLineBlocklistSyncResult {
     pub synced: usize,
     pub skipped: usize,
     pub failed: usize,
+    pub last_cursor: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SafeLineBlocklistPullResult {
+    pub imported: usize,
+    pub skipped: usize,
     pub last_cursor: Option<i64>,
 }
 
@@ -188,6 +205,8 @@ pub struct SecurityEventRecord {
 
 #[derive(Debug, Clone)]
 pub struct BlockedIpRecord {
+    pub provider: Option<String>,
+    pub provider_remote_id: Option<String>,
     pub ip: String,
     pub reason: String,
     pub blocked_at: i64,
@@ -542,6 +561,41 @@ impl SqliteStore {
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn upsert_safeline_sync_state(
+        &self,
+        resource: &str,
+        last_cursor: Option<i64>,
+        imported: usize,
+        skipped: usize,
+    ) -> Result<()> {
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO safeline_sync_state (
+                resource, last_cursor, last_success_at, last_imported_count, last_skipped_count, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(resource) DO UPDATE SET
+                last_cursor = excluded.last_cursor,
+                last_success_at = excluded.last_success_at,
+                last_imported_count = excluded.last_imported_count,
+                last_skipped_count = excluded.last_skipped_count,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(resource)
+        .bind(last_cursor)
+        .bind(now)
+        .bind(imported as i64)
+        .bind(skipped as i64)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn import_safeline_blocked_ips_sync_result(
         &self,
         synced_records: &[BlockedIpEntry],
@@ -607,6 +661,93 @@ impl SqliteStore {
             synced,
             skipped,
             failed,
+            last_cursor,
+        })
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn import_safeline_blocked_ips_pull(
+        &self,
+        records: &[BlockedIpRecord],
+    ) -> Result<SafeLineBlocklistPullResult> {
+        let mut tx = self.pool.begin().await?;
+        let mut imported = 0usize;
+        let mut skipped = 0usize;
+        let mut last_cursor = None;
+
+        for record in records {
+            let fingerprint = fingerprint_blocked_ip_record(record);
+            let dedup = sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO safeline_blocked_ip_pull_dedup (
+                    fingerprint, ip, expires_at, synced_at
+                )
+                VALUES (?, ?, ?, ?)
+                "#,
+            )
+            .bind(&fingerprint)
+            .bind(&record.ip)
+            .bind(record.expires_at)
+            .bind(unix_timestamp())
+            .execute(&mut *tx)
+            .await?;
+
+            if dedup.rows_affected() == 0 {
+                skipped += 1;
+                continue;
+            }
+
+            sqlx::query(
+                r#"
+                INSERT INTO blocked_ips (
+                    provider, provider_remote_id, ip, reason, blocked_at, expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&record.provider)
+            .bind(&record.provider_remote_id)
+            .bind(&record.ip)
+            .bind(&record.reason)
+            .bind(record.blocked_at)
+            .bind(record.expires_at)
+            .execute(&mut *tx)
+            .await?;
+
+            imported += 1;
+            last_cursor =
+                Some(last_cursor.map_or(record.expires_at, |current: i64| current.max(record.expires_at)));
+        }
+
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO safeline_sync_state (
+                resource, last_cursor, last_success_at, last_imported_count, last_skipped_count, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(resource) DO UPDATE SET
+                last_cursor = excluded.last_cursor,
+                last_success_at = excluded.last_success_at,
+                last_imported_count = excluded.last_imported_count,
+                last_skipped_count = excluded.last_skipped_count,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind("blocked_ips_pull")
+        .bind(last_cursor)
+        .bind(now)
+        .bind(imported as i64)
+        .bind(skipped as i64)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(SafeLineBlocklistPullResult {
+            imported,
+            skipped,
             last_cursor,
         })
     }
@@ -688,7 +829,7 @@ impl SqliteStore {
             .await?;
 
         let mut builder = QueryBuilder::<Sqlite>::new(
-            "SELECT id, ip, reason, blocked_at, expires_at FROM blocked_ips WHERE 1=1",
+            "SELECT id, provider, provider_remote_id, ip, reason, blocked_at, expires_at FROM blocked_ips WHERE 1=1",
         );
         append_blocked_ip_filters(&mut builder, query);
         append_blocked_ip_sort(&mut builder, query);
@@ -799,6 +940,22 @@ impl SqliteStore {
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn load_blocked_ip(&self, id: i64) -> Result<Option<BlockedIpEntry>> {
+        let row = sqlx::query_as::<_, BlockedIpEntry>(
+            r#"
+            SELECT id, provider, provider_remote_id, ip, reason, blocked_at, expires_at
+            FROM blocked_ips
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn mark_security_event_handled(&self, id: i64, handled: bool) -> Result<bool> {
         let handled_at = if handled {
             Some(unix_timestamp())
@@ -863,6 +1020,8 @@ impl BlockedIpRecord {
         expires_at: i64,
     ) -> Self {
         Self {
+            provider: None,
+            provider_remote_id: None,
             ip: ip.into(),
             reason: reason.into(),
             blocked_at,
@@ -903,6 +1062,8 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
 
         CREATE TABLE IF NOT EXISTS blocked_ips (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT,
+            provider_remote_id TEXT,
             ip TEXT NOT NULL,
             reason TEXT NOT NULL,
             blocked_at INTEGER NOT NULL,
@@ -913,7 +1074,6 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON blocked_ips(ip);
         CREATE INDEX IF NOT EXISTS idx_blocked_ips_expires_at
             ON blocked_ips(expires_at);
-
         CREATE TABLE IF NOT EXISTS rules (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -973,6 +1133,13 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             expires_at INTEGER NOT NULL,
             synced_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS safeline_blocked_ip_pull_dedup (
+            fingerprint TEXT PRIMARY KEY,
+            ip TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            synced_at INTEGER NOT NULL
+        );
         "#,
     )
     .execute(pool)
@@ -1007,11 +1174,24 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             }
         }
     }
+    for statement in [
+        "ALTER TABLE blocked_ips ADD COLUMN provider TEXT",
+        "ALTER TABLE blocked_ips ADD COLUMN provider_remote_id TEXT",
+    ] {
+        if let Err(err) = sqlx::query(statement).execute(pool).await {
+            if !err.to_string().contains("duplicate column name") {
+                return Err(err.into());
+            }
+        }
+    }
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_security_events_provider_site_id ON security_events(provider_site_id)",
     )
     .execute(pool)
     .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider ON blocked_ips(provider)")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -1067,6 +1247,37 @@ fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
 
 fn fingerprint_blocked_ip(record: &BlockedIpEntry) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(record.provider.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(
+        record
+            .provider_remote_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hasher.update([0]);
+    hasher.update(record.ip.as_bytes());
+    hasher.update([0]);
+    hasher.update(record.reason.as_bytes());
+    hasher.update([0]);
+    hasher.update(record.blocked_at.to_le_bytes());
+    hasher.update(record.expires_at.to_le_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn fingerprint_blocked_ip_record(record: &BlockedIpRecord) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(record.provider.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(
+        record
+            .provider_remote_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hasher.update([0]);
     hasher.update(record.ip.as_bytes());
     hasher.update([0]);
     hasher.update(record.reason.as_bytes());
@@ -1114,10 +1325,12 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
             StorageCommand::BlockedIp(record) => {
                 sqlx::query(
                     r#"
-                    INSERT INTO blocked_ips (ip, reason, blocked_at, expires_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO blocked_ips (provider, provider_remote_id, ip, reason, blocked_at, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     "#,
                 )
+                .bind(record.provider)
+                .bind(record.provider_remote_id)
                 .bind(record.ip)
                 .bind(record.reason)
                 .bind(record.blocked_at)
@@ -1207,6 +1420,10 @@ fn append_blocked_ip_filters<'a>(
     builder: &mut QueryBuilder<'a, Sqlite>,
     query: &'a BlockedIpQuery,
 ) {
+    if let Some(provider) = query.provider.as_deref() {
+        builder.push(" AND provider = ");
+        builder.push_bind(provider);
+    }
     if let Some(ip) = query.ip.as_deref() {
         builder.push(" AND ip = ");
         builder.push_bind(ip);
@@ -1819,5 +2036,87 @@ mod tests {
         let state = store.load_safeline_sync_state("events").await.unwrap().unwrap();
         assert_eq!(state.last_imported_count, 0);
         assert_eq!(state.last_skipped_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_deduplicates_safeline_blocked_ip_pull() {
+        let path = unique_test_db_path("safeline_blocked_ip_pull_dedup");
+        let store = SqliteStore::new(path, true).await.unwrap();
+        let record = BlockedIpRecord {
+            provider: Some("safeline".to_string()),
+            provider_remote_id: Some("remote-1".to_string()),
+            ip: "203.0.113.10".to_string(),
+            reason: "safeline:test".to_string(),
+            blocked_at: unix_timestamp(),
+            expires_at: unix_timestamp() + 600,
+        };
+
+        let first = store
+            .import_safeline_blocked_ips_pull(std::slice::from_ref(&record))
+            .await
+            .unwrap();
+        assert_eq!(first.imported, 1);
+        assert_eq!(first.skipped, 0);
+
+        let second = store
+            .import_safeline_blocked_ips_pull(std::slice::from_ref(&record))
+            .await
+            .unwrap();
+        assert_eq!(second.imported, 0);
+        assert_eq!(second.skipped, 1);
+
+        let blocked = store
+            .list_blocked_ips(&BlockedIpQuery {
+                provider: Some("safeline".to_string()),
+                ..BlockedIpQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(blocked.total, 1);
+
+        let state = store
+            .load_safeline_sync_state("blocked_ips_pull")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.last_imported_count, 0);
+        assert_eq!(state.last_skipped_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_blocked_ip_pull_dedup_is_isolated_from_push_dedup() {
+        let path = unique_test_db_path("safeline_blocked_ip_pull_isolated");
+        let store = SqliteStore::new(path, true).await.unwrap();
+        let now = unix_timestamp();
+        let pushed = BlockedIpEntry {
+            id: 1,
+            provider: Some("safeline".to_string()),
+            provider_remote_id: Some("remote-1".to_string()),
+            ip: "203.0.113.20".to_string(),
+            reason: "safeline:test".to_string(),
+            blocked_at: now,
+            expires_at: now + 1200,
+        };
+        let pulled = BlockedIpRecord {
+            provider: pushed.provider.clone(),
+            provider_remote_id: pushed.provider_remote_id.clone(),
+            ip: pushed.ip.clone(),
+            reason: pushed.reason.clone(),
+            blocked_at: pushed.blocked_at,
+            expires_at: pushed.expires_at,
+        };
+
+        let push_result = store
+            .import_safeline_blocked_ips_sync_result(&[pushed], 0)
+            .await
+            .unwrap();
+        assert_eq!(push_result.synced, 1);
+
+        let pull_result = store
+            .import_safeline_blocked_ips_pull(&[pulled])
+            .await
+            .unwrap();
+        assert_eq!(pull_result.imported, 1);
+        assert_eq!(pull_result.skipped, 0);
     }
 }

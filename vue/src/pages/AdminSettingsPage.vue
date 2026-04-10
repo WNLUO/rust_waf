@@ -733,13 +733,6 @@ onMounted(async () => {
           </div>
 
           <div class="mt-3 space-y-4">
-            <div class="rounded-[16px] border border-slate-200 bg-slate-50/80 p-4">
-              <p class="text-sm font-medium text-stone-900">快速操作</p>
-              <p class="mt-1 text-xs leading-5 text-slate-500">
-                生成随机证书会自动设为默认证书；上传证书会弹出表单，并优先尝试从剪切板识别 PEM 内容。
-              </p>
-            </div>
-
             <div class="flex flex-wrap items-center gap-2.5">
               <button
                 @click="openGenerateModal"

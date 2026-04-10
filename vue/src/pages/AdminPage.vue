@@ -194,6 +194,9 @@ onBeforeUnmount(() => {
                 <p>目标地址：{{ event.dest_ip }}:{{ event.dest_port }}</p>
                 <p>协议：{{ event.protocol }}</p>
                 <p>请求：{{ event.http_method || '无' }} {{ event.uri || '' }}</p>
+                <p v-if="event.provider_site_name || event.provider_site_domain" class="md:col-span-2">
+                  归属站点：{{ event.provider_site_name || event.provider_site_domain }}
+                </p>
               </div>
             </div>
             <p v-if="!dashboard?.events.events.length" class="text-sm text-cyber-muted">暂无安全事件。</p>

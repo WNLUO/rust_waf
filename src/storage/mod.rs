@@ -1,6 +1,7 @@
 use crate::config::{Config, Rule, RuleAction, RuleLayer, Severity};
 use anyhow::Result;
 use log::{debug, warn};
+use sha2::{Digest, Sha256};
 use serde_json;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
@@ -36,6 +37,8 @@ pub struct SecurityEventQuery {
     pub limit: u32,
     pub offset: u32,
     pub layer: Option<String>,
+    pub provider: Option<String>,
+    pub provider_site_id: Option<String>,
     pub source_ip: Option<String>,
     pub action: Option<String>,
     pub blocked_only: bool,
@@ -99,6 +102,10 @@ pub struct PagedResult<T> {
 pub struct SecurityEventEntry {
     pub id: i64,
     pub layer: String,
+    pub provider: Option<String>,
+    pub provider_site_id: Option<String>,
+    pub provider_site_name: Option<String>,
+    pub provider_site_domain: Option<String>,
     pub action: String,
     pub reason: String,
     pub source_ip: String,
@@ -138,9 +145,24 @@ pub struct SafeLineSiteMappingEntry {
     pub updated_at: i64,
 }
 
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SafeLineSyncStateEntry {
+    pub resource: String,
+    pub last_cursor: Option<i64>,
+    pub last_success_at: Option<i64>,
+    pub last_imported_count: i64,
+    pub last_skipped_count: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct SecurityEventRecord {
     pub layer: String,
+    pub provider: Option<String>,
+    pub provider_site_id: Option<String>,
+    pub provider_site_name: Option<String>,
+    pub provider_site_domain: Option<String>,
     pub action: String,
     pub reason: String,
     pub source_ip: String,
@@ -212,20 +234,51 @@ impl SqliteStore {
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
-    pub async fn insert_security_events(&self, events: &[SecurityEventRecord]) -> Result<usize> {
+    pub async fn import_safeline_security_events(
+        &self,
+        events: &[SecurityEventRecord],
+    ) -> Result<SafeLineImportResult> {
         let mut tx = self.pool.begin().await?;
+        let mut imported = 0usize;
+        let mut skipped = 0usize;
+        let mut last_cursor = None;
 
         for event in events {
+            let fingerprint = fingerprint_security_event(event);
+            let dedup_result = sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO safeline_event_dedup (
+                    fingerprint, created_at, imported_at
+                )
+                VALUES (?, ?, ?)
+                "#,
+            )
+            .bind(&fingerprint)
+            .bind(event.created_at)
+            .bind(unix_timestamp())
+            .execute(&mut *tx)
+            .await?;
+
+            if dedup_result.rows_affected() == 0 {
+                skipped += 1;
+                continue;
+            }
+
             sqlx::query(
                 r#"
                 INSERT INTO security_events (
-                    layer, action, reason, source_ip, dest_ip, source_port, dest_port,
+                    layer, provider, provider_site_id, provider_site_name, provider_site_domain,
+                    action, reason, source_ip, dest_ip, source_port, dest_port,
                     protocol, http_method, uri, http_version, created_at, handled, handled_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&event.layer)
+            .bind(&event.provider)
+            .bind(&event.provider_site_id)
+            .bind(&event.provider_site_name)
+            .bind(&event.provider_site_domain)
             .bind(&event.action)
             .bind(&event.reason)
             .bind(&event.source_ip)
@@ -241,10 +294,44 @@ impl SqliteStore {
             .bind(event.handled_at)
             .execute(&mut *tx)
             .await?;
+
+            imported += 1;
+            last_cursor = Some(
+                last_cursor.map_or(event.created_at, |current: i64| current.max(event.created_at)),
+            );
         }
 
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO safeline_sync_state (
+                resource, last_cursor, last_success_at, last_imported_count, last_skipped_count, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(resource) DO UPDATE SET
+                last_cursor = excluded.last_cursor,
+                last_success_at = excluded.last_success_at,
+                last_imported_count = excluded.last_imported_count,
+                last_skipped_count = excluded.last_skipped_count,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind("events")
+        .bind(last_cursor)
+        .bind(now)
+        .bind(imported as i64)
+        .bind(skipped as i64)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
-        Ok(events.len())
+
+        Ok(SafeLineImportResult {
+            imported,
+            skipped,
+            last_cursor,
+        })
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
@@ -427,6 +514,25 @@ impl SqliteStore {
         Ok(())
     }
 
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn load_safeline_sync_state(
+        &self,
+        resource: &str,
+    ) -> Result<Option<SafeLineSyncStateEntry>> {
+        let row = sqlx::query_as::<_, SafeLineSyncStateEntry>(
+            r#"
+            SELECT resource, last_cursor, last_success_at, last_imported_count, last_skipped_count, updated_at
+            FROM safeline_sync_state
+            WHERE resource = ?
+            "#,
+        )
+        .bind(resource)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
     pub async fn latest_rules_version(&self) -> Result<i64> {
         let latest_version: Option<i64> = sqlx::query_scalar("SELECT MAX(updated_at) FROM rules")
             .fetch_one(&self.pool)
@@ -460,7 +566,8 @@ impl SqliteStore {
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
-            SELECT id, layer, action, reason, source_ip, dest_ip, source_port, dest_port,
+            SELECT id, layer, provider, provider_site_id, provider_site_name, provider_site_domain,
+                   action, reason, source_ip, dest_ip, source_port, dest_port,
                    protocol, http_method, uri, http_version, created_at, handled, handled_at
             FROM security_events
             WHERE 1=1
@@ -649,6 +756,10 @@ impl SecurityEventRecord {
     ) -> Self {
         Self {
             layer: layer.into(),
+            provider: None,
+            provider_site_id: None,
+            provider_site_name: None,
+            provider_site_domain: None,
             action: action.into(),
             reason: reason.into(),
             source_ip: source_ip.into(),
@@ -688,6 +799,10 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE TABLE IF NOT EXISTS security_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             layer TEXT NOT NULL,
+            provider TEXT,
+            provider_site_id TEXT,
+            provider_site_name TEXT,
+            provider_site_domain TEXT,
             action TEXT NOT NULL,
             reason TEXT NOT NULL,
             source_ip TEXT NOT NULL,
@@ -707,6 +822,8 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON security_events(created_at);
         CREATE INDEX IF NOT EXISTS idx_security_events_source_ip
             ON security_events(source_ip);
+        CREATE INDEX IF NOT EXISTS idx_security_events_provider_site_id
+            ON security_events(provider_site_id);
 
         CREATE TABLE IF NOT EXISTS blocked_ips (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -755,6 +872,24 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
 
         CREATE INDEX IF NOT EXISTS idx_safeline_site_mappings_updated_at
             ON safeline_site_mappings(updated_at);
+
+        CREATE TABLE IF NOT EXISTS safeline_event_dedup (
+            fingerprint TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL,
+            imported_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_safeline_event_dedup_created_at
+            ON safeline_event_dedup(created_at);
+
+        CREATE TABLE IF NOT EXISTS safeline_sync_state (
+            resource TEXT PRIMARY KEY,
+            last_cursor INTEGER,
+            last_success_at INTEGER,
+            last_imported_count INTEGER NOT NULL DEFAULT 0,
+            last_skipped_count INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        );
         "#,
     )
     .execute(pool)
@@ -777,6 +912,18 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             return Err(err.into());
         }
     }
+    for statement in [
+        "ALTER TABLE security_events ADD COLUMN provider TEXT",
+        "ALTER TABLE security_events ADD COLUMN provider_site_id TEXT",
+        "ALTER TABLE security_events ADD COLUMN provider_site_name TEXT",
+        "ALTER TABLE security_events ADD COLUMN provider_site_domain TEXT",
+    ] {
+        if let Err(err) = sqlx::query(statement).execute(pool).await {
+            if !err.to_string().contains("duplicate column name") {
+                return Err(err.into());
+            }
+        }
+    }
 
     Ok(())
 }
@@ -792,6 +939,44 @@ pub struct SafeLineSiteMappingUpsert {
     pub notes: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SafeLineImportResult {
+    pub imported: usize,
+    pub skipped: usize,
+    pub last_cursor: Option<i64>,
+}
+
+fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(event.layer.as_bytes());
+    hasher.update([0]);
+    hasher.update(event.provider.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(event.provider_site_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(event.action.as_bytes());
+    hasher.update([0]);
+    hasher.update(event.reason.as_bytes());
+    hasher.update([0]);
+    hasher.update(event.source_ip.as_bytes());
+    hasher.update([0]);
+    hasher.update(event.dest_ip.as_bytes());
+    hasher.update([0]);
+    hasher.update(event.source_port.to_le_bytes());
+    hasher.update(event.dest_port.to_le_bytes());
+    hasher.update([0]);
+    hasher.update(event.protocol.as_bytes());
+    hasher.update([0]);
+    hasher.update(event.http_method.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(event.uri.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(event.http_version.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
+    hasher.update(event.created_at.to_le_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageCommand>) {
     while let Some(command) = receiver.recv().await {
         let result = match command {
@@ -799,13 +984,18 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
                 sqlx::query(
                     r#"
                     INSERT INTO security_events (
-                        layer, action, reason, source_ip, dest_ip, source_port, dest_port,
+                        layer, provider, provider_site_id, provider_site_name, provider_site_domain,
+                        action, reason, source_ip, dest_ip, source_port, dest_port,
                         protocol, http_method, uri, http_version, created_at, handled, handled_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(event.layer)
+                .bind(event.provider)
+                .bind(event.provider_site_id)
+                .bind(event.provider_site_name)
+                .bind(event.provider_site_domain)
                 .bind(event.action)
                 .bind(event.reason)
                 .bind(event.source_ip)
@@ -879,6 +1069,14 @@ fn append_security_event_filters<'a>(
     if let Some(layer) = query.layer.as_deref() {
         builder.push(" AND layer = ");
         builder.push_bind(layer);
+    }
+    if let Some(provider) = query.provider.as_deref() {
+        builder.push(" AND provider = ");
+        builder.push_bind(provider);
+    }
+    if let Some(provider_site_id) = query.provider_site_id.as_deref() {
+        builder.push(" AND provider_site_id = ");
+        builder.push_bind(provider_site_id);
     }
     if let Some(source_ip) = query.source_ip.as_deref() {
         builder.push(" AND source_ip = ");
@@ -1090,6 +1288,10 @@ mod tests {
 
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L7".to_string(),
+            provider: None,
+            provider_site_id: None,
+            provider_site_name: None,
+            provider_site_domain: None,
             action: "block".to_string(),
             reason: "test event".to_string(),
             source_ip: "127.0.0.1".to_string(),
@@ -1266,6 +1468,10 @@ mod tests {
 
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L7".to_string(),
+            provider: None,
+            provider_site_id: None,
+            provider_site_name: None,
+            provider_site_domain: None,
             action: "block".to_string(),
             reason: "sql injection".to_string(),
             source_ip: "10.0.0.1".to_string(),
@@ -1282,6 +1488,10 @@ mod tests {
         });
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L4".to_string(),
+            provider: None,
+            provider_site_id: None,
+            provider_site_name: None,
+            provider_site_domain: None,
             action: "alert".to_string(),
             reason: "port scan".to_string(),
             source_ip: "10.0.0.3".to_string(),
@@ -1460,5 +1670,55 @@ mod tests {
         let replaced = store.list_safeline_site_mappings().await.unwrap();
         assert_eq!(replaced.len(), 1);
         assert_eq!(replaced[0].safeline_site_id, "site-3");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_deduplicates_safeline_events() {
+        let path = unique_test_db_path("safeline_event_dedup");
+        let store = SqliteStore::new(path, true).await.unwrap();
+        let event = SecurityEventRecord {
+            layer: "safeline".to_string(),
+            provider: Some("safeline".to_string()),
+            provider_site_id: Some("site-1".to_string()),
+            provider_site_name: Some("主站".to_string()),
+            provider_site_domain: Some("portal.example.com".to_string()),
+            action: "block".to_string(),
+            reason: "safeline:sqli".to_string(),
+            source_ip: "203.0.113.10".to_string(),
+            dest_ip: "10.0.0.10".to_string(),
+            source_port: 44321,
+            dest_port: 443,
+            protocol: "HTTP".to_string(),
+            http_method: Some("POST".to_string()),
+            uri: Some("/login".to_string()),
+            http_version: Some("HTTP/1.1".to_string()),
+            created_at: unix_timestamp(),
+            handled: false,
+            handled_at: None,
+        };
+
+        let first = store
+            .import_safeline_security_events(std::slice::from_ref(&event))
+            .await
+            .unwrap();
+        assert_eq!(first.imported, 1);
+        assert_eq!(first.skipped, 0);
+
+        let second = store
+            .import_safeline_security_events(std::slice::from_ref(&event))
+            .await
+            .unwrap();
+        assert_eq!(second.imported, 0);
+        assert_eq!(second.skipped, 1);
+
+        let events = store
+            .list_security_events(&SecurityEventQuery::default())
+            .await
+            .unwrap();
+        assert_eq!(events.total, 1);
+
+        let state = store.load_safeline_sync_state("events").await.unwrap().unwrap();
+        assert_eq!(state.last_imported_count, 0);
+        assert_eq!(state.last_skipped_count, 1);
     }
 }

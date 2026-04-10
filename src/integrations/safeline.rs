@@ -27,6 +27,9 @@ pub struct SafeLineSiteSummary {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SafeLineSecurityEventSummary {
+    pub provider_site_id: Option<String>,
+    pub provider_site_name: Option<String>,
+    pub provider_site_domain: Option<String>,
     pub action: String,
     pub reason: String,
     pub source_ip: String,
@@ -365,8 +368,24 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
         &["created_at", "timestamp", "time", "occurred_at", "attack_time"],
     )
     .unwrap_or_else(unix_timestamp);
+    let provider_site_id = pick_string(
+        object,
+        &["site_id", "siteId", "website_id", "websiteId", "uuid"],
+    );
+    let provider_site_name = pick_string(
+        object,
+        &["site_name", "siteName", "website", "domain_name", "host_name"],
+    );
+    let provider_site_domain = pick_string(
+        object,
+        &["domain", "host", "hostname", "server_name", "website_domain"],
+    )
+    .or_else(|| uri.as_ref().and_then(|value| extract_host_from_uri(value)));
 
     Some(SafeLineSecurityEventSummary {
+        provider_site_id,
+        provider_site_name,
+        provider_site_domain,
         action,
         reason: attack_type
             .map(|kind| format!("safeline:{kind}:{reason}"))
@@ -441,10 +460,24 @@ fn unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+fn extract_host_from_uri(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return reqwest::Url::parse(trimmed)
+            .ok()
+            .and_then(|url| url.host_str().map(|host| host.to_string()));
+    }
+    None
+}
+
 impl From<SafeLineSecurityEventSummary> for SecurityEventRecord {
     fn from(value: SafeLineSecurityEventSummary) -> Self {
         Self {
             layer: "safeline".to_string(),
+            provider: Some("safeline".to_string()),
+            provider_site_id: value.provider_site_id,
+            provider_site_name: value.provider_site_name,
+            provider_site_domain: value.provider_site_domain,
             action: value.action,
             reason: value.reason,
             source_ip: value.source_ip,

@@ -58,6 +58,10 @@ export type ApiQueryValue = string | number | boolean | null | undefined
 export interface SecurityEventItem {
   id: number
   layer: string
+  provider: string | null
+  provider_site_id: string | null
+  provider_site_name: string | null
+  provider_site_domain: string | null
   action: string
   reason: string
   source_ip: string
@@ -84,6 +88,8 @@ export interface EventsQuery extends Record<string, ApiQueryValue> {
   limit?: number
   offset?: number
   layer?: string
+  provider?: string
+  provider_site_id?: string
   source_ip?: string
   action?: string
   blocked_only?: boolean
@@ -202,7 +208,18 @@ export interface SafeLineMappingsUpdateRequest {
 export interface SafeLineEventSyncResponse {
   success: boolean
   imported: number
+  skipped: number
+  last_cursor: number | null
   message: string
+}
+
+export interface SafeLineSyncStateResponse {
+  resource: string
+  last_cursor: number | null
+  last_success_at: number | null
+  last_imported_count: number
+  last_skipped_count: number
+  updated_at: number
 }
 
 export interface DashboardPayload {

@@ -15,6 +15,7 @@ const actionMap: Record<string, string> = {
 const layerMap: Record<string, string> = {
   l4: '四层',
   l7: '七层',
+  safeline: '雷池',
 }
 
 export function useFormatters() {

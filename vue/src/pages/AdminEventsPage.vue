@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { fetchSecurityEvents, markSecurityEventHandled } from '../lib/api'
 import type { SecurityEventItem, SecurityEventsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
@@ -16,6 +16,8 @@ const eventsPayload = ref<SecurityEventsResponse>({ total: 0, limit: 0, offset: 
 
 const eventsFilters = reactive({
   layer: 'all',
+  provider: 'all',
+  provider_site_id: 'all',
   action: 'all',
   blocked_only: false,
   handled: 'all' as 'all' | 'handled' | 'unhandled',
@@ -33,6 +35,9 @@ const loadEvents = async (showLoader = false) => {
       sort_direction: eventsFilters.sort_direction,
       blocked_only: eventsFilters.blocked_only,
       layer: eventsFilters.layer === 'all' ? undefined : eventsFilters.layer,
+      provider: eventsFilters.provider === 'all' ? undefined : eventsFilters.provider,
+      provider_site_id:
+        eventsFilters.provider_site_id === 'all' ? undefined : eventsFilters.provider_site_id,
       action: eventsFilters.action === 'all' ? undefined : eventsFilters.action,
       handled_only:
         eventsFilters.handled === 'all'
@@ -80,6 +85,18 @@ watch(
   },
   { deep: true },
 )
+
+const siteOptions = computed(() => {
+  const seen = new Map<string, string>()
+  for (const event of eventsPayload.value.events) {
+    if (!event.provider_site_id) continue
+    seen.set(
+      event.provider_site_id,
+      event.provider_site_name || event.provider_site_domain || event.provider_site_id,
+    )
+  }
+  return Array.from(seen.entries()).map(([id, label]) => ({ id, label }))
+})
 </script>
 
 <template>
@@ -116,6 +133,15 @@ watch(
           <option value="all">全部层级</option>
           <option value="l4">四层</option>
           <option value="l7">七层</option>
+          <option value="safeline">雷池</option>
+        </select>
+        <select v-model="eventsFilters.provider" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+          <option value="all">全部来源系统</option>
+          <option value="safeline">雷池</option>
+        </select>
+        <select v-model="eventsFilters.provider_site_id" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
+          <option value="all">全部雷池站点</option>
+          <option v-for="site in siteOptions" :key="site.id" :value="site.id">{{ site.label }}</option>
         </select>
         <select v-model="eventsFilters.action" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
           <option value="all">全部动作</option>
@@ -158,6 +184,13 @@ watch(
               <div class="flex flex-wrap items-center gap-3">
                 <StatusBadge :text="layerLabel(event.layer)" :type="event.layer === 'l7' ? 'info' : 'warning'" />
                 <StatusBadge :text="actionLabel(event.action)" :type="event.action === 'block' ? 'error' : 'warning'" />
+                <StatusBadge v-if="event.provider" :text="event.provider" type="muted" compact />
+                <StatusBadge
+                  v-if="event.provider_site_name || event.provider_site_domain"
+                  :text="event.provider_site_name || event.provider_site_domain || ''"
+                  type="info"
+                  compact
+                />
                 <StatusBadge v-if="event.handled" text="已处理" type="success" compact />
                 <span class="text-sm font-medium text-stone-900">{{ event.reason }}</span>
               </div>

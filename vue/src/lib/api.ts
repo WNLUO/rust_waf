@@ -12,6 +12,7 @@ import type {
   SafeLineEventSyncResponse,
   SafeLineMappingsResponse,
   SafeLineMappingsUpdateRequest,
+  SafeLineSyncStateResponse,
   SafeLineSitesResponse,
   SafeLineTestResponse,
   SecurityEventsResponse,
@@ -183,4 +184,8 @@ export function syncSafeLineEvents() {
   return apiRequest<SafeLineEventSyncResponse>('/integrations/safeline/sync/events', {
     method: 'POST',
   })
+}
+
+export function fetchSafeLineSyncState() {
+  return apiRequest<SafeLineSyncStateResponse | null>('/integrations/safeline/sync/state')
 }

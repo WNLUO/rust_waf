@@ -5,6 +5,7 @@ import { useFormatters } from '../composables/useFormatters'
 import {
   fetchSafeLineMappings,
   fetchSafeLineSites,
+  fetchSafeLineSyncState,
   fetchSettings,
   syncSafeLineEvents,
   testSafeLineConnection,
@@ -13,6 +14,7 @@ import {
 } from '../lib/api'
 import type {
   SafeLineMappingItem,
+  SafeLineSyncStateResponse,
   SafeLineSiteItem,
   SafeLineTestResponse,
   SettingsPayload,
@@ -35,6 +37,7 @@ const testResult = ref<SafeLineTestResponse | null>(null)
 const sites = ref<SafeLineSiteItem[]>([])
 const mappings = ref<SafeLineMappingItem[]>([])
 const sitesLoadedAt = ref<number | null>(null)
+const syncState = ref<SafeLineSyncStateResponse | null>(null)
 
 const systemSettings = reactive<SystemSettingsForm>({
   gateway_name: '玄枢防护网关',
@@ -112,6 +115,14 @@ async function loadMappings() {
     mappings.value = response.mappings
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取雷池站点映射失败'
+  }
+}
+
+async function loadSyncState() {
+  try {
+    syncState.value = await fetchSafeLineSyncState()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取雷池同步状态失败'
   }
 }
 
@@ -270,6 +281,7 @@ async function runEventSync() {
   try {
     const response = await syncSafeLineEvents()
     successMessage.value = response.message
+    await loadSyncState()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '同步雷池事件失败'
   } finally {
@@ -280,6 +292,7 @@ async function runEventSync() {
 onMounted(async () => {
   await loadSettings()
   await loadMappings()
+  await loadSyncState()
 })
 </script>
 
@@ -537,6 +550,24 @@ onMounted(async () => {
               <p>文档状态码：{{ testResult.openapi_doc_status ?? '-' }}</p>
               <p>鉴权结果：{{ testResult.authenticated ? '通过' : '未确认' }}</p>
               <p>探测状态码：{{ testResult.auth_probe_status ?? '-' }}</p>
+            </div>
+          </div>
+
+          <div class="rounded-[32px] border border-white/80 bg-white/80 p-6 shadow-[0_18px_50px_rgba(90,60,30,0.08)]">
+            <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">同步状态</p>
+            <h3 class="mt-2 text-xl font-semibold text-stone-900">雷池事件同步游标</h3>
+            <p class="mt-4 text-sm leading-7 text-stone-700">
+              {{
+                syncState
+                  ? `最近一次同步新增 ${syncState.last_imported_count} 条，跳过 ${syncState.last_skipped_count} 条重复事件。`
+                  : '尚未建立雷池事件同步状态。第一次同步后，这里会显示最近一次同步的游标和计数。'
+              }}
+            </p>
+            <div v-if="syncState" class="mt-4 grid gap-3 text-sm md:grid-cols-2">
+              <p>资源：{{ syncState.resource }}</p>
+              <p>最近成功时间：{{ syncState.last_success_at ? formatTimestamp(syncState.last_success_at) : '-' }}</p>
+              <p>最近游标：{{ syncState.last_cursor ?? '-' }}</p>
+              <p>状态更新时间：{{ formatTimestamp(syncState.updated_at) }}</p>
             </div>
           </div>
 

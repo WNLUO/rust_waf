@@ -152,7 +152,19 @@ pub struct SafeLineMappingUpsertRequest {
 pub struct SafeLineEventSyncResponse {
     success: bool,
     imported: u32,
+    skipped: u32,
+    last_cursor: Option<i64>,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineSyncStateResponse {
+    resource: String,
+    last_cursor: Option<i64>,
+    last_success_at: Option<i64>,
+    last_imported_count: u32,
+    last_skipped_count: u32,
+    updated_at: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -224,6 +236,10 @@ pub struct SecurityEventsResponse {
 pub struct SecurityEventResponse {
     id: i64,
     layer: String,
+    provider: Option<String>,
+    provider_site_id: Option<String>,
+    provider_site_name: Option<String>,
+    provider_site_domain: Option<String>,
     action: String,
     reason: String,
     source_ip: String,
@@ -266,6 +282,8 @@ pub struct EventsQueryParams {
     limit: Option<u32>,
     offset: Option<u32>,
     layer: Option<String>,
+    provider: Option<String>,
+    provider_site_id: Option<String>,
     source_ip: Option<String>,
     action: Option<String>,
     blocked_only: Option<bool>,
@@ -330,6 +348,10 @@ impl ApiServer {
             .route(
                 "/integrations/safeline/sync/events",
                 axum::routing::post(sync_safeline_events_handler),
+            )
+            .route(
+                "/integrations/safeline/sync/state",
+                get(get_safeline_sync_state_handler),
             )
             .route(
                 "/rules/:id",
@@ -476,23 +498,44 @@ async fn sync_safeline_events_handler(
         return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
     }
 
+    let mappings = store
+        .list_safeline_site_mappings()
+        .await
+        .map_err(ApiError::internal)?;
     let events = crate::integrations::safeline::list_security_events(safeline)
         .await
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
     let records = events
         .into_iter()
-        .map(crate::storage::SecurityEventRecord::from)
+        .map(|event| apply_safeline_mapping(event, &mappings))
         .collect::<Vec<_>>();
-    let imported = store
-        .insert_security_events(&records)
+    let result = store
+        .import_safeline_security_events(&records)
         .await
-        .map_err(ApiError::internal)? as u32;
+        .map_err(ApiError::internal)?;
 
     Ok(Json(SafeLineEventSyncResponse {
         success: true,
-        imported,
-        message: format!("已将 {} 条雷池事件写入本地事件库。", imported),
+        imported: result.imported as u32,
+        skipped: result.skipped as u32,
+        last_cursor: result.last_cursor,
+        message: format!(
+            "雷池事件同步完成，新增 {} 条，跳过 {} 条重复事件。",
+            result.imported, result.skipped
+        ),
     }))
+}
+
+async fn get_safeline_sync_state_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<Option<SafeLineSyncStateResponse>>> {
+    let store = sqlite_store(&state)?;
+    let state = store
+        .load_safeline_sync_state("events")
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(state.map(SafeLineSyncStateResponse::from)))
 }
 
 async fn list_security_events_handler(
@@ -907,6 +950,19 @@ impl SafeLineMappingsUpdateRequest {
     }
 }
 
+impl From<crate::storage::SafeLineSyncStateEntry> for SafeLineSyncStateResponse {
+    fn from(value: crate::storage::SafeLineSyncStateEntry) -> Self {
+        Self {
+            resource: value.resource,
+            last_cursor: value.last_cursor,
+            last_success_at: value.last_success_at,
+            last_imported_count: value.last_imported_count.max(0) as u32,
+            last_skipped_count: value.last_skipped_count.max(0) as u32,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
 impl RuleUpsertRequest {
     fn into_rule(self) -> Result<Rule, String> {
         let id = self.id.clone();
@@ -952,6 +1008,10 @@ impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
         Self {
             id: event.id,
             layer: event.layer,
+            provider: event.provider,
+            provider_site_id: event.provider_site_id,
+            provider_site_name: event.provider_site_name,
+            provider_site_domain: event.provider_site_domain,
             action: event.action,
             reason: event.reason,
             source_ip: event.source_ip,
@@ -987,6 +1047,8 @@ impl EventsQueryParams {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
             layer: self.layer,
+            provider: self.provider,
+            provider_site_id: self.provider_site_id,
             source_ip: self.source_ip,
             action: self.action,
             blocked_only: self.blocked_only.unwrap_or(false),
@@ -997,6 +1059,37 @@ impl EventsQueryParams {
             sort_direction: parse_sort_direction(self.sort_direction.as_deref())?,
         })
     }
+}
+
+fn apply_safeline_mapping(
+    event: crate::integrations::safeline::SafeLineSecurityEventSummary,
+    mappings: &[crate::storage::SafeLineSiteMappingEntry],
+) -> crate::storage::SecurityEventRecord {
+    let mut record = crate::storage::SecurityEventRecord::from(event);
+
+    if let Some(mapping) = mappings.iter().find(|mapping| {
+        record
+            .provider_site_id
+            .as_deref()
+            .map(|value| value == mapping.safeline_site_id)
+            .unwrap_or(false)
+            || record
+                .provider_site_domain
+                .as_deref()
+                .map(|value| !value.is_empty() && value == mapping.safeline_site_domain)
+                .unwrap_or(false)
+            || record
+                .provider_site_name
+                .as_deref()
+                .map(|value| !value.is_empty() && value == mapping.safeline_site_name)
+                .unwrap_or(false)
+    }) {
+        record.provider_site_id = Some(mapping.safeline_site_id.clone());
+        record.provider_site_name = Some(mapping.local_alias.clone());
+        record.provider_site_domain = Some(mapping.safeline_site_domain.clone());
+    }
+
+    record
 }
 
 impl BlockedIpsQueryParams {
@@ -1238,6 +1331,8 @@ mod tests {
             limit: Some(25),
             offset: Some(10),
             layer: Some("L7".to_string()),
+            provider: Some("safeline".to_string()),
+            provider_site_id: Some("site-1".to_string()),
             source_ip: Some("10.0.0.1".to_string()),
             action: Some("block".to_string()),
             blocked_only: Some(true),
@@ -1253,6 +1348,8 @@ mod tests {
         assert_eq!(query.limit, 25);
         assert_eq!(query.offset, 10);
         assert_eq!(query.layer.as_deref(), Some("L7"));
+        assert_eq!(query.provider.as_deref(), Some("safeline"));
+        assert_eq!(query.provider_site_id.as_deref(), Some("site-1"));
         assert_eq!(query.source_ip.as_deref(), Some("10.0.0.1"));
         assert_eq!(query.action.as_deref(), Some("block"));
         assert!(query.blocked_only);

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppLayout from '../components/layout/AppLayout.vue'
+import L7SectionNav from '../components/l7/L7SectionNav.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
 import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
@@ -351,6 +352,8 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="space-y-8">
+      <L7SectionNav />
+
       <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
         <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div class="max-w-3xl">
@@ -855,10 +858,10 @@ onBeforeUnmount(() => {
 
           <template #header-action>
             <RouterLink
-              to="/admin/rules"
+              to="/admin/l7/rules"
               class="inline-flex items-center gap-2 text-sm text-cyber-accent-strong transition hover:text-cyber-accent"
             >
-              前往规则中心
+              前往 L7 规则
             </RouterLink>
           </template>
         </CyberCard>

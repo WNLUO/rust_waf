@@ -54,6 +54,7 @@ pub struct SecurityEventQuery {
 pub struct BlockedIpQuery {
     pub limit: u32,
     pub offset: u32,
+    pub source_scope: BlockedIpSourceScope,
     pub provider: Option<String>,
     pub ip: Option<String>,
     pub active_only: bool,
@@ -61,6 +62,15 @@ pub struct BlockedIpQuery {
     pub blocked_to: Option<i64>,
     pub sort_by: BlockedIpSortField,
     pub sort_direction: SortDirection,
+}
+
+#[cfg(any(feature = "api", test))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BlockedIpSourceScope {
+    Local,
+    Remote,
+    #[default]
+    All,
 }
 
 #[cfg(any(feature = "api", test))]
@@ -1422,6 +1432,15 @@ fn append_blocked_ip_filters<'a>(
     builder: &mut QueryBuilder<'a, Sqlite>,
     query: &'a BlockedIpQuery,
 ) {
+    match query.source_scope {
+        BlockedIpSourceScope::Local => {
+            builder.push(" AND provider IS NULL");
+        }
+        BlockedIpSourceScope::Remote => {
+            builder.push(" AND provider IS NOT NULL");
+        }
+        BlockedIpSourceScope::All => {}
+    }
     if let Some(provider) = query.provider.as_deref() {
         builder.push(" AND provider = ");
         builder.push_bind(provider);

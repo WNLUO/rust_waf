@@ -391,6 +391,7 @@ pub struct EventsQueryParams {
 pub struct BlockedIpsQueryParams {
     limit: Option<u32>,
     offset: Option<u32>,
+    source_scope: Option<String>,
     provider: Option<String>,
     ip: Option<String>,
     active_only: Option<bool>,
@@ -1439,6 +1440,7 @@ impl BlockedIpsQueryParams {
         Ok(crate::storage::BlockedIpQuery {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
+            source_scope: parse_blocked_ip_source_scope(self.source_scope.as_deref())?,
             provider: self.provider,
             ip: self.ip,
             active_only: self.active_only.unwrap_or(false),
@@ -1447,6 +1449,17 @@ impl BlockedIpsQueryParams {
             sort_by: parse_blocked_ip_sort_field(self.sort_by.as_deref())?,
             sort_direction: parse_sort_direction(self.sort_direction.as_deref())?,
         })
+    }
+}
+
+fn parse_blocked_ip_source_scope(
+    value: Option<&str>,
+) -> Result<crate::storage::BlockedIpSourceScope, String> {
+    match value.unwrap_or("all").trim().to_ascii_lowercase().as_str() {
+        "all" => Ok(crate::storage::BlockedIpSourceScope::All),
+        "local" => Ok(crate::storage::BlockedIpSourceScope::Local),
+        "remote" => Ok(crate::storage::BlockedIpSourceScope::Remote),
+        other => Err(format!("Unsupported blocked IP source_scope '{}'", other)),
     }
 }
 
@@ -1720,6 +1733,7 @@ mod tests {
         let query = BlockedIpsQueryParams {
             limit: Some(5),
             offset: Some(2),
+            source_scope: Some("local".to_string()),
             provider: Some("safeline".to_string()),
             ip: Some("10.0.0.2".to_string()),
             active_only: Some(true),
@@ -1733,6 +1747,10 @@ mod tests {
         let query = query.unwrap();
         assert_eq!(query.limit, 5);
         assert_eq!(query.offset, 2);
+        assert!(matches!(
+            query.source_scope,
+            crate::storage::BlockedIpSourceScope::Local
+        ));
         assert_eq!(query.provider.as_deref(), Some("safeline"));
         assert_eq!(query.ip.as_deref(), Some("10.0.0.2"));
         assert!(query.active_only);
@@ -1754,10 +1772,17 @@ mod tests {
         assert!(invalid_events.is_err());
 
         let invalid_blocked = BlockedIpsQueryParams {
-            sort_direction: Some("sideways".to_string()),
+            source_scope: Some("sideways".to_string()),
             ..BlockedIpsQueryParams::default()
         }
         .into_query();
         assert!(invalid_blocked.is_err());
+
+        let invalid_blocked_sort = BlockedIpsQueryParams {
+            sort_direction: Some("sideways".to_string()),
+            ..BlockedIpsQueryParams::default()
+        }
+        .into_query();
+        assert!(invalid_blocked_sort.is_err());
     }
 }

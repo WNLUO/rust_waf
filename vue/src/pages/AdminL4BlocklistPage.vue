@@ -32,8 +32,6 @@ const isLocalBlockedIp = (item: BlockedIpItem) => !item.provider || item.provide
 
 const filteredBlockedIps = computed(() =>
   blockedPayload.value.blocked_ips.filter((item) => {
-    if (filters.scope === 'local' && !isLocalBlockedIp(item)) return false
-    if (filters.scope === 'safeline' && item.provider !== 'safeline') return false
     if (filters.search.trim()) {
       const keyword = filters.search.trim().toLowerCase()
       const provider = item.provider?.toLowerCase() ?? ''
@@ -67,6 +65,9 @@ const loadPageData = async (showLoader = false) => {
     const [blocked, config, stats] = await Promise.all([
       fetchBlockedIps({
         limit: 50,
+        source_scope:
+          filters.scope === 'local' ? 'local' : filters.scope === 'all' ? 'all' : 'remote',
+        provider: filters.scope === 'safeline' ? 'safeline' : undefined,
         active_only: filters.active_only,
         sort_by: filters.sort_by,
         sort_direction: filters.sort_direction,

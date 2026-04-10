@@ -118,6 +118,7 @@ export interface BlockedIpsResponse {
 export interface BlockedIpsQuery extends Record<string, ApiQueryValue> {
   limit?: number
   offset?: number
+  source_scope?: 'all' | 'local' | 'remote'
   provider?: string
   ip?: string
   active_only?: boolean

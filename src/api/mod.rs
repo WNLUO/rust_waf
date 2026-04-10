@@ -55,6 +55,38 @@ pub struct L4ConfigResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct L7ConfigResponse {
+    http_inspection_enabled: bool,
+    max_request_size: usize,
+    real_ip_headers: Vec<String>,
+    trusted_proxy_cidrs: Vec<String>,
+    first_byte_timeout_ms: u64,
+    read_idle_timeout_ms: u64,
+    tls_handshake_timeout_ms: u64,
+    proxy_connect_timeout_ms: u64,
+    proxy_write_timeout_ms: u64,
+    proxy_read_timeout_ms: u64,
+    upstream_healthcheck_enabled: bool,
+    upstream_healthcheck_interval_secs: u64,
+    upstream_healthcheck_timeout_ms: u64,
+    upstream_failure_mode: String,
+    bloom_filter_scale: f64,
+    http2_enabled: bool,
+    http2_max_concurrent_streams: usize,
+    http2_max_frame_size: usize,
+    http2_enable_priorities: bool,
+    http2_initial_window_size: u32,
+    runtime_enabled: bool,
+    bloom_enabled: bool,
+    bloom_false_positive_verification: bool,
+    runtime_profile: String,
+    listen_addrs: Vec<String>,
+    upstream_endpoint: String,
+    http3_enabled: bool,
+    http3_listen_addr: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SafeLineSettingsResponse {
     enabled: bool,
     auto_sync_events: bool,
@@ -100,6 +132,30 @@ pub struct L4ConfigUpdateRequest {
     max_blocked_ips: usize,
     state_ttl_secs: u64,
     bloom_filter_scale: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct L7ConfigUpdateRequest {
+    http_inspection_enabled: bool,
+    max_request_size: usize,
+    real_ip_headers: Vec<String>,
+    trusted_proxy_cidrs: Vec<String>,
+    first_byte_timeout_ms: u64,
+    read_idle_timeout_ms: u64,
+    tls_handshake_timeout_ms: u64,
+    proxy_connect_timeout_ms: u64,
+    proxy_write_timeout_ms: u64,
+    proxy_read_timeout_ms: u64,
+    upstream_healthcheck_enabled: bool,
+    upstream_healthcheck_interval_secs: u64,
+    upstream_healthcheck_timeout_ms: u64,
+    upstream_failure_mode: String,
+    bloom_filter_scale: f64,
+    http2_enabled: bool,
+    http2_max_concurrent_streams: usize,
+    http2_max_frame_size: usize,
+    http2_enable_priorities: bool,
+    http2_initial_window_size: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -283,6 +339,20 @@ pub struct L4StatsResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct L7StatsResponse {
+    enabled: bool,
+    blocked_requests: u64,
+    proxied_requests: u64,
+    proxy_successes: u64,
+    proxy_failures: u64,
+    proxy_fail_close_rejections: u64,
+    average_proxy_latency_micros: u64,
+    upstream_healthy: bool,
+    upstream_last_check_at: Option<i64>,
+    upstream_last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RulesListResponse {
     rules: Vec<RuleResponse>,
 }
@@ -435,6 +505,11 @@ impl ApiServer {
             )
             .route("/l4/stats", get(get_l4_stats_handler))
             .route(
+                "/l7/config",
+                get(get_l7_config_handler).put(update_l7_config_handler),
+            )
+            .route("/l7/stats", get(get_l7_stats_handler))
+            .route(
                 "/settings",
                 get(get_settings_handler).put(update_settings_handler),
             )
@@ -536,6 +611,14 @@ async fn get_l4_config_handler(State(state): State<ApiState>) -> ApiResult<Json<
     )))
 }
 
+async fn get_l7_config_handler(State(state): State<ApiState>) -> ApiResult<Json<L7ConfigResponse>> {
+    let config = persisted_config(&state).await?;
+    Ok(Json(L7ConfigResponse::from_config(
+        &config,
+        state.context.l7_inspector.is_some(),
+    )))
+}
+
 async fn update_l4_config_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<L4ConfigUpdateRequest>,
@@ -552,6 +635,28 @@ async fn update_l4_config_handler(
     Ok(Json(WriteStatusResponse {
         success: true,
         message: "L4 配置已写入数据库。当前运行中的四层检测实例需重启服务后才会加载新参数。"
+            .to_string(),
+    }))
+}
+
+async fn update_l7_config_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<L7ConfigUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let current = persisted_config(&state).await?;
+    let next = payload
+        .into_config(current)
+        .map_err(ApiError::bad_request)?;
+
+    store
+        .upsert_app_config(&next)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "L7 配置已写入数据库。监听、代理与协议栈相关参数需重启服务后生效。"
             .to_string(),
     }))
 }
@@ -586,6 +691,10 @@ async fn get_l4_stats_handler(State(state): State<ApiState>) -> ApiResult<Json<L
         .unwrap_or_else(L4StatsResponse::disabled);
 
     Ok(Json(response))
+}
+
+async fn get_l7_stats_handler(State(state): State<ApiState>) -> ApiResult<Json<L7StatsResponse>> {
+    Ok(Json(L7StatsResponse::from_context(state.context.as_ref())))
 }
 
 async fn test_safeline_handler(
@@ -1082,6 +1191,44 @@ impl L4ConfigResponse {
     }
 }
 
+impl L7ConfigResponse {
+    fn from_config(config: &Config, runtime_enabled: bool) -> Self {
+        Self {
+            http_inspection_enabled: config.l7_config.http_inspection_enabled,
+            max_request_size: config.l7_config.max_request_size,
+            real_ip_headers: config.l7_config.real_ip_headers.clone(),
+            trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
+            first_byte_timeout_ms: config.l7_config.first_byte_timeout_ms,
+            read_idle_timeout_ms: config.l7_config.read_idle_timeout_ms,
+            tls_handshake_timeout_ms: config.l7_config.tls_handshake_timeout_ms,
+            proxy_connect_timeout_ms: config.l7_config.proxy_connect_timeout_ms,
+            proxy_write_timeout_ms: config.l7_config.proxy_write_timeout_ms,
+            proxy_read_timeout_ms: config.l7_config.proxy_read_timeout_ms,
+            upstream_healthcheck_enabled: config.l7_config.upstream_healthcheck_enabled,
+            upstream_healthcheck_interval_secs: config.l7_config.upstream_healthcheck_interval_secs,
+            upstream_healthcheck_timeout_ms: config.l7_config.upstream_healthcheck_timeout_ms,
+            upstream_failure_mode: match config.l7_config.upstream_failure_mode {
+                crate::config::l7::UpstreamFailureMode::FailOpen => "fail_open".to_string(),
+                crate::config::l7::UpstreamFailureMode::FailClose => "fail_close".to_string(),
+            },
+            bloom_filter_scale: config.l7_config.bloom_filter_scale,
+            http2_enabled: config.l7_config.http2_config.enabled,
+            http2_max_concurrent_streams: config.l7_config.http2_config.max_concurrent_streams,
+            http2_max_frame_size: config.l7_config.http2_config.max_frame_size,
+            http2_enable_priorities: config.l7_config.http2_config.enable_priorities,
+            http2_initial_window_size: config.l7_config.http2_config.initial_window_size,
+            runtime_enabled,
+            bloom_enabled: config.bloom_enabled,
+            bloom_false_positive_verification: config.l7_bloom_false_positive_verification,
+            runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+            listen_addrs: config.listen_addrs.clone(),
+            upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
+            http3_enabled: config.http3_config.enabled,
+            http3_listen_addr: config.http3_config.listen_addr.clone(),
+        }
+    }
+}
+
 impl SafeLineSettingsResponse {
     fn from_config(config: &SafeLineConfig) -> Self {
         Self {
@@ -1120,6 +1267,40 @@ impl L4ConfigUpdateRequest {
         };
 
         current.normalized()
+    }
+}
+
+impl L7ConfigUpdateRequest {
+    fn into_config(self, mut current: Config) -> Result<Config, String> {
+        current.l7_config.http_inspection_enabled = self.http_inspection_enabled;
+        current.l7_config.max_request_size = self.max_request_size;
+        current.l7_config.real_ip_headers = self.real_ip_headers;
+        current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
+        current.l7_config.first_byte_timeout_ms = self.first_byte_timeout_ms;
+        current.l7_config.read_idle_timeout_ms = self.read_idle_timeout_ms;
+        current.l7_config.tls_handshake_timeout_ms = self.tls_handshake_timeout_ms;
+        current.l7_config.proxy_connect_timeout_ms = self.proxy_connect_timeout_ms;
+        current.l7_config.proxy_write_timeout_ms = self.proxy_write_timeout_ms;
+        current.l7_config.proxy_read_timeout_ms = self.proxy_read_timeout_ms;
+        current.l7_config.upstream_healthcheck_enabled = self.upstream_healthcheck_enabled;
+        current.l7_config.upstream_healthcheck_interval_secs =
+            self.upstream_healthcheck_interval_secs;
+        current.l7_config.upstream_healthcheck_timeout_ms =
+            self.upstream_healthcheck_timeout_ms;
+        current.l7_config.upstream_failure_mode = match self.upstream_failure_mode.as_str() {
+            "fail_open" => crate::config::l7::UpstreamFailureMode::FailOpen,
+            "fail_close" => crate::config::l7::UpstreamFailureMode::FailClose,
+            _ => return Err("上游失败策略仅支持 fail_open 或 fail_close".to_string()),
+        };
+        current.l7_config.bloom_filter_scale = self.bloom_filter_scale;
+        current.l7_config.http2_config.enabled = self.http2_enabled;
+        current.l7_config.http2_config.max_concurrent_streams =
+            self.http2_max_concurrent_streams;
+        current.l7_config.http2_config.max_frame_size = self.http2_max_frame_size;
+        current.l7_config.http2_config.enable_priorities = self.http2_enable_priorities;
+        current.l7_config.http2_config.initial_window_size = self.http2_initial_window_size;
+
+        Ok(current.normalized())
     }
 }
 
@@ -1237,6 +1418,38 @@ impl L4StatsResponse {
             bloom_stats: stats.bloom_stats,
             false_positive_stats: stats.false_positive_stats,
             per_port_stats,
+        }
+    }
+}
+
+impl L7StatsResponse {
+    fn from_context(context: &WafContext) -> Self {
+        let metrics = context.metrics_snapshot();
+        let upstream = context.upstream_health_snapshot();
+
+        Self {
+            enabled: context.l7_inspector.is_some(),
+            blocked_requests: metrics.as_ref().map(|value| value.blocked_l7).unwrap_or(0),
+            proxied_requests: metrics
+                .as_ref()
+                .map(|value| value.proxied_requests)
+                .unwrap_or(0),
+            proxy_successes: metrics
+                .as_ref()
+                .map(|value| value.proxy_successes)
+                .unwrap_or(0),
+            proxy_failures: metrics.as_ref().map(|value| value.proxy_failures).unwrap_or(0),
+            proxy_fail_close_rejections: metrics
+                .as_ref()
+                .map(|value| value.proxy_fail_close_rejections)
+                .unwrap_or(0),
+            average_proxy_latency_micros: metrics
+                .as_ref()
+                .map(|value| value.average_proxy_latency_micros)
+                .unwrap_or(0),
+            upstream_healthy: upstream.healthy,
+            upstream_last_check_at: upstream.last_check_at,
+            upstream_last_error: upstream.last_error,
         }
     }
 }

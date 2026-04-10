@@ -8,6 +8,8 @@ import type {
   HealthResponse,
   L4ConfigPayload,
   L4StatsPayload,
+  L7ConfigPayload,
+  L7StatsPayload,
   MetricsResponse,
   RuleDraft,
   RulesResponse,
@@ -172,6 +174,33 @@ export function updateL4Config(payload: Omit<L4ConfigPayload, 'runtime_enabled' 
 
 export function fetchL4Stats() {
   return apiRequest<L4StatsPayload>('/l4/stats')
+}
+
+export function fetchL7Config() {
+  return apiRequest<L7ConfigPayload>('/l7/config')
+}
+
+export function updateL7Config(
+  payload: Omit<
+    L7ConfigPayload,
+    | 'runtime_enabled'
+    | 'bloom_enabled'
+    | 'bloom_false_positive_verification'
+    | 'runtime_profile'
+    | 'listen_addrs'
+    | 'upstream_endpoint'
+    | 'http3_enabled'
+    | 'http3_listen_addr'
+  >,
+) {
+  return apiRequest<WriteStatusResponse>('/l7/config', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchL7Stats() {
+  return apiRequest<L7StatsPayload>('/l7/stats')
 }
 
 export function testSafeLineConnection(payload: SettingsPayload['safeline']) {

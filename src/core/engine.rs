@@ -1614,13 +1614,17 @@ fn inspect_application_layers(
     context: &WafContext,
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
-    _serialized_request: &str,
+    serialized_request: &str,
 ) -> InspectionResult {
     if let Some(l7_inspector) = &context.l7_inspector {
         let l7_result = l7_inspector.inspect_unified_request(packet, request);
         if l7_result.blocked {
             return l7_result;
         }
+    }
+
+    if let Some(rule_result) = inspect_l7_rules(context, packet, serialized_request) {
+        return rule_result;
     }
 
     InspectionResult::allow(InspectionLayer::L7)
@@ -1639,6 +1643,28 @@ fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> Option<Inspect
     }
     if rule_engine.has_rules() && !rule_result.reason.is_empty() {
         debug!("Non-blocking L4 rule matched: {}", rule_result.reason);
+    }
+
+    None
+}
+
+fn inspect_l7_rules(
+    context: &WafContext,
+    packet: &PacketInfo,
+    serialized_request: &str,
+) -> Option<InspectionResult> {
+    let rule_engine_guard = context
+        .rule_engine
+        .read()
+        .expect("rule_engine lock poisoned");
+    let rule_engine = rule_engine_guard.as_ref()?;
+
+    let rule_result = rule_engine.inspect(packet, Some(serialized_request));
+    if rule_result.blocked {
+        return Some(rule_result);
+    }
+    if rule_engine.has_rules() && !rule_result.reason.is_empty() {
+        debug!("Non-blocking L7 rule matched: {}", rule_result.reason);
     }
 
     None
@@ -2035,6 +2061,41 @@ mod tests {
         let result = inspect_transport_layers(&context, &udp_packet()).unwrap();
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L4);
+    }
+
+    #[tokio::test]
+    async fn inspect_application_layers_blocks_requests_via_l7_rules() {
+        let rule = Rule {
+            id: "l7-block-admin".to_string(),
+            name: "Block Admin Path".to_string(),
+            enabled: true,
+            layer: RuleLayer::L7,
+            pattern: r"GET /admin".to_string(),
+            action: RuleAction::Block,
+            severity: Severity::High,
+        };
+        let context = WafContext::new(test_config(vec![rule])).await.unwrap();
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 11)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            source_port: 41_000,
+            dest_port: 8080,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+        let request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/admin".to_string(),
+        );
+        let serialized_request = request.to_inspection_string();
+
+        let result =
+            inspect_application_layers(&context, &packet, &request, &serialized_request);
+
+        assert!(result.blocked);
+        assert_eq!(result.layer, InspectionLayer::L7);
+        assert!(result.reason.contains("l7-block-admin"));
     }
 
     #[tokio::test]

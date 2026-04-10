@@ -9,6 +9,10 @@ import type {
   MetricsResponse,
   RuleDraft,
   RulesResponse,
+  SafeLineEventSyncResponse,
+  SafeLineMappingsResponse,
+  SafeLineMappingsUpdateRequest,
+  SafeLineSitesResponse,
   SafeLineTestResponse,
   SecurityEventsResponse,
   SettingsPayload,
@@ -154,5 +158,29 @@ export function testSafeLineConnection(payload: SettingsPayload['safeline']) {
   return apiRequest<SafeLineTestResponse>('/integrations/safeline/test', {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export function fetchSafeLineSites(payload: SettingsPayload['safeline']) {
+  return apiRequest<SafeLineSitesResponse>('/integrations/safeline/sites', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchSafeLineMappings() {
+  return apiRequest<SafeLineMappingsResponse>('/integrations/safeline/mappings')
+}
+
+export function updateSafeLineMappings(payload: SafeLineMappingsUpdateRequest) {
+  return apiRequest<WriteStatusResponse>('/integrations/safeline/mappings', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function syncSafeLineEvents() {
+  return apiRequest<SafeLineEventSyncResponse>('/integrations/safeline/sync/events', {
+    method: 'POST',
   })
 }

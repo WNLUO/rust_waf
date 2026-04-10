@@ -130,6 +130,8 @@ export interface SafeLineSettings {
   verify_tls: boolean
   openapi_doc_path: string
   auth_probe_path: string
+  site_list_path: string
+  event_list_path: string
 }
 
 export interface SettingsPayload {
@@ -153,6 +155,54 @@ export interface SafeLineTestResponse {
   openapi_doc_status: number | null
   authenticated: boolean
   auth_probe_status: number | null
+}
+
+export interface SafeLineSiteItem {
+  id: string
+  name: string
+  domain: string
+  status: string
+  raw: Record<string, unknown>
+}
+
+export interface SafeLineSitesResponse {
+  total: number
+  sites: SafeLineSiteItem[]
+}
+
+export interface SafeLineMappingItem {
+  id: number
+  safeline_site_id: string
+  safeline_site_name: string
+  safeline_site_domain: string
+  local_alias: string
+  enabled: boolean
+  is_primary: boolean
+  notes: string
+  updated_at: number
+}
+
+export interface SafeLineMappingsResponse {
+  total: number
+  mappings: SafeLineMappingItem[]
+}
+
+export interface SafeLineMappingsUpdateRequest {
+  mappings: Array<{
+    safeline_site_id: string
+    safeline_site_name: string
+    safeline_site_domain: string
+    local_alias: string
+    enabled: boolean
+    is_primary: boolean
+    notes: string
+  }>
+}
+
+export interface SafeLineEventSyncResponse {
+  success: boolean
+  imported: number
+  message: string
 }
 
 export interface DashboardPayload {

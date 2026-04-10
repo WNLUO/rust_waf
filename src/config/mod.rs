@@ -85,6 +85,10 @@ pub struct SafeLineConfig {
     pub openapi_doc_path: String,
     #[serde(default = "default_auth_probe_path")]
     pub auth_probe_path: String,
+    #[serde(default = "default_site_list_path")]
+    pub site_list_path: String,
+    #[serde(default = "default_event_list_path")]
+    pub event_list_path: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -433,6 +437,10 @@ impl Config {
             normalize_path(&self.integrations.safeline.openapi_doc_path, "/openapi_doc/");
         self.integrations.safeline.auth_probe_path =
             normalize_path(&self.integrations.safeline.auth_probe_path, "/api/IPGroupAPI");
+        self.integrations.safeline.site_list_path =
+            normalize_path(&self.integrations.safeline.site_list_path, "/api/WebsiteAPI");
+        self.integrations.safeline.event_list_path =
+            normalize_path(&self.integrations.safeline.event_list_path, "/api/AttackLogAPI");
 
         self
     }
@@ -461,6 +469,8 @@ impl Default for SafeLineConfig {
             verify_tls: default_verify_tls(),
             openapi_doc_path: default_openapi_doc_path(),
             auth_probe_path: default_auth_probe_path(),
+            site_list_path: default_site_list_path(),
+            event_list_path: default_event_list_path(),
         }
     }
 }
@@ -513,6 +523,14 @@ fn default_openapi_doc_path() -> String {
 
 fn default_auth_probe_path() -> String {
     "/api/IPGroupAPI".to_string()
+}
+
+fn default_site_list_path() -> String {
+    "/api/WebsiteAPI".to_string()
+}
+
+fn default_event_list_path() -> String {
+    "/api/AttackLogAPI".to_string()
 }
 
 fn normalize_notification_level(value: &str) -> String {

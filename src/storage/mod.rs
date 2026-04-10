@@ -124,6 +124,20 @@ pub struct BlockedIpEntry {
     pub expires_at: i64,
 }
 
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SafeLineSiteMappingEntry {
+    pub id: i64,
+    pub safeline_site_id: String,
+    pub safeline_site_name: String,
+    pub safeline_site_domain: String,
+    pub local_alias: String,
+    pub enabled: bool,
+    pub is_primary: bool,
+    pub notes: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct SecurityEventRecord {
     pub layer: String,
@@ -195,6 +209,42 @@ impl SqliteStore {
         if let Err(err) = self.sender.try_send(StorageCommand::BlockedIp(record)) {
             warn!("Failed to enqueue blocked IP for SQLite storage: {}", err);
         }
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn insert_security_events(&self, events: &[SecurityEventRecord]) -> Result<usize> {
+        let mut tx = self.pool.begin().await?;
+
+        for event in events {
+            sqlx::query(
+                r#"
+                INSERT INTO security_events (
+                    layer, action, reason, source_ip, dest_ip, source_port, dest_port,
+                    protocol, http_method, uri, http_version, created_at, handled, handled_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&event.layer)
+            .bind(&event.action)
+            .bind(&event.reason)
+            .bind(&event.source_ip)
+            .bind(&event.dest_ip)
+            .bind(event.source_port)
+            .bind(event.dest_port)
+            .bind(&event.protocol)
+            .bind(&event.http_method)
+            .bind(&event.uri)
+            .bind(&event.http_version)
+            .bind(event.created_at)
+            .bind(if event.handled { 1 } else { 0 })
+            .bind(event.handled_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(events.len())
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
@@ -322,6 +372,58 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_safeline_site_mappings(&self) -> Result<Vec<SafeLineSiteMappingEntry>> {
+        let rows = sqlx::query_as::<_, SafeLineSiteMappingEntry>(
+            r#"
+            SELECT id, safeline_site_id, safeline_site_name, safeline_site_domain,
+                   local_alias, enabled, is_primary, notes, updated_at
+            FROM safeline_site_mappings
+            ORDER BY is_primary DESC, updated_at DESC, id DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn replace_safeline_site_mappings(
+        &self,
+        mappings: &[SafeLineSiteMappingUpsert],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM safeline_site_mappings")
+            .execute(&mut *tx)
+            .await?;
+
+        for mapping in mappings {
+            sqlx::query(
+                r#"
+                INSERT INTO safeline_site_mappings (
+                    safeline_site_id, safeline_site_name, safeline_site_domain,
+                    local_alias, enabled, is_primary, notes, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&mapping.safeline_site_id)
+            .bind(&mapping.safeline_site_name)
+            .bind(&mapping.safeline_site_domain)
+            .bind(&mapping.local_alias)
+            .bind(mapping.enabled)
+            .bind(mapping.is_primary)
+            .bind(&mapping.notes)
+            .bind(unix_timestamp())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -638,6 +740,21 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             config_json TEXT NOT NULL,
             updated_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS safeline_site_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            safeline_site_id TEXT NOT NULL UNIQUE,
+            safeline_site_name TEXT NOT NULL,
+            safeline_site_domain TEXT NOT NULL,
+            local_alias TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_safeline_site_mappings_updated_at
+            ON safeline_site_mappings(updated_at);
         "#,
     )
     .execute(pool)
@@ -662,6 +779,17 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeLineSiteMappingUpsert {
+    pub safeline_site_id: String,
+    pub safeline_site_name: String,
+    pub safeline_site_domain: String,
+    pub local_alias: String,
+    pub enabled: bool,
+    pub is_primary: bool,
+    pub notes: String,
 }
 
 async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageCommand>) {
@@ -941,11 +1069,18 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let safeline_site_mappings_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'safeline_site_mappings'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         assert_eq!(security_events_exists, 1);
         assert_eq!(blocked_ips_exists, 1);
         assert_eq!(rules_exists, 1);
         assert_eq!(app_config_exists, 1);
+        assert_eq!(safeline_site_mappings_exists, 1);
     }
 
     #[tokio::test]
@@ -1273,5 +1408,57 @@ mod tests {
         assert_eq!(paged_blocks.limit, 1);
         assert_eq!(paged_blocks.offset, 1);
         assert_eq!(paged_blocks.items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_replaces_safeline_site_mappings() {
+        let path = unique_test_db_path("safeline_site_mappings");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        store
+            .replace_safeline_site_mappings(&[
+                SafeLineSiteMappingUpsert {
+                    safeline_site_id: "site-1".to_string(),
+                    safeline_site_name: "portal".to_string(),
+                    safeline_site_domain: "portal.example.com".to_string(),
+                    local_alias: "主站".to_string(),
+                    enabled: true,
+                    is_primary: true,
+                    notes: "prod".to_string(),
+                },
+                SafeLineSiteMappingUpsert {
+                    safeline_site_id: "site-2".to_string(),
+                    safeline_site_name: "admin".to_string(),
+                    safeline_site_domain: "admin.example.com".to_string(),
+                    local_alias: "后台".to_string(),
+                    enabled: false,
+                    is_primary: false,
+                    notes: String::new(),
+                },
+            ])
+            .await
+            .unwrap();
+
+        let mappings = store.list_safeline_site_mappings().await.unwrap();
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[0].safeline_site_id, "site-1");
+        assert!(mappings[0].is_primary);
+
+        store
+            .replace_safeline_site_mappings(&[SafeLineSiteMappingUpsert {
+                safeline_site_id: "site-3".to_string(),
+                safeline_site_name: "api".to_string(),
+                safeline_site_domain: "api.example.com".to_string(),
+                local_alias: "接口".to_string(),
+                enabled: true,
+                is_primary: false,
+                notes: "new".to_string(),
+            }])
+            .await
+            .unwrap();
+
+        let replaced = store.list_safeline_site_mappings().await.unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].safeline_site_id, "site-3");
     }
 }

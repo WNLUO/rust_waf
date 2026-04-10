@@ -2,8 +2,21 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import AppLayout from '../components/layout/AppLayout.vue'
 import { useFormatters } from '../composables/useFormatters'
-import { fetchSettings, testSafeLineConnection, updateSettings } from '../lib/api'
-import type { SafeLineTestResponse, SettingsPayload } from '../lib/types'
+import {
+  fetchSafeLineMappings,
+  fetchSafeLineSites,
+  fetchSettings,
+  syncSafeLineEvents,
+  testSafeLineConnection,
+  updateSafeLineMappings,
+  updateSettings,
+} from '../lib/api'
+import type {
+  SafeLineMappingItem,
+  SafeLineSiteItem,
+  SafeLineTestResponse,
+  SettingsPayload,
+} from '../lib/types'
 import { BellRing, PlugZap, Save, ServerCog, Settings, ShieldCheck } from 'lucide-vue-next'
 
 interface SystemSettingsForm extends SettingsPayload {}
@@ -13,9 +26,15 @@ const settingsSavedAt = ref<number | null>(null)
 const loading = ref(true)
 const saving = ref(false)
 const testing = ref(false)
+const loadingSites = ref(false)
+const savingMappings = ref(false)
+const syncingEvents = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const testResult = ref<SafeLineTestResponse | null>(null)
+const sites = ref<SafeLineSiteItem[]>([])
+const mappings = ref<SafeLineMappingItem[]>([])
+const sitesLoadedAt = ref<number | null>(null)
 
 const systemSettings = reactive<SystemSettingsForm>({
   gateway_name: '玄枢防护网关',
@@ -35,6 +54,8 @@ const systemSettings = reactive<SystemSettingsForm>({
     verify_tls: false,
     openapi_doc_path: '/openapi_doc/',
     auth_probe_path: '/api/IPGroupAPI',
+    site_list_path: '/api/WebsiteAPI',
+    event_list_path: '/api/AttackLogAPI',
   },
 })
 
@@ -85,6 +106,15 @@ async function loadSettings() {
   }
 }
 
+async function loadMappings() {
+  try {
+    const response = await fetchSafeLineMappings()
+    mappings.value = response.mappings
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取雷池站点映射失败'
+  }
+}
+
 async function saveSettings() {
   saving.value = true
   error.value = ''
@@ -122,8 +152,134 @@ async function runSafeLineTest() {
   }
 }
 
+async function loadSafeLineSites() {
+  loadingSites.value = true
+  error.value = ''
+
+  try {
+    const response = await fetchSafeLineSites(structuredClone(systemSettings.safeline))
+    sites.value = response.sites
+    sitesLoadedAt.value = Math.floor(Date.now() / 1000)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取雷池站点列表失败'
+    sites.value = []
+  } finally {
+    loadingSites.value = false
+  }
+}
+
+function siteMappingDraft(site: SafeLineSiteItem) {
+  const existing = mappings.value.find((item) => item.safeline_site_id === site.id)
+  return {
+    safeline_site_id: site.id,
+    safeline_site_name: site.name,
+    safeline_site_domain: site.domain,
+    local_alias: existing?.local_alias ?? site.name ?? site.domain ?? '',
+    enabled: existing?.enabled ?? true,
+    is_primary: existing?.is_primary ?? false,
+    notes: existing?.notes ?? '',
+    updated_at: existing?.updated_at ?? null,
+  }
+}
+
+const mappingDrafts = computed(() => sites.value.map(siteMappingDraft))
+
+function setDraftAlias(siteId: string, value: string) {
+  upsertMapping(siteId, { local_alias: value })
+}
+
+function setDraftEnabled(siteId: string, value: boolean) {
+  upsertMapping(siteId, { enabled: value })
+}
+
+function setDraftPrimary(siteId: string, value: boolean) {
+  if (value) {
+    mappings.value = mappings.value.map((item) => ({
+      ...item,
+      is_primary: item.safeline_site_id === siteId,
+    }))
+  }
+  upsertMapping(siteId, { is_primary: value })
+}
+
+function setDraftNotes(siteId: string, value: string) {
+  upsertMapping(siteId, { notes: value })
+}
+
+function upsertMapping(
+  siteId: string,
+  patch: Partial<Pick<SafeLineMappingItem, 'local_alias' | 'enabled' | 'is_primary' | 'notes'>>,
+) {
+  const site = sites.value.find((item) => item.id === siteId)
+  if (!site) return
+
+  const index = mappings.value.findIndex((item) => item.safeline_site_id === siteId)
+  if (index >= 0) {
+    mappings.value[index] = {
+      ...mappings.value[index],
+      ...patch,
+    }
+    return
+  }
+
+  mappings.value.unshift({
+    id: 0,
+    safeline_site_id: site.id,
+    safeline_site_name: site.name,
+    safeline_site_domain: site.domain,
+    local_alias: patch.local_alias ?? site.name ?? site.domain ?? '',
+    enabled: patch.enabled ?? true,
+    is_primary: patch.is_primary ?? false,
+    notes: patch.notes ?? '',
+    updated_at: 0,
+  })
+}
+
+async function saveMappings() {
+  savingMappings.value = true
+  error.value = ''
+  successMessage.value = ''
+
+  try {
+    const payload = {
+      mappings: mappingDrafts.value.map((item) => ({
+        safeline_site_id: item.safeline_site_id,
+        safeline_site_name: item.safeline_site_name,
+        safeline_site_domain: item.safeline_site_domain,
+        local_alias: item.local_alias,
+        enabled: item.enabled,
+        is_primary: item.is_primary,
+        notes: item.notes,
+      })),
+    }
+    const response = await updateSafeLineMappings(payload)
+    successMessage.value = response.message
+    await loadMappings()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '保存雷池站点映射失败'
+  } finally {
+    savingMappings.value = false
+  }
+}
+
+async function runEventSync() {
+  syncingEvents.value = true
+  error.value = ''
+  successMessage.value = ''
+
+  try {
+    const response = await syncSafeLineEvents()
+    successMessage.value = response.message
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '同步雷池事件失败'
+  } finally {
+    syncingEvents.value = false
+  }
+}
+
 onMounted(async () => {
   await loadSettings()
+  await loadMappings()
 })
 </script>
 
@@ -307,6 +463,14 @@ onMounted(async () => {
                   <span class="text-sm text-cyber-muted">鉴权探测路径</span>
                   <input v-model="systemSettings.safeline.auth_probe_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
                 </label>
+                <label class="space-y-2 md:col-span-2">
+                  <span class="text-sm text-cyber-muted">站点列表路径</span>
+                  <input v-model="systemSettings.safeline.site_list_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                </label>
+                <label class="space-y-2 md:col-span-2">
+                  <span class="text-sm text-cyber-muted">事件列表路径</span>
+                  <input v-model="systemSettings.safeline.event_list_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                </label>
               </div>
 
               <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
@@ -325,6 +489,30 @@ onMounted(async () => {
                 >
                   <PlugZap :size="14" />
                   {{ testing ? '测试中...' : '测试雷池连接' }}
+                </button>
+                <button
+                  @click="loadSafeLineSites"
+                  :disabled="loadingSites || loading"
+                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ServerCog :size="14" />
+                  {{ loadingSites ? '读取中...' : '读取站点列表' }}
+                </button>
+                <button
+                  @click="saveMappings"
+                  :disabled="savingMappings || sites.length === 0"
+                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Save :size="14" />
+                  {{ savingMappings ? '保存中...' : '保存站点映射' }}
+                </button>
+                <button
+                  @click="runEventSync"
+                  :disabled="syncingEvents"
+                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <BellRing :size="14" />
+                  {{ syncingEvents ? '同步中...' : '立即同步雷池事件' }}
                 </button>
                 <p class="text-xs leading-6 text-cyber-muted">当前测试不会改动雷池配置，只会做连通性和鉴权探测。</p>
               </div>
@@ -349,6 +537,77 @@ onMounted(async () => {
               <p>文档状态码：{{ testResult.openapi_doc_status ?? '-' }}</p>
               <p>鉴权结果：{{ testResult.authenticated ? '通过' : '未确认' }}</p>
               <p>探测状态码：{{ testResult.auth_probe_status ?? '-' }}</p>
+            </div>
+          </div>
+
+          <div class="rounded-[32px] border border-white/80 bg-white/80 p-6 shadow-[0_18px_50px_rgba(90,60,30,0.08)]">
+            <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">站点发现</p>
+            <h3 class="mt-2 text-xl font-semibold text-stone-900">雷池站点列表预览</h3>
+            <p class="mt-4 text-sm leading-7 text-stone-700">
+              {{ sites.length > 0 ? `当前识别到 ${sites.length} 个站点。` : '可以直接用当前表单里的雷池地址、Token 和站点列表路径做一次即时读取。' }}
+            </p>
+            <p class="mt-2 text-xs leading-6 text-cyber-muted">
+              {{ sitesLoadedAt ? `最近读取：${formatTimestamp(sitesLoadedAt)}` : '尚未读取站点列表' }}
+            </p>
+
+            <div v-if="sites.length > 0" class="mt-5 space-y-3">
+              <div
+                v-for="site in sites"
+                :key="`${site.id}-${site.domain}`"
+                class="rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-stone-900">{{ site.name || '未命名站点' }}</p>
+                    <p class="mt-1 text-xs text-cyber-muted">{{ site.domain || '未识别域名' }}</p>
+                  </div>
+                  <div class="text-right">
+                    <p class="text-xs tracking-[0.14em] text-cyber-muted">状态</p>
+                    <p class="mt-1 text-sm font-medium text-cyber-accent-strong">{{ site.status || 'unknown' }}</p>
+                  </div>
+                </div>
+                <p class="mt-3 text-xs text-cyber-muted">ID：{{ site.id || '未识别' }}</p>
+                <div class="mt-4 grid gap-4 md:grid-cols-2">
+                  <label class="space-y-2">
+                    <span class="text-xs text-cyber-muted">本地别名</span>
+                    <input
+                      :value="siteMappingDraft(site).local_alias"
+                      @input="setDraftAlias(site.id, ($event.target as HTMLInputElement).value)"
+                      type="text"
+                      class="w-full rounded-[18px] border border-cyber-border bg-white px-3 py-2 text-sm outline-none transition focus:border-cyber-accent"
+                    />
+                  </label>
+                  <label class="space-y-2">
+                    <span class="text-xs text-cyber-muted">备注</span>
+                    <input
+                      :value="siteMappingDraft(site).notes"
+                      @input="setDraftNotes(site.id, ($event.target as HTMLInputElement).value)"
+                      type="text"
+                      class="w-full rounded-[18px] border border-cyber-border bg-white px-3 py-2 text-sm outline-none transition focus:border-cyber-accent"
+                    />
+                  </label>
+                </div>
+                <div class="mt-4 flex flex-wrap gap-4 text-sm text-stone-700">
+                  <label class="inline-flex items-center gap-2">
+                    <input
+                      :checked="siteMappingDraft(site).enabled"
+                      @change="setDraftEnabled(site.id, ($event.target as HTMLInputElement).checked)"
+                      type="checkbox"
+                      class="accent-[var(--color-cyber-accent)]"
+                    />
+                    启用映射
+                  </label>
+                  <label class="inline-flex items-center gap-2">
+                    <input
+                      :checked="siteMappingDraft(site).is_primary"
+                      @change="setDraftPrimary(site.id, ($event.target as HTMLInputElement).checked)"
+                      type="checkbox"
+                      class="accent-[var(--color-cyber-accent)]"
+                    />
+                    设为主站点
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
         </div>

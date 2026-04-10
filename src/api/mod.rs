@@ -1,6 +1,6 @@
 use crate::config::{Config, Rule, SafeLineConfig};
 use crate::core::WafContext;
-use crate::integrations::safeline::SafeLineProbeResult;
+use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
 use axum::{
     extract::Json as ExtractJson,
     extract::{Path, Query, State},
@@ -46,6 +46,8 @@ pub struct SafeLineSettingsResponse {
     verify_tls: bool,
     openapi_doc_path: String,
     auth_probe_path: String,
+    site_list_path: String,
+    event_list_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +73,8 @@ pub struct SafeLineSettingsRequest {
     verify_tls: bool,
     openapi_doc_path: String,
     auth_probe_path: String,
+    site_list_path: String,
+    event_list_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +84,8 @@ pub struct SafeLineTestRequest {
     verify_tls: bool,
     openapi_doc_path: String,
     auth_probe_path: String,
+    site_list_path: String,
+    event_list_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,6 +96,63 @@ pub struct SafeLineTestResponse {
     openapi_doc_status: Option<u16>,
     authenticated: bool,
     auth_probe_status: Option<u16>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineSitesResponse {
+    total: u32,
+    sites: Vec<SafeLineSiteResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineSiteResponse {
+    id: String,
+    name: String,
+    domain: String,
+    status: String,
+    raw: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineMappingsResponse {
+    total: u32,
+    mappings: Vec<SafeLineMappingResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineMappingResponse {
+    id: i64,
+    safeline_site_id: String,
+    safeline_site_name: String,
+    safeline_site_domain: String,
+    local_alias: String,
+    enabled: bool,
+    is_primary: bool,
+    notes: String,
+    updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SafeLineMappingsUpdateRequest {
+    mappings: Vec<SafeLineMappingUpsertRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SafeLineMappingUpsertRequest {
+    safeline_site_id: String,
+    safeline_site_name: String,
+    safeline_site_domain: String,
+    local_alias: String,
+    enabled: bool,
+    is_primary: bool,
+    notes: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineEventSyncResponse {
+    success: bool,
+    imported: u32,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -259,6 +322,15 @@ impl ApiServer {
             .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
             .route("/integrations/safeline/test", axum::routing::post(test_safeline_handler))
+            .route("/integrations/safeline/sites", axum::routing::post(list_safeline_sites_handler))
+            .route(
+                "/integrations/safeline/mappings",
+                get(list_safeline_mappings_handler).put(update_safeline_mappings_handler),
+            )
+            .route(
+                "/integrations/safeline/sync/events",
+                axum::routing::post(sync_safeline_events_handler),
+            )
             .route(
                 "/rules/:id",
                 get(get_rule_handler)
@@ -343,6 +415,84 @@ async fn test_safeline_handler(
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     Ok(Json(SafeLineTestResponse::from(result)))
+}
+
+async fn list_safeline_sites_handler(
+    ExtractJson(payload): ExtractJson<SafeLineTestRequest>,
+) -> ApiResult<Json<SafeLineSitesResponse>> {
+    let sites = crate::integrations::safeline::list_sites(&payload.into_config())
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(SafeLineSitesResponse {
+        total: sites.len() as u32,
+        sites: sites.into_iter().map(SafeLineSiteResponse::from).collect(),
+    }))
+}
+
+async fn list_safeline_mappings_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineMappingsResponse>> {
+    let store = sqlite_store(&state)?;
+    let mappings = store
+        .list_safeline_site_mappings()
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(SafeLineMappingsResponse {
+        total: mappings.len() as u32,
+        mappings: mappings
+            .into_iter()
+            .map(SafeLineMappingResponse::from)
+            .collect(),
+    }))
+}
+
+async fn update_safeline_mappings_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<SafeLineMappingsUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let mappings = payload.into_storage_mappings().map_err(ApiError::bad_request)?;
+    store
+        .replace_safeline_site_mappings(&mappings)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "雷池站点映射已写入数据库。".to_string(),
+    }))
+}
+
+async fn sync_safeline_events_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineEventSyncResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let events = crate::integrations::safeline::list_security_events(safeline)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let records = events
+        .into_iter()
+        .map(crate::storage::SecurityEventRecord::from)
+        .collect::<Vec<_>>();
+    let imported = store
+        .insert_security_events(&records)
+        .await
+        .map_err(ApiError::internal)? as u32;
+
+    Ok(Json(SafeLineEventSyncResponse {
+        success: true,
+        imported,
+        message: format!("已将 {} 条雷池事件写入本地事件库。", imported),
+    }))
 }
 
 async fn list_security_events_handler(
@@ -612,6 +762,8 @@ impl SafeLineSettingsResponse {
             verify_tls: config.verify_tls,
             openapi_doc_path: config.openapi_doc_path.clone(),
             auth_probe_path: config.auth_probe_path.clone(),
+            site_list_path: config.site_list_path.clone(),
+            event_list_path: config.event_list_path.clone(),
         }
     }
 }
@@ -650,6 +802,8 @@ impl SafeLineSettingsRequest {
             verify_tls: self.verify_tls,
             openapi_doc_path: self.openapi_doc_path,
             auth_probe_path: self.auth_probe_path,
+            site_list_path: self.site_list_path,
+            event_list_path: self.event_list_path,
         }
     }
 }
@@ -663,6 +817,8 @@ impl SafeLineTestRequest {
             verify_tls: self.verify_tls,
             openapi_doc_path: self.openapi_doc_path,
             auth_probe_path: self.auth_probe_path,
+            site_list_path: self.site_list_path,
+            event_list_path: self.event_list_path,
         }
     }
 }
@@ -677,6 +833,77 @@ impl From<SafeLineProbeResult> for SafeLineTestResponse {
             authenticated: value.authenticated,
             auth_probe_status: value.auth_probe_status,
         }
+    }
+}
+
+impl From<SafeLineSiteSummary> for SafeLineSiteResponse {
+    fn from(value: SafeLineSiteSummary) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            domain: value.domain,
+            status: value.status,
+            raw: value.raw,
+        }
+    }
+}
+
+impl From<crate::storage::SafeLineSiteMappingEntry> for SafeLineMappingResponse {
+    fn from(value: crate::storage::SafeLineSiteMappingEntry) -> Self {
+        Self {
+            id: value.id,
+            safeline_site_id: value.safeline_site_id,
+            safeline_site_name: value.safeline_site_name,
+            safeline_site_domain: value.safeline_site_domain,
+            local_alias: value.local_alias,
+            enabled: value.enabled,
+            is_primary: value.is_primary,
+            notes: value.notes,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+impl SafeLineMappingsUpdateRequest {
+    fn into_storage_mappings(
+        self,
+    ) -> Result<Vec<crate::storage::SafeLineSiteMappingUpsert>, String> {
+        let mut primary_count = 0usize;
+        let mut mappings = Vec::with_capacity(self.mappings.len());
+
+        for item in self.mappings {
+            let safeline_site_id = item.safeline_site_id.trim().to_string();
+            let safeline_site_name = item.safeline_site_name.trim().to_string();
+            let safeline_site_domain = item.safeline_site_domain.trim().to_string();
+            let local_alias = item.local_alias.trim().to_string();
+            let notes = item.notes.trim().to_string();
+
+            if safeline_site_id.is_empty() {
+                return Err("映射里的雷池站点 ID 不能为空".to_string());
+            }
+            if local_alias.is_empty() {
+                return Err(format!("站点 {} 的本地别名不能为空", safeline_site_id));
+            }
+            if item.is_primary {
+                primary_count += 1;
+            }
+
+            mappings.push(crate::storage::SafeLineSiteMappingUpsert {
+                safeline_site_id,
+                safeline_site_name,
+                safeline_site_domain,
+                local_alias,
+                enabled: item.enabled,
+                is_primary: item.is_primary,
+                notes,
+            });
+        }
+
+        if primary_count > 1 {
+            return Err("同一时间只能设置一个主站点映射".to_string());
+        }
+
+        Ok(mappings)
     }
 }
 

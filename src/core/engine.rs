@@ -33,7 +33,7 @@ use quinn::{Endpoint as QuinnEndpoint, Incoming as QuinnIncoming};
 use super::WafContext;
 use crate::config::l7::UpstreamFailureMode;
 use crate::config::{Config, RuntimeProfile};
-use crate::core::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
+use crate::core::{InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol};
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
     Http1Handler, Http2Handler, Http2Response, Http3Handler, HttpVersion, ProtocolDetector,
@@ -745,7 +745,11 @@ async fn handle_connection(
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
 
-    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    if l4_result.should_persist_event() {
+        persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
+    }
+    if l4_result.blocked {
         debug!(
             "L4 inspection blocked connection from {}: {}",
             peer_addr, l4_result.reason
@@ -753,7 +757,6 @@ async fn handle_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
-        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
         return Ok(());
     }
 
@@ -777,7 +780,11 @@ async fn handle_tls_connection(
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
 
-    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    if l4_result.should_persist_event() {
+        persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
+    }
+    if l4_result.blocked {
         debug!(
             "L4 inspection blocked TLS connection from {}: {}",
             peer_addr, l4_result.reason
@@ -785,7 +792,6 @@ async fn handle_tls_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
-        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
         return Ok(());
     }
 
@@ -824,7 +830,11 @@ async fn handle_http3_quic_connection(
     let peer_addr = connection.remote_address();
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
 
-    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    if l4_result.should_persist_event() {
+        persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
+    }
+    if l4_result.blocked {
         debug!(
             "L4 inspection blocked HTTP/3 connection from {}: {}",
             peer_addr, l4_result.reason
@@ -832,7 +842,6 @@ async fn handle_http3_quic_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
-        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
         connection.close(0u32.into(), b"blocked by l4 policy");
         return Ok(());
     }
@@ -904,11 +913,14 @@ async fn handle_http3_request(
     let inspection_result =
         inspect_application_layers(context.as_ref(), &packet, &unified, &request_dump);
 
+    if inspection_result.should_persist_event() {
+        persist_http_inspection_event(context.as_ref(), &packet, &unified, &inspection_result);
+    }
+
     if inspection_result.blocked {
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
-        persist_http_block_event(context.as_ref(), &packet, &unified, &inspection_result);
         send_http3_response(
             &mut stream,
             403,
@@ -1061,7 +1073,11 @@ async fn handle_udp_datagram(
         metrics.record_packet(payload.len());
     }
 
-    if let Some(l4_result) = inspect_transport_layers(context.as_ref(), &packet) {
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    if l4_result.should_persist_event() {
+        persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
+    }
+    if l4_result.blocked {
         debug!(
             "L4 inspection blocked UDP datagram from {}: {}",
             peer_addr, l4_result.reason
@@ -1069,7 +1085,6 @@ async fn handle_udp_datagram(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
-        persist_l4_block_event(context.as_ref(), &packet, &l4_result);
         return Ok(());
     }
 
@@ -1088,11 +1103,14 @@ async fn handle_udp_datagram(
             let inspection_result =
                 inspect_application_layers(context.as_ref(), &packet, &request, &request_dump);
 
+            if inspection_result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), &packet, &request, &inspection_result);
+            }
+
             if inspection_result.blocked {
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_block(inspection_result.layer.clone());
                 }
-                persist_http_block_event(context.as_ref(), &packet, &request, &inspection_result);
                 debug!(
                     "Blocked QUIC/HTTP3 datagram from {}: {}",
                     peer_addr, inspection_result.reason
@@ -1407,12 +1425,15 @@ async fn handle_http1_connection(
     let inspection_result =
         inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
 
+    if inspection_result.should_persist_event() {
+        persist_http_inspection_event(context.as_ref(), packet, &request, &inspection_result);
+    }
+
     // 写入响应
     if inspection_result.blocked {
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
-        persist_http_block_event(context.as_ref(), packet, &request, &inspection_result);
         http1_handler
             .write_response(
                 &mut stream,
@@ -1546,16 +1567,19 @@ async fn handle_http2_connection(
                         &request_dump,
                     );
 
-                    if inspection_result.blocked {
-                        if let Some(metrics) = context.metrics.as_ref() {
-                            metrics.record_block(inspection_result.layer.clone());
-                        }
-                        persist_http_block_event(
+                    if inspection_result.should_persist_event() {
+                        persist_http_inspection_event(
                             context.as_ref(),
                             &packet,
                             &request,
                             &inspection_result,
                         );
+                    }
+
+                    if inspection_result.blocked {
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(inspection_result.layer.clone());
+                        }
                         return Ok(Http2Response {
                             status_code: 403,
                             headers: vec![],
@@ -1658,72 +1682,101 @@ fn inspect_application_layers(
         }
     }
 
-    if let Some(rule_result) = inspect_l7_rules(context, packet, serialized_request) {
+    let rule_result = inspect_l7_rules(context, packet, serialized_request);
+    if rule_result.blocked || !rule_result.reason.is_empty() {
         return rule_result;
     }
 
     InspectionResult::allow(InspectionLayer::L7)
 }
 
-fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> Option<InspectionResult> {
+fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> InspectionResult {
     let rule_engine_guard = context
         .rule_engine
         .read()
         .expect("rule_engine lock poisoned");
-    let rule_engine = rule_engine_guard.as_ref()?;
+    let Some(rule_engine) = rule_engine_guard.as_ref() else {
+        return InspectionResult::allow(InspectionLayer::L4);
+    };
 
     let rule_result = rule_engine.inspect(packet, None);
     if rule_result.blocked {
-        return Some(rule_result);
+        return rule_result;
     }
     if rule_engine.has_rules() && !rule_result.reason.is_empty() {
-        debug!("Non-blocking L4 rule matched: {}", rule_result.reason);
+        match rule_result.action {
+            InspectionAction::Alert => {
+                debug!("Non-blocking L4 alert rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Allow => {
+                debug!("L4 allow rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Block => {}
+        }
     }
 
-    None
+    InspectionResult::allow(InspectionLayer::L4)
 }
 
 fn inspect_l7_rules(
     context: &WafContext,
     packet: &PacketInfo,
     serialized_request: &str,
-) -> Option<InspectionResult> {
+) -> InspectionResult {
     let rule_engine_guard = context
         .rule_engine
         .read()
         .expect("rule_engine lock poisoned");
-    let rule_engine = rule_engine_guard.as_ref()?;
+    let Some(rule_engine) = rule_engine_guard.as_ref() else {
+        return InspectionResult::allow(InspectionLayer::L7);
+    };
 
     let rule_result = rule_engine.inspect(packet, Some(serialized_request));
     if rule_result.blocked {
-        return Some(rule_result);
+        return rule_result;
     }
     if rule_engine.has_rules() && !rule_result.reason.is_empty() {
-        debug!("Non-blocking L7 rule matched: {}", rule_result.reason);
+        match rule_result.action {
+            InspectionAction::Alert => {
+                debug!("Non-blocking L7 alert rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Allow => {
+                debug!("L7 allow rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Block => {}
+        }
     }
 
-    None
+    InspectionResult::allow(InspectionLayer::L7)
 }
 
-fn inspect_transport_layers(context: &WafContext, packet: &PacketInfo) -> Option<InspectionResult> {
+fn inspect_transport_layers(context: &WafContext, packet: &PacketInfo) -> InspectionResult {
     if let Some(l4_inspector) = &context.l4_inspector {
         let l4_result = l4_inspector.inspect_packet(packet);
-        if l4_result.blocked {
-            return Some(l4_result);
+        if l4_result.blocked || l4_result.should_persist_event() {
+            return l4_result;
         }
     }
 
     inspect_l4_rules(context, packet)
 }
 
-fn persist_l4_block_event(context: &WafContext, packet: &PacketInfo, result: &InspectionResult) {
+fn persist_l4_inspection_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    result: &InspectionResult,
+) {
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };
 
     store.enqueue_security_event(SecurityEventRecord::now(
         "L4",
-        "block",
+        result.event_action(),
         result.reason.clone(),
         packet.source_ip.to_string(),
         packet.dest_ip.to_string(),
@@ -1732,7 +1785,7 @@ fn persist_l4_block_event(context: &WafContext, packet: &PacketInfo, result: &In
         format!("{:?}", packet.protocol),
     ));
 
-    if result.reason.contains("rate limiter") {
+    if result.persist_blocked_ip {
         let blocked_at = unix_timestamp();
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             packet.source_ip.to_string(),
@@ -1743,7 +1796,7 @@ fn persist_l4_block_event(context: &WafContext, packet: &PacketInfo, result: &In
     }
 }
 
-fn persist_http_block_event(
+fn persist_http_inspection_event(
     context: &WafContext,
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
@@ -1758,7 +1811,7 @@ fn persist_http_block_event(
             InspectionLayer::L4 => "L4",
             InspectionLayer::L7 => "L7",
         },
-        "block",
+        result.event_action(),
         result.reason.clone(),
         request
             .client_ip
@@ -2093,7 +2146,7 @@ mod tests {
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
 
-        let result = inspect_transport_layers(&context, &udp_packet()).unwrap();
+        let result = inspect_transport_layers(&context, &udp_packet());
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L4);
     }
@@ -2130,6 +2183,60 @@ mod tests {
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L7);
         assert!(result.reason.contains("l7-block-admin"));
+    }
+
+    #[tokio::test]
+    async fn inspect_transport_layers_returns_alert_for_l4_alert_rules() {
+        let rule = Rule {
+            id: "udp-alert".to_string(),
+            name: "Alert UDP".to_string(),
+            enabled: true,
+            layer: RuleLayer::L4,
+            pattern: r"protocol=UDP".to_string(),
+            action: RuleAction::Alert,
+            severity: Severity::Medium,
+        };
+        let context = WafContext::new(test_config(vec![rule])).await.unwrap();
+
+        let result = inspect_transport_layers(&context, &udp_packet());
+        assert!(!result.blocked);
+        assert_eq!(result.action, InspectionAction::Alert);
+        assert!(result.should_persist_event());
+    }
+
+    #[tokio::test]
+    async fn inspect_application_layers_returns_allow_for_l7_allow_rules() {
+        let rule = Rule {
+            id: "l7-allow-health".to_string(),
+            name: "Allow Health".to_string(),
+            enabled: true,
+            layer: RuleLayer::L7,
+            pattern: r"GET /health".to_string(),
+            action: RuleAction::Allow,
+            severity: Severity::Low,
+        };
+        let context = WafContext::new(test_config(vec![rule])).await.unwrap();
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 12)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            source_port: 42_000,
+            dest_port: 8080,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+        let request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/health".to_string(),
+        );
+        let serialized_request = request.to_inspection_string();
+
+        let result = inspect_application_layers(&context, &packet, &request, &serialized_request);
+
+        assert!(!result.blocked);
+        assert_eq!(result.action, InspectionAction::Allow);
+        assert!(!result.should_persist_event());
+        assert!(result.reason.contains("l7-allow-health"));
     }
 
     #[tokio::test]

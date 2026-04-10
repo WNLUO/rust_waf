@@ -1,5 +1,5 @@
 use crate::config::{Rule, RuleAction, RuleLayer};
-use crate::core::{InspectionLayer, InspectionResult, PacketInfo};
+use crate::core::{InspectionAction, InspectionLayer, InspectionResult, PacketInfo};
 use anyhow::Result;
 use regex::Regex;
 
@@ -30,6 +30,12 @@ impl RuleEngine {
     }
 
     pub fn inspect(&self, _packet: &PacketInfo, payload: Option<&str>) -> InspectionResult {
+        let default_layer = if payload.is_some() {
+            InspectionLayer::L7
+        } else {
+            InspectionLayer::L4
+        };
+
         for (rule, pattern) in &self.rules {
             if self.matches_layer(rule, payload) {
                 let packet_summary;
@@ -47,22 +53,23 @@ impl RuleEngine {
                     &packet_summary
                 };
                 if pattern.is_match(content) {
-                    return InspectionResult {
-                        blocked: matches!(rule.action, RuleAction::Block),
-                        reason: format!("Rule '{}' triggered: {}", rule.name, rule.id),
-                        layer: match rule.layer {
-                            RuleLayer::L4 => InspectionLayer::L4,
-                            RuleLayer::L7 => InspectionLayer::L7,
-                        },
+                    let layer = match rule.layer {
+                        RuleLayer::L4 => InspectionLayer::L4,
+                        RuleLayer::L7 => InspectionLayer::L7,
+                    };
+                    let reason = format!("Rule '{}' triggered: {}", rule.name, rule.id);
+                    return match rule.action {
+                        RuleAction::Block => InspectionResult::block(layer, reason),
+                        RuleAction::Allow => InspectionResult::allow_with_reason(layer, reason),
+                        RuleAction::Alert => InspectionResult::alert(layer, reason),
                     };
                 }
             }
         }
 
         InspectionResult {
-            blocked: false,
-            reason: String::new(),
-            layer: InspectionLayer::L7, // Default to L7
+            action: InspectionAction::Allow,
+            ..InspectionResult::allow(default_layer)
         }
     }
 

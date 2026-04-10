@@ -1,8 +1,8 @@
 use crate::config::L4Config;
-use crate::core::{InspectionResult, PacketInfo, WafContext};
+use crate::core::{InspectionLayer, InspectionResult, PacketInfo, WafContext};
 use crate::l4::bloom_filter::L4BloomFilterManager;
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
-use crate::l4::connection::ConnectionManager;
+use crate::l4::connection::{ConnectionManager, RateLimitDecision};
 use log::{debug, info};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -72,16 +72,28 @@ impl L4Inspector {
         // Track connection
         self.connection_manager.track(packet);
 
-        if !self.connection_manager.check_rate_limit(&packet.source_ip) {
-            self.record_port_event(&port, |stats| {
-                stats.increment_block();
-            });
-            self.defense_actions.fetch_add(1, Ordering::Relaxed);
-            return InspectionResult {
-                blocked: true,
-                reason: "Connection rejected by L4 rate limiter".to_string(),
-                layer: crate::core::InspectionLayer::L4,
-            };
+        match self.connection_manager.check_rate_limit(&packet.source_ip) {
+            RateLimitDecision::Allowed => {}
+            RateLimitDecision::Rejected => {
+                self.record_port_event(&port, |stats| {
+                    stats.increment_block();
+                });
+                self.defense_actions.fetch_add(1, Ordering::Relaxed);
+                return InspectionResult::block(
+                    InspectionLayer::L4,
+                    "Connection rejected by L4 rate limiter",
+                );
+            }
+            RateLimitDecision::RejectedAndBlocked => {
+                self.record_port_event(&port, |stats| {
+                    stats.increment_block();
+                });
+                self.defense_actions.fetch_add(1, Ordering::Relaxed);
+                return InspectionResult::block_and_persist_ip(
+                    InspectionLayer::L4,
+                    "Connection rejected by L4 rate limiter",
+                );
+            }
         }
 
         // Bloom filter checks
@@ -98,11 +110,10 @@ impl L4Inspector {
                                 stats.increment_block();
                             });
                             self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                            return InspectionResult {
-                                blocked: true,
-                                reason: format!("Blocked by L4 bloom filter: IPv4 {}", ipv4),
-                                layer: crate::core::InspectionLayer::L4,
-                            };
+                            return InspectionResult::block(
+                                InspectionLayer::L4,
+                                format!("Blocked by L4 bloom filter: IPv4 {}", ipv4),
+                            );
                         }
                     }
                     std::net::IpAddr::V6(ipv6) => {
@@ -112,11 +123,10 @@ impl L4Inspector {
                                 stats.increment_block();
                             });
                             self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                            return InspectionResult {
-                                blocked: true,
-                                reason: format!("Blocked by L4 bloom filter: IPv6 {}", ipv6),
-                                layer: crate::core::InspectionLayer::L4,
-                            };
+                            return InspectionResult::block(
+                                InspectionLayer::L4,
+                                format!("Blocked by L4 bloom filter: IPv6 {}", ipv6),
+                            );
                         }
                     }
                 }
@@ -131,14 +141,13 @@ impl L4Inspector {
                         stats.increment_block();
                     });
                     self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                    return InspectionResult {
-                        blocked: true,
-                        reason: format!(
+                    return InspectionResult::block(
+                        InspectionLayer::L4,
+                        format!(
                             "Blocked by L4 bloom filter: {}:{}",
                             packet.source_ip, packet.source_port
                         ),
-                        layer: crate::core::InspectionLayer::L4,
-                    };
+                    );
                 }
             }
         }
@@ -146,7 +155,7 @@ impl L4Inspector {
         // DDoS detection (simplified)
         if self.ddos_enabled {
             if self.detect_simple_ddos(packet) {
-                self.connection_manager.block_ip(
+                let blocked = self.connection_manager.block_ip(
                     &packet.source_ip,
                     "connection flood detected",
                     Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
@@ -157,14 +166,15 @@ impl L4Inspector {
                 });
                 self.ddos_events.fetch_add(1, Ordering::Relaxed);
                 self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                return InspectionResult {
-                    blocked: true,
-                    reason: format!(
-                        "DDoS attack detected: {} connections within 1s",
-                        self.connection_manager
-                            .recent_connection_count(&packet.source_ip, Duration::from_secs(1))
-                    ),
-                    layer: crate::core::InspectionLayer::L4,
+                let reason = format!(
+                    "DDoS attack detected: {} connections within 1s",
+                    self.connection_manager
+                        .recent_connection_count(&packet.source_ip, Duration::from_secs(1))
+                );
+                return if blocked {
+                    InspectionResult::block_and_persist_ip(InspectionLayer::L4, reason)
+                } else {
+                    InspectionResult::block(InspectionLayer::L4, reason)
                 };
             }
         }
@@ -174,11 +184,7 @@ impl L4Inspector {
             stats.increment_connection();
         });
 
-        InspectionResult {
-            blocked: false,
-            reason: String::new(),
-            layer: crate::core::InspectionLayer::L4,
-        }
+        InspectionResult::allow(InspectionLayer::L4)
     }
 
     fn detect_simple_ddos(&self, packet: &PacketInfo) -> bool {
@@ -251,6 +257,10 @@ impl L4Inspector {
 
     pub fn maintenance_tick(&self) {
         self.connection_manager.maintenance_tick();
+    }
+
+    pub fn unblock_ip(&self, ip: &std::net::IpAddr) -> bool {
+        self.connection_manager.unblock_ip(ip)
     }
 }
 

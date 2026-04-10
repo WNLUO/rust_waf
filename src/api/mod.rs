@@ -1785,12 +1785,34 @@ async fn delete_blocked_ip_handler(
         .map_err(ApiError::internal)?;
 
     if deleted {
+        let runtime_unblocked = if entry.provider.is_none() {
+            match entry.ip.parse::<std::net::IpAddr>() {
+                Ok(ip) => state
+                    .context
+                    .l4_inspector
+                    .as_ref()
+                    .map(|inspector| inspector.unblock_ip(&ip))
+                    .unwrap_or(false),
+                Err(err) => {
+                    log::warn!(
+                        "Failed to parse blocked IP '{}' while unblocking runtime state: {}",
+                        entry.ip, err
+                    );
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
         Ok(Json(WriteStatusResponse {
             success: true,
             message: if entry.provider.as_deref() == Some("safeline") {
                 format!("雷池封禁记录 '{}' 已完成远端解封并从本地缓存移除。", id)
+            } else if runtime_unblocked {
+                format!("本地封禁记录 '{}' 已从数据库移除，并同步解除运行时封禁。", id)
             } else {
-                format!("Blocked IP record '{}' removed", id)
+                format!("本地封禁记录 '{}' 已从数据库移除。", id)
             },
         }))
     } else {

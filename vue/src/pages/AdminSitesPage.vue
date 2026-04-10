@@ -12,7 +12,6 @@ import {
   pullSafeLineSite,
   pushSafeLineSite,
   testSafeLineConnection,
-  updateSafeLineMappings,
 } from "../lib/api";
 import type {
   LocalSiteItem,
@@ -24,16 +23,21 @@ import type {
 } from "../lib/types";
 import { useFormatters } from "../composables/useFormatters";
 import {
+  Link2,
   PlugZap,
   RefreshCw,
-  Save,
   Search,
   ServerCog,
   Settings2,
-  ShieldCheck,
 } from "lucide-vue-next";
 
-type ScopeFilter = "all" | "mapped" | "unmapped" | "orphaned" | "local_only";
+type ScopeFilter =
+  | "all"
+  | "mapped"
+  | "unmapped"
+  | "orphaned"
+  | "local_only"
+  | "missing_remote";
 type StateFilter = "all" | "enabled" | "disabled" | "primary";
 type RowKind =
   | "linked"
@@ -54,6 +58,10 @@ interface SiteRowDraft {
   remote_enabled: boolean | null;
   status: string;
   server_names: string[];
+  remote_ports: string[];
+  remote_ssl_ports: string[];
+  remote_upstreams: string[];
+  remote_ssl_enabled: boolean;
   local_site_id: number | null;
   local_site_name: string;
   local_primary_hostname: string;
@@ -92,7 +100,6 @@ const actions = reactive({
   refreshing: false,
   testing: false,
   loadingSites: false,
-  savingMappings: false,
 });
 
 const rowActions = reactive<Record<string, "pull" | "push" | undefined>>({});
@@ -196,6 +203,10 @@ function createSiteRow({
     remote_enabled: remote?.enabled ?? null,
     status: remote?.status ?? "",
     server_names: remote?.server_names ?? [],
+    remote_ports: remote?.ports ?? [],
+    remote_ssl_ports: remote?.ssl_ports ?? [],
+    remote_upstreams: remote?.upstreams ?? [],
+    remote_ssl_enabled: remote?.ssl_enabled ?? false,
     local_site_id: localSite?.id ?? null,
     local_site_name: localSite?.name ?? "",
     local_primary_hostname: localSite?.primary_hostname ?? "",
@@ -294,40 +305,25 @@ function mappingStateType(item: SiteRowDraft) {
   }
 }
 
-function selectPrimary(siteId: string) {
-  for (const item of siteRows.value) {
-    if (!item.safeline_site_id) continue;
-    item.is_primary = item.safeline_site_id === siteId;
-    if (item.is_primary) {
-      item.enabled = true;
-    }
+function syncModeLabel(value: string) {
+  switch (value.trim()) {
+    case "remote_to_local":
+    case "pull_only":
+      return "仅回流";
+    case "local_to_remote":
+    case "push_only":
+      return "仅推送";
+    case "bidirectional":
+      return "双向同步";
+    case "manual":
+      return "手动";
+    default:
+      return value.trim() || "未设置";
   }
-}
-
-function clearPrimary() {
-  for (const item of siteRows.value) {
-    item.is_primary = false;
-  }
-}
-
-function normalizeDraft(item: SiteRowDraft) {
-  return {
-    safeline_site_id: item.safeline_site_id.trim(),
-    safeline_site_name: item.safeline_site_name.trim(),
-    safeline_site_domain: item.safeline_site_domain.trim(),
-    local_alias: item.local_alias.trim(),
-    enabled: item.enabled,
-    is_primary: item.is_primary,
-    notes: item.notes.trim(),
-  };
 }
 
 const hasSavedConfig = computed(() =>
   Boolean(settings.value?.safeline.base_url.trim()),
-);
-
-const hasPrimary = computed(() =>
-  siteRows.value.some((item) => item.safeline_site_id && item.is_primary),
 );
 
 const totalMapped = computed(() => siteRows.value.filter((item) => item.saved).length);
@@ -344,6 +340,10 @@ const totalLocalOnly = computed(
   () => siteRows.value.filter((item) => item.row_kind === "local_only").length,
 );
 
+const totalMissingRemote = computed(
+  () => siteRows.value.filter((item) => item.row_kind === "missing_remote").length,
+);
+
 const totalLocalSites = computed(() => localSites.value.length);
 
 const totalLinkedSites = computed(
@@ -358,84 +358,6 @@ const primaryDraft = computed(
   () => siteRows.value.find((item) => item.safeline_site_id && item.is_primary) ?? null,
 );
 
-const draftPayload = computed(() =>
-  siteRows.value
-    .map(normalizeDraft)
-    .filter((item) => item.safeline_site_id.length > 0),
-);
-
-const savedPayload = computed(() =>
-  mappings.value.map((item) => ({
-    safeline_site_id: item.safeline_site_id.trim(),
-    safeline_site_name: item.safeline_site_name.trim(),
-    safeline_site_domain: item.safeline_site_domain.trim(),
-    local_alias: item.local_alias.trim(),
-    enabled: item.enabled,
-    is_primary: item.is_primary,
-    notes: item.notes.trim(),
-  })),
-);
-
-function serializeMappings(
-  value: Array<{
-    safeline_site_id: string;
-    safeline_site_name: string;
-    safeline_site_domain: string;
-    local_alias: string;
-    enabled: boolean;
-    is_primary: boolean;
-    notes: string;
-  }>,
-) {
-  return JSON.stringify(
-    [...value].sort((left, right) =>
-      left.safeline_site_id.localeCompare(right.safeline_site_id, "zh-CN"),
-    ),
-  );
-}
-
-const hasDraftChanges = computed(
-  () => serializeMappings(draftPayload.value) !== serializeMappings(savedPayload.value),
-);
-
-const validationError = computed(() => {
-  const seenIds = new Set<string>();
-  let primaryCount = 0;
-
-  for (const item of draftPayload.value) {
-    if (!item.safeline_site_id) {
-      return "存在缺少雷池站点 ID 的记录，暂时无法保存。";
-    }
-    if (seenIds.has(item.safeline_site_id)) {
-      return `雷池站点 ${item.safeline_site_id} 出现了重复映射，请先整理后再保存。`;
-    }
-    if (!item.local_alias) {
-      return `站点 ${item.safeline_site_id} 的本地别名不能为空。`;
-    }
-    if (item.is_primary) {
-      primaryCount += 1;
-      if (!item.enabled) {
-        return "主站点映射必须保持启用。";
-      }
-    }
-    seenIds.add(item.safeline_site_id);
-  }
-
-  if (primaryCount > 1) {
-    return "同一时间只能设置一个主站点。";
-  }
-
-  return "";
-});
-
-const canSave = computed(
-  () =>
-    !loading.value &&
-    !actions.savingMappings &&
-    !validationError.value &&
-    hasDraftChanges.value,
-);
-
 const filteredRows = computed(() => {
   const keyword = filters.keyword.trim().toLowerCase();
 
@@ -447,6 +369,9 @@ const filteredRows = computed(() => {
       }
       if (filters.scope === "orphaned" && !item.orphaned) return false;
       if (filters.scope === "local_only" && item.row_kind !== "local_only") return false;
+      if (filters.scope === "missing_remote" && item.row_kind !== "missing_remote") {
+        return false;
+      }
 
       if (filters.state === "enabled" && !item.enabled) return false;
       if (filters.state === "disabled" && item.enabled) return false;
@@ -606,31 +531,6 @@ async function syncLocalSite(row: SiteRowDraft) {
   }
 }
 
-async function saveMappings() {
-  if (validationError.value) {
-    error.value = validationError.value;
-    return;
-  }
-
-  actions.savingMappings = true;
-  clearFeedback();
-
-  try {
-    await updateSafeLineMappings({
-      mappings: draftPayload.value,
-    });
-
-    const mappingsResponse = await fetchSafeLineMappings();
-    mappings.value = mappingsResponse.mappings;
-    rebuildRows();
-    successMessage.value = "站点映射已保存到后端数据库。";
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存站点映射失败";
-  } finally {
-    actions.savingMappings = false;
-  }
-}
-
 function rowActionPending(row: SiteRowDraft, action: "pull" | "push") {
   return rowActions[row.row_key] === action;
 }
@@ -666,14 +566,13 @@ onMounted(loadPageData);
 <template>
   <AppLayout>
     <template #header-extra>
-      <button
-        @click="saveMappings"
-        :disabled="!canSave"
-        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
+      <RouterLink
+        to="/admin/safeline"
+        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90"
       >
-        <Save :size="12" />
-        {{ actions.savingMappings ? "保存中..." : "保存映射" }}
-      </button>
+        <Link2 :size="12" />
+        编辑映射
+      </RouterLink>
     </template>
 
     <div class="min-w-0 space-y-4">
@@ -704,13 +603,6 @@ onMounted(loadPageData);
               <ServerCog :size="14" :class="{ 'animate-spin': actions.loadingSites }" />
               {{ actions.loadingSites ? "读取中..." : "读取远端" }}
             </button>
-            <button
-              v-if="hasPrimary"
-              @click="clearPrimary"
-              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-amber-500/40 hover:text-amber-700"
-            >
-              清空主站点
-            </button>
             <RouterLink
               to="/admin/settings"
               class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
@@ -721,16 +613,6 @@ onMounted(loadPageData);
           </div>
 
           <div class="flex flex-wrap gap-2">
-            <StatusBadge
-              :text="hasDraftChanges ? '存在未保存改动' : '已与数据库同步'"
-              :type="hasDraftChanges ? 'warning' : 'success'"
-              compact
-            />
-            <StatusBadge
-              :text="validationError || '校验通过'"
-              :type="validationError ? 'error' : 'info'"
-              compact
-            />
             <StatusBadge
               :text="primaryDraft ? `主站点 ${primaryDraft.local_alias}` : '未设置主站点'"
               :type="primaryDraft ? 'info' : 'muted'"
@@ -762,21 +644,22 @@ onMounted(loadPageData);
           </label>
 
           <label class="w-[11rem] shrink-0 space-y-1.5">
-            <span class="text-xs text-slate-500">纳管状态</span>
+            <span class="text-xs text-slate-500">对账视图</span>
             <select
               v-model="filters.scope"
               class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
             >
               <option value="all">全部站点</option>
               <option value="mapped">只看已映射</option>
-              <option value="unmapped">只看待纳管</option>
+              <option value="unmapped">只看待建映射</option>
               <option value="orphaned">只看孤儿映射</option>
               <option value="local_only">只看仅本地</option>
+              <option value="missing_remote">只看远端缺失</option>
             </select>
           </label>
 
           <label class="w-[11rem] shrink-0 space-y-1.5">
-            <span class="text-xs text-slate-500">运行状态</span>
+            <span class="text-xs text-slate-500">映射状态</span>
             <select
               v-model="filters.state"
               class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
@@ -801,7 +684,7 @@ onMounted(loadPageData);
             compact
           />
           <StatusBadge
-            :text="`待纳管 ${formatNumber(totalUnmapped)} 条`"
+            :text="`待建映射 ${formatNumber(totalUnmapped)} 条`"
             type="muted"
             compact
           />
@@ -813,6 +696,11 @@ onMounted(loadPageData);
           <StatusBadge
             :text="`仅本地 ${formatNumber(totalLocalOnly)} 条`"
             type="info"
+            compact
+          />
+          <StatusBadge
+            :text="`远端缺失 ${formatNumber(totalMissingRemote)} 条`"
+            type="warning"
             compact
           />
           <StatusBadge
@@ -829,6 +717,16 @@ onMounted(loadPageData);
             :type="totalSyncErrors ? 'warning' : 'muted'"
             compact
           />
+        </div>
+
+        <div
+          class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+        >
+          这个页面现在聚焦站点对账与同步操作。本地别名、主站点和映射启停请到
+          <RouterLink to="/admin/safeline" class="font-medium text-blue-700 hover:underline">
+            雷池联动
+          </RouterLink>
+          页面维护。
         </div>
 
         <div
@@ -890,7 +788,10 @@ onMounted(loadPageData);
         <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div class="flex flex-col gap-4 border-b border-slate-200 px-4 py-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
-              <p class="text-sm font-semibold text-stone-900">站点列表</p>
+              <p class="text-sm font-semibold text-stone-900">站点对账列表</p>
+              <p class="mt-1 text-xs text-slate-500">
+                按“本地站点、雷池站点、映射、同步链路”四类数据合并展示，方便排查缺链路、孤儿映射和双端配置漂移。
+              </p>
             </div>
             <p class="text-xs text-slate-500">
               {{
@@ -909,13 +810,13 @@ onMounted(loadPageData);
           </div>
 
           <div v-else class="overflow-x-auto">
-            <table class="w-full min-w-[1180px] text-left text-sm text-slate-700">
+            <table class="w-full min-w-[1420px] text-left text-sm text-slate-700">
               <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th class="px-4 py-3 font-medium">名称 / 别名</th>
-                  <th class="px-4 py-3 font-medium">本地站点</th>
-                  <th class="px-4 py-3 font-medium">雷池站点</th>
-                  <th class="px-4 py-3 font-medium">状态</th>
+                  <th class="px-4 py-3 font-medium">站点标识</th>
+                  <th class="px-4 py-3 font-medium">本地配置</th>
+                  <th class="px-4 py-3 font-medium">雷池配置</th>
+                  <th class="px-4 py-3 font-medium">同步状态</th>
                   <th class="px-4 py-3 font-medium">操作</th>
                 </tr>
               </thead>
@@ -926,112 +827,256 @@ onMounted(loadPageData);
                   class="items-center transition hover:bg-slate-50/50"
                 >
                   <td class="px-4 py-2">
-                    <div v-if="row.safeline_site_id" class="flex items-center">
-                      <p class="font-medium text-stone-900 truncate max-w-[150px]" :title="row.local_alias || row.safeline_site_name || row.local_site_name">
-                        {{ row.local_alias || row.safeline_site_name || row.local_site_name || "未命名" }}
+                    <div class="space-y-1.5">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <p
+                          class="max-w-[220px] truncate font-medium text-stone-900"
+                          :title="
+                            row.local_alias ||
+                            row.local_primary_hostname ||
+                            row.safeline_site_domain ||
+                            row.local_site_name
+                          "
+                        >
+                          {{
+                            row.local_alias ||
+                            row.local_primary_hostname ||
+                            row.safeline_site_domain ||
+                            row.local_site_name ||
+                            "未命名"
+                          }}
+                        </p>
+                        <StatusBadge
+                          v-if="row.saved"
+                          text="已映射"
+                          type="success"
+                          compact
+                        />
+                        <StatusBadge
+                          v-else-if="row.remote_present"
+                          text="待建映射"
+                          type="muted"
+                          compact
+                        />
+                        <StatusBadge
+                          v-if="row.is_primary"
+                          text="主站点"
+                          type="info"
+                          compact
+                        />
+                        <StatusBadge
+                          v-if="row.orphaned"
+                          text="历史映射"
+                          type="warning"
+                          compact
+                        />
+                      </div>
+                      <p class="text-xs text-slate-500">
+                        {{
+                          row.local_primary_hostname ||
+                          row.safeline_site_domain ||
+                          row.local_site_name ||
+                          "暂无主机标识"
+                        }}
                       </p>
-                    </div>
-                    <div v-else>
-                      <p class="font-medium text-stone-900 truncate max-w-[150px]" :title="row.local_site_name">
-                        {{ row.local_site_name || "未命名本地" }}
-                      </p>
+                      <div class="flex flex-wrap gap-2 text-xs text-slate-400">
+                        <span v-if="row.local_site_id" class="font-mono">
+                          LOCAL:{{ row.local_site_id }}
+                        </span>
+                        <span v-if="row.safeline_site_id" class="font-mono">
+                          SAFE:{{ row.safeline_site_id }}
+                        </span>
+                      </div>
                     </div>
                   </td>
 
                   <td class="px-4 py-2">
-                    <div v-if="row.local_present" class="flex flex-col">
-                      <div class="flex items-center gap-1.5">
+                    <div v-if="row.local_present" class="space-y-1.5">
+                      <div class="flex flex-wrap items-center gap-1.5">
                         <span class="font-medium text-stone-900">{{ row.local_site_name }}</span>
                         <span class="font-mono text-[10px] text-slate-400">ID:{{ row.local_site_id }}</span>
+                        <StatusBadge
+                          :text="row.local_enabled ? '本地启用' : '本地停用'"
+                          :type="row.local_enabled ? 'success' : 'warning'"
+                          compact
+                        />
+                        <StatusBadge
+                          :text="row.local_sync_mode ? `模式 ${syncModeLabel(row.local_sync_mode)}` : '模式未设置'"
+                          type="muted"
+                          compact
+                        />
+                        <StatusBadge
+                          :text="row.local_upstreams.length ? '已配上游' : '未配上游'"
+                          :type="row.local_upstreams.length ? 'info' : 'warning'"
+                          compact
+                        />
                       </div>
-                      <div class="flex items-center gap-2 text-xs text-slate-500">
-                        <span class="truncate max-w-[180px]" :title="row.local_primary_hostname">{{ row.local_primary_hostname }}</span>
-                        <span v-if="row.local_listen_ports.length" class="shrink-0 text-slate-300">|</span>
-                        <span v-if="row.local_listen_ports.length" class="shrink-0">Port: {{ row.local_listen_ports.join("/") }}</span>
+                      <div class="grid gap-1 text-xs text-slate-500">
+                        <p class="truncate" :title="row.local_primary_hostname">
+                          主域名：{{ row.local_primary_hostname || "未设置" }}
+                        </p>
+                        <p class="truncate" :title="row.local_hostnames.join(' / ')">
+                          Hostnames：{{
+                            row.local_hostnames.length
+                              ? row.local_hostnames.join(" / ")
+                              : "未设置"
+                          }}
+                        </p>
+                        <p>
+                          监听端口：{{
+                            row.local_listen_ports.length
+                              ? row.local_listen_ports.join(" / ")
+                              : "未设置"
+                          }}
+                        </p>
+                        <p class="truncate" :title="row.local_upstreams.join(' / ')">
+                          Upstream：{{
+                            row.local_upstreams.length
+                              ? row.local_upstreams.join(" / ")
+                              : "未设置"
+                          }}
+                        </p>
                       </div>
                     </div>
-                    <p v-else class="text-xs text-slate-400 italic">未落库</p>
+                    <p v-else class="text-xs text-slate-400 italic">未落本地站点</p>
                   </td>
 
                   <td class="px-4 py-2">
-                    <div v-if="row.remote_present" class="flex flex-col">
-                      <div class="flex items-center gap-1.5">
+                    <div v-if="row.remote_present" class="space-y-1.5">
+                      <div class="flex flex-wrap items-center gap-1.5">
                         <span class="font-medium text-stone-900">{{ row.safeline_site_name || "未命名" }}</span>
                         <span class="font-mono text-[10px] text-slate-400">ID:{{ row.safeline_site_id }}</span>
+                        <StatusBadge
+                          :text="remoteStatusText(row.status)"
+                          :type="remoteStatusType(row.status)"
+                          compact
+                        />
+                        <StatusBadge
+                          :text="
+                            row.remote_enabled === null
+                              ? '未返回启停'
+                              : row.remote_enabled
+                                ? '远端启用'
+                                : '远端停用'
+                          "
+                          :type="
+                            row.remote_enabled === null
+                              ? 'muted'
+                              : row.remote_enabled
+                                ? 'success'
+                                : 'warning'
+                          "
+                          compact
+                        />
+                        <StatusBadge
+                          :text="row.remote_ssl_enabled ? 'TLS' : '明文'"
+                          :type="row.remote_ssl_enabled ? 'info' : 'muted'"
+                          compact
+                        />
                       </div>
-                      <div class="flex items-center gap-2 text-xs text-slate-500">
-                        <span class="truncate max-w-[180px]" :title="row.safeline_site_domain">{{ row.safeline_site_domain || "无域名" }}</span>
-                        <span v-if="row.server_names.length" class="shrink-0 text-slate-300">|</span>
-                        <span v-if="row.server_names.length" class="truncate max-w-[100px]" :title="row.server_names.join(' / ')">{{ row.server_names[0] }}{{ row.server_names.length > 1 ? '...' : '' }}</span>
+                      <div class="grid gap-1 text-xs text-slate-500">
+                        <p class="truncate" :title="row.safeline_site_domain">
+                          域名：{{ row.safeline_site_domain || "未提供" }}
+                        </p>
+                        <p class="truncate" :title="row.server_names.join(' / ')">
+                          Server Names：{{
+                            row.server_names.length
+                              ? row.server_names.join(" / ")
+                              : "未提供"
+                          }}
+                        </p>
+                        <p>
+                          HTTP/HTTPS 端口：{{
+                            row.remote_ports.length ? row.remote_ports.join(" / ") : "-"
+                          }}
+                          <span class="text-slate-300"> / </span>
+                          {{
+                            row.remote_ssl_ports.length
+                              ? row.remote_ssl_ports.join(" / ")
+                              : "-"
+                          }}
+                        </p>
+                        <p class="truncate" :title="row.remote_upstreams.join(' / ')">
+                          Upstream：{{
+                            row.remote_upstreams.length
+                              ? row.remote_upstreams.join(" / ")
+                              : "未提供"
+                          }}
+                        </p>
                       </div>
                     </div>
-                    <div v-else class="flex items-center gap-2">
-                      <span class="text-xs text-slate-400 italic">雷池未见</span>
+                    <div v-else class="space-y-1">
+                      <p class="text-xs text-slate-400 italic">雷池未见</p>
                       <span v-if="row.safeline_site_id" class="font-mono text-[10px] text-slate-400">ID:{{ row.safeline_site_id }}</span>
                     </div>
                   </td>
 
                   <td class="px-4 py-2">
-                    <div class="flex flex-wrap items-center gap-1.5">
-                      <StatusBadge
-                        :text="mappingStateText(row)"
-                        :type="mappingStateType(row)"
-                        compact
-                      />
-                      <StatusBadge
-                        v-if="row.remote_present"
-                        :text="isSiteOnline(row.status) ? '在线' : '停用'"
-                        :type="remoteStatusType(row.status)"
-                        compact
-                      />
-                      <StatusBadge
-                        v-if="row.is_primary"
-                        text="主"
-                        type="info"
-                        compact
-                      />
+                    <div class="space-y-2">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <StatusBadge
+                          :text="mappingStateText(row)"
+                          :type="mappingStateType(row)"
+                          compact
+                        />
+                        <StatusBadge
+                          v-if="row.safeline_site_id"
+                          :text="row.enabled ? '映射启用' : '映射停用'"
+                          :type="row.enabled ? 'success' : 'warning'"
+                          compact
+                        />
+                        <StatusBadge
+                          :text="`同步 ${syncModeLabel(row.local_sync_mode)}`"
+                          type="info"
+                          compact
+                        />
+                      </div>
+                      <div
+                        v-if="row.link_last_error"
+                        class="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700"
+                      >
+                        {{ row.link_last_error }}
+                      </div>
+                      <div v-else class="text-xs text-slate-500">
+                        {{ rowSyncText(row) }}
+                      </div>
+                      <p
+                        v-if="row.notes || row.local_notes"
+                        class="text-xs text-slate-400"
+                        :title="row.notes || row.local_notes"
+                      >
+                        备注：{{ row.notes || row.local_notes }}
+                      </p>
                     </div>
                   </td>
 
                   <td class="px-4 py-2">
-                    <div class="flex items-center gap-1.5">
+                    <div class="flex flex-wrap items-center gap-2">
                       <button
                         v-if="row.remote_present"
                         @click="syncRemoteSite(row)"
                         :disabled="rowBusy(row) || !hasSavedConfig"
-                        class="inline-flex h-8 w-8 items-center justify-center rounded border border-emerald-200 bg-emerald-50 text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                        :title="remoteActionLabel(row)"
+                        class="inline-flex h-8 items-center gap-1.5 rounded border border-emerald-200 bg-emerald-50 px-2.5 text-xs text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <RefreshCw
                           :size="14"
                           :class="{ 'animate-spin': rowActionPending(row, 'pull') }"
                         />
+                        <span>{{ remoteActionLabel(row) }}</span>
                       </button>
 
                       <button
                         v-if="row.local_present"
                         @click="syncLocalSite(row)"
                         :disabled="rowBusy(row) || !hasSavedConfig"
-                        class="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-200 bg-amber-50 text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-                        :title="localActionLabel(row)"
+                        class="inline-flex h-8 items-center gap-1.5 rounded border border-amber-200 bg-amber-50 px-2.5 text-xs text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <RefreshCw
                           :size="14"
                           :class="{ 'animate-spin': rowActionPending(row, 'push') }"
                         />
+                        <span>{{ localActionLabel(row) }}</span>
                       </button>
-
-                      <label
-                        v-if="row.safeline_site_id"
-                        class="inline-flex h-8 items-center gap-1 rounded border border-slate-200 bg-white px-2 text-xs text-stone-600 cursor-pointer hover:border-slate-300"
-                      >
-                        <input
-                          v-model="row.enabled"
-                          type="checkbox"
-                          class="accent-blue-600"
-                        />
-                        <span>启用</span>
-                      </label>
                     </div>
                   </td>
                 </tr>

@@ -25,12 +25,21 @@ pub struct InspectionResult {
     pub blocked: bool,
     pub reason: String,
     pub layer: InspectionLayer,
+    pub action: InspectionAction,
+    pub persist_blocked_ip: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum InspectionLayer {
     L4,
     L7,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum InspectionAction {
+    Allow,
+    Block,
+    Alert,
 }
 
 impl PacketInfo {
@@ -55,6 +64,57 @@ impl InspectionResult {
             blocked: false,
             reason: String::new(),
             layer,
+            action: InspectionAction::Allow,
+            persist_blocked_ip: false,
+        }
+    }
+
+    pub fn allow_with_reason(layer: InspectionLayer, reason: impl Into<String>) -> Self {
+        Self {
+            blocked: false,
+            reason: reason.into(),
+            layer,
+            action: InspectionAction::Allow,
+            persist_blocked_ip: false,
+        }
+    }
+
+    pub fn alert(layer: InspectionLayer, reason: impl Into<String>) -> Self {
+        Self {
+            blocked: false,
+            reason: reason.into(),
+            layer,
+            action: InspectionAction::Alert,
+            persist_blocked_ip: false,
+        }
+    }
+
+    pub fn block(layer: InspectionLayer, reason: impl Into<String>) -> Self {
+        Self {
+            blocked: true,
+            reason: reason.into(),
+            layer,
+            action: InspectionAction::Block,
+            persist_blocked_ip: false,
+        }
+    }
+
+    pub fn block_and_persist_ip(layer: InspectionLayer, reason: impl Into<String>) -> Self {
+        Self {
+            persist_blocked_ip: true,
+            ..Self::block(layer, reason)
+        }
+    }
+
+    pub fn should_persist_event(&self) -> bool {
+        self.blocked || matches!(self.action, InspectionAction::Alert)
+    }
+
+    pub fn event_action(&self) -> &'static str {
+        match self.action {
+            InspectionAction::Allow => "allow",
+            InspectionAction::Block => "block",
+            InspectionAction::Alert => "alert",
         }
     }
 }

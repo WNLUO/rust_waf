@@ -14,7 +14,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use engine::WafEngine;
-pub use packet::{InspectionLayer, InspectionResult, PacketInfo, Protocol};
+pub use packet::{InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol};
 
 #[derive(Debug, Clone)]
 pub struct UpstreamHealthSnapshot {

@@ -74,28 +74,16 @@ impl L7Inspector {
     #[allow(dead_code)]
     pub fn inspect_http_request(&self, _packet: &PacketInfo, payload: &[u8]) -> InspectionResult {
         if !self.config.http_inspection_enabled {
-            return InspectionResult {
-                blocked: false,
-                reason: String::new(),
-                layer: InspectionLayer::L7,
-            };
+            return InspectionResult::allow(InspectionLayer::L7);
         }
 
         // Convert payload to string for inspection
         let binding = String::from_utf8_lossy(payload);
         if binding.is_empty() {
-            return InspectionResult {
-                blocked: false,
-                reason: String::new(),
-                layer: InspectionLayer::L7,
-            };
+            return InspectionResult::allow(InspectionLayer::L7);
         }
 
-        InspectionResult {
-            blocked: false,
-            reason: String::new(),
-            layer: InspectionLayer::L7,
-        }
+        InspectionResult::allow(InspectionLayer::L7)
     }
 
     /// 检查统一HTTP请求（支持多协议版本）
@@ -107,11 +95,7 @@ impl L7Inspector {
         request: &UnifiedHttpRequest,
     ) -> InspectionResult {
         if !self.config.http_inspection_enabled {
-            return InspectionResult {
-                blocked: false,
-                reason: String::new(),
-                layer: InspectionLayer::L7,
-            };
+            return InspectionResult::allow(InspectionLayer::L7);
         }
 
         debug!(
@@ -120,10 +104,6 @@ impl L7Inspector {
         );
 
         debug!("{} request passed all checks", request.version);
-        InspectionResult {
-            blocked: false,
-            reason: String::new(),
-            layer: InspectionLayer::L7,
-        }
+        InspectionResult::allow(InspectionLayer::L7)
     }
 }

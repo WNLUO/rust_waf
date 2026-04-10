@@ -7,7 +7,7 @@ use log::info;
 use std::net::IpAddr;
 use std::time::Duration;
 
-pub use limiter::ConnectionLimiter;
+pub use limiter::{ConnectionLimiter, RateLimitDecision};
 pub use monitor::ConnectionMonitor;
 pub use tracker::ConnectionTracker;
 
@@ -40,12 +40,16 @@ impl ConnectionManager {
         self.tracker.track(packet);
     }
 
-    pub fn check_rate_limit(&self, ip: &std::net::IpAddr) -> bool {
+    pub fn check_rate_limit(&self, ip: &std::net::IpAddr) -> RateLimitDecision {
         self.limiter.check(ip)
     }
 
-    pub fn block_ip(&self, ip: &IpAddr, reason: &str, duration: Duration) {
-        self.limiter.block_ip(ip, reason, duration);
+    pub fn block_ip(&self, ip: &IpAddr, reason: &str, duration: Duration) -> bool {
+        self.limiter.block_ip(ip, reason, duration)
+    }
+
+    pub fn unblock_ip(&self, ip: &IpAddr) -> bool {
+        self.limiter.unblock_ip(ip)
     }
 
     pub fn recent_connection_count(&self, ip: &IpAddr, window: Duration) -> usize {

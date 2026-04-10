@@ -134,6 +134,10 @@ export interface WriteStatusResponse {
 
 export interface SafeLineSettings {
   enabled: boolean
+  auto_sync_events: boolean
+  auto_sync_blocked_ips_push: boolean
+  auto_sync_blocked_ips_pull: boolean
+  auto_sync_interval_secs: number
   base_url: string
   api_token: string
   username: string

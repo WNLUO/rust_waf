@@ -1800,7 +1800,10 @@ mod tests {
 
         let loaded = store.load_app_config().await.unwrap().unwrap();
         assert!(!loaded.integrations.safeline.enabled);
-        assert_eq!(loaded.integrations.safeline.auth_probe_path, "/api/open/system/key");
+        assert_eq!(
+            loaded.integrations.safeline.auth_probe_path,
+            "/api/open/system/key"
+        );
         assert_eq!(loaded.console_settings.gateway_name, "玄枢防护网关");
     }
 

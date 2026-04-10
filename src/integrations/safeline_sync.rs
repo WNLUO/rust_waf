@@ -1,8 +1,7 @@
 use crate::config::SafeLineConfig;
 use crate::storage::{
-    BlockedIpEntry, BlockedIpQuery, BlockedIpRecord, SafeLineBlocklistPullResult,
-    SafeLineBlocklistSyncResult, SafeLineImportResult, SafeLineSiteMappingEntry, SecurityEventRecord,
-    SqliteStore,
+    BlockedIpQuery, BlockedIpRecord, SafeLineBlocklistPullResult, SafeLineBlocklistSyncResult,
+    SafeLineImportResult, SafeLineSiteMappingEntry, SecurityEventRecord, SqliteStore,
 };
 use anyhow::{bail, Result};
 
@@ -81,7 +80,10 @@ fn apply_safeline_mapping(
 ) -> SecurityEventRecord {
     let mut record = SecurityEventRecord::from(event);
 
-    if let Some(mapping) = mappings.iter().find(|mapping| matches_mapping(&record, mapping)) {
+    if let Some(mapping) = mappings
+        .iter()
+        .find(|mapping| matches_mapping(&record, mapping))
+    {
         record.provider_site_id = Some(mapping.safeline_site_id.clone());
         record.provider_site_name = Some(mapping.local_alias.clone());
         record.provider_site_domain = Some(mapping.safeline_site_domain.clone());
@@ -107,6 +109,3 @@ fn matches_mapping(record: &SecurityEventRecord, mapping: &SafeLineSiteMappingEn
             .map(|value| !value.is_empty() && value == mapping.safeline_site_name)
             .unwrap_or(false)
 }
-
-#[allow(dead_code)]
-fn _assert_blocked_ip_entry_is_clone(_: &BlockedIpEntry) {}

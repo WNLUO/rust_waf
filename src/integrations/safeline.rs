@@ -184,7 +184,9 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
 pub async fn list_sites(config: &SafeLineConfig) -> Result<Vec<SafeLineSiteSummary>> {
     let base_url = normalize_base_url(&config.base_url)?;
     if !has_any_auth(config) {
-        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法读取雷池站点列表"));
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法读取雷池站点列表"
+        ));
     }
 
     let client = build_client(config)?;
@@ -207,7 +209,9 @@ pub async fn list_security_events(
 ) -> Result<Vec<SafeLineSecurityEventSummary>> {
     let base_url = normalize_base_url(&config.base_url)?;
     if !has_any_auth(config) {
-        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法读取雷池事件列表"));
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法读取雷池事件列表"
+        ));
     }
 
     let client = build_client(config)?;
@@ -231,13 +235,16 @@ pub async fn push_blocked_ip(
 ) -> Result<SafeLineBlockedIpSyncSummary> {
     let base_url = normalize_base_url(&config.base_url)?;
     if !has_any_auth(config) {
-        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法同步本地封禁到雷池"));
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法同步本地封禁到雷池"
+        ));
     }
 
     let client = build_client(config)?;
     let path = normalized_or_default(&config.blocklist_sync_path, DEFAULT_BLOCKLIST_PATH);
     if path.contains("/open/ipgroup") {
-        return push_blocked_ip_via_open_ipgroup(&client, &base_url, config, blocked_ip, &path).await;
+        return push_blocked_ip_via_open_ipgroup(&client, &base_url, config, blocked_ip, &path)
+            .await;
     }
     let url = format!("{base_url}{path}");
     let payload = serde_json::json!({
@@ -247,12 +254,9 @@ pub async fn push_blocked_ip(
         "expires_at": blocked_ip.expires_at,
         "source": "waf-local",
     });
-    let (status, body) = send_with_auth(
-        &client,
-        &base_url,
-        config,
-        |auth| with_auth_headers(client.post(&url).json(&payload), auth),
-    )
+    let (status, body) = send_with_auth(&client, &base_url, config, |auth| {
+        with_auth_headers(client.post(&url).json(&payload), auth)
+    })
     .await?;
     let accepted = status.is_success() || status == StatusCode::CONFLICT;
 
@@ -271,7 +275,9 @@ pub async fn push_blocked_ip(
 pub async fn list_blocked_ips(config: &SafeLineConfig) -> Result<Vec<SafeLineBlockedIpSummary>> {
     let base_url = normalize_base_url(&config.base_url)?;
     if !has_any_auth(config) {
-        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法读取雷池封禁列表"));
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法读取雷池封禁列表"
+        ));
     }
 
     let client = build_client(config)?;
@@ -295,7 +301,9 @@ pub async fn delete_blocked_ip(
 ) -> Result<SafeLineBlockedIpDeleteSummary> {
     let base_url = normalize_base_url(&config.base_url)?;
     if !has_any_auth(config) {
-        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法调用雷池远端解封"));
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法调用雷池远端解封"
+        ));
     }
 
     let client = build_client(config)?;
@@ -438,7 +446,10 @@ async fn delete_blocked_ip_via_open_ipgroup(
 
     let mut attempts = Vec::new();
     for action_path in open_ipgroup_action_paths(path, OPEN_BLOCKLIST_REMOVE_SUFFIX) {
-        attempts.push(OpenIpGroupDeleteAttempt::PostRemove(action_path.clone(), payload.clone()));
+        attempts.push(OpenIpGroupDeleteAttempt::PostRemove(
+            action_path.clone(),
+            payload.clone(),
+        ));
         attempts.push(OpenIpGroupDeleteAttempt::DeleteRemove(
             action_path.clone(),
             payload.clone(),
@@ -480,9 +491,7 @@ async fn delete_blocked_ip_via_open_ipgroup(
         })
         .await?;
 
-        if status.is_success()
-            || status == StatusCode::NOT_FOUND
-            || status == StatusCode::CONFLICT
+        if status.is_success() || status == StatusCode::NOT_FOUND || status == StatusCode::CONFLICT
         {
             return Ok(SafeLineBlockedIpDeleteSummary {
                 ip: blocked_ip.ip.clone(),
@@ -554,9 +563,10 @@ async fn probe_authentication(
 
     for path in paths {
         let url = format!("{base_url}{path}");
-        let (status, body) =
-            send_with_auth(client, base_url, config, |auth| with_auth_headers(client.get(&url), auth))
-                .await?;
+        let (status, body) = send_with_auth(client, base_url, config, |auth| {
+            with_auth_headers(client.get(&url), auth)
+        })
+        .await?;
         last_status = status;
         last_path = path.clone();
         if status.is_success()
@@ -599,9 +609,10 @@ async fn get_json_with_fallback(
 
     for path in paths {
         let url = format!("{base_url}{path}");
-        let (status, body) =
-            send_with_auth(client, base_url, config, |auth| with_auth_headers(client.get(&url), auth))
-                .await?;
+        let (status, body) = send_with_auth(client, base_url, config, |auth| {
+            with_auth_headers(client.get(&url), auth)
+        })
+        .await?;
 
         if status.is_success() {
             if looks_like_html(&body) {
@@ -778,9 +789,8 @@ async fn login_with_password(
         return Err(anyhow!("雷池登录失败，HTTP {}：{}", status, body));
     }
 
-    let envelope = serde_json::from_str::<SafeLineLoginEnvelope>(&body).map_err(|err| {
-        anyhow!("雷池登录返回了不可解析的 JSON：{}", err)
-    })?;
+    let envelope = serde_json::from_str::<SafeLineLoginEnvelope>(&body)
+        .map_err(|err| anyhow!("雷池登录返回了不可解析的 JSON：{}", err))?;
     if envelope.data.jwt.trim().is_empty() {
         return Err(anyhow!(
             "雷池登录未返回 JWT：{}",
@@ -1584,7 +1594,10 @@ mod tests {
             blocklist_ip_group_ids: vec!["  ".to_string(), "12".to_string(), "12".to_string()],
             ..SafeLineConfig::default()
         };
-        assert_eq!(configured_ip_group_ids(&config).unwrap(), vec!["12".to_string()]);
+        assert_eq!(
+            configured_ip_group_ids(&config).unwrap(),
+            vec!["12".to_string()]
+        );
 
         let empty_config = SafeLineConfig::default();
         assert!(configured_ip_group_ids(&empty_config).is_err());

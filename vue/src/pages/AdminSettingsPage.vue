@@ -44,6 +44,10 @@ const systemSettings = reactive<SystemSettingsForm>({
   notes: '',
   safeline: {
     enabled: false,
+    auto_sync_events: false,
+    auto_sync_blocked_ips_push: false,
+    auto_sync_blocked_ips_pull: false,
+    auto_sync_interval_secs: 300,
     base_url: '',
     api_token: '',
     username: '',
@@ -72,6 +76,10 @@ const blocklistIpGroupIdsText = computed({
 function toPlainSafeLineSettings() {
   return {
     enabled: systemSettings.safeline.enabled,
+    auto_sync_events: systemSettings.safeline.auto_sync_events,
+    auto_sync_blocked_ips_push: systemSettings.safeline.auto_sync_blocked_ips_push,
+    auto_sync_blocked_ips_pull: systemSettings.safeline.auto_sync_blocked_ips_pull,
+    auto_sync_interval_secs: systemSettings.safeline.auto_sync_interval_secs,
     base_url: systemSettings.safeline.base_url,
     api_token: systemSettings.safeline.api_token,
     username: systemSettings.safeline.username,
@@ -138,6 +146,9 @@ async function saveSettings() {
     systemSettings.retain_days = Number.isFinite(systemSettings.retain_days)
       ? Math.min(Math.max(systemSettings.retain_days, 1), 365)
       : 30
+    systemSettings.safeline.auto_sync_interval_secs = Number.isFinite(systemSettings.safeline.auto_sync_interval_secs)
+      ? Math.min(Math.max(systemSettings.safeline.auto_sync_interval_secs, 15), 86400)
+      : 300
 
     const response = await updateSettings(toPlainSettingsPayload())
     successMessage.value = response.message
@@ -354,6 +365,50 @@ onMounted(async () => {
                   <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">保存后写入 SQLite，供后续日志同步和策略联动复用。</span>
                 </span>
               </label>
+
+              <div class="rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
+                <div class="flex flex-col gap-1">
+                  <p class="text-sm font-medium text-stone-900">自动联动</p>
+                  <p class="text-xs leading-5 text-cyber-muted">由服务端后台周期执行，不依赖页面停留。手动按钮仍可继续用于立即触发。</p>
+                </div>
+
+                <div class="mt-4 grid gap-3 md:grid-cols-2">
+                  <label class="flex items-start gap-2.5 rounded-[16px] border border-cyber-border/70 bg-white px-3 py-3">
+                    <input v-model="systemSettings.safeline.auto_sync_events" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
+                    <span>
+                      <span class="block text-sm font-medium text-stone-900">自动同步事件</span>
+                      <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">定时拉取雷池攻击日志并写入本地事件库。</span>
+                    </span>
+                  </label>
+                  <label class="flex items-start gap-2.5 rounded-[16px] border border-cyber-border/70 bg-white px-3 py-3">
+                    <input v-model="systemSettings.safeline.auto_sync_blocked_ips_push" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
+                    <span>
+                      <span class="block text-sm font-medium text-stone-900">自动推送封禁</span>
+                      <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">把本地仍生效的封禁周期性同步到雷池。</span>
+                    </span>
+                  </label>
+                  <label class="flex items-start gap-2.5 rounded-[16px] border border-cyber-border/70 bg-white px-3 py-3 md:col-span-2">
+                    <input v-model="systemSettings.safeline.auto_sync_blocked_ips_pull" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
+                    <span>
+                      <span class="block text-sm font-medium text-stone-900">自动回流封禁</span>
+                      <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">定时把雷池远端封禁拉回本地，保持控制台名单同步。</span>
+                    </span>
+                  </label>
+                </div>
+
+                <label class="mt-4 block space-y-1.5">
+                  <span class="text-xs text-cyber-muted">自动联动间隔（秒）</span>
+                  <input
+                    v-model.number="systemSettings.safeline.auto_sync_interval_secs"
+                    type="number"
+                    min="15"
+                    max="86400"
+                    step="15"
+                    class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent"
+                  />
+                  <span class="block text-xs leading-5 text-cyber-muted">建议从 60 到 300 秒开始。保存后后台任务会自动读取新配置，无需页面保持打开。</span>
+                </label>
+              </div>
 
               <label class="space-y-1.5">
                 <span class="text-xs text-cyber-muted">雷池地址</span>

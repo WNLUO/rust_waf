@@ -41,6 +41,10 @@ pub struct SettingsResponse {
 #[derive(Debug, Serialize)]
 pub struct SafeLineSettingsResponse {
     enabled: bool,
+    auto_sync_events: bool,
+    auto_sync_blocked_ips_push: bool,
+    auto_sync_blocked_ips_pull: bool,
+    auto_sync_interval_secs: u64,
     base_url: String,
     api_token: String,
     username: String,
@@ -73,6 +77,10 @@ pub struct SettingsUpdateRequest {
 #[derive(Debug, Deserialize)]
 pub struct SafeLineSettingsRequest {
     enabled: bool,
+    auto_sync_events: bool,
+    auto_sync_blocked_ips_push: bool,
+    auto_sync_blocked_ips_pull: bool,
+    auto_sync_interval_secs: u64,
     base_url: String,
     api_token: String,
     username: String,
@@ -564,21 +572,9 @@ async fn sync_safeline_events_handler(
         return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
     }
 
-    let mappings = store
-        .list_safeline_site_mappings()
-        .await
-        .map_err(ApiError::internal)?;
-    let events = crate::integrations::safeline::list_security_events(safeline)
+    let result = crate::integrations::safeline_sync::sync_events(store, safeline)
         .await
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
-    let records = events
-        .into_iter()
-        .map(|event| apply_safeline_mapping(event, &mappings))
-        .collect::<Vec<_>>();
-    let result = store
-        .import_safeline_security_events(&records)
-        .await
-        .map_err(ApiError::internal)?;
 
     Ok(Json(SafeLineEventSyncResponse {
         success: true,
@@ -632,33 +628,9 @@ async fn sync_safeline_blocked_ips_handler(
         return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
     }
 
-    let blocked = store
-        .list_blocked_ips(&crate::storage::BlockedIpQuery {
-            limit: 200,
-            active_only: true,
-            ..crate::storage::BlockedIpQuery::default()
-        })
+    let result = crate::integrations::safeline_sync::push_blocked_ips(store, safeline)
         .await
-        .map_err(ApiError::internal)?;
-
-    let mut accepted = Vec::new();
-    let mut failed = 0usize;
-
-    for record in &blocked.items {
-        let result = crate::integrations::safeline::push_blocked_ip(safeline, record)
-            .await
-            .map_err(|err| ApiError::bad_request(err.to_string()))?;
-        if result.accepted {
-            accepted.push(record.clone());
-        } else {
-            failed += 1;
-        }
-    }
-
-    let result = store
-        .import_safeline_blocked_ips_sync_result(&accepted, failed)
-        .await
-        .map_err(ApiError::internal)?;
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     Ok(Json(SafeLineBlocklistSyncResponse {
         success: true,
@@ -684,17 +656,9 @@ async fn pull_safeline_blocked_ips_handler(
         return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
     }
 
-    let records = crate::integrations::safeline::list_blocked_ips(safeline)
+    let result = crate::integrations::safeline_sync::pull_blocked_ips(store, safeline)
         .await
-        .map_err(|err| ApiError::bad_request(err.to_string()))?
-        .into_iter()
-        .map(crate::storage::BlockedIpRecord::from)
-        .collect::<Vec<_>>();
-
-    let result = store
-        .import_safeline_blocked_ips_pull(&records)
-        .await
-        .map_err(ApiError::internal)?;
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     Ok(Json(SafeLineBlocklistPullResponse {
         success: true,
@@ -1014,6 +978,10 @@ impl SafeLineSettingsResponse {
     fn from_config(config: &SafeLineConfig) -> Self {
         Self {
             enabled: config.enabled,
+            auto_sync_events: config.auto_sync_events,
+            auto_sync_blocked_ips_push: config.auto_sync_blocked_ips_push,
+            auto_sync_blocked_ips_pull: config.auto_sync_blocked_ips_pull,
+            auto_sync_interval_secs: config.auto_sync_interval_secs,
             base_url: config.base_url.clone(),
             api_token: config.api_token.clone(),
             username: config.username.clone(),
@@ -1059,6 +1027,10 @@ impl SafeLineSettingsRequest {
     fn into_config(self) -> SafeLineConfig {
         SafeLineConfig {
             enabled: self.enabled,
+            auto_sync_events: self.auto_sync_events,
+            auto_sync_blocked_ips_push: self.auto_sync_blocked_ips_push,
+            auto_sync_blocked_ips_pull: self.auto_sync_blocked_ips_pull,
+            auto_sync_interval_secs: self.auto_sync_interval_secs,
             base_url: self.base_url,
             api_token: self.api_token,
             username: self.username,
@@ -1079,6 +1051,10 @@ impl SafeLineTestRequest {
     fn into_config(self) -> SafeLineConfig {
         SafeLineConfig {
             enabled: true,
+            auto_sync_events: false,
+            auto_sync_blocked_ips_push: false,
+            auto_sync_blocked_ips_pull: false,
+            auto_sync_interval_secs: 0,
             base_url: self.base_url,
             api_token: self.api_token,
             username: self.username,
@@ -1290,37 +1266,6 @@ impl EventsQueryParams {
             sort_direction: parse_sort_direction(self.sort_direction.as_deref())?,
         })
     }
-}
-
-fn apply_safeline_mapping(
-    event: crate::integrations::safeline::SafeLineSecurityEventSummary,
-    mappings: &[crate::storage::SafeLineSiteMappingEntry],
-) -> crate::storage::SecurityEventRecord {
-    let mut record = crate::storage::SecurityEventRecord::from(event);
-
-    if let Some(mapping) = mappings.iter().find(|mapping| {
-        record
-            .provider_site_id
-            .as_deref()
-            .map(|value| value == mapping.safeline_site_id)
-            .unwrap_or(false)
-            || record
-                .provider_site_domain
-                .as_deref()
-                .map(|value| !value.is_empty() && value == mapping.safeline_site_domain)
-                .unwrap_or(false)
-            || record
-                .provider_site_name
-                .as_deref()
-                .map(|value| !value.is_empty() && value == mapping.safeline_site_name)
-                .unwrap_or(false)
-    }) {
-        record.provider_site_id = Some(mapping.safeline_site_id.clone());
-        record.provider_site_name = Some(mapping.local_alias.clone());
-        record.provider_site_domain = Some(mapping.safeline_site_domain.clone());
-    }
-
-    record
 }
 
 impl BlockedIpsQueryParams {

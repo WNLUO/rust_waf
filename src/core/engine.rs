@@ -3,6 +3,7 @@ use ipnet::IpNet;
 use log::{debug, info, warn};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig as RustlsServerConfig;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 #[cfg(feature = "http3")]
@@ -13,6 +14,7 @@ use std::time::Instant;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::time::{Duration, MissedTickBehavior};
 use tokio_rustls::TlsAcceptor;
 
 #[cfg(feature = "http3")]
@@ -102,6 +104,13 @@ impl WafEngine {
                     run_upstream_healthcheck_loop(context, upstream_addr).await;
                 });
             }
+        }
+
+        if let Some(store) = self.context.sqlite_store.as_ref().cloned() {
+            let fallback_config = self.context.config.clone();
+            tokio::spawn(async move {
+                run_safeline_auto_sync_loop(store, fallback_config).await;
+            });
         }
 
         let maintenance_interval = self.context.config.maintenance_interval_secs.max(5);
@@ -455,6 +464,149 @@ impl WafEngine {
                         );
                     }
                     debug!("=============================");
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SafeLineAutoSyncTask {
+    Events,
+    BlockedIpsPush,
+    BlockedIpsPull,
+}
+
+impl SafeLineAutoSyncTask {
+    const ALL: [Self; 3] = [Self::Events, Self::BlockedIpsPush, Self::BlockedIpsPull];
+
+    fn resource(self) -> &'static str {
+        match self {
+            Self::Events => "events",
+            Self::BlockedIpsPush => "blocked_ips_push",
+            Self::BlockedIpsPull => "blocked_ips_pull",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Events => "事件同步",
+            Self::BlockedIpsPush => "封禁推送",
+            Self::BlockedIpsPull => "封禁回流",
+        }
+    }
+
+    fn enabled(self, config: &crate::config::SafeLineConfig) -> bool {
+        match self {
+            Self::Events => config.auto_sync_events,
+            Self::BlockedIpsPush => config.auto_sync_blocked_ips_push,
+            Self::BlockedIpsPull => config.auto_sync_blocked_ips_pull,
+        }
+    }
+}
+
+async fn run_safeline_auto_sync_loop(
+    store: Arc<crate::storage::SqliteStore>,
+    fallback_config: Config,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut last_attempts: HashMap<&'static str, i64> = HashMap::new();
+
+    loop {
+        interval.tick().await;
+
+        let config = match store.load_app_config().await {
+            Ok(Some(config)) => config.normalized(),
+            Ok(None) => fallback_config.clone().normalized(),
+            Err(err) => {
+                warn!(
+                    "Failed to load persisted config for SafeLine auto sync: {}",
+                    err
+                );
+                continue;
+            }
+        };
+        let safeline = &config.integrations.safeline;
+
+        if !safeline.enabled {
+            continue;
+        }
+
+        for task in SafeLineAutoSyncTask::ALL {
+            if !task.enabled(safeline) {
+                continue;
+            }
+
+            let last_persisted_run = match store.load_safeline_sync_state(task.resource()).await {
+                Ok(state) => state.map(|item| item.updated_at).unwrap_or(0),
+                Err(err) => {
+                    warn!(
+                        "Failed to read SafeLine sync state for {}: {}",
+                        task.label(),
+                        err
+                    );
+                    continue;
+                }
+            };
+            let last_attempt = last_attempts.get(task.resource()).copied().unwrap_or(0);
+            let now = unix_timestamp();
+            let last_run_at = last_persisted_run.max(last_attempt);
+
+            if last_run_at > 0
+                && now.saturating_sub(last_run_at) < safeline.auto_sync_interval_secs as i64
+            {
+                continue;
+            }
+
+            last_attempts.insert(task.resource(), now);
+
+            match task {
+                SafeLineAutoSyncTask::Events => {
+                    match crate::integrations::safeline_sync::sync_events(store.as_ref(), safeline)
+                        .await
+                    {
+                        Ok(result) => info!(
+                            "SafeLine 自动{}完成：新增 {} 条，跳过 {} 条。",
+                            task.label(),
+                            result.imported,
+                            result.skipped
+                        ),
+                        Err(err) => warn!("SafeLine 自动{}失败: {}", task.label(), err),
+                    }
+                }
+                SafeLineAutoSyncTask::BlockedIpsPush => {
+                    match crate::integrations::safeline_sync::push_blocked_ips(
+                        store.as_ref(),
+                        safeline,
+                    )
+                    .await
+                    {
+                        Ok(result) => info!(
+                            "SafeLine 自动{}完成：成功 {} 条，跳过 {} 条，失败 {} 条。",
+                            task.label(),
+                            result.synced,
+                            result.skipped,
+                            result.failed
+                        ),
+                        Err(err) => warn!("SafeLine 自动{}失败: {}", task.label(), err),
+                    }
+                }
+                SafeLineAutoSyncTask::BlockedIpsPull => {
+                    match crate::integrations::safeline_sync::pull_blocked_ips(
+                        store.as_ref(),
+                        safeline,
+                    )
+                    .await
+                    {
+                        Ok(result) => info!(
+                            "SafeLine 自动{}完成：新增 {} 条，跳过 {} 条。",
+                            task.label(),
+                            result.imported,
+                            result.skipped
+                        ),
+                        Err(err) => warn!("SafeLine 自动{}失败: {}", task.label(), err),
+                    }
                 }
             }
         }

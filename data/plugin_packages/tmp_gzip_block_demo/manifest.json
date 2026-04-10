@@ -1,0 +1,35 @@
+{
+  "plugin_id": "gzip-block-demo",
+  "name": "Gzip Block Demo",
+  "version": "1.0.0",
+  "description": "演示用 gzip 拦截页插件",
+  "templates": [
+    {
+      "id": "html_block_page",
+      "name": "HTML 拦截页",
+      "description": "返回 gzip 压缩的 HTML 拦截页",
+      "layer": "l7",
+      "action": "respond",
+      "pattern": "(?i)attack|blocked|forbidden",
+      "severity": "high",
+      "response_template": {
+        "status_code": 403,
+        "content_type": "text/html; charset=utf-8",
+        "body_source": "file",
+        "gzip": true,
+        "body_text": "",
+        "body_file_path": "block-page.html",
+        "headers": [
+          {
+            "key": "cache-control",
+            "value": "no-store"
+          },
+          {
+            "key": "x-plugin-demo",
+            "value": "gzip-block-demo"
+          }
+        ]
+      }
+    }
+  ]
+}

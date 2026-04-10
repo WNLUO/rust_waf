@@ -26,10 +26,11 @@ const styles = {
 
 <template>
   <div
-    class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs tracking-[0.12em] transition-all duration-300"
-    :class="[styles[type || 'info'], compact ? 'px-2 py-0.5' : '']"
+    class="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs tracking-[0.12em] transition-all duration-300"
+    :class="[styles[type || 'info'], compact ? 'max-w-[16rem] px-2 py-0.5' : '']"
+    :title="text"
   >
     <component :is="iconMap[type || 'info']" v-if="!compact" :size="12" />
-    <span>{{ text }}</span>
+    <span class="min-w-0" :class="compact ? 'truncate' : 'break-all'">{{ text }}</span>
   </div>
 </template>

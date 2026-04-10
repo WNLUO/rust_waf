@@ -5,7 +5,7 @@ import type { SecurityEventItem, SecurityEventsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useFormatters } from '../composables/useFormatters'
-import { Check, Copy, RefreshCw } from 'lucide-vue-next'
+import { Check, Copy, Eye, RefreshCw, X } from 'lucide-vue-next'
 
 const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
 const loading = ref(true)
@@ -14,6 +14,8 @@ const syncing = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const filtersReady = ref(false)
+const previewTitle = ref('')
+const previewContent = ref('')
 const eventsPayload = ref<SecurityEventsResponse>({ total: 0, limit: 0, offset: 0, events: [] })
 
 const eventsFilters = reactive({
@@ -90,6 +92,17 @@ const copyToClipboard = async (text: string) => {
   }
 }
 
+const openPreview = (title: string, content: string | null | undefined) => {
+  if (!content) return
+  previewTitle.value = title
+  previewContent.value = content
+}
+
+const closePreview = () => {
+  previewTitle.value = ''
+  previewContent.value = ''
+}
+
 onMounted(async () => {
   await loadEvents(true)
   filtersReady.value = true
@@ -138,7 +151,7 @@ const siteOptions = computed(() => {
       </button>
     </template>
 
-    <div class="space-y-6">
+    <div class="min-w-0 space-y-6">
       <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
         <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">事件记录</p>
         <h2 class="mt-3 font-display text-4xl font-semibold text-stone-900">攻击与处置轨迹</h2>
@@ -205,65 +218,147 @@ const siteOptions = computed(() => {
 
       <div v-if="loading" class="text-sm text-cyber-muted">正在加载事件...</div>
 
-      <div v-else class="grid gap-4">
-        <article
-          v-for="event in eventsPayload.events"
-          :key="event.id"
-          class="rounded-[30px] border border-white/80 bg-white/78 p-6 shadow-[0_14px_40px_rgba(90,60,30,0.07)] transition"
-          :class="{ 'opacity-65': event.handled }"
-        >
-          <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div class="space-y-3">
-              <div class="flex flex-wrap items-center gap-3">
-                <StatusBadge :text="layerLabel(event.layer)" :type="event.layer === 'l7' ? 'info' : 'warning'" />
-                <StatusBadge :text="actionLabel(event.action)" :type="event.action === 'block' ? 'error' : 'warning'" />
-                <StatusBadge v-if="event.provider" :text="event.provider" type="muted" compact />
-                <StatusBadge
-                  v-if="event.provider_site_name || event.provider_site_domain"
-                  :text="event.provider_site_name || event.provider_site_domain || ''"
-                  type="info"
-                  compact
-                />
-                <StatusBadge v-if="event.handled" text="已处理" type="success" compact />
-                <span class="text-sm font-medium text-stone-900">{{ event.reason }}</span>
-              </div>
-              <div class="grid gap-2 text-sm text-stone-700 md:grid-cols-2">
-                <p>来源：{{ event.source_ip }}:{{ event.source_port }}</p>
-                <p>目标：{{ event.dest_ip }}:{{ event.dest_port }}</p>
-                <p>协议：{{ event.protocol }}</p>
-                <p>请求方法：{{ event.http_method || '无' }}</p>
-                <p class="md:col-span-2">访问路径：{{ event.uri || '无' }}</p>
-              </div>
-            </div>
-            <div class="rounded-[20px] bg-cyber-surface-strong px-4 py-3 text-sm text-cyber-muted">
-              {{ formatTimestamp(event.created_at) }}
-            </div>
+      <div v-else class="min-w-0 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-white/70 bg-white/55 px-5 py-4">
+          <div>
+            <p class="text-xs tracking-[0.18em] text-cyber-accent-strong">事件列表</p>
+            <p class="mt-1 text-sm text-stone-700">当前展示 {{ eventsPayload.events.length }} 条，累计 {{ eventsPayload.total }} 条。</p>
           </div>
-          <div class="mt-4 flex flex-wrap gap-3 text-xs text-cyber-muted">
-            <button
-              class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 px-3 py-1 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-              @click="copyToClipboard(`${event.source_ip}`)"
-            >
-              <Copy :size="12" />
-              复制来源 IP
-            </button>
-            <button
-              class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 px-3 py-1 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-              @click="copyToClipboard(event.uri || '')"
-            >
-              <Copy :size="12" />
-              复制 URL
-            </button>
-            <button
-              class="inline-flex items-center gap-1 rounded-full border border-cyber-border/60 px-3 py-1 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-              @click="toggleEventHandled(event)"
-            >
-              <Check :size="12" />
-              {{ event.handled ? '标记未处理' : '标记已处理' }}
-            </button>
+          <p class="text-xs tracking-[0.14em] text-cyber-muted">
+            按 {{ eventsFilters.sort_by === 'created_at' ? '时间' : eventsFilters.sort_by === 'source_ip' ? '来源 IP' : '目标端口' }}
+            {{ eventsFilters.sort_direction === 'desc' ? '降序' : '升序' }}
+          </p>
+        </div>
+
+        <div class="max-w-full overflow-hidden rounded-[30px] border border-white/80 bg-white/78 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+          <div class="flex items-center justify-between gap-3 border-b border-cyber-border/60 px-5 py-3 text-xs text-cyber-muted">
+            <p class="tracking-[0.14em]">表格内容较多时会保持在卡片内滚动，不再撑出页面。</p>
+            <p class="whitespace-nowrap">左右滑动查看更多列</p>
           </div>
-        </article>
-        <p v-if="!eventsPayload.events.length" class="text-sm text-cyber-muted">当前没有可显示的安全事件。</p>
+          <div class="max-w-full overflow-x-auto overscroll-x-contain">
+            <table class="w-full min-w-[1040px] border-collapse text-left">
+              <thead class="bg-cyber-surface-strong text-sm text-cyber-muted">
+                <tr>
+                  <th class="whitespace-nowrap px-5 py-4 font-medium">时间</th>
+                  <th class="whitespace-nowrap px-5 py-4 font-medium">分类</th>
+                  <th class="whitespace-nowrap px-5 py-4 font-medium">原因</th>
+                  <th class="whitespace-nowrap px-5 py-4 font-medium">来源</th>
+                  <th class="whitespace-nowrap px-5 py-4 font-medium">目标</th>
+                  <th class="whitespace-nowrap px-5 py-4 text-right font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="event in eventsPayload.events"
+                  :key="event.id"
+                  class="border-t border-cyber-border/50 align-top text-sm text-stone-800 transition hover:bg-[#fff8ef]"
+                  :class="{ 'opacity-65': event.handled }"
+                >
+                  <td class="px-5 py-4">
+                    <div class="min-w-[154px]">
+                      <p class="font-mono text-[13px] leading-6 text-stone-900">{{ formatTimestamp(event.created_at) }}</p>
+                    </div>
+                  </td>
+                  <td class="px-5 py-4">
+                    <div class="flex min-w-[176px] flex-nowrap items-center gap-2 whitespace-nowrap">
+                      <StatusBadge :text="layerLabel(event.layer)" :type="event.layer === 'l7' ? 'info' : 'warning'" />
+                      <StatusBadge :text="actionLabel(event.action)" :type="event.action === 'block' ? 'error' : 'warning'" />
+                      <StatusBadge v-if="event.provider" :text="event.provider" type="muted" compact />
+                      <button
+                        v-if="event.provider_site_name || event.provider_site_domain"
+                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyber-border/60 bg-white/85 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                        :title="event.provider_site_name || event.provider_site_domain || '站点链接预览'"
+                        @click="openPreview('站点链接预览', event.provider_site_name || event.provider_site_domain)"
+                      >
+                        <Eye :size="13" />
+                      </button>
+                    </div>
+                  </td>
+                  <td class="px-5 py-4">
+                    <div class="w-[300px] min-w-[300px] max-w-[300px]">
+                      <p class="truncate font-medium leading-6 text-stone-900" :title="event.reason">{{ event.reason }}</p>
+                    </div>
+                  </td>
+                  <td class="px-5 py-4">
+                    <div class="w-[190px] min-w-[190px] max-w-[190px]">
+                      <p class="truncate font-mono text-[13px] whitespace-nowrap text-stone-900" :title="event.source_ip">{{ event.source_ip }}</p>
+                    </div>
+                  </td>
+                  <td class="px-5 py-4">
+                    <div class="w-[210px] min-w-[210px] max-w-[210px]">
+                      <p class="truncate font-mono text-[13px] whitespace-nowrap text-stone-900" :title="event.dest_ip">{{ event.dest_ip }}</p>
+                      <p class="mt-1 whitespace-nowrap text-xs text-cyber-muted">端口 {{ event.dest_port }}</p>
+                    </div>
+                  </td>
+                  <td class="px-5 py-4">
+                    <div class="flex min-w-[170px] flex-nowrap justify-end gap-2 whitespace-nowrap">
+                      <button
+                        class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-cyber-border px-3 py-2 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                        @click="copyToClipboard(`${event.source_ip}`)"
+                      >
+                        <Copy :size="12" />
+                        来源 IP
+                      </button>
+                      <button
+                        class="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-cyber-border px-3 py-2 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+                        @click="toggleEventHandled(event)"
+                      >
+                        <Check :size="12" />
+                        {{ event.handled ? '撤销' : '处理' }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="!eventsPayload.events.length">
+                  <td colspan="6" class="px-6 py-10 text-center text-sm text-cyber-muted">
+                    当前没有可显示的安全事件。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="previewContent" class="fixed inset-0 z-[100] flex items-center justify-center px-4 py-8">
+      <div class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm" @click="closePreview"></div>
+      <div class="relative w-full max-w-3xl rounded-[30px] border border-white/85 bg-[linear-gradient(160deg,rgba(255,250,244,0.98),rgba(244,239,231,0.98))] p-6 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:p-8">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">链接预览</p>
+            <h3 class="mt-2 text-2xl font-semibold text-stone-900">{{ previewTitle }}</h3>
+          </div>
+          <button
+            @click="closePreview"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-cyber-border bg-white/75 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+          >
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div class="mt-6 rounded-[24px] border border-cyber-border/60 bg-white/80 p-5">
+          <p class="text-xs tracking-[0.16em] text-cyber-muted">完整内容</p>
+          <p class="mt-3 break-all font-mono text-sm leading-7 text-stone-800">
+            {{ previewContent }}
+          </p>
+        </div>
+
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button
+            class="inline-flex items-center gap-2 rounded-full border border-cyber-border/60 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+            @click="copyToClipboard(previewContent)"
+          >
+            <Copy :size="14" />
+            复制内容
+          </button>
+          <button
+            class="inline-flex items-center gap-2 rounded-full border border-cyber-border/60 bg-white/70 px-4 py-2 text-sm text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
+            @click="closePreview"
+          >
+            关闭
+          </button>
+        </div>
       </div>
     </div>
   </AppLayout>

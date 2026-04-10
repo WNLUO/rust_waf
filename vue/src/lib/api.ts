@@ -263,8 +263,23 @@ export function pullSafeLineSites() {
   });
 }
 
+export function pullSafeLineSite(remoteSiteId: string) {
+  return apiRequest<WriteStatusResponse>(
+    `/integrations/safeline/pull/sites/${encodeURIComponent(remoteSiteId)}`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export function pushSafeLineSites() {
   return apiRequest<SafeLineSitesPushResponse>("/integrations/safeline/push/sites", {
+    method: "POST",
+  });
+}
+
+export function pushSafeLineSite(localSiteId: number) {
+  return apiRequest<WriteStatusResponse>(`/integrations/safeline/push/sites/${localSiteId}`, {
     method: "POST",
   });
 }

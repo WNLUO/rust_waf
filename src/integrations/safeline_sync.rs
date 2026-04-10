@@ -32,6 +32,26 @@ pub struct SafeLineSitesPushResult {
     pub failed_sites: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingleSiteSyncAction {
+    Created,
+    Updated,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeLineSingleSitePullResult {
+    pub action: SingleSiteSyncAction,
+    pub local_site_id: i64,
+    pub remote_site_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeLineSingleSitePushResult {
+    pub action: SingleSiteSyncAction,
+    pub local_site_id: i64,
+    pub remote_site_id: String,
+}
+
 pub async fn sync_events(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -348,6 +368,275 @@ pub async fn push_sites(
     Ok(result)
 }
 
+pub async fn pull_site(
+    store: &SqliteStore,
+    config: &SafeLineConfig,
+    remote_site_id: &str,
+) -> Result<SafeLineSingleSitePullResult> {
+    ensure_enabled(config)?;
+
+    let remote_site_id = remote_site_id.trim();
+    if remote_site_id.is_empty() {
+        bail!("remote_site_id 不能为空");
+    }
+
+    let now = unix_timestamp();
+    let remote_sites = crate::integrations::safeline::list_sites(config).await?;
+    let remote_site = remote_sites
+        .into_iter()
+        .find(|item| item.id == remote_site_id)
+        .ok_or_else(|| anyhow!("雷池站点 '{}' 不存在或当前账号不可见", remote_site_id))?;
+
+    let existing_links = store.list_site_sync_links().await?;
+    let existing_link = existing_links
+        .iter()
+        .find(|item| item.provider == "safeline" && item.remote_site_id == remote_site.id)
+        .cloned();
+    let sync_mode = existing_link
+        .as_ref()
+        .map(|item| item.sync_mode.as_str())
+        .unwrap_or("remote_to_local");
+
+    if !allows_pull(sync_mode) {
+        bail!("站点 '{}' 当前链路配置不允许从雷池回流", remote_site.id);
+    }
+
+    let mut local_certificates = store.list_local_certificates().await?;
+    let mut local_sites = store.list_local_sites().await?;
+    let linked_local_id = existing_link.as_ref().map(|item| item.local_site_id);
+
+    if let Some(conflict) = find_matching_local_site(&remote_site, &local_sites, linked_local_id) {
+        bail!(
+            "发现疑似重复的本地站点 #{}（{}），为避免覆盖现有配置，请先确认链路后再同步。",
+            conflict.id,
+            conflict.primary_hostname
+        );
+    }
+
+    let local_certificate_id = if let Some(cert_id) = remote_site.cert_id {
+        let cert_id_text = cert_id.to_string();
+        let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
+        if let Some(certificate) = remote_certificates.iter().find(|item| item.id == cert_id_text) {
+            let detail = crate::integrations::safeline::load_certificate(config, &certificate.id)
+                .await
+                .ok();
+            sync_remote_certificate(store, &mut local_certificates, certificate, detail, now)
+                .await?;
+
+            local_certificates
+                .iter()
+                .find(|item| item.provider_remote_id.as_deref() == Some(cert_id_text.as_str()))
+                .map(|item| item.id)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let site_upsert = local_site_upsert_from_remote(&remote_site, local_certificate_id, sync_mode, now);
+    let existing_local_site = existing_link.as_ref().and_then(|link| {
+        local_sites
+            .iter()
+            .find(|item| item.id == link.local_site_id)
+            .cloned()
+    });
+
+    let (local_site_id, action) = if let Some(existing_site) = existing_local_site {
+        store
+            .update_local_site(existing_site.id, &site_upsert)
+            .await?;
+        replace_local_site(&mut local_sites, existing_site.id, &site_upsert, now);
+        (existing_site.id, SingleSiteSyncAction::Updated)
+    } else {
+        let local_site_id = store.insert_local_site(&site_upsert).await?;
+        local_sites.push(LocalSiteEntry {
+            id: local_site_id,
+            name: site_upsert.name.clone(),
+            primary_hostname: site_upsert.primary_hostname.clone(),
+            hostnames_json: serde_json::to_string(&site_upsert.hostnames)?,
+            listen_ports_json: serde_json::to_string(&site_upsert.listen_ports)?,
+            upstreams_json: serde_json::to_string(&site_upsert.upstreams)?,
+            enabled: site_upsert.enabled,
+            tls_enabled: site_upsert.tls_enabled,
+            local_certificate_id: site_upsert.local_certificate_id,
+            source: site_upsert.source.clone(),
+            sync_mode: site_upsert.sync_mode.clone(),
+            notes: site_upsert.notes.clone(),
+            last_synced_at: site_upsert.last_synced_at,
+            created_at: now,
+            updated_at: now,
+        });
+        (local_site_id, SingleSiteSyncAction::Created)
+    };
+
+    store
+        .upsert_site_sync_link(&SiteSyncLinkUpsert {
+            local_site_id,
+            provider: "safeline".to_string(),
+            remote_site_id: remote_site.id.clone(),
+            remote_site_name: remote_site.name.clone(),
+            remote_cert_id: remote_site.cert_id.map(|id| id.to_string()),
+            sync_mode: sync_mode.to_string(),
+            last_local_hash: Some(hash_local_site_upsert(
+                &site_upsert,
+                remote_site.cert_id.map(|id| id.to_string()).as_deref(),
+            )),
+            last_remote_hash: Some(hash_remote_site(&remote_site)),
+            last_error: None,
+            last_synced_at: Some(now),
+        })
+        .await?;
+
+    store
+        .upsert_safeline_sync_state("sites_pull", Some(now), 1, 0)
+        .await?;
+
+    Ok(SafeLineSingleSitePullResult {
+        action,
+        local_site_id,
+        remote_site_id: remote_site.id,
+    })
+}
+
+pub async fn push_site(
+    store: &SqliteStore,
+    config: &SafeLineConfig,
+    local_site_id: i64,
+) -> Result<SafeLineSingleSitePushResult> {
+    ensure_enabled(config)?;
+
+    if local_site_id <= 0 {
+        bail!("local_site_id 必须大于 0");
+    }
+
+    let now = unix_timestamp();
+    let local_sites = store.list_local_sites().await?;
+    let local_site = local_sites
+        .iter()
+        .find(|item| item.id == local_site_id)
+        .cloned()
+        .ok_or_else(|| anyhow!("本地站点 '{}' 不存在", local_site_id))?;
+    let local_certificates = store.list_local_certificates().await?;
+    let existing_links = store.list_site_sync_links().await?;
+    let remote_sites = crate::integrations::safeline::list_sites(config).await?;
+    let existing_link = existing_links
+        .iter()
+        .find(|item| item.provider == "safeline" && item.local_site_id == local_site.id)
+        .cloned();
+    let sync_mode = existing_link
+        .as_ref()
+        .map(|item| item.sync_mode.as_str())
+        .unwrap_or(local_site.sync_mode.as_str());
+
+    if !allows_push(sync_mode) {
+        bail!("本地站点 #{} 当前链路配置不允许推送到雷池", local_site.id);
+    }
+
+    let linked_remote_site = existing_link.as_ref().and_then(|link| {
+        remote_sites
+            .iter()
+            .find(|item| item.id == link.remote_site_id)
+            .cloned()
+    });
+
+    if existing_link.is_none() {
+        if let Some(conflict) = find_matching_remote_site(&local_site, &remote_sites, None) {
+            bail!(
+                "发现疑似重复的雷池站点 '{}'（{}），为避免覆盖现有配置，请先建立明确链路后再推送。",
+                conflict.id,
+                conflict.domain
+            );
+        }
+    } else if linked_remote_site.is_none() {
+        if let Some(conflict) = find_matching_remote_site(&local_site, &remote_sites, None) {
+            bail!(
+                "原有链路指向的雷池站点已不存在，但检测到相似站点 '{}'（{}），为避免误覆盖请先核对后再处理。",
+                conflict.id,
+                conflict.domain
+            );
+        }
+    }
+
+    let mut push_result = SafeLineSitesPushResult::default();
+    let remote_certificate_id = match resolve_remote_certificate_id(
+        store,
+        config,
+        &local_site,
+        &local_certificates,
+        &mut push_result,
+        now,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            if let Some(existing_link) = existing_link.as_ref() {
+                record_site_link_error(store, existing_link, err.to_string(), now).await?;
+            }
+            return Err(err);
+        }
+    };
+
+    let mut site_upsert = local_site_to_remote(&local_site, remote_certificate_id);
+    site_upsert.remote_id = linked_remote_site.as_ref().map(|item| item.id.clone());
+
+    let site_summary = crate::integrations::safeline::upsert_site(config, &site_upsert).await?;
+    if !site_summary.accepted {
+        if let Some(existing_link) = existing_link.as_ref() {
+            record_site_link_error(store, existing_link, site_summary.message.clone(), now).await?;
+        }
+        bail!("{}", site_summary.message);
+    }
+
+    let remote_site_id = site_summary
+        .remote_id
+        .clone()
+        .or_else(|| linked_remote_site.as_ref().map(|item| item.id.clone()))
+        .ok_or_else(|| anyhow!("雷池站点写入成功，但响应里未返回站点 ID"))?;
+    let remote_site_name = linked_remote_site
+        .as_ref()
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| local_site.name.clone());
+    let local_hash = hash_local_site_entry(
+        &local_site,
+        remote_certificate_id
+            .as_ref()
+            .map(|id| id.to_string())
+            .as_deref(),
+    )?;
+
+    store
+        .upsert_site_sync_link(&SiteSyncLinkUpsert {
+            local_site_id: local_site.id,
+            provider: "safeline".to_string(),
+            remote_site_id: remote_site_id.clone(),
+            remote_site_name,
+            remote_cert_id: remote_certificate_id.map(|id| id.to_string()),
+            sync_mode: sync_mode.to_string(),
+            last_local_hash: Some(local_hash.clone()),
+            last_remote_hash: Some(local_hash),
+            last_error: None,
+            last_synced_at: Some(now),
+        })
+        .await?;
+
+    update_local_site_sync_metadata(store, &local_site, now).await?;
+    store
+        .upsert_safeline_sync_state("sites_push", Some(now), 1, 0)
+        .await?;
+
+    Ok(SafeLineSingleSitePushResult {
+        action: if linked_remote_site.is_some() {
+            SingleSiteSyncAction::Updated
+        } else {
+            SingleSiteSyncAction::Created
+        },
+        local_site_id: local_site.id,
+        remote_site_id,
+    })
+}
+
 pub async fn push_blocked_ips(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -611,22 +900,86 @@ fn allows_push(sync_mode: &str) -> bool {
     !matches!(sync_mode.trim(), "remote_to_local" | "pull_only")
 }
 
+fn site_matches_remote(local_site: &LocalSiteEntry, remote_site: &SafeLineSiteSummary) -> bool {
+    let local_hosts = parse_json_vec(&local_site.hostnames_json)
+        .unwrap_or_else(|_| vec![local_site.primary_hostname.clone()]);
+    let mut remote_hosts = remote_site.server_names.clone();
+
+    if !remote_site.domain.trim().is_empty()
+        && !remote_hosts.iter().any(|item| item == &remote_site.domain)
+    {
+        remote_hosts.push(remote_site.domain.clone());
+    }
+
+    remote_hosts.iter().any(|remote_host| {
+        remote_host == &local_site.primary_hostname
+            || local_hosts.iter().any(|local_host| local_host == remote_host)
+    })
+}
+
 fn match_remote_site(
     local_site: &LocalSiteEntry,
     remote_sites: &[SafeLineSiteSummary],
 ) -> Option<SafeLineSiteSummary> {
-    let local_hosts = parse_json_vec(&local_site.hostnames_json).ok()?;
-
     remote_sites
         .iter()
-        .find(|remote| {
-            remote.domain == local_site.primary_hostname
-                || remote
-                    .server_names
-                    .iter()
-                    .any(|name| local_hosts.iter().any(|item| item == name))
+        .find(|remote| site_matches_remote(local_site, remote))
+        .cloned()
+}
+
+fn find_matching_local_site(
+    remote_site: &SafeLineSiteSummary,
+    local_sites: &[LocalSiteEntry],
+    exclude_local_id: Option<i64>,
+) -> Option<LocalSiteEntry> {
+    local_sites
+        .iter()
+        .find(|local_site| {
+            if Some(local_site.id) == exclude_local_id {
+                return false;
+            }
+            site_matches_remote(local_site, remote_site)
         })
         .cloned()
+}
+
+fn find_matching_remote_site(
+    local_site: &LocalSiteEntry,
+    remote_sites: &[SafeLineSiteSummary],
+    exclude_remote_id: Option<&str>,
+) -> Option<SafeLineSiteSummary> {
+    remote_sites
+        .iter()
+        .find(|remote_site| {
+            if Some(remote_site.id.as_str()) == exclude_remote_id {
+                return false;
+            }
+            site_matches_remote(local_site, remote_site)
+        })
+        .cloned()
+}
+
+async fn record_site_link_error(
+    store: &SqliteStore,
+    existing_link: &crate::storage::SiteSyncLinkEntry,
+    message: String,
+    now: i64,
+) -> Result<()> {
+    store
+        .upsert_site_sync_link(&SiteSyncLinkUpsert {
+            local_site_id: existing_link.local_site_id,
+            provider: existing_link.provider.clone(),
+            remote_site_id: existing_link.remote_site_id.clone(),
+            remote_site_name: existing_link.remote_site_name.clone(),
+            remote_cert_id: existing_link.remote_cert_id.clone(),
+            sync_mode: existing_link.sync_mode.clone(),
+            last_local_hash: existing_link.last_local_hash.clone(),
+            last_remote_hash: existing_link.last_remote_hash.clone(),
+            last_error: Some(message),
+            last_synced_at: Some(now),
+        })
+        .await?;
+    Ok(())
 }
 
 async fn resolve_remote_certificate_id(

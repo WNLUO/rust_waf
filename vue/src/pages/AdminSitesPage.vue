@@ -8,8 +8,8 @@ import {
   fetchSafeLineSites,
   fetchSiteSyncLinks,
   fetchSettings,
-  pullSafeLineSites,
-  pushSafeLineSites,
+  pullSafeLineSite,
+  pushSafeLineSite,
   testSafeLineConnection,
   updateSafeLineMappings,
 } from "../lib/api";
@@ -17,14 +17,12 @@ import type {
   LocalSiteItem,
   SafeLineMappingItem,
   SafeLineSiteItem,
-  SiteSyncLinkItem,
   SafeLineTestResponse,
   SettingsPayload,
+  SiteSyncLinkItem,
 } from "../lib/types";
 import { useFormatters } from "../composables/useFormatters";
 import {
-  AppWindow,
-  Link2,
   PlugZap,
   RefreshCw,
   Save,
@@ -34,33 +32,46 @@ import {
   ShieldCheck,
 } from "lucide-vue-next";
 
-interface SiteMappingDraft {
+type ScopeFilter = "all" | "mapped" | "unmapped" | "orphaned" | "local_only";
+type StateFilter = "all" | "enabled" | "disabled" | "primary";
+type RowKind =
+  | "linked"
+  | "remote_only"
+  | "local_only"
+  | "missing_remote"
+  | "orphaned_mapping";
+
+interface SiteRowDraft {
+  row_key: string;
+  row_kind: RowKind;
+  link_id: number | null;
+  remote_present: boolean;
+  local_present: boolean;
   safeline_site_id: string;
   safeline_site_name: string;
   safeline_site_domain: string;
   remote_enabled: boolean | null;
+  status: string;
   server_names: string[];
-  ports: string[];
-  ssl_ports: string[];
-  upstreams: string[];
-  ssl_enabled: boolean;
-  cert_id: number | null;
-  cert_type: number | null;
-  cert_filename: string | null;
-  key_filename: string | null;
-  health_check: boolean | null;
+  local_site_id: number | null;
+  local_site_name: string;
+  local_primary_hostname: string;
+  local_hostnames: string[];
+  local_listen_ports: string[];
+  local_upstreams: string[];
+  local_enabled: boolean;
+  local_notes: string;
+  local_updated_at: number | null;
+  local_sync_mode: string;
   local_alias: string;
   enabled: boolean;
   is_primary: boolean;
   notes: string;
-  updated_at: number | null;
-  orphaned: boolean;
   saved: boolean;
-  status: string;
+  orphaned: boolean;
+  link_last_error: string | null;
+  link_last_synced_at: number | null;
 }
-
-type ScopeFilter = "all" | "mapped" | "unmapped" | "orphaned";
-type StateFilter = "all" | "enabled" | "disabled" | "primary";
 
 const { formatNumber, formatTimestamp } = useFormatters();
 
@@ -73,17 +84,17 @@ const sites = ref<SafeLineSiteItem[]>([]);
 const localSites = ref<LocalSiteItem[]>([]);
 const siteLinks = ref<SiteSyncLinkItem[]>([]);
 const testResult = ref<SafeLineTestResponse | null>(null);
-const mappingDrafts = ref<SiteMappingDraft[]>([]);
+const siteRows = ref<SiteRowDraft[]>([]);
 const sitesLoadedAt = ref<number | null>(null);
 
 const actions = reactive({
   refreshing: false,
   testing: false,
   loadingSites: false,
-  pullingSites: false,
-  pushingSites: false,
   savingMappings: false,
 });
+
+const rowActions = reactive<Record<string, "pull" | "push" | undefined>>({});
 
 const filters = reactive({
   keyword: "",
@@ -133,93 +144,158 @@ function remoteStatusType(status: string) {
 }
 
 function remoteStatusText(status: string) {
-  if (!status.trim()) return "状态未知";
+  if (!status.trim()) return "未读取远端状态";
   if (isSiteOnline(status)) return `远端在线 · ${status}`;
   if (isSiteOffline(status)) return `远端停用 · ${status}`;
   return `远端状态 · ${status}`;
 }
 
-function mergeMappingDrafts(
-  siteList: SafeLineSiteItem[],
-  mappingList: SafeLineMappingItem[],
-) {
-  const nextDrafts: SiteMappingDraft[] = siteList.map((site) => {
-    const existing = mappingList.find(
-      (item) => item.safeline_site_id === site.id,
-    );
+function createSiteRow({
+  site,
+  mapping,
+  local,
+  link,
+}: {
+  site?: SafeLineSiteItem | null;
+  mapping?: SafeLineMappingItem | null;
+  local?: LocalSiteItem | null;
+  link?: SiteSyncLinkItem | null;
+}): SiteRowDraft {
+  const remote = site ?? null;
+  const savedMapping = mapping ?? null;
+  const localSite = local ?? null;
+  const siteLink = link ?? null;
 
-    return {
-      safeline_site_id: site.id,
-      safeline_site_name: site.name,
-      safeline_site_domain: site.domain,
-      remote_enabled: site.enabled,
-      server_names: site.server_names,
-      ports: site.ports,
-      ssl_ports: site.ssl_ports,
-      upstreams: site.upstreams,
-      ssl_enabled: site.ssl_enabled,
-      cert_id: site.cert_id,
-      cert_type: site.cert_type,
-      cert_filename: site.cert_filename,
-      key_filename: site.key_filename,
-      health_check: site.health_check,
-      local_alias: existing?.local_alias ?? site.name ?? site.domain ?? "",
-      enabled: existing?.enabled ?? true,
-      is_primary: existing?.is_primary ?? false,
-      notes: existing?.notes ?? "",
-      updated_at: existing?.updated_at ?? null,
-      orphaned: false,
-      saved: Boolean(existing),
-      status: site.status,
-    };
-  });
-
-  const existingIds = new Set(nextDrafts.map((item) => item.safeline_site_id));
-  for (const item of mappingList) {
-    if (existingIds.has(item.safeline_site_id)) continue;
-    nextDrafts.push({
-      safeline_site_id: item.safeline_site_id,
-      safeline_site_name: item.safeline_site_name,
-      safeline_site_domain: item.safeline_site_domain,
-      remote_enabled: null,
-      server_names: [],
-      ports: [],
-      ssl_ports: [],
-      upstreams: [],
-      ssl_enabled: false,
-      cert_id: null,
-      cert_type: null,
-      cert_filename: null,
-      key_filename: null,
-      health_check: null,
-      local_alias: item.local_alias,
-      enabled: item.enabled,
-      is_primary: item.is_primary,
-      notes: item.notes,
-      updated_at: item.updated_at ?? null,
-      orphaned: true,
-      saved: true,
-      status: "",
-    });
+  let rowKind: RowKind = "orphaned_mapping";
+  if (remote && localSite) {
+    rowKind = "linked";
+  } else if (remote) {
+    rowKind = "remote_only";
+  } else if (localSite && siteLink) {
+    rowKind = "missing_remote";
+  } else if (localSite) {
+    rowKind = "local_only";
   }
 
-  mappingDrafts.value = nextDrafts;
+  return {
+    row_key: remote?.id
+      ? `remote:${remote.id}`
+      : localSite
+        ? `local:${localSite.id}`
+        : `mapping:${savedMapping?.safeline_site_id || savedMapping?.id || "unknown"}`,
+    row_kind: rowKind,
+    link_id: siteLink?.id ?? null,
+    remote_present: Boolean(remote),
+    local_present: Boolean(localSite),
+    safeline_site_id:
+      remote?.id ?? savedMapping?.safeline_site_id ?? siteLink?.remote_site_id ?? "",
+    safeline_site_name:
+      remote?.name ?? savedMapping?.safeline_site_name ?? siteLink?.remote_site_name ?? "",
+    safeline_site_domain: remote?.domain ?? savedMapping?.safeline_site_domain ?? "",
+    remote_enabled: remote?.enabled ?? null,
+    status: remote?.status ?? "",
+    server_names: remote?.server_names ?? [],
+    local_site_id: localSite?.id ?? null,
+    local_site_name: localSite?.name ?? "",
+    local_primary_hostname: localSite?.primary_hostname ?? "",
+    local_hostnames: localSite?.hostnames ?? [],
+    local_listen_ports: localSite?.listen_ports ?? [],
+    local_upstreams: localSite?.upstreams ?? [],
+    local_enabled: localSite?.enabled ?? false,
+    local_notes: localSite?.notes ?? "",
+    local_updated_at: localSite?.updated_at ?? null,
+    local_sync_mode: siteLink?.sync_mode ?? localSite?.sync_mode ?? "manual",
+    local_alias: savedMapping?.local_alias ?? remote?.name ?? remote?.domain ?? localSite?.name ?? "",
+    enabled: savedMapping?.enabled ?? (remote ? true : localSite?.enabled ?? true),
+    is_primary: savedMapping?.is_primary ?? false,
+    notes: savedMapping?.notes ?? (remote ? "" : localSite?.notes ?? ""),
+    saved: Boolean(savedMapping),
+    orphaned: Boolean(savedMapping && !remote),
+    link_last_error: siteLink?.last_error ?? null,
+    link_last_synced_at: siteLink?.last_synced_at ?? localSite?.last_synced_at ?? null,
+  };
 }
 
-function mappingStateText(item: SiteMappingDraft) {
-  if (item.orphaned) return "孤儿映射";
-  if (item.saved) return "已映射";
-  return "待纳管";
+function mergeSiteRows(
+  siteList: SafeLineSiteItem[],
+  mappingList: SafeLineMappingItem[],
+  localSiteList: LocalSiteItem[],
+  linkList: SiteSyncLinkItem[],
+) {
+  const rows: SiteRowDraft[] = [];
+  const localById = new Map(localSiteList.map((item) => [item.id, item]));
+  const safeLineLinks = linkList.filter((item) => item.provider === "safeline");
+  const linkByRemoteId = new Map(safeLineLinks.map((item) => [item.remote_site_id, item]));
+  const linkByLocalId = new Map(safeLineLinks.map((item) => [item.local_site_id, item]));
+  const mappingByRemoteId = new Map(mappingList.map((item) => [item.safeline_site_id, item]));
+  const usedLocalIds = new Set<number>();
+  const usedMappingIds = new Set<string>();
+
+  for (const site of siteList) {
+    const mapping = mappingByRemoteId.get(site.id) ?? null;
+    const link = linkByRemoteId.get(site.id) ?? null;
+    const local = link ? localById.get(link.local_site_id) ?? null : null;
+    rows.push(createSiteRow({ site, mapping, local, link }));
+    if (mapping) usedMappingIds.add(mapping.safeline_site_id);
+    if (local) usedLocalIds.add(local.id);
+  }
+
+  for (const mapping of mappingList) {
+    if (usedMappingIds.has(mapping.safeline_site_id)) continue;
+    const link = linkByRemoteId.get(mapping.safeline_site_id) ?? null;
+    const local = link ? localById.get(link.local_site_id) ?? null : null;
+    rows.push(createSiteRow({ mapping, local, link }));
+    usedMappingIds.add(mapping.safeline_site_id);
+    if (local) usedLocalIds.add(local.id);
+  }
+
+  for (const local of localSiteList) {
+    if (usedLocalIds.has(local.id)) continue;
+    const link = linkByLocalId.get(local.id) ?? null;
+    const site = link ? siteList.find((item) => item.id === link.remote_site_id) ?? null : null;
+    const mapping = link ? mappingByRemoteId.get(link.remote_site_id) ?? null : null;
+    rows.push(createSiteRow({ site, mapping, local, link }));
+  }
+
+  siteRows.value = rows;
 }
 
-function mappingStateType(item: SiteMappingDraft) {
-  if (item.orphaned) return "warning";
-  if (item.saved) return "success";
-  return "muted";
+function rebuildRows() {
+  mergeSiteRows(sites.value, mappings.value, localSites.value, siteLinks.value);
+}
+
+function mappingStateText(item: SiteRowDraft) {
+  switch (item.row_kind) {
+    case "linked":
+      return item.saved ? "已映射" : "已建链";
+    case "remote_only":
+      return item.saved ? "仅映射" : "仅雷池";
+    case "local_only":
+      return "仅本地";
+    case "missing_remote":
+      return "远端缺失";
+    case "orphaned_mapping":
+      return "孤儿映射";
+  }
+}
+
+function mappingStateType(item: SiteRowDraft) {
+  switch (item.row_kind) {
+    case "linked":
+      return item.saved ? "success" : "info";
+    case "remote_only":
+      return item.saved ? "warning" : "muted";
+    case "local_only":
+      return "info";
+    case "missing_remote":
+    case "orphaned_mapping":
+      return "warning";
+  }
 }
 
 function selectPrimary(siteId: string) {
-  for (const item of mappingDrafts.value) {
+  for (const item of siteRows.value) {
+    if (!item.safeline_site_id) continue;
     item.is_primary = item.safeline_site_id === siteId;
     if (item.is_primary) {
       item.enabled = true;
@@ -228,12 +304,12 @@ function selectPrimary(siteId: string) {
 }
 
 function clearPrimary() {
-  for (const item of mappingDrafts.value) {
+  for (const item of siteRows.value) {
     item.is_primary = false;
   }
 }
 
-function normalizeDraft(item: SiteMappingDraft) {
+function normalizeDraft(item: SiteRowDraft) {
   return {
     safeline_site_id: item.safeline_site_id.trim(),
     safeline_site_name: item.safeline_site_name.trim(),
@@ -249,32 +325,22 @@ const hasSavedConfig = computed(() =>
   Boolean(settings.value?.safeline.base_url.trim()),
 );
 
-const authMode = computed(() => {
-  if (settings.value?.safeline.api_token.trim()) return "API Token";
-  if (
-    settings.value?.safeline.username.trim() &&
-    settings.value?.safeline.password.trim()
-  ) {
-    return "账号密码";
-  }
-  return "未配置鉴权";
-});
-
 const hasPrimary = computed(() =>
-  mappingDrafts.value.some((item) => item.is_primary),
+  siteRows.value.some((item) => item.safeline_site_id && item.is_primary),
 );
 
-const totalMapped = computed(
-  () => mappingDrafts.value.filter((item) => item.saved).length,
-);
+const totalMapped = computed(() => siteRows.value.filter((item) => item.saved).length);
 
 const totalUnmapped = computed(
-  () =>
-    mappingDrafts.value.filter((item) => !item.saved && !item.orphaned).length,
+  () => siteRows.value.filter((item) => item.remote_present && !item.saved).length,
 );
 
 const totalOrphaned = computed(
-  () => mappingDrafts.value.filter((item) => item.orphaned).length,
+  () => siteRows.value.filter((item) => item.orphaned).length,
+);
+
+const totalLocalOnly = computed(
+  () => siteRows.value.filter((item) => item.row_kind === "local_only").length,
 );
 
 const totalLocalSites = computed(() => localSites.value.length);
@@ -287,20 +353,12 @@ const totalSyncErrors = computed(
   () => siteLinks.value.filter((item) => Boolean(item.last_error)).length,
 );
 
-const totalEnabled = computed(
-  () => mappingDrafts.value.filter((item) => item.enabled).length,
-);
-
-const totalSslSites = computed(
-  () => mappingDrafts.value.filter((item) => item.ssl_enabled).length,
-);
-
 const primaryDraft = computed(
-  () => mappingDrafts.value.find((item) => item.is_primary) ?? null,
+  () => siteRows.value.find((item) => item.safeline_site_id && item.is_primary) ?? null,
 );
 
 const draftPayload = computed(() =>
-  mappingDrafts.value
+  siteRows.value
     .map(normalizeDraft)
     .filter((item) => item.safeline_site_id.length > 0),
 );
@@ -377,19 +435,17 @@ const canSave = computed(
     hasDraftChanges.value,
 );
 
-const filteredDrafts = computed(() => {
+const filteredRows = computed(() => {
   const keyword = filters.keyword.trim().toLowerCase();
 
-  return [...mappingDrafts.value]
+  return [...siteRows.value]
     .filter((item) => {
       if (filters.scope === "mapped" && !item.saved) return false;
-      if (
-        filters.scope === "unmapped" &&
-        (item.saved || item.orphaned)
-      ) {
+      if (filters.scope === "unmapped" && (!item.remote_present || item.saved)) {
         return false;
       }
       if (filters.scope === "orphaned" && !item.orphaned) return false;
+      if (filters.scope === "local_only" && item.row_kind !== "local_only") return false;
 
       if (filters.state === "enabled" && !item.enabled) return false;
       if (filters.state === "disabled" && item.enabled) return false;
@@ -399,15 +455,17 @@ const filteredDrafts = computed(() => {
 
       return [
         item.local_alias,
+        item.local_site_name,
+        item.local_primary_hostname,
         item.safeline_site_name,
         item.safeline_site_domain,
         item.safeline_site_id,
-        item.ports.join(" "),
+        item.local_listen_ports.join(" "),
+        item.local_upstreams.join(" "),
         item.server_names.join(" "),
-        item.upstreams.join(" "),
-        item.cert_filename ?? "",
-        item.key_filename ?? "",
         item.notes,
+        item.local_notes,
+        item.link_last_error ?? "",
       ]
         .join(" ")
         .toLowerCase()
@@ -416,29 +474,44 @@ const filteredDrafts = computed(() => {
     .sort((left, right) => {
       if (left.is_primary !== right.is_primary) return left.is_primary ? -1 : 1;
       if (left.saved !== right.saved) return left.saved ? -1 : 1;
-      if (left.enabled !== right.enabled) return left.enabled ? -1 : 1;
-      if (left.orphaned !== right.orphaned) return left.orphaned ? 1 : -1;
-      return left.local_alias.localeCompare(right.local_alias, "zh-CN");
+      if (left.remote_present !== right.remote_present) return left.remote_present ? -1 : 1;
+      return (left.local_alias || left.local_site_name || left.safeline_site_name).localeCompare(
+        right.local_alias || right.local_site_name || right.safeline_site_name,
+        "zh-CN",
+      );
     });
 });
+
+async function refreshCollections(includeRemote: boolean) {
+  const [mappingsResponse, localSitesResponse, siteLinksResponse, remoteSitesResponse] =
+    await Promise.all([
+      fetchSafeLineMappings(),
+      fetchLocalSites(),
+      fetchSiteSyncLinks(),
+      includeRemote && settings.value && hasSavedConfig.value
+        ? fetchSafeLineSites(settings.value.safeline)
+        : Promise.resolve(null),
+    ]);
+
+  mappings.value = mappingsResponse.mappings;
+  localSites.value = localSitesResponse.sites;
+  siteLinks.value = siteLinksResponse.links;
+
+  if (remoteSitesResponse) {
+    sites.value = remoteSitesResponse.sites;
+    sitesLoadedAt.value = Math.floor(Date.now() / 1000);
+  }
+
+  rebuildRows();
+}
 
 async function loadPageData() {
   loading.value = true;
   clearFeedback();
 
   try {
-    const [settingsResponse, mappingsResponse, localSitesResponse, siteLinksResponse] = await Promise.all([
-      fetchSettings(),
-      fetchSafeLineMappings(),
-      fetchLocalSites(),
-      fetchSiteSyncLinks(),
-    ]);
-
-    settings.value = settingsResponse;
-    mappings.value = mappingsResponse.mappings;
-    localSites.value = localSitesResponse.sites;
-    siteLinks.value = siteLinksResponse.links;
-    mergeMappingDrafts(sites.value, mappings.value);
+    settings.value = await fetchSettings();
+    await refreshCollections(false);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "读取站点管理信息失败";
   } finally {
@@ -451,8 +524,10 @@ async function refreshPageData() {
   clearFeedback();
 
   try {
-    await loadPageData();
+    await refreshCollections(sitesLoadedAt.value !== null);
     successMessage.value = "页面数据已刷新。";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "刷新页面数据失败";
   } finally {
     actions.refreshing = false;
   }
@@ -485,7 +560,7 @@ async function loadRemoteSites() {
     const response = await fetchSafeLineSites(settings.value.safeline);
     sites.value = response.sites;
     sitesLoadedAt.value = Math.floor(Date.now() / 1000);
-    mergeMappingDrafts(sites.value, mappings.value);
+    rebuildRows();
     successMessage.value = `已读取 ${response.total} 个雷池站点。`;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "读取雷池站点失败";
@@ -494,47 +569,37 @@ async function loadRemoteSites() {
   }
 }
 
-async function pullRemoteSitesToLocal() {
-  actions.pullingSites = true;
+async function syncRemoteSite(row: SiteRowDraft) {
+  if (!row.safeline_site_id) return;
+
+  rowActions[row.row_key] = "pull";
   clearFeedback();
 
   try {
-    const response = await pullSafeLineSites();
-    const [localSitesResponse, siteLinksResponse, safeLineMappingsResponse] =
-      await Promise.all([
-        fetchLocalSites(),
-        fetchSiteSyncLinks(),
-        fetchSafeLineMappings(),
-      ]);
-    localSites.value = localSitesResponse.sites;
-    siteLinks.value = siteLinksResponse.links;
-    mappings.value = safeLineMappingsResponse.mappings;
-    mergeMappingDrafts(sites.value, mappings.value);
+    const response = await pullSafeLineSite(row.safeline_site_id);
+    await refreshCollections(true);
     successMessage.value = response.message;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "雷池站点回流失败";
+    error.value = e instanceof Error ? e.message : "单站点回流失败";
   } finally {
-    actions.pullingSites = false;
+    delete rowActions[row.row_key];
   }
 }
 
-async function pushLocalSitesToRemote() {
-  actions.pushingSites = true;
+async function syncLocalSite(row: SiteRowDraft) {
+  if (!row.local_site_id) return;
+
+  rowActions[row.row_key] = "push";
   clearFeedback();
 
   try {
-    const response = await pushSafeLineSites();
-    const [siteLinksResponse, localSitesResponse] = await Promise.all([
-      fetchSiteSyncLinks(),
-      fetchLocalSites(),
-    ]);
-    siteLinks.value = siteLinksResponse.links;
-    localSites.value = localSitesResponse.sites;
+    const response = await pushSafeLineSite(row.local_site_id);
+    await refreshCollections(true);
     successMessage.value = response.message;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "本地站点推送失败";
+    error.value = e instanceof Error ? e.message : "单站点推送失败";
   } finally {
-    actions.pushingSites = false;
+    delete rowActions[row.row_key];
   }
 }
 
@@ -554,7 +619,7 @@ async function saveMappings() {
 
     const mappingsResponse = await fetchSafeLineMappings();
     mappings.value = mappingsResponse.mappings;
-    mergeMappingDrafts(sites.value, mappings.value);
+    rebuildRows();
     successMessage.value = "站点映射已保存到后端数据库。";
   } catch (e) {
     error.value = e instanceof Error ? e.message : "保存站点映射失败";
@@ -563,30 +628,33 @@ async function saveMappings() {
   }
 }
 
-function listPreview(values: string[], fallback = "未配置") {
-  return values.length ? values.join(" / ") : fallback;
+function rowActionPending(row: SiteRowDraft, action: "pull" | "push") {
+  return rowActions[row.row_key] === action;
 }
 
-function sslStateText(site: SiteMappingDraft) {
-  if (!site.ssl_enabled) return "未绑定 HTTPS";
-  if (site.cert_id !== null) return `HTTPS 已启用 · 证书 #${site.cert_id}`;
-  if (site.cert_filename) return `HTTPS 已启用 · ${site.cert_filename}`;
-  return "HTTPS 已启用";
+function rowBusy(row: SiteRowDraft) {
+  return Boolean(rowActions[row.row_key]);
 }
 
-function sslStateType(site: SiteMappingDraft) {
-  return site.ssl_enabled ? "success" : "muted";
+function remoteActionLabel(row: SiteRowDraft) {
+  return row.local_present ? "从雷池更新" : "导入到本地";
 }
 
-function certBindingText(site: SiteMappingDraft) {
-  if (site.cert_id !== null) {
-    const type = site.cert_type !== null ? `类型 ${site.cert_type}` : "类型未知";
-    return `证书 #${site.cert_id} · ${type}`;
+function localActionLabel(row: SiteRowDraft) {
+  if (row.row_kind === "missing_remote") return "重新创建到雷池";
+  return row.remote_present && row.link_id ? "推送到雷池" : "创建到雷池";
+}
+
+function rowSyncText(row: SiteRowDraft) {
+  if (row.link_last_error) return row.link_last_error;
+  if (row.link_last_synced_at) return `最近同步：${formatTimestamp(row.link_last_synced_at)}`;
+  if (row.remote_present && sitesLoadedAt.value) {
+    return `远端读取：${formatTimestamp(sitesLoadedAt.value)}`;
   }
-  if (site.cert_filename || site.key_filename) {
-    return [site.cert_filename, site.key_filename].filter(Boolean).join(" / ");
+  if (row.local_updated_at) {
+    return `本地更新：${formatTimestamp(row.local_updated_at)}`;
   }
-  return "未返回证书绑定";
+  return "尚未执行单站点同步";
 }
 
 onMounted(loadPageData);
@@ -605,114 +673,191 @@ onMounted(loadPageData);
       </button>
     </template>
 
-    <div class="min-w-0 space-y-6">
-      <section
-        class="rounded-[28px] border border-white/80 bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(255,255,255,0.88))] p-5 shadow-[0_20px_45px_rgba(90,60,30,0.08)]"
-      >
-        <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div class="max-w-3xl">
-            <div class="flex items-center gap-3">
-              <div
-                class="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-700 shadow-sm"
-              >
-                <AppWindow :size="20" />
-              </div>
-              <div>
-                <p class="text-xs tracking-[0.24em] text-blue-700">
-                  SITE CONTROL
-                </p>
-                <h1 class="mt-1 text-2xl font-semibold tracking-tight text-stone-900">
-                  站点管理
-                </h1>
-              </div>
-            </div>
-
-            <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600">
-              这一页聚合了后端已保存的雷池接入配置、远端站点读取结果以及本地站点映射编辑。你可以在这里统一完成站点纳管、主站点选择和备注维护。
-            </p>
-
-            <div class="mt-4 flex flex-wrap gap-2.5">
-              <button
-                @click="refreshPageData"
-                :disabled="actions.refreshing"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw :size="14" :class="{ 'animate-spin': actions.refreshing }" />
-                {{ actions.refreshing ? "刷新中..." : "刷新页面数据" }}
-              </button>
-              <button
-                @click="runConnectionTest"
-                :disabled="actions.testing || !hasSavedConfig"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <PlugZap :size="14" :class="{ 'animate-pulse': actions.testing }" />
-                {{ actions.testing ? "测试中..." : "测试雷池连接" }}
-              </button>
-              <button
-                @click="loadRemoteSites"
-                :disabled="actions.loadingSites || !hasSavedConfig"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <ServerCog :size="14" :class="{ 'animate-spin': actions.loadingSites }" />
-                {{ actions.loadingSites ? "读取中..." : "读取远端站点" }}
-              </button>
-              <button
-                @click="pullRemoteSitesToLocal"
-                :disabled="actions.pullingSites || !hasSavedConfig"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-emerald-500/40 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pullingSites }" />
-                {{ actions.pullingSites ? "回流中..." : "雷池回流到本地" }}
-              </button>
-              <button
-                @click="pushLocalSitesToRemote"
-                :disabled="actions.pushingSites || !hasSavedConfig"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-amber-500/40 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pushingSites }" />
-                {{ actions.pushingSites ? "推送中..." : "本地推送到雷池" }}
-              </button>
-              <RouterLink
-                to="/admin/settings"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              >
-                <Settings2 :size="14" />
-                前往系统设置
-              </RouterLink>
-            </div>
+    <div class="min-w-0 space-y-4">
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <div class="flex flex-wrap gap-2">
+            <button
+              @click="refreshPageData"
+              :disabled="actions.refreshing"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw :size="14" :class="{ 'animate-spin': actions.refreshing }" />
+              {{ actions.refreshing ? "刷新中..." : "刷新" }}
+            </button>
+            <button
+              @click="runConnectionTest"
+              :disabled="actions.testing || !hasSavedConfig"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <PlugZap :size="14" :class="{ 'animate-pulse': actions.testing }" />
+              {{ actions.testing ? "测试中..." : "测试连接" }}
+            </button>
+            <button
+              @click="loadRemoteSites"
+              :disabled="actions.loadingSites || !hasSavedConfig"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <ServerCog :size="14" :class="{ 'animate-spin': actions.loadingSites }" />
+              {{ actions.loadingSites ? "读取中..." : "读取远端" }}
+            </button>
+            <button
+              v-if="hasPrimary"
+              @click="clearPrimary"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-amber-500/40 hover:text-amber-700"
+            >
+              清空主站点
+            </button>
+            <RouterLink
+              to="/admin/settings"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+            >
+              <Settings2 :size="14" />
+              系统设置
+            </RouterLink>
           </div>
 
-          <div
-            class="grid min-w-0 gap-3 sm:grid-cols-2 xl:w-[28rem]"
-          >
-            <div class="rounded-2xl border border-slate-200 bg-white/80 p-4">
-              <p class="text-xs text-slate-500">当前主站点</p>
-              <p class="mt-2 text-sm font-semibold text-stone-900">
-                {{ primaryDraft?.local_alias || "尚未设置" }}
-              </p>
-              <p class="mt-1 text-xs text-slate-500">
-                {{
-                  primaryDraft?.safeline_site_domain ||
-                  primaryDraft?.safeline_site_name ||
-                  "保存映射后将用于统一识别站点。"
-                }}
-              </p>
+          <div class="flex flex-wrap gap-2">
+            <StatusBadge
+              :text="hasDraftChanges ? '存在未保存改动' : '已与数据库同步'"
+              :type="hasDraftChanges ? 'warning' : 'success'"
+              compact
+            />
+            <StatusBadge
+              :text="validationError || '校验通过'"
+              :type="validationError ? 'error' : 'info'"
+              compact
+            />
+            <StatusBadge
+              :text="primaryDraft ? `主站点 ${primaryDraft.local_alias}` : '未设置主站点'"
+              :type="primaryDraft ? 'info' : 'muted'"
+              compact
+            />
+            <StatusBadge
+              :text="sitesLoadedAt ? `远端已读取 ${formatNumber(sites.length)} 条` : '远端站点未读取'"
+              :type="sitesLoadedAt ? 'success' : 'muted'"
+              compact
+            />
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-nowrap items-end gap-3 overflow-x-auto">
+          <label class="min-w-[18rem] flex-1 space-y-1.5">
+            <span class="text-xs text-slate-500">搜索</span>
+            <div class="relative">
+              <Search
+                class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                :size="14"
+              />
+              <input
+                v-model="filters.keyword"
+                type="text"
+                placeholder="别名 / 本地域名 / 雷池域名 / 站点 ID / 备注"
+                class="w-full rounded-lg border border-slate-200 bg-white px-9 py-2.5 text-sm outline-none transition focus:border-blue-500"
+              />
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white/80 p-4">
-              <p class="text-xs text-slate-500">页面状态</p>
-              <div class="mt-2 flex flex-wrap gap-2">
-                <StatusBadge
-                  :text="hasDraftChanges ? '存在未保存改动' : '与数据库一致'"
-                  :type="hasDraftChanges ? 'warning' : 'success'"
-                  compact
-                />
-                <StatusBadge
-                  :text="validationError || '校验通过'"
-                  :type="validationError ? 'error' : 'info'"
-                  compact
-                />
-              </div>
-            </div>
+          </label>
+
+          <label class="w-[11rem] shrink-0 space-y-1.5">
+            <span class="text-xs text-slate-500">纳管状态</span>
+            <select
+              v-model="filters.scope"
+              class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            >
+              <option value="all">全部站点</option>
+              <option value="mapped">只看已映射</option>
+              <option value="unmapped">只看待纳管</option>
+              <option value="orphaned">只看孤儿映射</option>
+              <option value="local_only">只看仅本地</option>
+            </select>
+          </label>
+
+          <label class="w-[11rem] shrink-0 space-y-1.5">
+            <span class="text-xs text-slate-500">运行状态</span>
+            <select
+              v-model="filters.state"
+              class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            >
+              <option value="all">全部状态</option>
+              <option value="enabled">只看启用映射</option>
+              <option value="disabled">只看停用映射</option>
+              <option value="primary">只看主站点</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="mt-3 flex flex-wrap gap-2">
+          <StatusBadge
+            :text="`当前列表 ${formatNumber(filteredRows.length)} 条`"
+            type="info"
+            compact
+          />
+          <StatusBadge
+            :text="`已映射 ${formatNumber(totalMapped)} 条`"
+            type="success"
+            compact
+          />
+          <StatusBadge
+            :text="`待纳管 ${formatNumber(totalUnmapped)} 条`"
+            type="muted"
+            compact
+          />
+          <StatusBadge
+            :text="`孤儿映射 ${formatNumber(totalOrphaned)} 条`"
+            type="warning"
+            compact
+          />
+          <StatusBadge
+            :text="`仅本地 ${formatNumber(totalLocalOnly)} 条`"
+            type="info"
+            compact
+          />
+          <StatusBadge
+            :text="`本地站点 ${formatNumber(totalLocalSites)} 条`"
+            type="muted"
+            compact
+          />
+          <StatusBadge
+            :text="
+              totalSyncErrors
+                ? `链路 ${formatNumber(totalLinkedSites)} 条，错误 ${formatNumber(totalSyncErrors)} 条`
+                : `链路 ${formatNumber(totalLinkedSites)} 条`
+            "
+            :type="totalSyncErrors ? 'warning' : 'muted'"
+            compact
+          />
+        </div>
+
+        <div
+          v-if="!hasSavedConfig"
+          class="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+        >
+          还没有保存雷池地址或鉴权参数，当前只能查看本地站点和本地映射。
+        </div>
+
+        <div
+          v-if="testResult"
+          class="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge
+              :text="
+                testResult.status === 'ok'
+                  ? '连接测试通过'
+                  : testResult.status === 'warning'
+                    ? '连接测试需确认'
+                    : '连接测试失败'
+              "
+              :type="
+                testResult.status === 'ok'
+                  ? 'success'
+                  : testResult.status === 'warning'
+                    ? 'warning'
+                    : 'error'
+              "
+              compact
+            />
+            <span>{{ testResult.message }}</span>
           </div>
         </div>
       </section>
@@ -739,633 +884,242 @@ onMounted(loadPageData);
       </div>
 
       <template v-else>
-        <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">远端站点</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ sites.length ? formatNumber(sites.length) : "未读取" }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              {{
-                sitesLoadedAt
-                  ? `最近读取：${formatTimestamp(sitesLoadedAt)}`
-                  : "使用“读取远端站点”从雷池加载最新站点。"
-              }}
-            </p>
-          </article>
-
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">已保存映射</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ formatNumber(totalMapped) }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              含 {{ formatNumber(totalEnabled) }} 个启用映射，{{ hasPrimary ? "已" : "未" }}设置主站点。
-            </p>
-          </article>
-
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">待纳管站点</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ formatNumber(totalUnmapped) }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              这些站点已从远端读取，但尚未保存到本地映射表。
-            </p>
-          </article>
-
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">HTTPS 站点</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ formatNumber(totalSslSites) }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              当前已读取站点中，已检测到 SSL 端口或证书绑定的站点数量。
-            </p>
-          </article>
-
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">孤儿映射</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ formatNumber(totalOrphaned) }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              数据库里还在，但本次远端列表未返回对应站点。
-            </p>
-          </article>
-
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">本地站点</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ formatNumber(totalLocalSites) }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              已落库的本系统站点实体数量，可作为双向同步的本地源。
-            </p>
-          </article>
-
-          <article
-            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <p class="text-xs text-slate-500">同步链路</p>
-            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
-              {{ formatNumber(totalLinkedSites) }}
-            </p>
-            <p class="mt-1 text-xs text-slate-500">
-              {{
-                totalSyncErrors
-                  ? `其中 ${formatNumber(totalSyncErrors)} 条存在最近一次同步错误。`
-                  : "当前没有记录到站点同步错误。"
-              }}
-            </p>
-          </article>
-        </section>
-
-        <section class="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-          <div
-            class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-stone-900">同步编排</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">
-                  现在支持两条显式路径：把雷池站点和证书回流到本地，或把本地站点推送到雷池。
-                </p>
-              </div>
-              <StatusBadge
-                :text="siteLinks.length ? '链路已建立' : '尚未建立链路'"
-                :type="siteLinks.length ? 'success' : 'muted'"
-                compact
-              />
-            </div>
-
-            <div class="mt-4 grid gap-3 md:grid-cols-2">
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">雷池回流到本地</p>
-                <p class="mt-2 text-sm leading-6 text-slate-600">
-                  拉取雷池站点、证书元数据和可读取的证书材料，写入本地站点、证书和同步链路。
-                </p>
-              </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">本地推送到雷池</p>
-                <p class="mt-2 text-sm leading-6 text-slate-600">
-                  按本地站点和证书定义创建或更新雷池站点；证书变更会采用新建证书后重绑站点的策略。
-                </p>
-              </div>
-            </div>
-
-            <div class="mt-4 flex flex-wrap gap-2.5">
-              <button
-                @click="pullRemoteSitesToLocal"
-                :disabled="actions.pullingSites || !hasSavedConfig"
-                class="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1.5 text-xs text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pullingSites }" />
-                {{ actions.pullingSites ? "正在回流..." : "执行回流" }}
-              </button>
-              <button
-                @click="pushLocalSitesToRemote"
-                :disabled="actions.pushingSites || !hasSavedConfig"
-                class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pushingSites }" />
-                {{ actions.pushingSites ? "正在推送..." : "执行推送" }}
-              </button>
-            </div>
-          </div>
-
-          <div
-            class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-stone-900">本地链路状态</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">
-                  这里展示数据库中已经建立的雷池站点同步链路和最近一次错误。
-                </p>
-              </div>
-              <StatusBadge
-                :text="`共 ${formatNumber(siteLinks.length)} 条`"
-                type="info"
-                compact
-              />
-            </div>
-
-            <div
-              v-if="siteLinks.length === 0"
-              class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"
-            >
-              还没有建立任何站点同步链路。先执行一次“雷池回流到本地”或保存本地链路配置。
-            </div>
-
-            <div v-else class="mt-4 grid gap-3">
-              <article
-                v-for="link in siteLinks.slice(0, 6)"
-                :key="link.id"
-                class="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-              >
-                <div class="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-medium text-stone-900">
-                      {{ link.remote_site_name || `Remote #${link.remote_site_id}` }}
-                    </p>
-                    <p class="mt-1 font-mono text-xs text-slate-500">
-                      remote={{ link.remote_site_id }} · local={{ link.local_site_id }}
-                    </p>
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <StatusBadge
-                      :text="link.sync_mode || 'manual'"
-                      type="info"
-                      compact
-                    />
-                    <StatusBadge
-                      :text="link.last_error ? '最近一次失败' : '最近一次成功'"
-                      :type="link.last_error ? 'warning' : 'success'"
-                      compact
-                    />
-                  </div>
-                </div>
-
-                <p class="mt-3 text-xs leading-5 text-slate-600">
-                  {{
-                    link.last_error ||
-                    `最近同步时间：${formatTimestamp(link.last_synced_at)}`
-                  }}
-                </p>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-          <div
-            class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-stone-900">接入配置概览</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">
-                  这里展示的是后端数据库当前保存的雷池接入参数。
-                </p>
-              </div>
-              <StatusBadge
-                :text="settings?.safeline.enabled ? '集成已启用' : '集成未启用'"
-                :type="settings?.safeline.enabled ? 'success' : 'warning'"
-                compact
-              />
-            </div>
-
-            <div class="mt-4 grid gap-3 md:grid-cols-2">
-              <div class="rounded-2xl bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">雷池地址</p>
-                <p class="mt-2 break-all text-sm font-medium text-stone-900">
-                  {{ settings?.safeline.base_url || "未配置" }}
-                </p>
-              </div>
-              <div class="rounded-2xl bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">鉴权方式</p>
-                <p class="mt-2 text-sm font-medium text-stone-900">
-                  {{ authMode }}
-                </p>
-              </div>
-              <div class="rounded-2xl bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">站点列表路径</p>
-                <p class="mt-2 break-all font-mono text-xs text-stone-900">
-                  {{ settings?.safeline.site_list_path || "未配置" }}
-                </p>
-              </div>
-              <div class="rounded-2xl bg-slate-50 p-4">
-                <p class="text-xs text-slate-500">自动同步周期</p>
-                <p class="mt-2 text-sm font-medium text-stone-900">
-                  {{
-                    settings?.safeline.auto_sync_interval_secs
-                      ? `${formatNumber(settings.safeline.auto_sync_interval_secs)} 秒`
-                      : "未配置"
-                  }}
-                </p>
-              </div>
-            </div>
-
-            <div
-              v-if="!hasSavedConfig"
-              class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 text-sm leading-6 text-slate-500"
-            >
-              还没有保存雷池地址或鉴权参数，当前只能查看已存在的本地映射。先去系统设置完成接入，再回来读取远端站点。
-            </div>
-          </div>
-
-          <div
-            class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-stone-900">连接自检</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">
-                  检查文档入口和鉴权探测是否能正常访问。
-                </p>
-              </div>
-              <ShieldCheck class="text-blue-700" :size="18" />
-            </div>
-
-            <div
-              v-if="testResult"
-              class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p class="text-sm font-medium text-stone-900">
-                    最近一次测试结果
-                  </p>
-                  <p class="mt-1 text-xs leading-5 text-slate-500">
-                    {{ testResult.message }}
-                  </p>
-                </div>
-                <StatusBadge
-                  :text="
-                    testResult.status === 'ok'
-                      ? '通过'
-                      : testResult.status === 'warning'
-                        ? '需确认'
-                        : '失败'
-                  "
-                  :type="
-                    testResult.status === 'ok'
-                      ? 'success'
-                      : testResult.status === 'warning'
-                        ? 'warning'
-                        : 'error'
-                  "
-                  compact
-                />
-              </div>
-
-              <div class="mt-4 grid gap-3 md:grid-cols-2">
-                <div class="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p class="text-xs text-slate-500">OpenAPI 文档</p>
-                  <p class="mt-1 text-sm font-medium text-stone-900">
-                    {{ testResult.openapi_doc_reachable ? "可访问" : "不可访问" }}
-                    <span
-                      v-if="testResult.openapi_doc_status !== null"
-                      class="text-slate-500"
-                    >
-                      （HTTP {{ testResult.openapi_doc_status }}）
-                    </span>
-                  </p>
-                </div>
-                <div class="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p class="text-xs text-slate-500">鉴权探测</p>
-                  <p class="mt-1 text-sm font-medium text-stone-900">
-                    {{ testResult.authenticated ? "已通过" : "未通过" }}
-                    <span
-                      v-if="testResult.auth_probe_status !== null"
-                      class="text-slate-500"
-                    >
-                      （HTTP {{ testResult.auth_probe_status }}）
-                    </span>
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div
-              v-else
-              class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500"
-            >
-              还没有执行连接测试。读取远端站点前，建议先跑一次自检。
-            </div>
-
-            <div class="mt-4 flex flex-wrap gap-2.5">
-              <RouterLink
-                to="/admin/safeline"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              >
-                <Link2 :size="14" />
-                打开雷池联动页
-              </RouterLink>
-              <button
-                v-if="hasPrimary"
-                @click="clearPrimary"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-xs text-stone-700 transition hover:border-amber-500/40 hover:text-amber-700"
-              >
-                清空主站点
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section
-          class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
-        >
-          <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div class="flex flex-col gap-4 border-b border-slate-200 px-4 py-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
-              <p class="text-sm font-semibold text-stone-900">站点清单</p>
+              <p class="text-sm font-semibold text-stone-900">站点列表</p>
               <p class="mt-1 text-xs leading-5 text-slate-500">
-                默认优先展示主站点、已保存映射和启用中的站点。直接编辑别名、启用状态和备注后保存即可写入后端。
+                一行代表一个站点视图。这里只做映射维护和单站点同步，不再提供批量回流或批量推送。
               </p>
             </div>
-
-            <div class="grid gap-3 md:grid-cols-3 xl:min-w-[42rem]">
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">搜索</span>
-                <div class="relative">
-                  <Search
-                    class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                    :size="14"
-                  />
-                  <input
-                    v-model="filters.keyword"
-                    type="text"
-                    placeholder="别名 / 域名 / 站点 ID / 备注"
-                    class="w-full rounded-[16px] border border-slate-200 bg-white px-9 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                  />
-                </div>
-              </label>
-
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">纳管状态</span>
-                <select
-                  v-model="filters.scope"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                >
-                  <option value="all">全部站点</option>
-                  <option value="mapped">只看已映射</option>
-                  <option value="unmapped">只看待纳管</option>
-                  <option value="orphaned">只看孤儿映射</option>
-                </select>
-              </label>
-
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">运行状态</span>
-                <select
-                  v-model="filters.state"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                >
-                  <option value="all">全部状态</option>
-                  <option value="enabled">只看启用映射</option>
-                  <option value="disabled">只看停用映射</option>
-                  <option value="primary">只看主站点</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div class="mt-4 flex flex-wrap gap-2">
-            <StatusBadge
-              :text="`当前列表 ${formatNumber(filteredDrafts.length)} 条`"
-              type="info"
-              compact
-            />
-            <StatusBadge
-              :text="`已映射 ${formatNumber(totalMapped)} 条`"
-              type="success"
-              compact
-            />
-            <StatusBadge
-              :text="`待纳管 ${formatNumber(totalUnmapped)} 条`"
-              type="muted"
-              compact
-            />
-            <StatusBadge
-              :text="`孤儿映射 ${formatNumber(totalOrphaned)} 条`"
-              type="warning"
-              compact
-            />
+            <p class="text-xs text-slate-500">
+              {{
+                sitesLoadedAt
+                  ? `最近一次远端读取：${formatTimestamp(sitesLoadedAt)}`
+                  : "还没有读取远端站点。"
+              }}
+            </p>
           </div>
 
           <div
-            v-if="filteredDrafts.length === 0"
-            class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"
+            v-if="filteredRows.length === 0"
+            class="px-4 py-8 text-center text-sm text-slate-500"
           >
             当前筛选条件下没有可展示的站点。可以先读取远端站点，或者调整搜索与筛选条件。
           </div>
 
-          <div v-else class="mt-4 grid gap-4">
-            <article
-              v-for="site in filteredDrafts"
-              :key="site.safeline_site_id"
-              class="rounded-[24px] border border-slate-200 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] p-4 shadow-[0_10px_28px_rgba(90,60,30,0.05)]"
-            >
-              <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div class="min-w-0 flex-1">
-                  <label class="block text-xs text-slate-500">本地别名</label>
-                  <input
-                    v-model="site.local_alias"
-                    type="text"
-                    class="mt-1.5 w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-medium text-stone-900 outline-none transition focus:border-blue-500"
-                    placeholder="给站点一个便于运营识别的名称"
-                  />
-
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <StatusBadge
-                      :text="mappingStateText(site)"
-                      :type="mappingStateType(site)"
-                      compact
-                    />
-                    <StatusBadge
-                      :text="remoteStatusText(site.status)"
-                      :type="remoteStatusType(site.status)"
-                      compact
-                    />
-                    <StatusBadge
-                      :text="sslStateText(site)"
-                      :type="sslStateType(site)"
-                      compact
-                    />
-                    <StatusBadge
-                      v-if="site.is_primary"
-                      text="主站点"
-                      type="info"
-                      compact
-                    />
-                    <StatusBadge
-                      v-if="!site.enabled"
-                      text="映射已停用"
-                      type="warning"
-                      compact
-                    />
-                  </div>
-                </div>
-
-                <div class="flex shrink-0 flex-wrap gap-2">
-                  <button
-                    @click="selectPrimary(site.safeline_site_id)"
-                    class="inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs font-medium transition"
-                    :class="
-                      site.is_primary
-                        ? 'border-blue-500/30 bg-blue-50 text-blue-700'
-                        : 'border-slate-200 bg-white text-stone-700 hover:border-blue-500/40 hover:text-blue-700'
-                    "
-                  >
-                    <ShieldCheck :size="14" />
-                    {{ site.is_primary ? "当前主站点" : "设为主站点" }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">雷池站点名</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ site.safeline_site_name || "未返回名称" }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">域名 / Host</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ site.safeline_site_domain || "未返回域名" }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">雷池站点 ID</p>
-                  <p class="mt-1 break-all font-mono text-sm text-stone-900">
-                    {{ site.safeline_site_id || "缺失" }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">最近入库时间</p>
-                  <p class="mt-1 text-sm text-stone-900">
-                    {{ formatTimestamp(site.updated_at) }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">监听端口</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ listPreview(site.ports) }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">SSL 端口</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ listPreview(site.ssl_ports, "无 SSL 端口") }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">证书绑定</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ certBindingText(site) }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">健康检查</p>
-                  <p class="mt-1 text-sm text-stone-900">
-                    {{
-                      site.health_check === null
-                        ? "未返回"
-                        : site.health_check
-                          ? "已启用"
-                          : "已关闭"
-                    }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="mt-3 grid gap-3 md:grid-cols-2">
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">Server Names</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ listPreview(site.server_names) }}
-                  </p>
-                </div>
-                <div class="rounded-2xl bg-slate-50 p-3.5">
-                  <p class="text-xs text-slate-500">上游地址</p>
-                  <p class="mt-1 break-all text-sm text-stone-900">
-                    {{ listPreview(site.upstreams, "静态站点或未配置上游") }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="mt-4 grid gap-3 xl:grid-cols-[220px_1fr]">
-                <label
-                  class="flex items-start gap-2.5 rounded-2xl border border-slate-200 bg-white px-3 py-3"
+          <div v-else class="overflow-x-auto">
+            <table class="w-full min-w-[1180px] text-left text-sm text-slate-700">
+              <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th class="px-4 py-3 font-medium">名称 / 别名</th>
+                  <th class="px-4 py-3 font-medium">本地站点</th>
+                  <th class="px-4 py-3 font-medium">雷池站点</th>
+                  <th class="px-4 py-3 font-medium">状态</th>
+                  <th class="px-4 py-3 font-medium">备注</th>
+                  <th class="px-4 py-3 font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200">
+                <tr
+                  v-for="row in filteredRows"
+                  :key="row.row_key"
+                  class="align-top"
                 >
-                  <input
-                    v-model="site.enabled"
-                    type="checkbox"
-                    class="mt-0.5 accent-blue-600"
-                  />
-                  <span>
-                    <span class="block text-sm font-medium text-stone-900">
-                      启用映射
-                    </span>
-                    <span class="mt-0.5 block text-xs leading-5 text-slate-500">
-                      关闭后保留记录，但事件识别和默认映射将不再使用它。
-                    </span>
-                  </span>
-                </label>
+                  <td class="px-4 py-4">
+                    <div v-if="row.safeline_site_id" class="space-y-2">
+                      <input
+                        v-model="row.local_alias"
+                        type="text"
+                        class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-stone-900 outline-none transition focus:border-blue-500"
+                        placeholder="输入本地别名"
+                      />
+                      <p class="text-xs text-slate-500">
+                        用于事件识别和主站点选择。
+                      </p>
+                    </div>
+                    <div v-else class="space-y-1">
+                      <p class="font-medium text-stone-900">
+                        {{ row.local_site_name || "未命名本地站点" }}
+                      </p>
+                      <p class="text-xs text-slate-500">
+                        仅本地站点，不能保存雷池映射。
+                      </p>
+                    </div>
+                  </td>
 
-                <label class="space-y-1.5">
-                  <span class="text-xs text-slate-500">备注</span>
-                  <textarea
-                    v-model="site.notes"
-                    rows="3"
-                    class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                    placeholder="例如：核心业务、灰度入口、海外站点等"
-                  />
-                </label>
-              </div>
+                  <td class="px-4 py-4">
+                    <div v-if="row.local_present" class="space-y-1.5">
+                      <p class="font-medium text-stone-900">
+                        {{ row.local_site_name }}
+                      </p>
+                      <p class="font-mono text-xs text-slate-500">
+                        local={{ row.local_site_id }}
+                      </p>
+                      <p class="break-all text-xs text-slate-500">
+                        {{ row.local_primary_hostname }}
+                      </p>
+                      <p
+                        v-if="row.local_listen_ports.length"
+                        class="text-xs text-slate-500"
+                      >
+                        端口：{{ row.local_listen_ports.join(" / ") }}
+                      </p>
+                    </div>
+                    <p v-else class="text-xs text-slate-500">未落库到本地</p>
+                  </td>
 
-              <div
-                v-if="site.orphaned"
-                class="mt-4 rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800"
-              >
-                这条映射目前只存在于本地数据库。说明远端接口本次没有返回对应站点，可能是站点已删除、接口路径不一致，或者当前账号无权限看到它。
-              </div>
-            </article>
+                  <td class="px-4 py-4">
+                    <div v-if="row.remote_present" class="space-y-1.5">
+                      <p class="font-medium text-stone-900">
+                        {{ row.safeline_site_name || "未返回名称" }}
+                      </p>
+                      <p class="font-mono text-xs text-slate-500">
+                        remote={{ row.safeline_site_id }}
+                      </p>
+                      <p class="break-all text-xs text-slate-500">
+                        {{ row.safeline_site_domain || "未返回域名" }}
+                      </p>
+                      <p
+                        v-if="row.server_names.length"
+                        class="break-all text-xs text-slate-500"
+                      >
+                        Server Names：{{ row.server_names.join(" / ") }}
+                      </p>
+                    </div>
+                    <div v-else class="space-y-1">
+                      <p class="text-xs text-slate-500">当前未出现在雷池列表</p>
+                      <p
+                        v-if="row.safeline_site_id"
+                        class="font-mono text-xs text-slate-500"
+                      >
+                        记录中的 remote={{ row.safeline_site_id }}
+                      </p>
+                    </div>
+                  </td>
+
+                  <td class="px-4 py-4">
+                    <div class="flex flex-wrap gap-2">
+                      <StatusBadge
+                        :text="mappingStateText(row)"
+                        :type="mappingStateType(row)"
+                        compact
+                      />
+                      <StatusBadge
+                        v-if="row.remote_present"
+                        :text="remoteStatusText(row.status)"
+                        :type="remoteStatusType(row.status)"
+                        compact
+                      />
+                      <StatusBadge
+                        v-else-if="row.local_present"
+                        :text="row.local_enabled ? '本地启用' : '本地停用'"
+                        :type="row.local_enabled ? 'success' : 'warning'"
+                        compact
+                      />
+                      <StatusBadge
+                        v-if="row.is_primary"
+                        text="主站点"
+                        type="info"
+                        compact
+                      />
+                      <StatusBadge
+                        v-if="row.safeline_site_id && !row.enabled"
+                        text="映射已停用"
+                        type="warning"
+                        compact
+                      />
+                    </div>
+                    <p
+                      class="mt-2 max-w-[24rem] text-xs leading-5"
+                      :class="row.link_last_error ? 'text-red-600' : 'text-slate-500'"
+                    >
+                      {{ rowSyncText(row) }}
+                    </p>
+                  </td>
+
+                  <td class="px-4 py-4">
+                    <textarea
+                      v-if="row.safeline_site_id"
+                      v-model="row.notes"
+                      rows="3"
+                      class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+                      placeholder="例如：核心业务、灰度入口、海外站点等"
+                    />
+                    <p
+                      v-else
+                      class="whitespace-pre-wrap text-sm leading-6 text-slate-600"
+                    >
+                      {{ row.local_notes || "无本地备注" }}
+                    </p>
+                  </td>
+
+                  <td class="px-4 py-4">
+                    <div class="flex min-w-[220px] flex-col gap-2">
+                      <button
+                        v-if="row.remote_present"
+                        @click="syncRemoteSite(row)"
+                        :disabled="rowBusy(row) || !hasSavedConfig"
+                        class="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RefreshCw
+                          :size="14"
+                          :class="{ 'animate-spin': rowActionPending(row, 'pull') }"
+                        />
+                        {{
+                          rowActionPending(row, "pull")
+                            ? "处理中..."
+                            : remoteActionLabel(row)
+                        }}
+                      </button>
+
+                      <button
+                        v-if="row.local_present"
+                        @click="syncLocalSite(row)"
+                        :disabled="rowBusy(row) || !hasSavedConfig"
+                        class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <RefreshCw
+                          :size="14"
+                          :class="{ 'animate-spin': rowActionPending(row, 'push') }"
+                        />
+                        {{
+                          rowActionPending(row, "push")
+                            ? "处理中..."
+                            : localActionLabel(row)
+                        }}
+                      </button>
+
+                      <button
+                        v-if="row.safeline_site_id"
+                        @click="selectPrimary(row.safeline_site_id)"
+                        class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition"
+                        :class="
+                          row.is_primary
+                            ? 'border-blue-500/30 bg-blue-50 text-blue-700'
+                            : 'border-slate-200 bg-white text-stone-700 hover:border-blue-500/40 hover:text-blue-700'
+                        "
+                      >
+                        <ShieldCheck :size="14" />
+                        {{ row.is_primary ? "当前主站点" : "设为主站点" }}
+                      </button>
+
+                      <label
+                        v-if="row.safeline_site_id"
+                        class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700"
+                      >
+                        <input
+                          v-model="row.enabled"
+                          type="checkbox"
+                          class="accent-blue-600"
+                        />
+                        启用映射
+                      </label>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </template>

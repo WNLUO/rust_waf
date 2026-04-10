@@ -750,8 +750,16 @@ impl ApiServer {
                 axum::routing::post(pull_safeline_sites_handler),
             )
             .route(
+                "/integrations/safeline/pull/sites/:remote_site_id",
+                axum::routing::post(pull_safeline_site_handler),
+            )
+            .route(
                 "/integrations/safeline/push/sites",
                 axum::routing::post(push_safeline_sites_handler),
+            )
+            .route(
+                "/integrations/safeline/push/sites/:local_site_id",
+                axum::routing::post(push_safeline_site_handler),
             )
             .route(
                 "/integrations/safeline/site-links",
@@ -1310,6 +1318,37 @@ async fn pull_safeline_sites_handler(
     }))
 }
 
+async fn pull_safeline_site_handler(
+    State(state): State<ApiState>,
+    Path(remote_site_id): Path<String>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let result = crate::integrations::safeline_sync::pull_site(store, safeline, &remote_site_id)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: match result.action {
+            crate::integrations::safeline_sync::SingleSiteSyncAction::Created => format!(
+                "雷池站点 {} 已导入到本地站点 #{}。",
+                result.remote_site_id, result.local_site_id
+            ),
+            crate::integrations::safeline_sync::SingleSiteSyncAction::Updated => format!(
+                "雷池站点 {} 已回流更新到本地站点 #{}。",
+                result.remote_site_id, result.local_site_id
+            ),
+        },
+    }))
+}
+
 async fn push_safeline_sites_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<SafeLineSitesPushResponse>> {
@@ -1340,6 +1379,37 @@ async fn push_safeline_sites_handler(
             result.created_certificates,
             result.failed_sites
         ),
+    }))
+}
+
+async fn push_safeline_site_handler(
+    State(state): State<ApiState>,
+    Path(local_site_id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let result = crate::integrations::safeline_sync::push_site(store, safeline, local_site_id)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: match result.action {
+            crate::integrations::safeline_sync::SingleSiteSyncAction::Created => format!(
+                "本地站点 #{} 已创建到雷池站点 {}。",
+                result.local_site_id, result.remote_site_id
+            ),
+            crate::integrations::safeline_sync::SingleSiteSyncAction::Updated => format!(
+                "本地站点 #{} 已推送更新到雷池站点 {}。",
+                result.local_site_id, result.remote_site_id
+            ),
+        },
     }))
 }
 

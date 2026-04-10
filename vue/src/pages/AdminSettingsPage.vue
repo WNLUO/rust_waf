@@ -664,7 +664,7 @@ onMounted(async () => {
           </div>
 
           <div class="mt-3 space-y-4">
-            <div class="flex flex-wrap items-center gap-2.5">
+            <div class="flex flex-wrap items-center justify-end gap-2.5">
               <button
                 @click="openGenerateModal"
                 :disabled="generatingCertificate || savingCertificate || savingDefaultCertificate"
@@ -681,9 +681,6 @@ onMounted(async () => {
                 <Save :size="12" />
                 上传证书
               </button>
-              <span class="text-xs leading-5 text-slate-500">
-                切换默认证书会立即保存，刷新页面后也会保留。
-              </span>
             </div>
 
             <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -727,6 +724,7 @@ onMounted(async () => {
                         当前默认
                       </span>
                       <button
+                        v-if="systemSettings.default_certificate_id !== certificate.id"
                         @click="persistDefaultCertificate(certificate.id)"
                         :disabled="savingDefaultCertificate"
                         class="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -777,59 +775,6 @@ onMounted(async () => {
           </div>
 
           <div class="mt-3 space-y-4">
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div class="flex items-center justify-between gap-3">
-                <p class="text-sm font-medium text-stone-900">自动联动</p>
-                <label class="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">
-                  <span>间隔</span>
-                  <input
-                    v-model.number="
-                      systemSettings.safeline.auto_sync_interval_secs
-                    "
-                    type="number"
-                    min="15"
-                    max="86400"
-                    step="15"
-                    class="w-20 border-0 bg-transparent p-0 text-right text-sm text-stone-900 outline-none"
-                  />
-                  <span>秒</span>
-                </label>
-              </div>
-
-              <div class="mt-3 grid gap-2 md:grid-cols-3">
-                <label
-                  class="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2"
-                >
-                  <input
-                    v-model="systemSettings.safeline.auto_sync_events"
-                    type="checkbox"
-                    class="accent-blue-600"
-                  />
-                  <span class="text-sm font-medium text-stone-900">同步事件</span>
-                </label>
-                <label
-                  class="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2"
-                >
-                  <input
-                    v-model="systemSettings.safeline.auto_sync_blocked_ips_push"
-                    type="checkbox"
-                    class="accent-blue-600"
-                  />
-                  <span class="text-sm font-medium text-stone-900">推送封禁</span>
-                </label>
-                <label
-                  class="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2"
-                >
-                  <input
-                    v-model="systemSettings.safeline.auto_sync_blocked_ips_pull"
-                    type="checkbox"
-                    class="accent-blue-600"
-                  />
-                  <span class="text-sm font-medium text-stone-900">回流封禁</span>
-                </label>
-              </div>
-            </div>
-
             <div class="grid gap-4 md:grid-cols-2">
               <label class="space-y-1.5">
                 <span class="text-xs text-slate-500">雷池地址</span>
@@ -873,18 +818,64 @@ onMounted(async () => {
               </label>
             </div>
 
-            <label
-              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
-            >
-              <input
-                v-model="systemSettings.safeline.verify_tls"
-                type="checkbox"
-                class="accent-blue-600"
-              />
-              <span>校验证书</span>
-            </label>
+            <div class="flex flex-wrap items-center justify-end gap-2.5">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
+              >
+                <input
+                  v-model="systemSettings.safeline.verify_tls"
+                  type="checkbox"
+                  class="accent-blue-600"
+                />
+                <span>校验证书</span>
+              </label>
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
+              >
+                <input
+                  v-model="systemSettings.safeline.auto_sync_events"
+                  type="checkbox"
+                  class="accent-blue-600"
+                />
+                <span>同步事件</span>
+              </label>
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
+              >
+                <input
+                  v-model="systemSettings.safeline.auto_sync_blocked_ips_push"
+                  type="checkbox"
+                  class="accent-blue-600"
+                />
+                <span>推送封禁</span>
+              </label>
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
+              >
+                <input
+                  v-model="systemSettings.safeline.auto_sync_blocked_ips_pull"
+                  type="checkbox"
+                  class="accent-blue-600"
+                />
+                <span>回流封禁</span>
+              </label>
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
+              >
+                <span>自动</span>
+                <input
+                  v-model.number="systemSettings.safeline.auto_sync_interval_secs"
+                  type="number"
+                  min="15"
+                  max="86400"
+                  step="15"
+                  class="w-20 appearance-none border-0 bg-transparent p-0 text-center text-sm text-stone-900 outline-none"
+                />
+                <span>秒同步</span>
+              </label>
+            </div>
 
-            <div class="flex flex-wrap items-center gap-2.5">
+            <div class="flex flex-wrap items-center justify-end gap-2.5">
               <button
                 @click="runSafeLineTest"
                 :disabled="testing || loading"
@@ -909,9 +900,6 @@ onMounted(async () => {
                 <Save :size="12" />
                 {{ savingMappings ? "保存中..." : "保存站点映射" }}
               </button>
-              <p class="text-xs leading-5 text-slate-500">
-                当前测试不会改动雷池配置，只会做连通性和鉴权探测。
-              </p>
             </div>
 
             <div

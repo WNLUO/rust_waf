@@ -1,4 +1,6 @@
-use crate::config::{Config, Http3Config, L4Config, Rule, RuntimeProfile, SafeLineConfig};
+use crate::config::{
+    Config, GatewayConfig, Http3Config, L4Config, Rule, RuntimeProfile, SafeLineConfig,
+};
 use crate::core::WafContext;
 use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
 use axum::{
@@ -28,6 +30,8 @@ pub struct HealthResponse {
 pub struct SettingsResponse {
     gateway_name: String,
     auto_refresh_seconds: u32,
+    https_listen_addr: String,
+    default_certificate_id: Option<i64>,
     upstream_endpoint: String,
     api_endpoint: String,
     emergency_mode: bool,
@@ -121,6 +125,8 @@ pub struct SafeLineSettingsResponse {
 pub struct SettingsUpdateRequest {
     gateway_name: String,
     auto_refresh_seconds: u32,
+    https_listen_addr: String,
+    default_certificate_id: Option<i64>,
     upstream_endpoint: String,
     api_endpoint: String,
     emergency_mode: bool,
@@ -911,7 +917,8 @@ async fn update_settings_handler(
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
     let next = payload
-        .into_config(current)
+        .into_config(current, Some(store))
+        .await
         .map_err(ApiError::bad_request)?;
 
     store
@@ -1124,7 +1131,7 @@ async fn update_local_site_handler(
     if updated {
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地站点 {} 已更新。", id),
+            message: format!("本地站点 {} 已更新。重启服务后生效。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id)))
@@ -1144,7 +1151,7 @@ async fn delete_local_site_handler(
     if deleted {
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地站点 {} 已删除。", id),
+            message: format!("本地站点 {} 已删除。重启服务后生效。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id)))
@@ -1252,7 +1259,7 @@ async fn update_local_certificate_handler(
         }
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地证书 {} 已更新。", id),
+            message: format!("本地证书 {} 已更新。重启服务后生效。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))
@@ -1272,7 +1279,7 @@ async fn delete_local_certificate_handler(
     if deleted {
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地证书 {} 已删除。", id),
+            message: format!("本地证书 {} 已删除。重启服务后生效。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))
@@ -1796,7 +1803,8 @@ async fn delete_blocked_ip_handler(
                 Err(err) => {
                     log::warn!(
                         "Failed to parse blocked IP '{}' while unblocking runtime state: {}",
-                        entry.ip, err
+                        entry.ip,
+                        err
                     );
                     false
                 }
@@ -1810,7 +1818,10 @@ async fn delete_blocked_ip_handler(
             message: if entry.provider.as_deref() == Some("safeline") {
                 format!("雷池封禁记录 '{}' 已完成远端解封并从本地缓存移除。", id)
             } else if runtime_unblocked {
-                format!("本地封禁记录 '{}' 已从数据库移除，并同步解除运行时封禁。", id)
+                format!(
+                    "本地封禁记录 '{}' 已从数据库移除，并同步解除运行时封禁。",
+                    id
+                )
             } else {
                 format!("本地封禁记录 '{}' 已从数据库移除。", id)
             },
@@ -1889,6 +1900,8 @@ impl SettingsResponse {
         Self {
             gateway_name: config.console_settings.gateway_name.clone(),
             auto_refresh_seconds: config.console_settings.auto_refresh_seconds,
+            https_listen_addr: config.gateway_config.https_listen_addr.clone(),
+            default_certificate_id: config.gateway_config.default_certificate_id,
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             api_endpoint: config.api_bind.clone(),
             emergency_mode: config.console_settings.emergency_mode,
@@ -2102,16 +2115,34 @@ impl L7ConfigUpdateRequest {
 }
 
 impl SettingsUpdateRequest {
-    fn into_config(self, mut current: Config) -> Result<Config, String> {
+    async fn into_config(
+        self,
+        mut current: Config,
+        store: Option<&crate::storage::SqliteStore>,
+    ) -> Result<Config, String> {
         if self.gateway_name.trim().is_empty() {
             return Err("网关名称不能为空".to_string());
         }
         if self.api_endpoint.trim().is_empty() {
             return Err("控制面 API 地址不能为空".to_string());
         }
+        let https_listen_addr = self.https_listen_addr.trim().to_string();
+        if !https_listen_addr.is_empty() {
+            https_listen_addr
+                .parse::<SocketAddr>()
+                .map_err(|err| format!("HTTPS 入口地址 '{}' 无效: {}", https_listen_addr, err))?;
+        }
+
+        if let (Some(store), Some(default_certificate_id)) = (store, self.default_certificate_id) {
+            ensure_local_certificate_exists(store, default_certificate_id).await?;
+        }
 
         current.console_settings.gateway_name = self.gateway_name;
         current.console_settings.auto_refresh_seconds = self.auto_refresh_seconds;
+        current.gateway_config = GatewayConfig {
+            https_listen_addr,
+            default_certificate_id: self.default_certificate_id,
+        };
         current.tcp_upstream_addr = non_empty_string(self.upstream_endpoint);
         current.api_bind = self.api_endpoint.trim().to_string();
         current.console_settings.emergency_mode = self.emergency_mode;
@@ -2455,6 +2486,14 @@ impl LocalSiteUpsertRequest {
         let sync_mode = non_empty_string(self.sync_mode).unwrap_or_else(|| "manual".to_string());
         let notes = self.notes.trim().to_string();
 
+        for listen_port in &listen_ports {
+            validate_listen_port_token(listen_port)?;
+        }
+        for upstream in &upstreams {
+            crate::core::gateway::normalize_upstream_endpoint(upstream)
+                .map_err(|err| format!("上游地址 '{}' 无效: {}", upstream, err))?;
+        }
+
         if let Some(local_certificate_id) = self.local_certificate_id {
             ensure_local_certificate_exists(store, local_certificate_id).await?;
         }
@@ -2783,6 +2822,32 @@ fn parse_json_string_vec(value: &str) -> Result<Vec<String>, anyhow::Error> {
 
 fn parse_json_value(value: &str) -> Result<serde_json::Value, anyhow::Error> {
     Ok(serde_json::from_str::<serde_json::Value>(value)?)
+}
+
+fn validate_listen_port_token(value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("监听端口不能为空".to_string());
+    }
+
+    if trimmed.parse::<u16>().is_ok() {
+        return Ok(());
+    }
+
+    if let Ok(uri) = trimmed.parse::<http::Uri>() {
+        if uri.port_u16().is_some() {
+            return Ok(());
+        }
+    }
+
+    match trimmed
+        .rsplit(':')
+        .next()
+        .and_then(|item| item.parse::<u16>().ok())
+    {
+        Some(_) => Ok(()),
+        None => Err(format!("监听端口 '{}' 无效", trimmed)),
+    }
 }
 
 async fn ensure_local_certificate_exists(

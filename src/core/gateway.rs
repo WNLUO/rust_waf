@@ -1,0 +1,322 @@
+use crate::config::Config;
+use crate::storage::{LocalCertificateSecretEntry, LocalSiteEntry, SqliteStore};
+use anyhow::Result;
+use log::warn;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::server::{ClientHello, ResolvesServerCert};
+use rustls::sign::CertifiedKey;
+use std::collections::{HashMap, HashSet};
+use std::io::{BufReader, Cursor};
+use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+pub struct GatewaySiteRuntime {
+    pub id: i64,
+    pub name: String,
+    pub primary_hostname: String,
+    pub hostnames: Vec<String>,
+    pub listen_ports: Vec<String>,
+    pub tls_enabled: bool,
+    pub certificate_id: Option<i64>,
+    pub upstream_endpoint: Option<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct GatewayRuntime {
+    sites: Vec<GatewaySiteRuntime>,
+    host_index: HashMap<String, Vec<usize>>,
+    cert_resolver: Option<Arc<dyn ResolvesServerCert>>,
+}
+
+#[derive(Debug, Default)]
+struct GatewayCertResolver {
+    by_name: HashMap<String, Arc<CertifiedKey>>,
+    default_cert: Option<Arc<CertifiedKey>>,
+}
+
+impl ResolvesServerCert for GatewayCertResolver {
+    fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        client_hello
+            .server_name()
+            .and_then(normalize_sni_hostname)
+            .and_then(|name| self.by_name.get(&name).cloned())
+            .or_else(|| self.default_cert.clone())
+    }
+}
+
+impl GatewayRuntime {
+    pub async fn load(config: &Config, store: Option<&SqliteStore>) -> Result<Self> {
+        let Some(store) = store else {
+            return Ok(Self::default());
+        };
+
+        let raw_sites = store.list_local_sites().await?;
+        let enabled_sites = raw_sites
+            .into_iter()
+            .filter(|site| site.enabled)
+            .collect::<Vec<_>>();
+
+        let mut certificate_ids = enabled_sites
+            .iter()
+            .filter(|site| site.tls_enabled)
+            .filter_map(|site| site.local_certificate_id)
+            .collect::<HashSet<_>>();
+        if let Some(default_certificate_id) = config.gateway_config.default_certificate_id {
+            certificate_ids.insert(default_certificate_id);
+        }
+
+        let certified_keys = load_certified_keys(store, &certificate_ids).await?;
+        let default_cert = config
+            .gateway_config
+            .default_certificate_id
+            .and_then(|id| certified_keys.get(&id).cloned());
+
+        let mut sites = Vec::with_capacity(enabled_sites.len());
+        let mut host_index: HashMap<String, Vec<usize>> = HashMap::new();
+        let mut certificates_by_name = HashMap::new();
+
+        for site in enabled_sites {
+            let runtime_site = runtime_site_from_entry(&site);
+            let site_index = sites.len();
+
+            for hostname in &runtime_site.hostnames {
+                host_index
+                    .entry(hostname.clone())
+                    .or_default()
+                    .push(site_index);
+            }
+
+            if runtime_site.tls_enabled {
+                if let Some(certificate_id) = runtime_site.certificate_id {
+                    if let Some(certified_key) = certified_keys.get(&certificate_id) {
+                        for hostname in &runtime_site.hostnames {
+                            certificates_by_name
+                                .entry(hostname.clone())
+                                .or_insert_with(|| Arc::clone(certified_key));
+                        }
+                    } else {
+                        warn!(
+                            "Site '{}' references certificate {} but the certificate secret is unavailable",
+                            runtime_site.name, certificate_id
+                        );
+                    }
+                }
+            }
+
+            sites.push(runtime_site);
+        }
+
+        let cert_resolver = if certificates_by_name.is_empty() && default_cert.is_none() {
+            None
+        } else {
+            Some(Arc::new(GatewayCertResolver {
+                by_name: certificates_by_name,
+                default_cert,
+            }) as Arc<dyn ResolvesServerCert>)
+        };
+
+        Ok(Self {
+            sites,
+            host_index,
+            cert_resolver,
+        })
+    }
+
+    pub fn tls_resolver(&self) -> Option<Arc<dyn ResolvesServerCert>> {
+        self.cert_resolver.as_ref().map(Arc::clone)
+    }
+
+    pub fn has_sites(&self) -> bool {
+        !self.sites.is_empty()
+    }
+
+    pub fn resolve_site(
+        &self,
+        hostname: Option<&str>,
+        listener_port: u16,
+    ) -> Option<GatewaySiteRuntime> {
+        let hostname = hostname.and_then(normalize_hostname)?;
+        let site_indexes = self.host_index.get(&hostname)?;
+
+        site_indexes
+            .iter()
+            .filter_map(|index| self.sites.get(*index))
+            .find(|site| site_matches_port(site, listener_port))
+            .cloned()
+    }
+}
+
+fn runtime_site_from_entry(site: &LocalSiteEntry) -> GatewaySiteRuntime {
+    let primary_hostname =
+        normalize_hostname(&site.primary_hostname).unwrap_or_else(|| site.primary_hostname.clone());
+    let mut hostnames = parse_json_string_vec(&site.hostnames_json)
+        .unwrap_or_else(|_| vec![site.primary_hostname.clone()])
+        .into_iter()
+        .filter_map(|hostname| normalize_hostname(&hostname))
+        .collect::<Vec<_>>();
+
+    if !hostnames
+        .iter()
+        .any(|hostname| hostname == &primary_hostname)
+    {
+        hostnames.insert(0, primary_hostname.clone());
+    }
+    hostnames.sort();
+    hostnames.dedup();
+
+    let listen_ports = parse_json_string_vec(&site.listen_ports_json).unwrap_or_default();
+    let upstreams = parse_json_string_vec(&site.upstreams_json).unwrap_or_default();
+    let upstream_endpoint =
+        upstreams
+            .iter()
+            .find_map(|upstream| match normalize_upstream_endpoint(upstream) {
+                Ok(endpoint) => Some(endpoint),
+                Err(err) => {
+                    warn!(
+                        "Ignoring invalid upstream '{}' for site '{}': {}",
+                        upstream, site.name, err
+                    );
+                    None
+                }
+            });
+
+    GatewaySiteRuntime {
+        id: site.id,
+        name: site.name.clone(),
+        primary_hostname,
+        hostnames,
+        listen_ports,
+        tls_enabled: site.tls_enabled,
+        certificate_id: site.local_certificate_id,
+        upstream_endpoint,
+    }
+}
+
+async fn load_certified_keys(
+    store: &SqliteStore,
+    certificate_ids: &HashSet<i64>,
+) -> Result<HashMap<i64, Arc<CertifiedKey>>> {
+    let mut certified_keys = HashMap::new();
+
+    for certificate_id in certificate_ids {
+        let Some(secret) = store.load_local_certificate_secret(*certificate_id).await? else {
+            continue;
+        };
+        match certified_key_from_secret(&secret) {
+            Ok(certified_key) => {
+                certified_keys.insert(*certificate_id, Arc::new(certified_key));
+            }
+            Err(err) => {
+                warn!(
+                    "Failed to load certificate {} from SQLite secret storage: {}",
+                    certificate_id, err
+                );
+            }
+        }
+    }
+
+    Ok(certified_keys)
+}
+
+fn certified_key_from_secret(secret: &LocalCertificateSecretEntry) -> Result<CertifiedKey> {
+    crate::tls::ensure_rustls_crypto_provider();
+
+    let certs = load_pem_certificates(&secret.certificate_pem)?;
+    let private_key = load_pem_private_key(&secret.private_key_pem)?;
+    Ok(CertifiedKey::from_der(
+        certs,
+        private_key,
+        &rustls::crypto::aws_lc_rs::default_provider(),
+    )?)
+}
+
+fn load_pem_certificates(pem: &str) -> Result<Vec<CertificateDer<'static>>> {
+    let mut reader = BufReader::new(Cursor::new(pem.as_bytes()));
+    let certs = rustls_pemfile::certs(&mut reader).collect::<std::result::Result<Vec<_>, _>>()?;
+    if certs.is_empty() {
+        anyhow::bail!("证书内容为空");
+    }
+    Ok(certs)
+}
+
+fn load_pem_private_key(pem: &str) -> Result<PrivateKeyDer<'static>> {
+    let mut reader = BufReader::new(Cursor::new(pem.as_bytes()));
+    rustls_pemfile::private_key(&mut reader)?.ok_or_else(|| anyhow::anyhow!("私钥内容为空"))
+}
+
+fn parse_json_string_vec(value: &str) -> Result<Vec<String>> {
+    Ok(serde_json::from_str(value)?)
+}
+
+pub fn normalize_hostname(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches('.').to_ascii_lowercase();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn normalize_sni_hostname(value: &str) -> Option<String> {
+    let normalized = normalize_hostname(value)?;
+    if normalized.parse::<std::net::IpAddr>().is_ok() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn site_matches_port(site: &GatewaySiteRuntime, listener_port: u16) -> bool {
+    if site.listen_ports.is_empty() {
+        return true;
+    }
+
+    site.listen_ports
+        .iter()
+        .any(|port| normalize_port_token(port) == Some(listener_port))
+}
+
+fn normalize_port_token(value: &str) -> Option<u16> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(port) = trimmed.parse::<u16>() {
+        return Some(port);
+    }
+
+    if let Ok(uri) = trimmed.parse::<http::Uri>() {
+        return uri.port_u16();
+    }
+
+    trimmed
+        .rsplit(':')
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+}
+
+pub fn normalize_upstream_endpoint(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("上游地址不能为空");
+    }
+
+    if trimmed.starts_with("https://") {
+        anyhow::bail!("暂不支持 HTTPS 回源，请使用 ip:port 或 http://ip:port");
+    }
+
+    if trimmed.starts_with("http://") {
+        let uri = trimmed.parse::<http::Uri>()?;
+        let authority = uri
+            .authority()
+            .ok_or_else(|| anyhow::anyhow!("HTTP 回源地址缺少 authority"))?;
+        return Ok(authority.as_str().to_string());
+    }
+
+    if trimmed.contains(':') {
+        return Ok(trimmed.to_string());
+    }
+
+    anyhow::bail!("上游地址 '{}' 缺少端口", trimmed)
+}

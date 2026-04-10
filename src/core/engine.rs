@@ -33,6 +33,7 @@ use quinn::{Endpoint as QuinnEndpoint, Incoming as QuinnIncoming};
 use super::WafContext;
 use crate::config::l7::UpstreamFailureMode;
 use crate::config::{Config, RuntimeProfile};
+use crate::core::gateway::{normalize_hostname, GatewaySiteRuntime};
 use crate::core::{InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol};
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
@@ -148,8 +149,8 @@ impl WafEngine {
             }
         }
 
-        if let Some(tls_acceptor) = build_tls_acceptor(&self.context.config.http3_config)? {
-            let tls_addr = &self.context.config.http3_config.listen_addr;
+        if let Some(tls_acceptor) = build_tls_acceptor(self.context.as_ref())? {
+            let tls_addr = &self.context.config.gateway_config.https_listen_addr;
             match TcpListener::bind(tls_addr).await {
                 Ok(listener) => {
                     let addr = listener.local_addr()?;
@@ -648,25 +649,26 @@ async fn run_safeline_auto_sync_loop(
     }
 }
 
-fn build_tls_acceptor(config: &crate::config::Http3Config) -> Result<Option<TlsAcceptor>> {
-    if !config.enable_tls13 {
+fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAcceptor>> {
+    if context
+        .config
+        .gateway_config
+        .https_listen_addr
+        .trim()
+        .is_empty()
+    {
         return Ok(None);
     }
 
-    let (Some(cert_path), Some(key_path)) = (
-        config.certificate_path.as_deref(),
-        config.private_key_path.as_deref(),
-    ) else {
+    let Some(cert_resolver) = context.gateway_runtime.tls_resolver() else {
         return Ok(None);
     };
 
     crate::tls::ensure_rustls_crypto_provider();
 
-    let certs = load_tls_certificates(cert_path)?;
-    let private_key = load_tls_private_key(key_path)?;
     let mut server_config = RustlsServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(certs, private_key)?;
+        .with_cert_resolver(cert_resolver);
     server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     Ok(Some(TlsAcceptor::from(Arc::new(server_config))))
@@ -721,6 +723,7 @@ fn build_http3_endpoint(config: &crate::config::Http3Config) -> Result<Option<Qu
     Ok(Some(QuinnEndpoint::server(server_config, listen_addr)?))
 }
 
+#[cfg_attr(not(feature = "http3"), allow(dead_code))]
 fn load_tls_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(File::open(path)?);
     let certs = rustls_pemfile::certs(&mut reader).collect::<std::result::Result<Vec<_>, _>>()?;
@@ -730,6 +733,7 @@ fn load_tls_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
     Ok(certs)
 }
 
+#[cfg_attr(not(feature = "http3"), allow(dead_code))]
 fn load_tls_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(File::open(path)?);
     rustls_pemfile::private_key(&mut reader)?
@@ -809,6 +813,9 @@ async fn handle_tls_connection(
     let mut metadata = vec![("transport".to_string(), "tls".to_string())];
     if let Some(protocol) = &alpn {
         metadata.push(("tls.alpn".to_string(), protocol.clone()));
+    }
+    if let Some(server_name) = tls_stream.get_ref().1.server_name() {
+        metadata.push(("tls.sni".to_string(), server_name.to_string()));
     }
 
     match alpn.as_deref() {
@@ -904,6 +911,10 @@ async fn handle_http3_request(
         &mut unified,
     );
     prepare_request_for_proxy(&mut unified);
+    let matched_site = resolve_gateway_site(context.as_ref(), &unified);
+    if let Some(site) = matched_site.as_ref() {
+        apply_gateway_site_metadata(&mut unified, site);
+    }
 
     let request_dump = unified.to_inspection_string();
     if let Some(metrics) = context.metrics.as_ref() {
@@ -931,7 +942,8 @@ async fn handle_http3_request(
         return Ok(());
     }
 
-    if let Some(upstream_addr) = context.config.tcp_upstream_addr.as_deref() {
+    let upstream_addr = select_upstream_target(context.as_ref(), matched_site.as_ref());
+    if let Some(upstream_addr) = upstream_addr.as_deref() {
         if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_fail_close_rejection();
@@ -982,6 +994,18 @@ async fn handle_http3_request(
                 return Ok(());
             }
         }
+    } else if matched_site.is_some() {
+        send_http3_response(
+            &mut stream,
+            502,
+            &[],
+            b"site upstream not configured".to_vec(),
+        )
+        .await?;
+        return Ok(());
+    } else if should_reject_unmatched_site(context.as_ref(), &unified) {
+        send_http3_response(&mut stream, 421, &[], b"site not found".to_vec()).await?;
+        return Ok(());
     }
 
     let metrics = context.metrics_snapshot();
@@ -1104,7 +1128,12 @@ async fn handle_udp_datagram(
                 inspect_application_layers(context.as_ref(), &packet, &request, &request_dump);
 
             if inspection_result.should_persist_event() {
-                persist_http_inspection_event(context.as_ref(), &packet, &request, &inspection_result);
+                persist_http_inspection_event(
+                    context.as_ref(),
+                    &packet,
+                    &request,
+                    &inspection_result,
+                );
             }
 
             if inspection_result.blocked {
@@ -1409,6 +1438,10 @@ async fn handle_http1_connection(
         request.add_metadata(key, value);
     }
     prepare_request_for_proxy(&mut request);
+    let matched_site = resolve_gateway_site(context.as_ref(), &request);
+    if let Some(site) = matched_site.as_ref() {
+        apply_gateway_site_metadata(&mut request, site);
+    }
 
     if request.uri.is_empty() {
         debug!("Empty request from {}, ignoring", peer_addr);
@@ -1443,7 +1476,8 @@ async fn handle_http1_connection(
             )
             .await?;
     } else {
-        if let Some(upstream_addr) = context.config.tcp_upstream_addr.as_deref() {
+        let upstream_addr = select_upstream_target(context.as_ref(), matched_site.as_ref());
+        if let Some(upstream_addr) = upstream_addr.as_deref() {
             if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_fail_close_rejection();
@@ -1487,6 +1521,19 @@ async fn handle_http1_connection(
             } else if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_proxy_success(proxy_started_at.elapsed());
             }
+        } else if matched_site.is_some() {
+            http1_handler
+                .write_response(
+                    &mut stream,
+                    502,
+                    "Bad Gateway",
+                    b"site upstream not configured",
+                )
+                .await?;
+        } else if should_reject_unmatched_site(context.as_ref(), &request) {
+            http1_handler
+                .write_response(&mut stream, 421, "Misdirected Request", b"site not found")
+                .await?;
         } else {
             let metrics = context.metrics_snapshot();
             let metrics_line = metrics
@@ -1531,7 +1578,6 @@ async fn handle_http2_connection(
     let context_for_service = Arc::clone(&context);
     let peer_ip = peer_addr.ip().to_string();
     let max_request_size = context.config.l7_config.max_request_size;
-    let upstream_addr = context.config.tcp_upstream_addr.clone();
     let request_metadata = extra_metadata.clone();
 
     http2_handler
@@ -1543,7 +1589,6 @@ async fn handle_http2_connection(
             move |request| {
                 let context = Arc::clone(&context_for_service);
                 let packet = packet.clone();
-                let upstream_addr = upstream_addr.clone();
                 let request_metadata = request_metadata.clone();
 
                 async move {
@@ -1553,6 +1598,10 @@ async fn handle_http2_connection(
                         request.add_metadata(key, value);
                     }
                     prepare_request_for_proxy(&mut request);
+                    let matched_site = resolve_gateway_site(context.as_ref(), &request);
+                    if let Some(site) = matched_site.as_ref() {
+                        apply_gateway_site_metadata(&mut request, site);
+                    }
                     debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
 
                     let request_dump = request.to_inspection_string();
@@ -1587,6 +1636,8 @@ async fn handle_http2_connection(
                         });
                     }
 
+                    let upstream_addr =
+                        select_upstream_target(context.as_ref(), matched_site.as_ref());
                     if let Some(upstream_addr) = upstream_addr.as_deref() {
                         if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
                             if let Some(metrics) = context.metrics.as_ref() {
@@ -1640,6 +1691,18 @@ async fn handle_http2_connection(
                                 });
                             }
                         }
+                    } else if matched_site.is_some() {
+                        return Ok(Http2Response {
+                            status_code: 502,
+                            headers: vec![],
+                            body: b"site upstream not configured".to_vec(),
+                        });
+                    } else if should_reject_unmatched_site(context.as_ref(), &request) {
+                        return Ok(Http2Response {
+                            status_code: 421,
+                            headers: vec![],
+                            body: b"site not found".to_vec(),
+                        });
                     }
 
                     let metrics = context.metrics_snapshot();
@@ -1954,6 +2017,72 @@ fn infer_forwarded_proto(request: &UnifiedHttpRequest) -> String {
     "http".to_string()
 }
 
+fn resolve_gateway_site(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+) -> Option<GatewaySiteRuntime> {
+    let listener_port = request
+        .get_metadata("listener_port")
+        .and_then(|port| port.parse::<u16>().ok())?;
+    let hostname = request_hostname(request);
+    context
+        .gateway_runtime
+        .resolve_site(hostname.as_deref(), listener_port)
+}
+
+fn apply_gateway_site_metadata(request: &mut UnifiedHttpRequest, site: &GatewaySiteRuntime) {
+    request.add_metadata("gateway.site_id".to_string(), site.id.to_string());
+    request.add_metadata("gateway.site_name".to_string(), site.name.clone());
+    request.add_metadata(
+        "gateway.primary_hostname".to_string(),
+        site.primary_hostname.clone(),
+    );
+    if let Some(upstream) = &site.upstream_endpoint {
+        request.add_metadata("gateway.upstream".to_string(), upstream.clone());
+    }
+}
+
+fn request_hostname(request: &UnifiedHttpRequest) -> Option<String> {
+    request
+        .get_header("host")
+        .or_else(|| request.get_metadata("authority"))
+        .and_then(|value| normalize_request_host(value))
+}
+
+fn normalize_request_host(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(uri) = format!("http://{}", trimmed).parse::<http::Uri>() {
+        if let Some(authority) = uri.authority() {
+            return normalize_hostname(authority.host());
+        }
+    }
+
+    if let Some(host) = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.split(']').next())
+    {
+        return normalize_hostname(host);
+    }
+
+    normalize_hostname(trimmed.split(':').next().unwrap_or(trimmed))
+}
+
+fn select_upstream_target(
+    context: &WafContext,
+    site: Option<&GatewaySiteRuntime>,
+) -> Option<String> {
+    site.and_then(|site| site.upstream_endpoint.clone())
+        .or_else(|| context.config.tcp_upstream_addr.clone())
+}
+
+fn should_reject_unmatched_site(context: &WafContext, request: &UnifiedHttpRequest) -> bool {
+    context.gateway_runtime.has_sites() && request_hostname(request).is_some()
+}
+
 fn generate_request_id() -> String {
     let sequence = REQUEST_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{:x}-{:x}", unix_timestamp(), sequence)
@@ -2117,20 +2246,27 @@ mod tests {
     }
 
     #[test]
-    fn build_tls_acceptor_is_disabled_without_identity_files() {
-        let config = Http3Config::default();
-        assert!(build_tls_acceptor(&config).unwrap().is_none());
+    fn build_tls_acceptor_is_disabled_without_https_listener() {
+        let context = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(WafContext::new(test_config(vec![])))
+            .unwrap();
+        assert!(build_tls_acceptor(&context).unwrap().is_none());
     }
 
     #[test]
-    fn build_tls_acceptor_errors_for_missing_identity_files() {
-        let config = Http3Config {
-            certificate_path: Some("/tmp/definitely-missing-cert.pem".to_string()),
-            private_key_path: Some("/tmp/definitely-missing-key.pem".to_string()),
-            ..Http3Config::default()
-        };
-
-        assert!(build_tls_acceptor(&config).is_err());
+    fn build_tls_acceptor_is_disabled_without_loaded_certificates() {
+        let mut config = test_config(vec![]);
+        config.gateway_config.https_listen_addr = "127.0.0.1:660".to_string();
+        let context = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(WafContext::new(config))
+            .unwrap();
+        assert!(build_tls_acceptor(&context).unwrap().is_none());
     }
 
     #[tokio::test]

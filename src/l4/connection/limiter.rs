@@ -123,13 +123,13 @@ impl ConnectionLimiter {
 
         let inserted = blocked_ips
             .insert(
-            *ip,
-            BlockedIp {
-                blocked_at: std::time::Instant::now(),
-                block_duration: duration,
-                reason: reason.to_string(),
-            },
-        )
+                *ip,
+                BlockedIp {
+                    blocked_at: std::time::Instant::now(),
+                    block_duration: duration,
+                    reason: reason.to_string(),
+                },
+            )
             .is_none();
         self.total_blocked.fetch_add(1, Ordering::Relaxed);
         warn!("Blocked IP {} for {:?}: {}", ip, duration, reason);

@@ -2,14 +2,19 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import AppLayout from "../components/layout/AppLayout.vue";
 import {
+  createLocalCertificate,
+  deleteLocalCertificate,
   fetchSafeLineMappings,
   fetchSafeLineSites,
   fetchSettings,
+  fetchLocalCertificates,
   testSafeLineConnection,
   updateSafeLineMappings,
   updateSettings,
 } from "../lib/api";
 import type {
+  LocalCertificateDraft,
+  LocalCertificateItem,
   SafeLineMappingItem,
   SafeLineSiteItem,
   SafeLineTestResponse,
@@ -24,16 +29,22 @@ const saving = ref(false);
 const testing = ref(false);
 const loadingSites = ref(false);
 const savingMappings = ref(false);
+const loadingCertificates = ref(false);
+const savingCertificate = ref(false);
+const deletingCertificateId = ref<number | null>(null);
 const error = ref("");
 const successMessage = ref("");
 const testResult = ref<SafeLineTestResponse | null>(null);
 const sites = ref<SafeLineSiteItem[]>([]);
 const mappings = ref<SafeLineMappingItem[]>([]);
+const localCertificates = ref<LocalCertificateItem[]>([]);
 const sitesLoadedAt = ref<number | null>(null);
 
 const systemSettings = reactive<SystemSettingsForm>({
   gateway_name: "玄枢防护网关",
   auto_refresh_seconds: 5,
+  https_listen_addr: "",
+  default_certificate_id: null,
   upstream_endpoint: "",
   api_endpoint: "127.0.0.1:3000",
   emergency_mode: false,
@@ -60,6 +71,32 @@ const systemSettings = reactive<SystemSettingsForm>({
     blocklist_sync_path: "/api/open/ipgroup",
     blocklist_delete_path: "/api/open/ipgroup",
     blocklist_ip_group_ids: [],
+  },
+});
+
+const certificateForm = reactive<LocalCertificateDraft>({
+  name: "",
+  domains: [],
+  issuer: "",
+  valid_from: null,
+  valid_to: null,
+  source_type: "manual",
+  provider_remote_id: null,
+  trusted: false,
+  expired: false,
+  notes: "",
+  last_synced_at: null,
+  certificate_pem: "",
+  private_key_pem: "",
+});
+
+const certificateDomainsText = computed({
+  get: () => certificateForm.domains.join(", "),
+  set: (value: string) => {
+    certificateForm.domains = value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
   },
 });
 
@@ -101,6 +138,8 @@ function toPlainSettingsPayload(): SettingsPayload {
   return {
     gateway_name: systemSettings.gateway_name,
     auto_refresh_seconds: systemSettings.auto_refresh_seconds,
+    https_listen_addr: systemSettings.https_listen_addr,
+    default_certificate_id: systemSettings.default_certificate_id,
     upstream_endpoint: systemSettings.upstream_endpoint,
     api_endpoint: systemSettings.api_endpoint,
     emergency_mode: systemSettings.emergency_mode,
@@ -111,6 +150,19 @@ function toPlainSettingsPayload(): SettingsPayload {
     notes: systemSettings.notes,
     safeline: toPlainSafeLineSettings(),
   };
+}
+
+async function loadCertificates() {
+  loadingCertificates.value = true;
+
+  try {
+    const response = await fetchLocalCertificates();
+    localCertificates.value = response.certificates;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "读取本地证书失败";
+  } finally {
+    loadingCertificates.value = false;
+  }
 }
 
 async function loadSettings() {
@@ -248,8 +300,61 @@ async function saveMappings() {
   }
 }
 
+async function uploadCertificate() {
+  savingCertificate.value = true;
+  error.value = "";
+  successMessage.value = "";
+
+  try {
+    const payload: LocalCertificateDraft = {
+      ...certificateForm,
+      name: certificateForm.name.trim(),
+      domains: certificateForm.domains.map((item) => item.trim()).filter(Boolean),
+      issuer: certificateForm.issuer.trim(),
+      notes: certificateForm.notes.trim(),
+      certificate_pem: certificateForm.certificate_pem?.trim() ?? "",
+      private_key_pem: certificateForm.private_key_pem?.trim() ?? "",
+    };
+
+    await createLocalCertificate(payload);
+    certificateForm.name = "";
+    certificateForm.domains = [];
+    certificateForm.issuer = "";
+    certificateForm.notes = "";
+    certificateForm.certificate_pem = "";
+    certificateForm.private_key_pem = "";
+
+    await loadCertificates();
+    successMessage.value = "证书已上传，可在下方设为默认证书。";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "上传本地证书失败";
+  } finally {
+    savingCertificate.value = false;
+  }
+}
+
+async function removeCertificate(id: number) {
+  deletingCertificateId.value = id;
+  error.value = "";
+  successMessage.value = "";
+
+  try {
+    const response = await deleteLocalCertificate(id);
+    if (systemSettings.default_certificate_id === id) {
+      systemSettings.default_certificate_id = null;
+    }
+    await loadCertificates();
+    successMessage.value = response.message;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "删除本地证书失败";
+  } finally {
+    deletingCertificateId.value = null;
+  }
+}
+
 onMounted(async () => {
   await loadSettings();
+  await loadCertificates();
   await loadMappings();
 });
 </script>
@@ -327,10 +432,11 @@ onMounted(async () => {
               />
             </label>
             <label class="space-y-1.5">
-              <span class="text-xs text-slate-500">上游服务地址</span>
+              <span class="text-xs text-slate-500">统一 HTTPS 入口</span>
               <input
-                v-model="systemSettings.upstream_endpoint"
+                v-model="systemSettings.https_listen_addr"
                 type="text"
+                placeholder="例如 0.0.0.0:660"
                 class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
@@ -362,6 +468,31 @@ onMounted(async () => {
                 <option value="blocked_only">仅拦截事件</option>
                 <option value="all">全部事件</option>
               </select>
+            </label>
+            <label class="space-y-1.5">
+              <span class="text-xs text-slate-500">默认证书</span>
+              <select
+                v-model="systemSettings.default_certificate_id"
+                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+              >
+                <option :value="null">未设置</option>
+                <option
+                  v-for="certificate in localCertificates"
+                  :key="certificate.id"
+                  :value="certificate.id"
+                >
+                  #{{ certificate.id }} · {{ certificate.name }}
+                </option>
+              </select>
+            </label>
+            <label class="space-y-1.5">
+              <span class="text-xs text-slate-500">默认回源地址</span>
+              <input
+                v-model="systemSettings.upstream_endpoint"
+                type="text"
+                placeholder="未命中站点时使用，可留空"
+                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+              />
             </label>
           </div>
 
@@ -417,6 +548,156 @@ onMounted(async () => {
                 >
               </span>
             </label>
+          </div>
+        </div>
+
+        <div
+          class="rounded-xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+        >
+          <div class="flex items-center gap-3">
+            <div
+              class="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-blue-700"
+            >
+              <ServerCog :size="20" />
+            </div>
+            <div>
+              <p class="text-xs tracking-wide text-blue-700">证书中心</p>
+              <h3 class="mt-0.5 text-lg font-semibold text-stone-900">
+                本地证书上传
+              </h3>
+            </div>
+          </div>
+
+          <div class="mt-3 space-y-4">
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="space-y-1.5">
+                <span class="text-xs text-slate-500">证书名称</span>
+                <input
+                  v-model="certificateForm.name"
+                  type="text"
+                  placeholder="例如 default-fake-cert"
+                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                />
+              </label>
+              <label class="space-y-1.5">
+                <span class="text-xs text-slate-500">域名列表</span>
+                <input
+                  v-model="certificateDomainsText"
+                  type="text"
+                  placeholder="多个域名用逗号分隔"
+                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                />
+              </label>
+              <label class="space-y-1.5 md:col-span-2">
+                <span class="text-xs text-slate-500">备注</span>
+                <input
+                  v-model="certificateForm.notes"
+                  type="text"
+                  placeholder="例如：用于 IP 直连时返回的假证书"
+                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                />
+              </label>
+              <label class="space-y-1.5 md:col-span-2">
+                <span class="text-xs text-slate-500">证书 PEM</span>
+                <textarea
+                  v-model="certificateForm.certificate_pem"
+                  rows="8"
+                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
+                />
+              </label>
+              <label class="space-y-1.5 md:col-span-2">
+                <span class="text-xs text-slate-500">私钥 PEM</span>
+                <textarea
+                  v-model="certificateForm.private_key_pem"
+                  rows="8"
+                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
+                />
+              </label>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2.5">
+              <button
+                @click="uploadCertificate"
+                :disabled="savingCertificate"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Save :size="12" />
+                {{ savingCertificate ? "上传中..." : "上传证书" }}
+              </button>
+              <span class="text-xs leading-5 text-slate-500">
+                上传后可在“默认证书”里指定用于 `IP:端口` 或未知 SNI 的回包证书。
+              </span>
+            </div>
+
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium text-stone-900">当前证书</p>
+                  <p class="mt-1 text-xs leading-5 text-slate-500">
+                    {{
+                      loadingCertificates
+                        ? "正在读取本地证书..."
+                        : `共 ${localCertificates.length} 张，可用于站点证书和默认证书。`
+                    }}
+                  </p>
+                </div>
+              </div>
+
+              <div v-if="localCertificates.length" class="mt-3 grid gap-3">
+                <div
+                  v-for="certificate in localCertificates"
+                  :key="certificate.id"
+                  class="rounded-[16px] border border-slate-200 bg-white px-4 py-3"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p class="text-sm font-medium text-stone-900">
+                        #{{ certificate.id }} · {{ certificate.name }}
+                      </p>
+                      <p class="mt-1 text-xs text-slate-500">
+                        {{
+                          certificate.domains.length
+                            ? certificate.domains.join(" / ")
+                            : "未填写域名"
+                        }}
+                      </p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      <span
+                        v-if="systemSettings.default_certificate_id === certificate.id"
+                        class="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
+                      >
+                        当前默认
+                      </span>
+                      <button
+                        @click="systemSettings.default_certificate_id = certificate.id"
+                        class="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                      >
+                        设为默认
+                      </button>
+                      <button
+                        @click="removeCertificate(certificate.id)"
+                        :disabled="deletingCertificateId === certificate.id"
+                        class="inline-flex items-center gap-1 rounded-lg border border-red-500/20 px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {{
+                          deletingCertificateId === certificate.id
+                            ? "删除中..."
+                            : "删除"
+                        }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-else-if="!loadingCertificates"
+                class="mt-3 rounded-[16px] border border-dashed border-slate-200 bg-white px-4 py-6 text-sm text-slate-500"
+              >
+                还没有上传本地证书。
+              </div>
+            </div>
           </div>
         </div>
 

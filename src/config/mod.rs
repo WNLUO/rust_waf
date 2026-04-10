@@ -3,10 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::net::SocketAddr;
 
+pub mod gateway;
 pub mod http3;
 pub mod l4;
 pub mod l7;
 
+pub use gateway::GatewayConfig;
 pub use http3::Http3Config;
 pub use l4::L4Config;
 pub use l7::L7Config;
@@ -28,6 +30,8 @@ pub struct Config {
     pub maintenance_interval_secs: u64,
     pub l4_config: L4Config,
     pub l7_config: L7Config,
+    #[serde(default)]
+    pub gateway_config: GatewayConfig,
     pub http3_config: Http3Config,
     pub rules: Vec<Rule>,
     pub metrics_enabled: bool,
@@ -233,6 +237,7 @@ impl Default for Config {
             maintenance_interval_secs: 30,
             l4_config: L4Config::default(),
             l7_config: L7Config::default(),
+            gateway_config: GatewayConfig::default(),
             http3_config: Http3Config::default(),
             rules: vec![],
             metrics_enabled: true,
@@ -446,6 +451,11 @@ impl Config {
             normalize_notification_level(&self.console_settings.notification_level);
         self.console_settings.retain_days = self.console_settings.retain_days.clamp(1, 365);
         self.console_settings.notes = self.console_settings.notes.trim().to_string();
+        self.gateway_config.https_listen_addr =
+            self.gateway_config.https_listen_addr.trim().to_string();
+        if self.gateway_config.default_certificate_id == Some(0) {
+            self.gateway_config.default_certificate_id = None;
+        }
 
         self.integrations.safeline.base_url =
             normalize_base_url(&self.integrations.safeline.base_url);

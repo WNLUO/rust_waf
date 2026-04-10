@@ -416,7 +416,10 @@ pub async fn pull_site(
     let local_certificate_id = if let Some(cert_id) = remote_site.cert_id {
         let cert_id_text = cert_id.to_string();
         let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
-        if let Some(certificate) = remote_certificates.iter().find(|item| item.id == cert_id_text) {
+        if let Some(certificate) = remote_certificates
+            .iter()
+            .find(|item| item.id == cert_id_text)
+        {
             let detail = crate::integrations::safeline::load_certificate(config, &certificate.id)
                 .await
                 .ok();
@@ -434,7 +437,8 @@ pub async fn pull_site(
         None
     };
 
-    let site_upsert = local_site_upsert_from_remote(&remote_site, local_certificate_id, sync_mode, now);
+    let site_upsert =
+        local_site_upsert_from_remote(&remote_site, local_certificate_id, sync_mode, now);
     let existing_local_site = existing_link.as_ref().and_then(|link| {
         local_sites
             .iter()
@@ -913,7 +917,9 @@ fn site_matches_remote(local_site: &LocalSiteEntry, remote_site: &SafeLineSiteSu
 
     remote_hosts.iter().any(|remote_host| {
         remote_host == &local_site.primary_hostname
-            || local_hosts.iter().any(|local_host| local_host == remote_host)
+            || local_hosts
+                .iter()
+                .any(|local_host| local_host == remote_host)
     })
 }
 

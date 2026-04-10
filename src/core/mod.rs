@@ -1,7 +1,9 @@
 pub mod engine;
+pub mod gateway;
 pub mod packet;
 
 use crate::config::Config;
+use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
 use crate::l7::L7Inspector;
 use crate::metrics::MetricsCollector;
@@ -43,6 +45,7 @@ pub struct WafContext {
     pub rule_engine: RwLock<Option<RuleEngine>>,
     pub metrics: Option<MetricsCollector>,
     pub sqlite_store: Option<Arc<SqliteStore>>,
+    pub gateway_runtime: GatewayRuntime,
     upstream_health: RwLock<UpstreamHealthSnapshot>,
     http3_runtime: RwLock<Http3RuntimeSnapshot>,
     rule_count: AtomicU64,
@@ -71,6 +74,7 @@ impl WafContext {
         };
         let (rule_engine, rule_count, rule_version) =
             load_rule_engine_state(&config, sqlite_store.as_deref()).await?;
+        let gateway_runtime = GatewayRuntime::load(&config, sqlite_store.as_deref()).await?;
 
         Ok(Self {
             l4_inspector: l4_enabled.then(|| {
@@ -90,6 +94,7 @@ impl WafContext {
             rule_engine: RwLock::new(rule_engine),
             metrics,
             sqlite_store,
+            gateway_runtime,
             upstream_health: RwLock::new(UpstreamHealthSnapshot {
                 healthy: true,
                 last_check_at: None,

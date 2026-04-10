@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { LayoutDashboard, Shield, ListFilter, Ban, Activity, Cpu } from 'lucide-vue-next'
+import { LayoutDashboard, Shield, ListFilter, Ban, Activity, Cpu, Settings } from 'lucide-vue-next'
 
 const navItems = [
   { name: '总览', path: '/admin', icon: LayoutDashboard },
   { name: '规则中心', path: '/admin/rules', icon: Shield },
   { name: '事件记录', path: '/admin/events', icon: Activity },
   { name: '封禁名单', path: '/admin/blocked', icon: Ban },
+  { name: '系统设置', path: '/admin/settings', icon: Settings },
 ]
 </script>
 
@@ -41,11 +42,6 @@ const navItems = [
       </nav>
 
       <div class="space-y-4 border-t border-cyber-border/70 px-6 py-6">
-        <div class="rounded-[24px] bg-cyber-surface-strong p-4">
-          <p class="text-xs tracking-[0.18em] text-cyber-muted">当前界面</p>
-          <p class="mt-2 text-lg font-semibold text-stone-900">边界防护工作台</p>
-          <p class="mt-2 text-sm leading-6 text-stone-700">适合在值班、排障和规则调整时持续打开。</p>
-        </div>
         <RouterLink to="/" class="flex items-center gap-2 text-sm text-cyber-muted transition-colors hover:text-cyber-accent-strong">
           <ListFilter :size="14" />
           <span>返回首页</span>
@@ -61,12 +57,6 @@ const navItems = [
         </div>
 
         <div class="flex flex-wrap items-center gap-4 md:gap-6">
-          <div class="flex flex-col items-start md:items-end">
-            <span class="text-xs tracking-[0.18em] text-cyber-muted">界面节奏</span>
-            <div class="mt-2 h-2 w-28 overflow-hidden rounded-full bg-cyber-border/70">
-              <div class="h-full w-[68%] rounded-full bg-gradient-to-r from-cyber-accent to-cyber-success"></div>
-            </div>
-          </div>
           <slot name="header-extra"></slot>
         </div>
       </header>

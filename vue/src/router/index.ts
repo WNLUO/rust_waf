@@ -1,6 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from '../pages/HomePage.vue'
 import AdminPage from '../pages/AdminPage.vue'
+import AdminRulesPage from '../pages/AdminRulesPage.vue'
+import AdminEventsPage from '../pages/AdminEventsPage.vue'
+import AdminBlockedPage from '../pages/AdminBlockedPage.vue'
+import AdminSettingsPage from '../pages/AdminSettingsPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -18,17 +22,22 @@ const router = createRouter({
     {
       path: '/admin/rules',
       name: 'admin-rules',
-      component: AdminPage,
+      component: AdminRulesPage,
     },
     {
       path: '/admin/events',
       name: 'admin-events',
-      component: AdminPage,
+      component: AdminEventsPage,
     },
     {
       path: '/admin/blocked',
       name: 'admin-blocked',
-      component: AdminPage,
+      component: AdminBlockedPage,
+    },
+    {
+      path: '/admin/settings',
+      name: 'admin-settings',
+      component: AdminSettingsPage,
     },
   ],
   scrollBehavior() {

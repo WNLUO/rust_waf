@@ -162,16 +162,55 @@ impl WafEngine {
         }
 
         #[cfg(feature = "http3")]
-        if let Some(endpoint) = build_http3_endpoint(&self.context.config.http3_config)? {
-            let addr = endpoint.local_addr()?;
-            quic_listener = Some((addr, endpoint));
+        {
+            if let Some(endpoint) = build_http3_endpoint(&self.context.config.http3_config)? {
+                let addr = endpoint.local_addr()?;
+                self.context.set_http3_runtime(
+                    "running",
+                    true,
+                    Some(addr.to_string()),
+                    None,
+                );
+                quic_listener = Some((addr, endpoint));
+            } else {
+                let config = &self.context.config.http3_config;
+                let (status, last_error) = if !config.enabled {
+                    ("disabled".to_string(), None)
+                } else if !config.enable_tls13 {
+                    (
+                        "degraded".to_string(),
+                        Some("HTTP/3 requires TLS 1.3".to_string()),
+                    )
+                } else if config.certificate_path.is_none() || config.private_key_path.is_none() {
+                    (
+                        "degraded".to_string(),
+                        Some("certificate_path/private_key_path are missing".to_string()),
+                    )
+                } else {
+                    (
+                        "pending".to_string(),
+                        Some("HTTP/3 listener was not started".to_string()),
+                    )
+                };
+                self.context
+                    .set_http3_runtime(status, false, None, last_error);
+            }
         }
 
         #[cfg(not(feature = "http3"))]
         if self.context.config.http3_config.enabled {
+            self.context.set_http3_runtime(
+                "unsupported",
+                false,
+                None,
+                Some("Binary was built without the 'http3' feature".to_string()),
+            );
             warn!(
                 "HTTP/3 support was requested but the binary was built without the 'http3' feature"
             );
+        } else {
+            self.context
+                .set_http3_runtime("disabled", false, None, None);
         }
 
         #[cfg(feature = "http3")]

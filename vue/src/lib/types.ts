@@ -261,6 +261,15 @@ export interface L7ConfigPayload {
   upstream_endpoint: string
   http3_enabled: boolean
   http3_listen_addr: string
+  http3_max_concurrent_streams: number
+  http3_idle_timeout_secs: number
+  http3_mtu: number
+  http3_max_frame_size: number
+  http3_enable_connection_migration: boolean
+  http3_qpack_table_size: number
+  http3_certificate_path: string
+  http3_private_key_path: string
+  http3_enable_tls13: boolean
 }
 
 export interface L7StatsPayload {
@@ -274,6 +283,15 @@ export interface L7StatsPayload {
   upstream_healthy: boolean
   upstream_last_check_at: number | null
   upstream_last_error: string | null
+  http3_feature_available: boolean
+  http3_configured_enabled: boolean
+  http3_tls13_enabled: boolean
+  http3_certificate_configured: boolean
+  http3_private_key_configured: boolean
+  http3_listener_started: boolean
+  http3_listener_addr: string | null
+  http3_status: string
+  http3_last_error: string | null
 }
 
 export interface SafeLineTestResponse {

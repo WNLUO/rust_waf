@@ -23,6 +23,19 @@ pub struct UpstreamHealthSnapshot {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Http3RuntimeSnapshot {
+    pub feature_available: bool,
+    pub configured_enabled: bool,
+    pub tls13_enabled: bool,
+    pub certificate_configured: bool,
+    pub private_key_configured: bool,
+    pub listener_started: bool,
+    pub listener_addr: Option<String>,
+    pub status: String,
+    pub last_error: Option<String>,
+}
+
 pub struct WafContext {
     pub config: Config,
     pub l4_inspector: Option<L4Inspector>,
@@ -31,6 +44,7 @@ pub struct WafContext {
     pub metrics: Option<MetricsCollector>,
     pub sqlite_store: Option<Arc<SqliteStore>>,
     upstream_health: RwLock<UpstreamHealthSnapshot>,
+    http3_runtime: RwLock<Http3RuntimeSnapshot>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -81,6 +95,21 @@ impl WafContext {
                 last_check_at: None,
                 last_error: None,
             }),
+            http3_runtime: RwLock::new(Http3RuntimeSnapshot {
+                feature_available: cfg!(feature = "http3"),
+                configured_enabled: config.http3_config.enabled,
+                tls13_enabled: config.http3_config.enable_tls13,
+                certificate_configured: config.http3_config.certificate_path.is_some(),
+                private_key_configured: config.http3_config.private_key_path.is_some(),
+                listener_started: false,
+                listener_addr: None,
+                status: if config.http3_config.enabled {
+                    "pending".to_string()
+                } else {
+                    "disabled".to_string()
+                },
+                last_error: None,
+            }),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -106,6 +135,35 @@ impl WafContext {
         guard.healthy = healthy;
         guard.last_error = last_error;
         guard.last_check_at = Some(unix_timestamp());
+    }
+
+    pub fn http3_runtime_snapshot(&self) -> Http3RuntimeSnapshot {
+        self.http3_runtime
+            .read()
+            .expect("http3_runtime lock poisoned")
+            .clone()
+    }
+
+    pub fn set_http3_runtime(
+        &self,
+        status: impl Into<String>,
+        listener_started: bool,
+        listener_addr: Option<String>,
+        last_error: Option<String>,
+    ) {
+        let mut guard = self
+            .http3_runtime
+            .write()
+            .expect("http3_runtime lock poisoned");
+        guard.feature_available = cfg!(feature = "http3");
+        guard.configured_enabled = self.config.http3_config.enabled;
+        guard.tls13_enabled = self.config.http3_config.enable_tls13;
+        guard.certificate_configured = self.config.http3_config.certificate_path.is_some();
+        guard.private_key_configured = self.config.http3_config.private_key_path.is_some();
+        guard.listener_started = listener_started;
+        guard.listener_addr = listener_addr;
+        guard.status = status.into();
+        guard.last_error = last_error;
     }
 
     pub async fn refresh_rules_from_storage(&self) -> Result<bool> {

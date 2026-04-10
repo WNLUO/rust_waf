@@ -1,4 +1,4 @@
-use crate::config::{Config, L4Config, Rule, RuntimeProfile, SafeLineConfig};
+use crate::config::{Config, Http3Config, L4Config, Rule, RuntimeProfile, SafeLineConfig};
 use crate::core::WafContext;
 use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
 use axum::{
@@ -84,6 +84,15 @@ pub struct L7ConfigResponse {
     upstream_endpoint: String,
     http3_enabled: bool,
     http3_listen_addr: String,
+    http3_max_concurrent_streams: usize,
+    http3_idle_timeout_secs: u64,
+    http3_mtu: usize,
+    http3_max_frame_size: usize,
+    http3_enable_connection_migration: bool,
+    http3_qpack_table_size: usize,
+    http3_certificate_path: String,
+    http3_private_key_path: String,
+    http3_enable_tls13: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +145,7 @@ pub struct L4ConfigUpdateRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct L7ConfigUpdateRequest {
+    runtime_profile: String,
     http_inspection_enabled: bool,
     max_request_size: usize,
     real_ip_headers: Vec<String>,
@@ -156,6 +166,21 @@ pub struct L7ConfigUpdateRequest {
     http2_max_frame_size: usize,
     http2_enable_priorities: bool,
     http2_initial_window_size: u32,
+    bloom_enabled: bool,
+    bloom_false_positive_verification: bool,
+    listen_addrs: Vec<String>,
+    upstream_endpoint: String,
+    http3_enabled: bool,
+    http3_listen_addr: String,
+    http3_max_concurrent_streams: usize,
+    http3_idle_timeout_secs: u64,
+    http3_mtu: usize,
+    http3_max_frame_size: usize,
+    http3_enable_connection_migration: bool,
+    http3_qpack_table_size: usize,
+    http3_certificate_path: String,
+    http3_private_key_path: String,
+    http3_enable_tls13: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -350,6 +375,15 @@ pub struct L7StatsResponse {
     upstream_healthy: bool,
     upstream_last_check_at: Option<i64>,
     upstream_last_error: Option<String>,
+    http3_feature_available: bool,
+    http3_configured_enabled: bool,
+    http3_tls13_enabled: bool,
+    http3_certificate_configured: bool,
+    http3_private_key_configured: bool,
+    http3_listener_started: bool,
+    http3_listener_addr: Option<String>,
+    http3_status: String,
+    http3_last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1225,6 +1259,23 @@ impl L7ConfigResponse {
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             http3_enabled: config.http3_config.enabled,
             http3_listen_addr: config.http3_config.listen_addr.clone(),
+            http3_max_concurrent_streams: config.http3_config.max_concurrent_streams,
+            http3_idle_timeout_secs: config.http3_config.idle_timeout_secs,
+            http3_mtu: config.http3_config.mtu,
+            http3_max_frame_size: config.http3_config.max_frame_size,
+            http3_enable_connection_migration: config.http3_config.enable_connection_migration,
+            http3_qpack_table_size: config.http3_config.qpack_table_size,
+            http3_certificate_path: config
+                .http3_config
+                .certificate_path
+                .clone()
+                .unwrap_or_default(),
+            http3_private_key_path: config
+                .http3_config
+                .private_key_path
+                .clone()
+                .unwrap_or_default(),
+            http3_enable_tls13: config.http3_config.enable_tls13,
         }
     }
 }
@@ -1272,6 +1323,53 @@ impl L4ConfigUpdateRequest {
 
 impl L7ConfigUpdateRequest {
     fn into_config(self, mut current: Config) -> Result<Config, String> {
+        current.runtime_profile = match self.runtime_profile.as_str() {
+            "minimal" => RuntimeProfile::Minimal,
+            "standard" => RuntimeProfile::Standard,
+            _ => return Err("运行档位仅支持 minimal 或 standard".to_string()),
+        };
+
+        let listen_addrs = self
+            .listen_addrs
+            .into_iter()
+            .map(|addr| addr.trim().to_string())
+            .filter(|addr| !addr.is_empty())
+            .collect::<Vec<_>>();
+        if listen_addrs.is_empty() {
+            return Err("至少需要保留一个监听地址".to_string());
+        }
+        for addr in &listen_addrs {
+            addr.parse::<SocketAddr>()
+                .map_err(|err| format!("监听地址 '{}' 无效: {}", addr, err))?;
+        }
+
+        let upstream_endpoint = self.upstream_endpoint.trim().to_string();
+        if !upstream_endpoint.is_empty() {
+            upstream_endpoint
+                .parse::<SocketAddr>()
+                .map_err(|err| format!("上游地址 '{}' 无效: {}", upstream_endpoint, err))?;
+        }
+
+        let http3_listen_addr = self.http3_listen_addr.trim().to_string();
+        http3_listen_addr
+            .parse::<SocketAddr>()
+            .map_err(|err| format!("HTTP/3 监听地址 '{}' 无效: {}", http3_listen_addr, err))?;
+
+        let http3_config = Http3Config {
+            enabled: self.http3_enabled,
+            listen_addr: http3_listen_addr,
+            max_concurrent_streams: self.http3_max_concurrent_streams,
+            idle_timeout_secs: self.http3_idle_timeout_secs,
+            mtu: self.http3_mtu,
+            max_frame_size: self.http3_max_frame_size,
+            enable_connection_migration: self.http3_enable_connection_migration,
+            qpack_table_size: self.http3_qpack_table_size,
+            certificate_path: non_empty_string(self.http3_certificate_path),
+            private_key_path: non_empty_string(self.http3_private_key_path),
+            enable_tls13: self.http3_enable_tls13,
+        };
+        http3_config.validate()?;
+
         current.l7_config.http_inspection_enabled = self.http_inspection_enabled;
         current.l7_config.max_request_size = self.max_request_size;
         current.l7_config.real_ip_headers = self.real_ip_headers;
@@ -1299,6 +1397,11 @@ impl L7ConfigUpdateRequest {
         current.l7_config.http2_config.max_frame_size = self.http2_max_frame_size;
         current.l7_config.http2_config.enable_priorities = self.http2_enable_priorities;
         current.l7_config.http2_config.initial_window_size = self.http2_initial_window_size;
+        current.bloom_enabled = self.bloom_enabled;
+        current.l7_bloom_false_positive_verification = self.bloom_false_positive_verification;
+        current.listen_addrs = listen_addrs;
+        current.tcp_upstream_addr = non_empty_string(upstream_endpoint);
+        current.http3_config = http3_config;
 
         Ok(current.normalized())
     }
@@ -1426,6 +1529,7 @@ impl L7StatsResponse {
     fn from_context(context: &WafContext) -> Self {
         let metrics = context.metrics_snapshot();
         let upstream = context.upstream_health_snapshot();
+        let http3 = context.http3_runtime_snapshot();
 
         Self {
             enabled: context.l7_inspector.is_some(),
@@ -1450,6 +1554,15 @@ impl L7StatsResponse {
             upstream_healthy: upstream.healthy,
             upstream_last_check_at: upstream.last_check_at,
             upstream_last_error: upstream.last_error,
+            http3_feature_available: http3.feature_available,
+            http3_configured_enabled: http3.configured_enabled,
+            http3_tls13_enabled: http3.tls13_enabled,
+            http3_certificate_configured: http3.certificate_configured,
+            http3_private_key_configured: http3.private_key_configured,
+            http3_listener_started: http3.listener_started,
+            http3_listener_addr: http3.listener_addr,
+            http3_status: http3.status,
+            http3_last_error: http3.last_error,
         }
     }
 }

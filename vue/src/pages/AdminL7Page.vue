@@ -21,7 +21,6 @@ import type {
 } from '../lib/types'
 import {
   Activity,
-  AlertTriangle,
   ArrowUpRight,
   RefreshCw,
   Save,
@@ -31,14 +30,7 @@ import {
 
 type L7ConfigForm = Omit<
   L7ConfigPayload,
-  | 'runtime_enabled'
-  | 'bloom_enabled'
-  | 'bloom_false_positive_verification'
-  | 'runtime_profile'
-  | 'listen_addrs'
-  | 'upstream_endpoint'
-  | 'http3_enabled'
-  | 'http3_listen_addr'
+  'runtime_enabled'
 >
 
 const { actionLabel, formatLatency, formatNumber, formatTimestamp } = useFormatters()
@@ -55,16 +47,10 @@ const statsTimer = ref<number | null>(null)
 const lastUpdated = ref<number | null>(null)
 const meta = ref({
   runtime_enabled: false,
-  bloom_enabled: false,
-  bloom_false_positive_verification: false,
-  runtime_profile: 'minimal',
-  listen_addrs: [] as string[],
-  upstream_endpoint: '',
-  http3_enabled: false,
-  http3_listen_addr: '',
 })
 
 const configForm = reactive<L7ConfigForm>({
+  runtime_profile: 'minimal',
   http_inspection_enabled: true,
   max_request_size: 8192,
   real_ip_headers: [],
@@ -85,6 +71,21 @@ const configForm = reactive<L7ConfigForm>({
   http2_max_frame_size: 16384,
   http2_enable_priorities: true,
   http2_initial_window_size: 65535,
+  bloom_enabled: false,
+  bloom_false_positive_verification: false,
+  listen_addrs: ['0.0.0.0:8080'],
+  upstream_endpoint: '',
+  http3_enabled: false,
+  http3_listen_addr: '0.0.0.0:8443',
+  http3_max_concurrent_streams: 100,
+  http3_idle_timeout_secs: 300,
+  http3_mtu: 1350,
+  http3_max_frame_size: 65536,
+  http3_enable_connection_migration: true,
+  http3_qpack_table_size: 4096,
+  http3_certificate_path: '',
+  http3_private_key_path: '',
+  http3_enable_tls13: true,
 })
 
 const numberInputClass =
@@ -105,6 +106,7 @@ const clampFloat = (value: number, min: number, max: number, fallback: number) =
 
 const applyConfig = (payload: L7ConfigPayload) => {
   configForm.http_inspection_enabled = payload.http_inspection_enabled
+  configForm.runtime_profile = payload.runtime_profile
   configForm.max_request_size = payload.max_request_size
   configForm.real_ip_headers = [...payload.real_ip_headers]
   configForm.trusted_proxy_cidrs = [...payload.trusted_proxy_cidrs]
@@ -124,16 +126,24 @@ const applyConfig = (payload: L7ConfigPayload) => {
   configForm.http2_max_frame_size = payload.http2_max_frame_size
   configForm.http2_enable_priorities = payload.http2_enable_priorities
   configForm.http2_initial_window_size = payload.http2_initial_window_size
+  configForm.bloom_enabled = payload.bloom_enabled
+  configForm.bloom_false_positive_verification = payload.bloom_false_positive_verification
+  configForm.listen_addrs = [...payload.listen_addrs]
+  configForm.upstream_endpoint = payload.upstream_endpoint
+  configForm.http3_enabled = payload.http3_enabled
+  configForm.http3_listen_addr = payload.http3_listen_addr
+  configForm.http3_max_concurrent_streams = payload.http3_max_concurrent_streams
+  configForm.http3_idle_timeout_secs = payload.http3_idle_timeout_secs
+  configForm.http3_mtu = payload.http3_mtu
+  configForm.http3_max_frame_size = payload.http3_max_frame_size
+  configForm.http3_enable_connection_migration = payload.http3_enable_connection_migration
+  configForm.http3_qpack_table_size = payload.http3_qpack_table_size
+  configForm.http3_certificate_path = payload.http3_certificate_path
+  configForm.http3_private_key_path = payload.http3_private_key_path
+  configForm.http3_enable_tls13 = payload.http3_enable_tls13
 
   meta.value = {
     runtime_enabled: payload.runtime_enabled,
-    bloom_enabled: payload.bloom_enabled,
-    bloom_false_positive_verification: payload.bloom_false_positive_verification,
-    runtime_profile: payload.runtime_profile,
-    listen_addrs: [...payload.listen_addrs],
-    upstream_endpoint: payload.upstream_endpoint,
-    http3_enabled: payload.http3_enabled,
-    http3_listen_addr: payload.http3_listen_addr,
   }
 }
 
@@ -196,6 +206,14 @@ const saveConfig = async () => {
     configForm.http2_max_concurrent_streams = clampInteger(configForm.http2_max_concurrent_streams, 1, 10_000, 100)
     configForm.http2_max_frame_size = clampInteger(configForm.http2_max_frame_size, 1024, 16_777_216, 16384)
     configForm.http2_initial_window_size = clampInteger(configForm.http2_initial_window_size, 1024, 16_777_216, 65535)
+    configForm.http3_max_concurrent_streams = clampInteger(configForm.http3_max_concurrent_streams, 1, 1000, 100)
+    configForm.http3_idle_timeout_secs = clampInteger(configForm.http3_idle_timeout_secs, 1, 86_400, 300)
+    configForm.http3_mtu = clampInteger(configForm.http3_mtu, 1200, 1500, 1350)
+    configForm.http3_max_frame_size = clampInteger(configForm.http3_max_frame_size, 65536, 16_777_215, 65536)
+    configForm.http3_qpack_table_size = clampInteger(configForm.http3_qpack_table_size, 1024, 65536, 4096)
+    if (!configForm.bloom_enabled) {
+      configForm.bloom_false_positive_verification = false
+    }
 
     const response = await updateL7Config({ ...configForm })
     successMessage.value = response.message
@@ -227,6 +245,16 @@ const trustedProxyCidrsText = computed({
   },
 })
 
+const listenAddrsText = computed({
+  get: () => configForm.listen_addrs.join('\n'),
+  set: (value: string) => {
+    configForm.listen_addrs = value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  },
+})
+
 const l7Rules = computed(() => rules.value.filter((rule) => rule.layer === 'l7'))
 const enabledL7Rules = computed(() => l7Rules.value.filter((rule) => rule.enabled).length)
 const blockL7Rules = computed(() => l7Rules.value.filter((rule) => rule.action === 'block').length)
@@ -245,7 +273,7 @@ const lastUpdatedLabel = computed(() => {
 })
 const runtimeStatus = computed(() => stats.value?.enabled ?? meta.value.runtime_enabled)
 const runtimeProfileLabel = computed(() =>
-  meta.value.runtime_profile === 'standard' ? 'standard' : 'minimal',
+  configForm.runtime_profile === 'standard' ? 'standard' : 'minimal',
 )
 const upstreamStatusText = computed(() =>
   stats.value?.upstream_healthy ? '健康' : '异常',
@@ -256,10 +284,25 @@ const upstreamStatusType = computed(() =>
 const failureModeLabel = computed(() =>
   configForm.upstream_failure_mode === 'fail_close' ? '故障关闭' : '故障放行',
 )
+const http3StatusLabel = computed(() => {
+  const status = stats.value?.http3_status || 'unknown'
+  if (status === 'running') return '运行中'
+  if (status === 'degraded') return '未就绪'
+  if (status === 'unsupported') return '未编译支持'
+  if (status === 'disabled') return '已关闭'
+  return '待初始化'
+})
+const http3StatusType = computed(() => {
+  const status = stats.value?.http3_status || 'unknown'
+  if (status === 'running') return 'success'
+  if (status === 'disabled') return 'muted'
+  if (status === 'unsupported') return 'warning'
+  return 'error'
+})
 const protocolTags = computed(() => [
   { text: 'HTTP/1.1 常驻', type: 'info' as const },
   { text: configForm.http2_enabled ? 'HTTP/2 已启用' : 'HTTP/2 未启用', type: configForm.http2_enabled ? ('success' as const) : ('muted' as const) },
-  { text: meta.value.http3_enabled ? 'HTTP/3 已启用' : 'HTTP/3 未启用', type: meta.value.http3_enabled ? ('success' as const) : ('muted' as const) },
+  { text: configForm.http3_enabled ? 'HTTP/3 已启用' : 'HTTP/3 未启用', type: configForm.http3_enabled ? ('success' as const) : ('muted' as const) },
 ])
 
 onMounted(async () => {
@@ -320,28 +363,14 @@ onBeforeUnmount(() => {
           <div class="flex flex-wrap gap-3">
             <StatusBadge :text="runtimeStatus ? '运行中' : '未启用'" :type="runtimeStatus ? 'success' : 'warning'" />
             <StatusBadge :text="`配置档位 ${runtimeProfileLabel}`" type="info" />
-            <StatusBadge :text="meta.bloom_enabled ? 'Bloom 已启用' : 'Bloom 未启用'" :type="meta.bloom_enabled ? 'info' : 'muted'" />
+            <StatusBadge :text="configForm.bloom_enabled ? 'Bloom 已启用' : 'Bloom 未启用'" :type="configForm.bloom_enabled ? 'info' : 'muted'" />
             <StatusBadge
-              :text="meta.bloom_false_positive_verification ? '误判校验开启' : '误判校验关闭'"
-              :type="meta.bloom_false_positive_verification ? 'success' : 'muted'"
+              :text="configForm.bloom_false_positive_verification ? '误判校验开启' : '误判校验关闭'"
+              :type="configForm.bloom_false_positive_verification ? 'success' : 'muted'"
             />
           </div>
         </div>
       </section>
-
-      <div
-        class="rounded-[26px] border border-amber-300/60 bg-amber-50/90 px-5 py-4 text-sm text-amber-900 shadow-[0_18px_38px_rgba(180,120,20,0.08)]"
-      >
-        <div class="flex items-start gap-3">
-          <AlertTriangle class="mt-0.5 shrink-0 text-amber-600" :size="18" />
-          <div class="space-y-1">
-            <p class="font-semibold">当前页面优先提供运行态与配置态管理。</p>
-            <p>
-              七层规则已可在规则中心维护，但后端的专用 L7 规则执行链路仍在继续完善，因此这里先把规则状态作为摘要展示，避免误导成“已完全闭环”。
-            </p>
-          </div>
-        </div>
-      </div>
 
       <div
         v-if="error"
@@ -401,14 +430,14 @@ onBeforeUnmount(() => {
               <div class="rounded-[22px] bg-cyber-surface-strong p-4">
                 <p class="text-xs tracking-[0.18em] text-cyber-muted">监听地址</p>
                 <div class="mt-3 space-y-2 text-sm text-stone-800">
-                  <p v-for="addr in meta.listen_addrs" :key="addr">{{ addr }}</p>
-                  <p v-if="!meta.listen_addrs.length" class="text-cyber-muted">暂无监听入口</p>
+                  <p v-for="addr in configForm.listen_addrs" :key="addr">{{ addr }}</p>
+                  <p v-if="!configForm.listen_addrs.length" class="text-cyber-muted">暂无监听入口</p>
                 </div>
               </div>
               <div class="rounded-[22px] bg-cyber-surface-strong p-4">
                 <p class="text-xs tracking-[0.18em] text-cyber-muted">HTTP/3 监听</p>
                 <p class="mt-3 text-sm text-stone-800">
-                  {{ meta.http3_enabled ? meta.http3_listen_addr || '已启用' : '未启用 HTTP/3' }}
+                  {{ configForm.http3_enabled ? configForm.http3_listen_addr || '已启用' : '未启用 HTTP/3' }}
                 </p>
               </div>
             </div>
@@ -441,7 +470,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="rounded-[22px] bg-cyber-surface-strong p-4">
               <p class="text-xs tracking-[0.18em] text-cyber-muted">TCP 上游</p>
-              <p class="mt-3 text-sm text-stone-800">{{ meta.upstream_endpoint || '未配置上游转发地址' }}</p>
+              <p class="mt-3 text-sm text-stone-800">{{ configForm.upstream_endpoint || '未配置上游转发地址' }}</p>
             </div>
             <div class="grid gap-3 md:grid-cols-2">
               <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
@@ -465,6 +494,73 @@ onBeforeUnmount(() => {
               <p v-if="stats?.upstream_last_error" class="mt-2 text-sm text-cyber-error">
                 最近错误：{{ stats.upstream_last_error }}
               </p>
+            </div>
+          </div>
+        </CyberCard>
+      </section>
+
+      <section class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <CyberCard title="HTTP/3 运行状态" sub-title="编译能力、证书就绪度与监听启动结果">
+          <div class="space-y-5">
+            <div class="flex flex-wrap gap-3">
+              <StatusBadge :text="`状态 ${http3StatusLabel}`" :type="http3StatusType" />
+              <StatusBadge :text="stats?.http3_feature_available ? '已编译 HTTP/3' : '未编译 HTTP/3'" :type="stats?.http3_feature_available ? 'info' : 'warning'" />
+              <StatusBadge :text="stats?.http3_listener_started ? '监听已启动' : '监听未启动'" :type="stats?.http3_listener_started ? 'success' : 'muted'" />
+            </div>
+
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+                <p class="text-xs tracking-[0.18em] text-cyber-muted">配置启用</p>
+                <p class="mt-3 text-2xl font-semibold text-stone-900">{{ stats?.http3_configured_enabled ? '是' : '否' }}</p>
+              </div>
+              <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+                <p class="text-xs tracking-[0.18em] text-cyber-muted">TLS 1.3</p>
+                <p class="mt-3 text-2xl font-semibold text-stone-900">{{ stats?.http3_tls13_enabled ? '开启' : '关闭' }}</p>
+              </div>
+              <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+                <p class="text-xs tracking-[0.18em] text-cyber-muted">证书路径</p>
+                <p class="mt-3 text-2xl font-semibold text-stone-900">{{ stats?.http3_certificate_configured ? '已配置' : '缺失' }}</p>
+              </div>
+              <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+                <p class="text-xs tracking-[0.18em] text-cyber-muted">私钥路径</p>
+                <p class="mt-3 text-2xl font-semibold text-stone-900">{{ stats?.http3_private_key_configured ? '已配置' : '缺失' }}</p>
+              </div>
+            </div>
+
+            <div class="grid gap-3 md:grid-cols-2">
+              <div class="rounded-[22px] bg-cyber-surface-strong p-4">
+                <p class="text-xs tracking-[0.18em] text-cyber-muted">监听结果</p>
+                <p class="mt-3 text-sm text-stone-800">
+                  {{ stats?.http3_listener_started ? (stats?.http3_listener_addr || '监听已启动') : '当前未启动 HTTP/3 监听器' }}
+                </p>
+              </div>
+              <div class="rounded-[22px] bg-cyber-surface-strong p-4">
+                <p class="text-xs tracking-[0.18em] text-cyber-muted">启动诊断</p>
+                <p class="mt-3 text-sm leading-7 text-stone-800">
+                  {{ stats?.http3_last_error || '没有诊断错误，当前状态允许启动 HTTP/3。' }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </CyberCard>
+
+        <CyberCard title="HTTP/3 当前配置摘要" sub-title="便于值班时快速对照配置与运行结果">
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+              <p class="text-xs tracking-[0.18em] text-cyber-muted">监听地址</p>
+              <p class="mt-3 text-sm text-stone-800">{{ configForm.http3_listen_addr }}</p>
+            </div>
+            <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+              <p class="text-xs tracking-[0.18em] text-cyber-muted">最大并发流</p>
+              <p class="mt-3 text-sm text-stone-800">{{ formatNumber(configForm.http3_max_concurrent_streams) }}</p>
+            </div>
+            <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+              <p class="text-xs tracking-[0.18em] text-cyber-muted">空闲超时</p>
+              <p class="mt-3 text-sm text-stone-800">{{ formatNumber(configForm.http3_idle_timeout_secs) }} 秒</p>
+            </div>
+            <div class="rounded-[22px] border border-cyber-border/60 bg-white/80 p-4">
+              <p class="text-xs tracking-[0.18em] text-cyber-muted">MTU / QPACK</p>
+              <p class="mt-3 text-sm text-stone-800">{{ formatNumber(configForm.http3_mtu) }} / {{ formatNumber(configForm.http3_qpack_table_size) }}</p>
             </div>
           </div>
         </CyberCard>
@@ -499,11 +595,40 @@ onBeforeUnmount(() => {
           </label>
           <label class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong px-4 py-4 text-sm text-stone-800">
             <span class="flex items-center justify-between gap-3">
+              <span class="font-medium">启用 Bloom</span>
+              <input v-model="configForm.bloom_enabled" type="checkbox" class="h-4 w-4 accent-[var(--color-cyber-accent)]" />
+            </span>
+            <span class="mt-2 block text-xs leading-6 text-cyber-muted">控制全局 Bloom 过滤能力，关闭后误判校验也会随之失效。</span>
+          </label>
+          <label class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong px-4 py-4 text-sm text-stone-800">
+            <span class="flex items-center justify-between gap-3">
               <span class="font-medium">启用上游健康检查</span>
               <input v-model="configForm.upstream_healthcheck_enabled" type="checkbox" class="h-4 w-4 accent-[var(--color-cyber-accent)]" />
             </span>
             <span class="mt-2 block text-xs leading-6 text-cyber-muted">关闭后故障状态仅来自实时代理结果，不再主动探测。</span>
           </label>
+          <label class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong px-4 py-4 text-sm text-stone-800">
+            <span class="flex items-center justify-between gap-3">
+              <span class="font-medium">启用 Bloom 误判校验</span>
+              <input v-model="configForm.bloom_false_positive_verification" type="checkbox" class="h-4 w-4 accent-[var(--color-cyber-accent)]" :disabled="!configForm.bloom_enabled" />
+            </span>
+            <span class="mt-2 block text-xs leading-6 text-cyber-muted">启用后会为命中结果追加精确校验，适合误判敏感场景。</span>
+          </label>
+          <label class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong px-4 py-4 text-sm text-stone-800">
+            <span class="flex items-center justify-between gap-3">
+              <span class="font-medium">启用 HTTP/3</span>
+              <input v-model="configForm.http3_enabled" type="checkbox" class="h-4 w-4 accent-[var(--color-cyber-accent)]" />
+            </span>
+            <span class="mt-2 block text-xs leading-6 text-cyber-muted">启用后会尝试监听 QUIC / HTTP/3 入口。</span>
+          </label>
+          <div class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong px-4 py-4 text-sm text-stone-800">
+            <p class="font-medium">运行档位</p>
+            <select v-model="configForm.runtime_profile" class="mt-3 w-full rounded-[16px] border border-cyber-border bg-white px-3 py-2.5 text-sm outline-none transition focus:border-cyber-accent">
+              <option value="minimal">minimal</option>
+              <option value="standard">standard</option>
+            </select>
+            <p class="mt-2 text-xs leading-6 text-cyber-muted">会影响 L7 参数的收敛范围，以及多监听场景下的运行能力。</p>
+          </div>
           <div class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong px-4 py-4 text-sm text-stone-800">
             <p class="font-medium">上游失败模式</p>
             <select v-model="configForm.upstream_failure_mode" class="mt-3 w-full rounded-[16px] border border-cyber-border bg-white px-3 py-2.5 text-sm outline-none transition focus:border-cyber-accent">
@@ -515,6 +640,14 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <label class="text-sm text-stone-700 md:col-span-2">
+            监听地址
+            <textarea v-model="listenAddrsText" :class="listFieldClass" placeholder="每行一个，例如 0.0.0.0:8080" />
+          </label>
+          <label class="text-sm text-stone-700 md:col-span-2">
+            TCP 上游地址
+            <input v-model="configForm.upstream_endpoint" type="text" placeholder="例如 127.0.0.1:9000" :class="numberInputClass" />
+          </label>
           <label class="text-sm text-stone-700">
             最大请求体大小
             <input v-model.number="configForm.max_request_size" type="number" min="1024" :class="numberInputClass" />
@@ -585,6 +718,68 @@ onBeforeUnmount(() => {
             可信代理网段
             <textarea v-model="trustedProxyCidrsText" :class="listFieldClass" placeholder="每行一个，例如 203.0.113.0/24" />
           </label>
+        </div>
+
+        <div class="mt-8 border-t border-cyber-border/50 pt-6">
+          <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p class="text-sm tracking-[0.2em] text-cyber-accent-strong">HTTP/3 配置</p>
+              <h4 class="mt-2 text-xl font-semibold text-stone-900">QUIC 与 TLS 1.3 入口参数</h4>
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <StatusBadge :text="configForm.http3_enabled ? 'HTTP/3 已启用' : 'HTTP/3 未启用'" :type="configForm.http3_enabled ? 'success' : 'muted'" />
+              <StatusBadge :text="configForm.http3_enable_tls13 ? 'TLS1.3 开启' : 'TLS1.3 关闭'" :type="configForm.http3_enable_tls13 ? 'info' : 'warning'" />
+            </div>
+          </div>
+
+          <div class="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+            <label class="text-sm text-stone-700 md:col-span-2">
+              HTTP/3 监听地址
+              <input v-model="configForm.http3_listen_addr" type="text" placeholder="例如 0.0.0.0:8443" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700">
+              最大并发流
+              <input v-model.number="configForm.http3_max_concurrent_streams" type="number" min="1" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700">
+              空闲超时(s)
+              <input v-model.number="configForm.http3_idle_timeout_secs" type="number" min="1" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700">
+              MTU
+              <input v-model.number="configForm.http3_mtu" type="number" min="1200" max="1500" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700">
+              最大帧大小
+              <input v-model.number="configForm.http3_max_frame_size" type="number" min="65536" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700">
+              QPACK 表大小
+              <input v-model.number="configForm.http3_qpack_table_size" type="number" min="1024" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700 md:col-span-2">
+              证书路径
+              <input v-model="configForm.http3_certificate_path" type="text" placeholder="例如 /path/to/cert.pem" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700 md:col-span-2">
+              私钥路径
+              <input v-model="configForm.http3_private_key_path" type="text" placeholder="例如 /path/to/key.pem" :class="numberInputClass" />
+            </label>
+            <label class="text-sm text-stone-700">
+              连接迁移支持
+              <span class="mt-2 flex items-center gap-3 rounded-[18px] border border-cyber-border/70 bg-white px-4 py-3">
+                <input v-model="configForm.http3_enable_connection_migration" type="checkbox" class="h-4 w-4 accent-[var(--color-cyber-accent)]" />
+                <span class="text-sm text-stone-800">允许连接迁移</span>
+              </span>
+            </label>
+            <label class="text-sm text-stone-700">
+              TLS 1.3
+              <span class="mt-2 flex items-center gap-3 rounded-[18px] border border-cyber-border/70 bg-white px-4 py-3">
+                <input v-model="configForm.http3_enable_tls13" type="checkbox" class="h-4 w-4 accent-[var(--color-cyber-accent)]" />
+                <span class="text-sm text-stone-800">启用 TLS 1.3</span>
+              </span>
+            </label>
+          </div>
         </div>
       </section>
 

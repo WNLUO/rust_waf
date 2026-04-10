@@ -183,14 +183,7 @@ export function fetchL7Config() {
 export function updateL7Config(
   payload: Omit<
     L7ConfigPayload,
-    | 'runtime_enabled'
-    | 'bloom_enabled'
-    | 'bloom_false_positive_verification'
-    | 'runtime_profile'
-    | 'listen_addrs'
-    | 'upstream_endpoint'
-    | 'http3_enabled'
-    | 'http3_listen_addr'
+    'runtime_enabled'
   >,
 ) {
   return apiRequest<WriteStatusResponse>('/l7/config', {

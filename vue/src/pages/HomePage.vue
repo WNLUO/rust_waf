@@ -1,24 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { ArrowRight, Shield, Orbit, ScanSearch, Waves, Sparkles, Blocks } from 'lucide-vue-next'
-
-const features = [
-  {
-    title: '多层流量治理',
-    desc: '统一处理四层连接和七层请求，让拦截、放行、记录形成同一条决策链。',
-    icon: Shield,
-  },
-  {
-    title: '实时策略编排',
-    desc: '规则可直接在控制台编辑并即时生效，适合快速应对突发攻击与灰度调整。',
-    icon: ScanSearch,
-  },
-  {
-    title: '可观测安全态势',
-    desc: '把封禁来源、事件走势、上游健康和持久化状态集中展示，便于运维联动。',
-    icon: Orbit,
-  },
-]
+import { ArrowRight, Waves, Sparkles } from 'lucide-vue-next'
 
 const highlights = [
   '流量在进入业务前完成识别与分流',
@@ -32,31 +14,6 @@ const highlights = [
     <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyber-accent/20 to-transparent pointer-events-none"></div>
     <div class="absolute inset-x-0 top-24 h-px bg-gradient-to-r from-transparent via-cyber-border/80 to-transparent pointer-events-none"></div>
     <div class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#f3ede5] to-transparent pointer-events-none"></div>
-
-    <header class="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-6 md:px-10">
-      <div class="flex items-center gap-4">
-        <div class="flex h-14 w-14 items-center justify-center rounded-full border border-cyber-accent/20 bg-white">
-          <Blocks :size="24" class="text-cyber-accent-strong" />
-        </div>
-        <div>
-          <p class="font-display text-2xl font-semibold tracking-[0.18em] text-cyber-accent-strong">玄枢防护网关</p>
-          <p class="mt-1 text-sm text-cyber-muted">安全网关总控台</p>
-        </div>
-      </div>
-
-      <nav class="hidden items-center gap-3 md:flex">
-        <a href="#能力概览" class="rounded-full border border-cyber-border/80 px-5 py-2 text-sm text-cyber-muted transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong">
-          能力概览
-        </a>
-        <RouterLink
-          to="/admin"
-          class="inline-flex items-center gap-2 rounded-full bg-cyber-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyber-accent/90"
-        >
-          进入控制台
-          <ArrowRight :size="16" />
-        </RouterLink>
-      </nav>
-    </header>
 
     <main class="relative z-10 mx-auto max-w-7xl px-6 pb-16 md:px-10 md:pb-24">
       <section class="grid gap-10 pt-8 md:grid-cols-[1.15fr_0.85fr] md:items-center md:pt-12">
@@ -78,7 +35,7 @@ const highlights = [
             从规则管理、攻击事件到封禁名单，所有核心环节都在同一块界面里完成。
           </p>
 
-          <div class="mt-8 flex flex-wrap gap-4">
+          <div class="mt-8">
             <RouterLink
               to="/admin"
               class="inline-flex items-center gap-3 rounded-full bg-cyber-accent px-7 py-4 text-base font-semibold text-white transition hover:bg-cyber-accent/90"
@@ -86,12 +43,6 @@ const highlights = [
               立即查看控制台
               <ArrowRight :size="18" />
             </RouterLink>
-            <a
-              href="#能力概览"
-              class="inline-flex items-center gap-3 rounded-full border border-cyber-border bg-white/70 px-7 py-4 text-base font-semibold text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
-            >
-              了解核心能力
-            </a>
           </div>
 
           <ul class="mt-10 grid gap-3 text-sm text-stone-700 md:grid-cols-3">
@@ -143,29 +94,6 @@ const highlights = [
               </p>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section id="能力概览" class="mt-24">
-        <div class="flex items-end justify-between gap-4">
-          <div>
-            <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">能力概览</p>
-            <h2 class="mt-3 font-display text-4xl font-semibold">前端重心围绕“值守”和“处置”展开</h2>
-          </div>
-        </div>
-
-        <div class="mt-8 grid gap-6 md:grid-cols-3">
-          <article
-            v-for="feature in features"
-            :key="feature.title"
-            class="group rounded-2xl border border-cyber-border/60 bg-white p-7 shadow-sm transition-colors hover:border-cyber-accent/25"
-          >
-            <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyber-surface-strong text-cyber-accent-strong transition-colors group-hover:bg-cyber-accent/12">
-              <component :is="feature.icon" :size="24" />
-            </div>
-            <h3 class="mt-6 text-2xl font-semibold text-stone-900">{{ feature.title }}</h3>
-            <p class="mt-4 text-sm leading-7 text-stone-700">{{ feature.desc }}</p>
-          </article>
         </div>
       </section>
     </main>

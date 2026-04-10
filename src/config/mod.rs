@@ -437,18 +437,30 @@ impl Config {
             normalize_base_url(&self.integrations.safeline.base_url);
         self.integrations.safeline.api_token =
             self.integrations.safeline.api_token.trim().to_string();
-        self.integrations.safeline.openapi_doc_path =
-            normalize_path(&self.integrations.safeline.openapi_doc_path, "/openapi_doc/");
-        self.integrations.safeline.auth_probe_path =
-            normalize_path(&self.integrations.safeline.auth_probe_path, "/api/IPGroupAPI");
-        self.integrations.safeline.site_list_path =
-            normalize_path(&self.integrations.safeline.site_list_path, "/api/WebsiteAPI");
-        self.integrations.safeline.event_list_path =
-            normalize_path(&self.integrations.safeline.event_list_path, "/api/AttackLogAPI");
-        self.integrations.safeline.blocklist_sync_path =
-            normalize_path(&self.integrations.safeline.blocklist_sync_path, "/api/IPGroupAPI");
-        self.integrations.safeline.blocklist_delete_path =
-            normalize_path(&self.integrations.safeline.blocklist_delete_path, "/api/IPGroupAPI");
+        self.integrations.safeline.openapi_doc_path = normalize_path(
+            &self.integrations.safeline.openapi_doc_path,
+            "/openapi_doc/",
+        );
+        self.integrations.safeline.auth_probe_path = normalize_path(
+            &self.integrations.safeline.auth_probe_path,
+            "/api/IPGroupAPI",
+        );
+        self.integrations.safeline.site_list_path = normalize_path(
+            &self.integrations.safeline.site_list_path,
+            "/api/WebsiteAPI",
+        );
+        self.integrations.safeline.event_list_path = normalize_path(
+            &self.integrations.safeline.event_list_path,
+            "/api/AttackLogAPI",
+        );
+        self.integrations.safeline.blocklist_sync_path = normalize_path(
+            &self.integrations.safeline.blocklist_sync_path,
+            "/api/IPGroupAPI",
+        );
+        self.integrations.safeline.blocklist_delete_path = normalize_path(
+            &self.integrations.safeline.blocklist_delete_path,
+            "/api/IPGroupAPI",
+        );
 
         self
     }
@@ -532,23 +544,23 @@ fn default_openapi_doc_path() -> String {
 }
 
 fn default_auth_probe_path() -> String {
-    "/api/IPGroupAPI".to_string()
+    "/api/open/system/key".to_string()
 }
 
 fn default_site_list_path() -> String {
-    "/api/WebsiteAPI".to_string()
+    "/api/open/site".to_string()
 }
 
 fn default_event_list_path() -> String {
-    "/api/AttackLogAPI".to_string()
+    "/api/open/records".to_string()
 }
 
 fn default_blocklist_sync_path() -> String {
-    "/api/IPGroupAPI".to_string()
+    "/api/open/ipgroup".to_string()
 }
 
 fn default_blocklist_delete_path() -> String {
-    "/api/IPGroupAPI".to_string()
+    "/api/open/ipgroup".to_string()
 }
 
 fn normalize_notification_level(value: &str) -> String {

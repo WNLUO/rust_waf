@@ -1,10 +1,21 @@
 use crate::config::SafeLineConfig;
 use crate::storage::{BlockedIpEntry, BlockedIpRecord, SecurityEventRecord};
 use anyhow::{anyhow, Result};
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, RequestBuilder, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::time::Duration;
+
+const DEFAULT_OPENAPI_DOC_PATH: &str = "/openapi_doc/";
+const DEFAULT_AUTH_PROBE_PATH: &str = "/api/open/system/key";
+const LEGACY_AUTH_PROBE_PATH: &str = "/api/IPGroupAPI";
+const DEFAULT_SITE_LIST_PATH: &str = "/api/open/site";
+const LEGACY_SITE_LIST_PATH: &str = "/api/WebsiteAPI";
+const DEFAULT_EVENT_LIST_PATH: &str = "/api/open/records";
+const LEGACY_EVENT_LIST_PATH: &str = "/api/AttackLogAPI";
+const DEFAULT_BLOCKLIST_PATH: &str = "/api/open/ipgroup";
+const LEGACY_BLOCKLIST_PATH: &str = "/api/IPGroupAPI";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SafeLineProbeResult {
@@ -72,8 +83,9 @@ pub struct SafeLineBlockedIpSummary {
 
 pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
     let base_url = normalize_base_url(&config.base_url)?;
-    let openapi_doc_url = format!("{base_url}{}", config.openapi_doc_path);
-    let auth_probe_url = format!("{base_url}{}", config.auth_probe_path);
+    let openapi_doc_path =
+        normalized_or_default(&config.openapi_doc_path, DEFAULT_OPENAPI_DOC_PATH);
+    let openapi_doc_url = format!("{base_url}{openapi_doc_path}");
 
     let client = build_client(config)?;
 
@@ -92,7 +104,10 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
                 "已访问到雷池 OpenAPI 文档入口，但当前未填写 API Token，无法继续验证鉴权。"
                     .to_string()
             } else {
-                format!("无法访问雷池 OpenAPI 文档入口，HTTP 状态码 {}", openapi_doc_status)
+                format!(
+                    "无法访问雷池 OpenAPI 文档入口，HTTP 状态码 {}",
+                    openapi_doc_status
+                )
             },
             openapi_doc_reachable,
             openapi_doc_status: Some(openapi_doc_status.as_u16()),
@@ -101,18 +116,17 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
         });
     }
 
-    let auth_probe_response = client
-        .get(&auth_probe_url)
-        .header("API-TOKEN", config.api_token.trim())
-        .send()
-        .await?;
-    let auth_probe_status = auth_probe_response.status();
+    let auth_probe_paths = candidate_paths(
+        &config.auth_probe_path,
+        &[DEFAULT_AUTH_PROBE_PATH, LEGACY_AUTH_PROBE_PATH],
+    );
+    let auth_probe = probe_authentication(&client, &base_url, config, &auth_probe_paths).await?;
 
     let (status, authenticated, message) = classify_probe_result(
         openapi_doc_reachable,
         openapi_doc_status,
-        auth_probe_status,
-        &config.auth_probe_path,
+        auth_probe.status,
+        &auth_probe.path,
     );
 
     Ok(SafeLineProbeResult {
@@ -121,7 +135,7 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
         openapi_doc_reachable,
         openapi_doc_status: Some(openapi_doc_status.as_u16()),
         authenticated,
-        auth_probe_status: Some(auth_probe_status.as_u16()),
+        auth_probe_status: Some(auth_probe.status.as_u16()),
     })
 }
 
@@ -132,21 +146,17 @@ pub async fn list_sites(config: &SafeLineConfig) -> Result<Vec<SafeLineSiteSumma
     }
 
     let client = build_client(config)?;
-    let site_list_url = format!("{base_url}{}", config.site_list_path);
-    let response = client
-        .get(&site_list_url)
-        .header("API-TOKEN", config.api_token.trim())
-        .send()
-        .await?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(anyhow!(
-            "雷池站点列表接口返回 HTTP {}，请检查 site_list_path 是否与目标实例版本匹配",
-            status
-        ));
-    }
-
-    let payload = response.json::<Value>().await?;
+    let payload = get_json_with_fallback(
+        &client,
+        &base_url,
+        config,
+        &candidate_paths(
+            &config.site_list_path,
+            &[DEFAULT_SITE_LIST_PATH, LEGACY_SITE_LIST_PATH],
+        ),
+        "站点列表",
+    )
+    .await?;
     extract_sites(&payload)
 }
 
@@ -159,21 +169,17 @@ pub async fn list_security_events(
     }
 
     let client = build_client(config)?;
-    let event_list_url = format!("{base_url}{}", config.event_list_path);
-    let response = client
-        .get(&event_list_url)
-        .header("API-TOKEN", config.api_token.trim())
-        .send()
-        .await?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(anyhow!(
-            "雷池事件接口返回 HTTP {}，请检查 event_list_path 是否与目标实例版本匹配",
-            status
-        ));
-    }
-
-    let payload = response.json::<Value>().await?;
+    let payload = get_json_with_fallback(
+        &client,
+        &base_url,
+        config,
+        &candidate_paths(
+            &config.event_list_path,
+            &[DEFAULT_EVENT_LIST_PATH, LEGACY_EVENT_LIST_PATH],
+        ),
+        "事件列表",
+    )
+    .await?;
     extract_security_events(&payload)
 }
 
@@ -187,10 +193,15 @@ pub async fn push_blocked_ip(
     }
 
     let client = build_client(config)?;
-    let url = format!("{base_url}{}", config.blocklist_sync_path);
-    let response = client
-        .post(&url)
-        .header("API-TOKEN", config.api_token.trim())
+    let path = normalized_or_default(&config.blocklist_sync_path, DEFAULT_BLOCKLIST_PATH);
+    if path.contains("/open/ipgroup") {
+        return Err(anyhow!(
+            "当前雷池版本的 IP 组接口为 /api/open/ipgroup/append，需要明确的 ip_group_ids 才能追加封禁，现有接入尚未提供目标分组，暂无法自动推送本地封禁。"
+        ));
+    }
+    let url = format!("{base_url}{path}");
+    let response = client.post(&url);
+    let response = with_auth_headers(response, config)
         .json(&serde_json::json!({
             "ip": blocked_ip.ip,
             "reason": blocked_ip.reason,
@@ -224,21 +235,17 @@ pub async fn list_blocked_ips(config: &SafeLineConfig) -> Result<Vec<SafeLineBlo
     }
 
     let client = build_client(config)?;
-    let url = format!("{base_url}{}", config.blocklist_sync_path);
-    let response = client
-        .get(&url)
-        .header("API-TOKEN", config.api_token.trim())
-        .send()
-        .await?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(anyhow!(
-            "雷池封禁列表接口返回 HTTP {}，请检查 blocklist_sync_path 是否与目标实例版本匹配",
-            status
-        ));
-    }
-
-    let payload = response.json::<Value>().await?;
+    let payload = get_json_with_fallback(
+        &client,
+        &base_url,
+        config,
+        &candidate_paths(
+            &config.blocklist_sync_path,
+            &[DEFAULT_BLOCKLIST_PATH, LEGACY_BLOCKLIST_PATH],
+        ),
+        "封禁列表",
+    )
+    .await?;
     extract_blocked_ips(&payload)
 }
 
@@ -257,6 +264,12 @@ pub async fn delete_blocked_ip(
     } else {
         &config.blocklist_delete_path
     };
+    let path = normalized_or_default(path, DEFAULT_BLOCKLIST_PATH);
+    if path.contains("/open/ipgroup") {
+        return Err(anyhow!(
+            "当前雷池版本的 IP 组接口没有暴露与旧版兼容的单条远端解封语义，现有接入尚未完成 open/ipgroup 的删除适配。"
+        ));
+    }
     let url = format!("{base_url}{path}");
 
     let payload = serde_json::json!({
@@ -287,6 +300,10 @@ pub async fn delete_blocked_ip(
     for request in attempts {
         let response = request
             .header("API-TOKEN", config.api_token.trim())
+            .header(
+                "Authorization",
+                format!("Bearer {}", config.api_token.trim()),
+            )
             .send()
             .await?;
         let status = response.status();
@@ -327,12 +344,160 @@ fn build_client(config: &SafeLineConfig) -> Result<Client> {
         .build()?)
 }
 
+#[derive(Debug, Clone)]
+struct ProbeAttempt {
+    path: String,
+    status: StatusCode,
+}
+
+async fn probe_authentication(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+    paths: &[String],
+) -> Result<ProbeAttempt> {
+    let mut last_status = StatusCode::NOT_FOUND;
+    let mut last_path = paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| DEFAULT_AUTH_PROBE_PATH.to_string());
+
+    for path in paths {
+        let url = format!("{base_url}{path}");
+        let response = with_auth_headers(client.get(&url), config).send().await?;
+        let status = response.status();
+        last_status = status;
+        last_path = path.clone();
+        if status.is_success()
+            || matches!(
+                status,
+                StatusCode::UNAUTHORIZED
+                    | StatusCode::FORBIDDEN
+                    | StatusCode::BAD_REQUEST
+                    | StatusCode::METHOD_NOT_ALLOWED
+                    | StatusCode::NOT_FOUND
+            )
+        {
+            return Ok(ProbeAttempt {
+                path: path.clone(),
+                status,
+            });
+        }
+    }
+
+    Ok(ProbeAttempt {
+        path: last_path,
+        status: last_status,
+    })
+}
+
+async fn get_json_with_fallback(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+    paths: &[String],
+    resource_name: &str,
+) -> Result<Value> {
+    let mut failures = Vec::new();
+
+    for path in paths {
+        let url = format!("{base_url}{path}");
+        let response = with_auth_headers(client.get(&url), config).send().await?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+
+        if status.is_success() {
+            if looks_like_html(&body) {
+                failures.push(format!(
+                    "{path} -> HTTP {status}（返回了前端页面而不是 JSON）"
+                ));
+                continue;
+            }
+
+            let payload = serde_json::from_str::<Value>(&body).map_err(|err| {
+                anyhow!(
+                    "雷池{resource_name}接口 {} 返回了不可解析的 JSON：{}",
+                    path,
+                    err
+                )
+            })?;
+            return Ok(payload);
+        }
+
+        if body.contains("login-required") || body.contains("Login required") {
+            return Err(anyhow!(
+                "雷池{}接口 {} 返回 login-required。当前 Token 可访问部分 OpenAPI，但该接口仍要求登录态 Bearer 授权，说明接入尚未完全完成。",
+                resource_name,
+                path
+            ));
+        }
+
+        if body.contains("commerce license required") {
+            return Err(anyhow!(
+                "雷池{}接口 {} 返回 commerce license required，当前实例版本或授权不支持该能力。",
+                resource_name,
+                path
+            ));
+        }
+
+        failures.push(format!("{path} -> HTTP {status}"));
+    }
+
+    Err(anyhow!(
+        "雷池{}接口均未成功返回，请检查路径是否与实例版本匹配。已尝试：{}",
+        resource_name,
+        failures.join("，")
+    ))
+}
+
+fn with_auth_headers(request: RequestBuilder, config: &SafeLineConfig) -> RequestBuilder {
+    let token = config.api_token.trim();
+    if token.is_empty() {
+        request
+    } else {
+        request
+            .header("API-TOKEN", token)
+            .header("Authorization", format!("Bearer {token}"))
+    }
+}
+
 fn normalize_base_url(value: &str) -> Result<String> {
     let base_url = value.trim().trim_end_matches('/').to_string();
     if base_url.is_empty() {
         return Err(anyhow!("雷池地址不能为空"));
     }
     Ok(base_url)
+}
+
+fn normalized_or_default(value: &str, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
+
+fn candidate_paths(current: &str, fallbacks: &[&str]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut paths = Vec::new();
+
+    for value in std::iter::once(current).chain(fallbacks.iter().copied()) {
+        let normalized = normalized_or_default(value, "");
+        if normalized.is_empty() || !seen.insert(normalized.clone()) {
+            continue;
+        }
+        paths.push(normalized);
+    }
+
+    paths
+}
+
+fn looks_like_html(value: &str) -> bool {
+    let trimmed = value.trim_start();
+    trimmed.starts_with("<!DOCTYPE html") || trimmed.starts_with("<html")
 }
 
 fn classify_probe_result(
@@ -374,12 +539,14 @@ fn classify_probe_result(
         );
     }
 
-    if matches!(auth_probe_status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+    if matches!(
+        auth_probe_status,
+        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
+    ) {
         return (
             "error".to_string(),
             false,
-            "雷池已响应，但 API Token 校验失败，请检查 Token 是否正确且具备调用权限。"
-                .to_string(),
+            "雷池已响应，但 API Token 校验失败，请检查 Token 是否正确且具备调用权限。".to_string(),
         );
     }
 
@@ -464,14 +631,7 @@ fn find_array_candidates<'a>(value: &'a Value) -> Vec<&'a Vec<Value>> {
 
     if let Some(object) = value.as_object() {
         for key in [
-            "data",
-            "list",
-            "items",
-            "results",
-            "rows",
-            "records",
-            "objs",
-            "objects",
+            "data", "list", "items", "nodes", "results", "rows", "records", "objs", "objects",
         ] {
             if let Some(array) = object.get(key).and_then(Value::as_array) {
                 candidates.push(array);
@@ -502,6 +662,8 @@ fn parse_site_summary(value: &Value) -> Option<SafeLineSiteSummary> {
         object,
         &[
             "name",
+            "title",
+            "comment",
             "site_name",
             "siteName",
             "domain",
@@ -514,8 +676,9 @@ fn parse_site_summary(value: &Value) -> Option<SafeLineSiteSummary> {
         object,
         &["domain", "hostname", "host", "server", "origin", "upstream"],
     )
+    .or_else(|| pick_first_array_string(object, &["server_names", "hosts"]))
     .unwrap_or_default();
-    let status = pick_string(object, &["status", "state", "enabled"])
+    let status = pick_string(object, &["status", "state", "enabled", "mode"])
         .unwrap_or_else(|| "unknown".to_string());
 
     Some(SafeLineSiteSummary {
@@ -534,8 +697,7 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
         &["src_ip", "source_ip", "client_ip", "ip", "remote_addr"],
     )
     .unwrap_or_else(|| "0.0.0.0".to_string());
-    let dest_ip =
-        pick_string(object, &["dst_ip", "dest_ip", "server_ip"]).unwrap_or_default();
+    let dest_ip = pick_string(object, &["dst_ip", "dest_ip", "server_ip"]).unwrap_or_default();
     let action = pick_string(object, &["action", "decision", "event_type", "type"])
         .unwrap_or_else(|| "alert".to_string());
     let attack_type = pick_string(object, &["attack_type", "rule_type", "category"]);
@@ -545,13 +707,19 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
     let uri = pick_string(object, &["uri", "path", "url", "request_uri"]);
     let http_method = pick_string(object, &["method", "http_method", "request_method"]);
     let http_version = pick_string(object, &["http_version", "version"]);
-    let protocol = pick_string(object, &["protocol", "scheme"])
-        .unwrap_or_else(|| "HTTP".to_string());
+    let protocol =
+        pick_string(object, &["protocol", "scheme"]).unwrap_or_else(|| "HTTP".to_string());
     let source_port = pick_i64(object, &["src_port", "source_port", "client_port"]).unwrap_or(0);
     let dest_port = pick_i64(object, &["dst_port", "dest_port", "server_port"]).unwrap_or(0);
     let created_at = pick_i64(
         object,
-        &["created_at", "timestamp", "time", "occurred_at", "attack_time"],
+        &[
+            "created_at",
+            "timestamp",
+            "time",
+            "occurred_at",
+            "attack_time",
+        ],
     )
     .unwrap_or_else(unix_timestamp);
     let provider_site_id = pick_string(
@@ -560,12 +728,28 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
     );
     let provider_site_name = pick_string(
         object,
-        &["site_name", "siteName", "website", "domain_name", "host_name"],
+        &[
+            "site_name",
+            "siteName",
+            "site_title",
+            "site_comment",
+            "website",
+            "domain_name",
+            "host_name",
+        ],
     );
     let provider_site_domain = pick_string(
         object,
-        &["domain", "host", "hostname", "server_name", "website_domain"],
+        &[
+            "domain",
+            "host",
+            "hostname",
+            "server_name",
+            "website_domain",
+        ],
     )
+    .or_else(|| pick_first_array_string(object, &["site_server_names", "server_names"]))
+    .or_else(|| pick_string(object, &["website"]))
     .or_else(|| uri.as_ref().and_then(|value| extract_host_from_uri(value)));
 
     Some(SafeLineSecurityEventSummary {
@@ -591,15 +775,20 @@ fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecurityEventSu
 
 fn parse_blocked_ip_summary(value: &Value) -> Option<SafeLineBlockedIpSummary> {
     let object = value.as_object()?;
-    let ip = pick_string(object, &["ip", "ip_addr", "address"])?;
+    let ip = pick_string(object, &["ip", "ip_addr", "address"])
+        .or_else(|| pick_first_array_string(object, &["ips"]))?;
     let reason = pick_string(object, &["reason", "message", "description"])
+        .or_else(|| pick_string(object, &["reference", "comment"]))
         .unwrap_or_else(|| "safeline_blocked_ip".to_string());
     let blocked_at = pick_i64(object, &["blocked_at", "created_at", "timestamp", "time"])
         .map(normalize_timestamp)
         .unwrap_or_else(unix_timestamp);
-    let expires_at = pick_i64(object, &["expires_at", "expired_at", "expire_at", "ttl_until"])
-        .map(normalize_timestamp)
-        .unwrap_or(blocked_at + 3600);
+    let expires_at = pick_i64(
+        object,
+        &["expires_at", "expired_at", "expire_at", "ttl_until"],
+    )
+    .map(normalize_timestamp)
+    .unwrap_or(blocked_at + 3600);
     let remote_id = pick_string(object, &["id", "uuid", "uid"]);
 
     Some(SafeLineBlockedIpSummary {
@@ -612,10 +801,7 @@ fn parse_blocked_ip_summary(value: &Value) -> Option<SafeLineBlockedIpSummary> {
     })
 }
 
-fn pick_string(
-    object: &serde_json::Map<String, Value>,
-    keys: &[&str],
-) -> Option<String> {
+fn pick_string(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
     for key in keys {
         let Some(value) = object.get(*key) else {
             continue;
@@ -628,6 +814,30 @@ fn pick_string(
             Value::Number(number) => return Some(number.to_string()),
             Value::Bool(flag) => return Some(flag.to_string()),
             _ => {}
+        }
+    }
+
+    None
+}
+
+fn pick_first_array_string(
+    object: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<String> {
+    for key in keys {
+        let Some(value) = object.get(*key) else {
+            continue;
+        };
+
+        if let Some(array) = value.as_array() {
+            for item in array {
+                if let Some(inner) = item.as_str() {
+                    let trimmed = inner.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
         }
     }
 
@@ -762,6 +972,29 @@ mod tests {
     }
 
     #[test]
+    fn extract_sites_supports_open_site_payload() {
+        let payload = json!({
+            "total": 1,
+            "data": [
+                {
+                    "id": 7,
+                    "title": "portal",
+                    "comment": "portal-comment",
+                    "server_names": ["portal.example.com", "www.example.com"],
+                    "mode": 0
+                }
+            ]
+        });
+
+        let sites = extract_sites(&payload).unwrap();
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].id, "7");
+        assert_eq!(sites[0].name, "portal");
+        assert_eq!(sites[0].domain, "portal.example.com");
+        assert_eq!(sites[0].status, "0");
+    }
+
+    #[test]
     fn extract_security_events_supports_list_payload() {
         let payload = json!({
             "data": {
@@ -784,5 +1017,56 @@ mod tests {
         assert_eq!(events[0].action, "block");
         assert_eq!(events[0].source_ip, "203.0.113.10");
         assert_eq!(events[0].uri.as_deref(), Some("/login"));
+    }
+
+    #[test]
+    fn extract_security_events_supports_open_records_payload() {
+        let payload = json!({
+            "total": 1,
+            "data": [
+                {
+                    "event_id": "evt-1",
+                    "src_ip": "2.2.2.2",
+                    "website": "https://portal.example.com/login",
+                    "reason": "sqli",
+                    "attack_type": 4,
+                    "timestamp": 1710000000,
+                    "site_id": 99,
+                    "site_title": "portal",
+                    "site_server_names": ["portal.example.com"]
+                }
+            ]
+        });
+
+        let events = extract_security_events(&payload).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].provider_site_id.as_deref(), Some("99"));
+        assert_eq!(events[0].provider_site_name.as_deref(), Some("portal"));
+        assert_eq!(
+            events[0].provider_site_domain.as_deref(),
+            Some("portal.example.com")
+        );
+    }
+
+    #[test]
+    fn extract_blocked_ips_supports_open_ipgroup_nodes() {
+        let payload = json!({
+            "total": 1,
+            "nodes": [
+                {
+                    "id": 12,
+                    "reference": "manual",
+                    "comment": "ops",
+                    "ips": ["198.51.100.10"],
+                    "updated_at": "1710000000",
+                    "builtin": false
+                }
+            ]
+        });
+
+        let ips = extract_blocked_ips(&payload).unwrap();
+        assert_eq!(ips.len(), 1);
+        assert_eq!(ips[0].ip, "198.51.100.10");
+        assert_eq!(ips[0].remote_id.as_deref(), Some("12"));
     }
 }

@@ -4,6 +4,7 @@
 pub mod bloom_filter;
 pub mod config;
 pub mod core;
+pub mod integrations;
 pub mod l4;
 pub mod l7;
 pub mod metrics;
@@ -11,7 +12,6 @@ pub mod protocol;
 pub mod rules;
 pub mod storage;
 pub mod tls;
-pub mod integrations;
 
 #[cfg(feature = "api")]
 pub mod api;

@@ -1,8 +1,8 @@
 use crate::config::{Config, Rule, RuleAction, RuleLayer, Severity};
 use anyhow::Result;
 use log::{debug, warn};
-use sha2::{Digest, Sha256};
 use serde_json;
+use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 #[cfg(any(feature = "api", test))]
@@ -157,13 +157,6 @@ pub struct SafeLineSyncStateEntry {
     pub last_imported_count: i64,
     pub last_skipped_count: i64,
     pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SafeLineDeleteResult {
-    pub success: usize,
-    pub failed: usize,
-    pub last_cursor: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -323,9 +316,9 @@ impl SqliteStore {
             .await?;
 
             imported += 1;
-            last_cursor = Some(
-                last_cursor.map_or(event.created_at, |current: i64| current.max(event.created_at)),
-            );
+            last_cursor = Some(last_cursor.map_or(event.created_at, |current: i64| {
+                current.max(event.created_at)
+            }));
         }
 
         let now = unix_timestamp();
@@ -627,7 +620,9 @@ impl SqliteStore {
                 skipped += 1;
             } else {
                 synced += 1;
-                last_cursor = Some(last_cursor.map_or(record.expires_at, |current: i64| current.max(record.expires_at)));
+                last_cursor = Some(last_cursor.map_or(record.expires_at, |current: i64| {
+                    current.max(record.expires_at)
+                }));
             }
         }
 
@@ -715,8 +710,9 @@ impl SqliteStore {
             .await?;
 
             imported += 1;
-            last_cursor =
-                Some(last_cursor.map_or(record.expires_at, |current: i64| current.max(record.expires_at)));
+            last_cursor = Some(last_cursor.map_or(record.expires_at, |current: i64| {
+                current.max(record.expires_at)
+            }));
         }
 
         let now = unix_timestamp();
@@ -1220,7 +1216,13 @@ fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
     hasher.update([0]);
     hasher.update(event.provider.as_deref().unwrap_or_default().as_bytes());
     hasher.update([0]);
-    hasher.update(event.provider_site_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(
+        event
+            .provider_site_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     hasher.update([0]);
     hasher.update(event.action.as_bytes());
     hasher.update([0]);
@@ -2033,7 +2035,11 @@ mod tests {
             .unwrap();
         assert_eq!(events.total, 1);
 
-        let state = store.load_safeline_sync_state("events").await.unwrap().unwrap();
+        let state = store
+            .load_safeline_sync_state("events")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(state.last_imported_count, 0);
         assert_eq!(state.last_skipped_count, 1);
     }

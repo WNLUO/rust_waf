@@ -3,6 +3,7 @@ mod api;
 mod bloom_filter;
 mod config;
 mod core;
+mod integrations;
 mod l4;
 mod l7;
 mod metrics;
@@ -10,7 +11,6 @@ mod protocol;
 mod rules;
 mod storage;
 mod tls;
-mod integrations;
 
 use anyhow::Result;
 use env_logger::Env;

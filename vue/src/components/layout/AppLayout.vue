@@ -50,7 +50,8 @@ const navItems = [
     </aside>
 
     <main class="min-h-screen flex-1 lg:ml-72">
-      <header class="sticky top-0 z-50 flex flex-col gap-4 border-b border-cyber-border/70 bg-[#f8f1e8]/85 px-6 py-4 backdrop-blur md:flex-row md:items-center md:justify-between md:px-8">
+      <header class="sticky top-0 z-50 flex items-center justify-between gap-4 border-b border-cyber-border/70 bg-[#f8f1e8]/85 px-6 py-4 backdrop-blur md:px-8">
+        <div class="flex-1"></div>
         <div class="flex flex-wrap items-center gap-4 md:gap-6">
           <slot name="header-extra"></slot>
         </div>

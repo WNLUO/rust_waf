@@ -174,6 +174,14 @@ pub struct SafeLineSyncStateResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct SafeLineSyncOverviewResponse {
+    events: Option<SafeLineSyncStateResponse>,
+    blocked_ips_push: Option<SafeLineSyncStateResponse>,
+    blocked_ips_pull: Option<SafeLineSyncStateResponse>,
+    blocked_ips_delete: Option<SafeLineSyncStateResponse>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SafeLineBlocklistSyncResponse {
     success: bool,
     synced: u32,
@@ -361,14 +369,23 @@ impl ApiServer {
         let app = Router::new()
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
-            .route("/settings", get(get_settings_handler).put(update_settings_handler))
+            .route(
+                "/settings",
+                get(get_settings_handler).put(update_settings_handler),
+            )
             .route("/events", get(list_security_events_handler))
             .route("/events/:id", patch(update_security_event_handler))
             .route("/blocked-ips", get(list_blocked_ips_handler))
             .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
-            .route("/integrations/safeline/test", axum::routing::post(test_safeline_handler))
-            .route("/integrations/safeline/sites", axum::routing::post(list_safeline_sites_handler))
+            .route(
+                "/integrations/safeline/test",
+                axum::routing::post(test_safeline_handler),
+            )
+            .route(
+                "/integrations/safeline/sites",
+                axum::routing::post(list_safeline_sites_handler),
+            )
             .route(
                 "/integrations/safeline/mappings",
                 get(list_safeline_mappings_handler).put(update_safeline_mappings_handler),
@@ -452,7 +469,9 @@ async fn update_settings_handler(
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
-    let next = payload.into_config(current).map_err(ApiError::bad_request)?;
+    let next = payload
+        .into_config(current)
+        .map_err(ApiError::bad_request)?;
 
     store
         .upsert_app_config(&next)
@@ -511,7 +530,9 @@ async fn update_safeline_mappings_handler(
     ExtractJson(payload): ExtractJson<SafeLineMappingsUpdateRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let mappings = payload.into_storage_mappings().map_err(ApiError::bad_request)?;
+    let mappings = payload
+        .into_storage_mappings()
+        .map_err(ApiError::bad_request)?;
     store
         .replace_safeline_site_mappings(&mappings)
         .await
@@ -564,14 +585,31 @@ async fn sync_safeline_events_handler(
 
 async fn get_safeline_sync_state_handler(
     State(state): State<ApiState>,
-) -> ApiResult<Json<Option<SafeLineSyncStateResponse>>> {
+) -> ApiResult<Json<SafeLineSyncOverviewResponse>> {
     let store = sqlite_store(&state)?;
-    let state = store
+    let events = store
         .load_safeline_sync_state("events")
         .await
         .map_err(ApiError::internal)?;
+    let blocked_ips_push = store
+        .load_safeline_sync_state("blocked_ips_push")
+        .await
+        .map_err(ApiError::internal)?;
+    let blocked_ips_pull = store
+        .load_safeline_sync_state("blocked_ips_pull")
+        .await
+        .map_err(ApiError::internal)?;
+    let blocked_ips_delete = store
+        .load_safeline_sync_state("blocked_ips_delete")
+        .await
+        .map_err(ApiError::internal)?;
 
-    Ok(Json(state.map(SafeLineSyncStateResponse::from)))
+    Ok(Json(SafeLineSyncOverviewResponse {
+        events: events.map(SafeLineSyncStateResponse::from),
+        blocked_ips_push: blocked_ips_push.map(SafeLineSyncStateResponse::from),
+        blocked_ips_pull: blocked_ips_pull.map(SafeLineSyncStateResponse::from),
+        blocked_ips_delete: blocked_ips_delete.map(SafeLineSyncStateResponse::from),
+    }))
 }
 
 async fn sync_safeline_blocked_ips_handler(
@@ -822,7 +860,11 @@ async fn delete_blocked_ip_handler(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let Some(entry) = store.load_blocked_ip(id).await.map_err(ApiError::internal)? else {
+    let Some(entry) = store
+        .load_blocked_ip(id)
+        .await
+        .map_err(ApiError::internal)?
+    else {
         return Err(ApiError::not_found(format!(
             "Blocked IP record '{}' not found",
             id
@@ -833,21 +875,35 @@ async fn delete_blocked_ip_handler(
         let config = persisted_config(&state).await?;
         let safeline = &config.integrations.safeline;
         if !safeline.enabled {
-            return Err(ApiError::conflict("雷池集成尚未启用，无法执行远端解封".to_string()));
+            return Err(ApiError::conflict(
+                "雷池集成尚未启用，无法执行远端解封".to_string(),
+            ));
         }
 
         let result = crate::integrations::safeline::delete_blocked_ip(safeline, &entry)
             .await
             .map_err(|err| ApiError::bad_request(err.to_string()))?;
         if !result.accepted {
+            store
+                .upsert_safeline_sync_state("blocked_ips_delete", Some(entry.expires_at), 0, 1)
+                .await
+                .map_err(ApiError::internal)?;
             return Err(ApiError::conflict(format!(
                 "雷池远端解封失败，HTTP {}：{}",
                 result.status_code, result.message
             )));
         }
+
+        store
+            .upsert_safeline_sync_state("blocked_ips_delete", Some(entry.expires_at), 1, 0)
+            .await
+            .map_err(ApiError::internal)?;
     }
 
-    let deleted = store.delete_blocked_ip(id).await.map_err(ApiError::internal)?;
+    let deleted = store
+        .delete_blocked_ip(id)
+        .await
+        .map_err(ApiError::internal)?;
 
     if deleted {
         Ok(Json(WriteStatusResponse {

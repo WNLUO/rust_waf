@@ -4,23 +4,18 @@ import AppLayout from '../components/layout/AppLayout.vue'
 import {
   fetchSafeLineMappings,
   fetchSafeLineSites,
-  fetchSafeLineSyncState,
   fetchSettings,
-  pullSafeLineBlockedIps,
-  syncSafeLineBlockedIps,
-  syncSafeLineEvents,
   testSafeLineConnection,
   updateSafeLineMappings,
   updateSettings,
 } from '../lib/api'
 import type {
   SafeLineMappingItem,
-  SafeLineSyncStateResponse,
   SafeLineSiteItem,
   SafeLineTestResponse,
   SettingsPayload,
 } from '../lib/types'
-import { BellRing, PlugZap, Save, ServerCog, Settings, ShieldCheck } from 'lucide-vue-next'
+import { PlugZap, Save, ServerCog, Settings } from 'lucide-vue-next'
 
 interface SystemSettingsForm extends SettingsPayload {}
 
@@ -29,16 +24,12 @@ const saving = ref(false)
 const testing = ref(false)
 const loadingSites = ref(false)
 const savingMappings = ref(false)
-const syncingEvents = ref(false)
-const syncingBlockedIps = ref(false)
-const pullingBlockedIps = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const testResult = ref<SafeLineTestResponse | null>(null)
 const sites = ref<SafeLineSiteItem[]>([])
 const mappings = ref<SafeLineMappingItem[]>([])
 const sitesLoadedAt = ref<number | null>(null)
-const syncState = ref<SafeLineSyncStateResponse | null>(null)
 
 const systemSettings = reactive<SystemSettingsForm>({
   gateway_name: '玄枢防护网关',
@@ -57,11 +48,11 @@ const systemSettings = reactive<SystemSettingsForm>({
     api_token: '',
     verify_tls: false,
     openapi_doc_path: '/openapi_doc/',
-    auth_probe_path: '/api/IPGroupAPI',
-    site_list_path: '/api/WebsiteAPI',
-    event_list_path: '/api/AttackLogAPI',
-    blocklist_sync_path: '/api/IPGroupAPI',
-    blocklist_delete_path: '/api/IPGroupAPI',
+    auth_probe_path: '/api/open/system/key',
+    site_list_path: '/api/open/site',
+    event_list_path: '/api/open/records',
+    blocklist_sync_path: '/api/open/ipgroup',
+    blocklist_delete_path: '/api/open/ipgroup',
   },
 })
 
@@ -85,14 +76,6 @@ async function loadMappings() {
     mappings.value = response.mappings
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取雷池站点映射失败'
-  }
-}
-
-async function loadSyncState() {
-  try {
-    syncState.value = await fetchSafeLineSyncState()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '读取雷池同步状态失败'
   }
 }
 
@@ -191,56 +174,9 @@ async function saveMappings() {
   }
 }
 
-async function runEventSync() {
-  syncingEvents.value = true
-  error.value = ''
-  successMessage.value = ''
-
-  try {
-    const response = await syncSafeLineEvents()
-    successMessage.value = response.message
-    await loadSyncState()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '同步雷池事件失败'
-  } finally {
-    syncingEvents.value = false
-  }
-}
-
-async function runBlockedIpSync() {
-  syncingBlockedIps.value = true
-  error.value = ''
-  successMessage.value = ''
-
-  try {
-    const response = await syncSafeLineBlockedIps()
-    successMessage.value = response.message
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '同步本地封禁到雷池失败'
-  } finally {
-    syncingBlockedIps.value = false
-  }
-}
-
-async function runBlockedIpPull() {
-  pullingBlockedIps.value = true
-  error.value = ''
-  successMessage.value = ''
-
-  try {
-    const response = await pullSafeLineBlockedIps()
-    successMessage.value = response.message
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '拉取雷池封禁失败'
-  } finally {
-    pullingBlockedIps.value = false
-  }
-}
-
 onMounted(async () => {
   await loadSettings()
   await loadMappings()
-  await loadSyncState()
 })
 </script>
 
@@ -250,72 +186,71 @@ onMounted(async () => {
       <button
         @click="saveSettings"
         :disabled="saving || loading"
-        class="inline-flex items-center gap-2 rounded-full bg-cyber-accent px-4 py-2 text-xs font-semibold text-white shadow-cyber transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+        class="inline-flex items-center gap-2 rounded-lg bg-cyber-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-cyber-accent/90 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        <Save :size="14" />
-        {{ saving ? '写入数据库中...' : '保存设置' }}
+        <Save :size="12" />
+        {{ saving ? '保存中...' : '保存设置' }}
       </button>
     </template>
 
-    <div class="space-y-6">
+    <div class="space-y-4">
       <div
         v-if="loading"
-        class="rounded-[24px] border border-cyber-border/70 bg-white/75 px-5 py-4 text-sm text-cyber-muted shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+        class="rounded-[20px] border border-cyber-border/70 bg-white/75 px-4 py-3 text-sm text-cyber-muted shadow-[0_10px_25px_rgba(90,60,30,0.05)]"
       >
         正在从数据库加载设置...
       </div>
 
       <div
         v-if="error"
-        class="rounded-[24px] border border-cyber-error/25 bg-cyber-error/8 px-5 py-4 text-sm text-cyber-error shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
+        class="rounded-[20px] border border-cyber-error/25 bg-cyber-error/8 px-4 py-3 text-sm text-cyber-error shadow-[0_10px_25px_rgba(166,30,77,0.07)]"
       >
         {{ error }}
       </div>
 
       <div
         v-if="successMessage"
-        class="rounded-[24px] border border-emerald-300/60 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
+        class="rounded-[20px] border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_10px_25px_rgba(16,185,129,0.07)]"
       >
         {{ successMessage }}
       </div>
 
-      <div class="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <div class="space-y-6">
-          <div class="rounded-[32px] border border-white/80 bg-white/80 p-6 shadow-[0_18px_50px_rgba(90,60,30,0.08)]">
+      <div class="space-y-4 max-w-5xl mx-auto">
+          <div class="rounded-[24px] border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]">
             <div class="flex items-center gap-3">
-              <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyber-surface-strong text-cyber-accent-strong">
-                <Settings :size="22" />
+              <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-cyber-surface-strong text-cyber-accent-strong">
+                <Settings :size="20" />
               </div>
               <div>
-                <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">控制台参数</p>
-                <h3 class="mt-1 text-xl font-semibold text-stone-900">基础运行配置</h3>
+                <p class="text-xs tracking-[0.18em] text-cyber-accent-strong">控制台参数</p>
+                <h3 class="mt-0.5 text-lg font-semibold text-stone-900">基础运行配置</h3>
               </div>
             </div>
 
-            <div class="mt-6 grid gap-5 md:grid-cols-2">
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">网关名称</span>
-                <input v-model="systemSettings.gateway_name" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+            <div class="mt-5 grid gap-4 md:grid-cols-2">
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">网关名称</span>
+                <input v-model="systemSettings.gateway_name" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">自动刷新频率（秒）</span>
-                <input v-model.number="systemSettings.auto_refresh_seconds" type="number" min="3" max="60" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">自动刷新频率（秒）</span>
+                <input v-model.number="systemSettings.auto_refresh_seconds" type="number" min="3" max="60" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">上游服务地址</span>
-                <input v-model="systemSettings.upstream_endpoint" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">上游服务地址</span>
+                <input v-model="systemSettings.upstream_endpoint" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">控制面 API 地址</span>
-                <input v-model="systemSettings.api_endpoint" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">控制面 API 地址</span>
+                <input v-model="systemSettings.api_endpoint" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">事件保留天数</span>
-                <input v-model.number="systemSettings.retain_days" type="number" min="1" max="365" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">事件保留天数</span>
+                <input v-model.number="systemSettings.retain_days" type="number" min="1" max="365" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">通知级别</span>
-                <select v-model="systemSettings.notification_level" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent">
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">通知级别</span>
+                <select v-model="systemSettings.notification_level" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent">
                   <option value="critical">仅高风险事件</option>
                   <option value="blocked_only">仅拦截事件</option>
                   <option value="all">全部事件</option>
@@ -323,152 +258,125 @@ onMounted(async () => {
               </label>
             </div>
 
-            <div class="mt-6 grid gap-4 md:grid-cols-3">
-              <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
-                <input v-model="systemSettings.emergency_mode" type="checkbox" class="mt-1 accent-[var(--color-cyber-accent)]" />
+            <div class="mt-4 grid gap-3 md:grid-cols-3">
+              <label class="flex items-start gap-2.5 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-3">
+                <input v-model="systemSettings.emergency_mode" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
                 <span>
                   <span class="block text-sm font-medium text-stone-900">紧急模式</span>
-                  <span class="mt-1 block text-sm leading-6 text-cyber-muted">面向突发攻击时的高敏感运行状态。</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">面向突发攻击时的高敏感运行状态。</span>
                 </span>
               </label>
-              <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
-                <input v-model="systemSettings.sqlite_persistence" type="checkbox" class="mt-1 accent-[var(--color-cyber-accent)]" />
+              <label class="flex items-start gap-2.5 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-3">
+                <input v-model="systemSettings.sqlite_persistence" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
                 <span>
                   <span class="block text-sm font-medium text-stone-900">启用持久化</span>
-                  <span class="mt-1 block text-sm leading-6 text-cyber-muted">保存到后端 SQLite 配置与事件库。</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">保存到后端 SQLite 配置与事件库。</span>
                 </span>
               </label>
-              <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
-                <input v-model="systemSettings.notify_by_sound" type="checkbox" class="mt-1 accent-[var(--color-cyber-accent)]" />
+              <label class="flex items-start gap-2.5 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-3">
+                <input v-model="systemSettings.notify_by_sound" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
                 <span>
                   <span class="block text-sm font-medium text-stone-900">声音提醒</span>
-                  <span class="mt-1 block text-sm leading-6 text-cyber-muted">在控制台打开期间对关键事件进行即时提示。</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">在控制台打开期间对关键事件进行即时提示。</span>
                 </span>
               </label>
             </div>
           </div>
-        </div>
 
-        <div class="space-y-6">
-          <div class="rounded-[32px] border border-white/80 bg-white/80 p-6 shadow-[0_18px_50px_rgba(90,60,30,0.08)]">
+          <div class="rounded-[24px] border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]">
             <div class="flex items-center gap-3">
-              <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyber-surface-strong text-cyber-accent-strong">
-                <PlugZap :size="22" />
+              <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-cyber-surface-strong text-cyber-accent-strong">
+                <PlugZap :size="20" />
               </div>
               <div>
-                <p class="text-sm tracking-[0.18em] text-cyber-accent-strong">雷池接入</p>
-                <h3 class="mt-1 text-xl font-semibold text-stone-900">OpenAPI 基础配置</h3>
+                <p class="text-xs tracking-[0.18em] text-cyber-accent-strong">雷池接入</p>
+                <h3 class="mt-0.5 text-lg font-semibold text-stone-900">OpenAPI 基础配置</h3>
               </div>
             </div>
 
-            <div class="mt-6 space-y-5">
-              <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
-                <input v-model="systemSettings.safeline.enabled" type="checkbox" class="mt-1 accent-[var(--color-cyber-accent)]" />
+            <div class="mt-5 space-y-4">
+              <label class="flex items-start gap-2.5 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-3">
+                <input v-model="systemSettings.safeline.enabled" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
                 <span>
                   <span class="block text-sm font-medium text-stone-900">启用雷池集成</span>
-                  <span class="mt-1 block text-sm leading-6 text-cyber-muted">保存后写入 SQLite，供后续日志同步和策略联动复用。</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">保存后写入 SQLite，供后续日志同步和策略联动复用。</span>
                 </span>
               </label>
 
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">雷池地址</span>
-                <input v-model="systemSettings.safeline.base_url" type="text" placeholder="https://127.0.0.1:9443" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">雷池地址</span>
+                <input v-model="systemSettings.safeline.base_url" type="text" placeholder="https://127.0.0.1:9443" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
 
-              <label class="space-y-2">
-                <span class="text-sm text-cyber-muted">API Token</span>
-                <input v-model="systemSettings.safeline.api_token" type="password" placeholder="API-TOKEN" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <label class="space-y-1.5">
+                <span class="text-xs text-cyber-muted">API Token</span>
+                <input v-model="systemSettings.safeline.api_token" type="password" placeholder="API-TOKEN" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
               </label>
 
-              <div class="grid gap-5 md:grid-cols-2">
-                <label class="space-y-2">
-                  <span class="text-sm text-cyber-muted">OpenAPI 文档路径</span>
-                  <input v-model="systemSettings.safeline.openapi_doc_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="space-y-1.5">
+                  <span class="text-xs text-cyber-muted">OpenAPI 文档路径</span>
+                  <input v-model="systemSettings.safeline.openapi_doc_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
-                <label class="space-y-2">
-                  <span class="text-sm text-cyber-muted">鉴权探测路径</span>
-                  <input v-model="systemSettings.safeline.auth_probe_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                <label class="space-y-1.5">
+                  <span class="text-xs text-cyber-muted">鉴权探测路径</span>
+                  <input v-model="systemSettings.safeline.auth_probe_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
-                <label class="space-y-2 md:col-span-2">
-                  <span class="text-sm text-cyber-muted">站点列表路径</span>
-                  <input v-model="systemSettings.safeline.site_list_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-cyber-muted">站点列表路径</span>
+                  <input v-model="systemSettings.safeline.site_list_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
-                <label class="space-y-2 md:col-span-2">
-                  <span class="text-sm text-cyber-muted">事件列表路径</span>
-                  <input v-model="systemSettings.safeline.event_list_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-cyber-muted">事件列表路径</span>
+                  <input v-model="systemSettings.safeline.event_list_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
-                <label class="space-y-2 md:col-span-2">
-                  <span class="text-sm text-cyber-muted">封禁同步路径</span>
-                  <input v-model="systemSettings.safeline.blocklist_sync_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-cyber-muted">封禁同步路径</span>
+                  <input v-model="systemSettings.safeline.blocklist_sync_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
-                <label class="space-y-2 md:col-span-2">
-                  <span class="text-sm text-cyber-muted">远端解封路径</span>
-                  <input v-model="systemSettings.safeline.blocklist_delete_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-cyber-muted">远端解封路径</span>
+                  <input v-model="systemSettings.safeline.blocklist_delete_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
               </div>
 
-              <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
-                <input v-model="systemSettings.safeline.verify_tls" type="checkbox" class="mt-1 accent-[var(--color-cyber-accent)]" />
+              <label class="flex items-start gap-2.5 rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-3">
+                <input v-model="systemSettings.safeline.verify_tls" type="checkbox" class="mt-0.5 accent-[var(--color-cyber-accent)]" />
                 <span>
                   <span class="block text-sm font-medium text-stone-900">校验证书</span>
-                  <span class="mt-1 block text-sm leading-6 text-cyber-muted">开启后会严格校验雷池 HTTPS 证书；自签名环境建议先关闭测试。</span>
+                  <span class="mt-0.5 block text-xs leading-5 text-cyber-muted">开启后会严格校验雷池 HTTPS 证书；自签名环境建议先关闭测试。</span>
                 </span>
               </label>
 
-              <div class="flex flex-wrap items-center gap-3">
+              <div class="flex flex-wrap items-center gap-2.5">
                 <button
                   @click="runSafeLineTest"
                   :disabled="testing || loading"
-                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-cyber-surface-strong px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-cyber-accent/25 bg-cyber-surface-strong px-3 py-1.5 text-xs font-medium text-cyber-accent-strong transition hover:bg-cyber-surface-strong/80 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <PlugZap :size="14" />
+                  <PlugZap :size="12" />
                   {{ testing ? '测试中...' : '测试雷池连接' }}
                 </button>
                 <button
                   @click="loadSafeLineSites"
                   :disabled="loadingSites || loading"
-                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-cyber-accent/25 bg-white px-3 py-1.5 text-xs font-medium text-cyber-accent-strong transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <ServerCog :size="14" />
+                  <ServerCog :size="12" />
                   {{ loadingSites ? '读取中...' : '读取站点列表' }}
                 </button>
                 <button
                   @click="saveMappings"
                   :disabled="savingMappings || sites.length === 0"
-                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-cyber-accent/25 bg-white px-3 py-1.5 text-xs font-medium text-cyber-accent-strong transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Save :size="14" />
+                  <Save :size="12" />
                   {{ savingMappings ? '保存中...' : '保存站点映射' }}
                 </button>
-                <button
-                  @click="runEventSync"
-                  :disabled="syncingEvents"
-                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <BellRing :size="14" />
-                  {{ syncingEvents ? '同步中...' : '立即同步雷池事件' }}
-                </button>
-                <button
-                  @click="runBlockedIpSync"
-                  :disabled="syncingBlockedIps"
-                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <ShieldCheck :size="14" />
-                  {{ syncingBlockedIps ? '同步中...' : '同步本地封禁到雷池' }}
-                </button>
-                <button
-                  @click="runBlockedIpPull"
-                  :disabled="pullingBlockedIps"
-                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <ServerCog :size="14" />
-                  {{ pullingBlockedIps ? '拉取中...' : '拉取雷池封禁到本地' }}
-                </button>
-                <p class="text-xs leading-6 text-cyber-muted">当前测试不会改动雷池配置，只会做连通性和鉴权探测。</p>
+                <p class="text-xs leading-5 text-cyber-muted">当前测试不会改动雷池配置，只会做连通性和鉴权探测。</p>
               </div>
             </div>
           </div>
-        </div>
       </div>
     </div>
   </AppLayout>

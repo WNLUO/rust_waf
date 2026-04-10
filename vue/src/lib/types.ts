@@ -227,6 +227,13 @@ export interface SafeLineSyncStateResponse {
   updated_at: number
 }
 
+export interface SafeLineSyncOverviewResponse {
+  events: SafeLineSyncStateResponse | null
+  blocked_ips_push: SafeLineSyncStateResponse | null
+  blocked_ips_pull: SafeLineSyncStateResponse | null
+  blocked_ips_delete: SafeLineSyncStateResponse | null
+}
+
 export interface SafeLineBlocklistSyncResponse {
   success: boolean
   synced: number

@@ -14,7 +14,7 @@ import type {
   SafeLineEventSyncResponse,
   SafeLineMappingsResponse,
   SafeLineMappingsUpdateRequest,
-  SafeLineSyncStateResponse,
+  SafeLineSyncOverviewResponse,
   SafeLineSitesResponse,
   SafeLineTestResponse,
   SecurityEventsResponse,
@@ -189,7 +189,7 @@ export function syncSafeLineEvents() {
 }
 
 export function fetchSafeLineSyncState() {
-  return apiRequest<SafeLineSyncStateResponse | null>('/integrations/safeline/sync/state')
+  return apiRequest<SafeLineSyncOverviewResponse>('/integrations/safeline/sync/state')
 }
 
 export function syncSafeLineBlockedIps() {

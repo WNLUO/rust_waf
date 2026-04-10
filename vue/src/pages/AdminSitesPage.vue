@@ -655,7 +655,7 @@ onMounted(loadPageData);
       </div>
 
       <template v-else>
-        <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <article
             class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
           >
@@ -693,6 +693,18 @@ onMounted(loadPageData);
             </p>
             <p class="mt-1 text-xs text-slate-500">
               这些站点已从远端读取，但尚未保存到本地映射表。
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+          >
+            <p class="text-xs text-slate-500">HTTPS 站点</p>
+            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
+              {{ formatNumber(totalSslSites) }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500">
+              当前已读取站点中，已检测到 SSL 端口或证书绑定的站点数量。
             </p>
           </article>
 
@@ -978,6 +990,11 @@ onMounted(loadPageData);
                       compact
                     />
                     <StatusBadge
+                      :text="sslStateText(site)"
+                      :type="sslStateType(site)"
+                      compact
+                    />
+                    <StatusBadge
                       v-if="site.is_primary"
                       text="主站点"
                       type="info"
@@ -1031,6 +1048,54 @@ onMounted(loadPageData);
                   <p class="text-xs text-slate-500">最近入库时间</p>
                   <p class="mt-1 text-sm text-stone-900">
                     {{ formatTimestamp(site.updated_at) }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div class="rounded-2xl bg-slate-50 p-3.5">
+                  <p class="text-xs text-slate-500">监听端口</p>
+                  <p class="mt-1 break-all text-sm text-stone-900">
+                    {{ listPreview(site.ports) }}
+                  </p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 p-3.5">
+                  <p class="text-xs text-slate-500">SSL 端口</p>
+                  <p class="mt-1 break-all text-sm text-stone-900">
+                    {{ listPreview(site.ssl_ports, "无 SSL 端口") }}
+                  </p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 p-3.5">
+                  <p class="text-xs text-slate-500">证书绑定</p>
+                  <p class="mt-1 break-all text-sm text-stone-900">
+                    {{ certBindingText(site) }}
+                  </p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 p-3.5">
+                  <p class="text-xs text-slate-500">健康检查</p>
+                  <p class="mt-1 text-sm text-stone-900">
+                    {{
+                      site.health_check === null
+                        ? "未返回"
+                        : site.health_check
+                          ? "已启用"
+                          : "已关闭"
+                    }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <div class="rounded-2xl bg-slate-50 p-3.5">
+                  <p class="text-xs text-slate-500">Server Names</p>
+                  <p class="mt-1 break-all text-sm text-stone-900">
+                    {{ listPreview(site.server_names) }}
+                  </p>
+                </div>
+                <div class="rounded-2xl bg-slate-50 p-3.5">
+                  <p class="text-xs text-slate-500">上游地址</p>
+                  <p class="mt-1 break-all text-sm text-stone-900">
+                    {{ listPreview(site.upstreams, "静态站点或未配置上游") }}
                   </p>
                 </div>
               </div>

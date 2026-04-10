@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from '../pages/HomePage.vue'
 import AdminPage from '../pages/AdminPage.vue'
 import AdminRulesPage from '../pages/AdminRulesPage.vue'
+import AdminL4Page from '../pages/AdminL4Page.vue'
 import AdminEventsPage from '../pages/AdminEventsPage.vue'
 import AdminBlockedPage from '../pages/AdminBlockedPage.vue'
 import AdminSettingsPage from '../pages/AdminSettingsPage.vue'
@@ -24,6 +25,11 @@ const router = createRouter({
       path: '/admin/rules',
       name: 'admin-rules',
       component: AdminRulesPage,
+    },
+    {
+      path: '/admin/l4',
+      name: 'admin-l4',
+      component: AdminL4Page,
     },
     {
       path: '/admin/events',

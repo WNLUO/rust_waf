@@ -1,4 +1,4 @@
-use crate::config::{Config, Rule, SafeLineConfig};
+use crate::config::{Config, L4Config, Rule, RuntimeProfile, SafeLineConfig};
 use crate::core::WafContext;
 use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
 use axum::{
@@ -39,6 +39,22 @@ pub struct SettingsResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct L4ConfigResponse {
+    ddos_protection_enabled: bool,
+    advanced_ddos_enabled: bool,
+    connection_rate_limit: usize,
+    syn_flood_threshold: usize,
+    max_tracked_ips: usize,
+    max_blocked_ips: usize,
+    state_ttl_secs: u64,
+    bloom_filter_scale: f64,
+    runtime_enabled: bool,
+    bloom_enabled: bool,
+    bloom_false_positive_verification: bool,
+    runtime_profile: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SafeLineSettingsResponse {
     enabled: bool,
     auto_sync_events: bool,
@@ -72,6 +88,18 @@ pub struct SettingsUpdateRequest {
     retain_days: u32,
     notes: String,
     safeline: SafeLineSettingsRequest,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct L4ConfigUpdateRequest {
+    ddos_protection_enabled: bool,
+    advanced_ddos_enabled: bool,
+    connection_rate_limit: usize,
+    syn_flood_threshold: usize,
+    max_tracked_ips: usize,
+    max_blocked_ips: usize,
+    state_ttl_secs: u64,
+    bloom_filter_scale: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,6 +270,19 @@ pub struct MetricsResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct L4StatsResponse {
+    enabled: bool,
+    connections: crate::l4::connection::ConnectionStats,
+    ddos_events: u64,
+    protocol_anomalies: u64,
+    traffic: u64,
+    defense_actions: u64,
+    bloom_stats: Option<crate::l4::bloom_filter::L4BloomStats>,
+    false_positive_stats: Option<crate::l4::bloom_filter::L4FalsePositiveStats>,
+    per_port_stats: Vec<crate::l4::inspector::PortStats>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RulesListResponse {
     rules: Vec<RuleResponse>,
 }
@@ -387,6 +428,11 @@ impl ApiServer {
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
             .route(
+                "/l4/config",
+                get(get_l4_config_handler).put(update_l4_config_handler),
+            )
+            .route("/l4/stats", get(get_l4_stats_handler))
+            .route(
                 "/settings",
                 get(get_settings_handler).put(update_settings_handler),
             )
@@ -480,6 +526,34 @@ async fn get_settings_handler(State(state): State<ApiState>) -> ApiResult<Json<S
     Ok(Json(SettingsResponse::from_config(&config)))
 }
 
+async fn get_l4_config_handler(State(state): State<ApiState>) -> ApiResult<Json<L4ConfigResponse>> {
+    let config = persisted_config(&state).await?;
+    Ok(Json(L4ConfigResponse::from_config(
+        &config,
+        state.context.l4_inspector.is_some(),
+    )))
+}
+
+async fn update_l4_config_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<L4ConfigUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let current = persisted_config(&state).await?;
+    let next = payload.into_config(current);
+
+    store
+        .upsert_app_config(&next)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "L4 配置已写入数据库。当前运行中的四层检测实例需重启服务后才会加载新参数。"
+            .to_string(),
+    }))
+}
+
 async fn update_settings_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<SettingsUpdateRequest>,
@@ -499,6 +573,17 @@ async fn update_settings_handler(
         success: true,
         message: "设置已写入数据库。运行时监听与转发类参数需重启服务后生效。".to_string(),
     }))
+}
+
+async fn get_l4_stats_handler(State(state): State<ApiState>) -> ApiResult<Json<L4StatsResponse>> {
+    let response = state
+        .context
+        .l4_inspector
+        .as_ref()
+        .map(|inspector| L4StatsResponse::from_stats(inspector.get_statistics()))
+        .unwrap_or_else(L4StatsResponse::disabled);
+
+    Ok(Json(response))
 }
 
 async fn test_safeline_handler(
@@ -974,6 +1059,25 @@ impl SettingsResponse {
     }
 }
 
+impl L4ConfigResponse {
+    fn from_config(config: &Config, runtime_enabled: bool) -> Self {
+        Self {
+            ddos_protection_enabled: config.l4_config.ddos_protection_enabled,
+            advanced_ddos_enabled: config.l4_config.advanced_ddos_enabled,
+            connection_rate_limit: config.l4_config.connection_rate_limit,
+            syn_flood_threshold: config.l4_config.syn_flood_threshold,
+            max_tracked_ips: config.l4_config.max_tracked_ips,
+            max_blocked_ips: config.l4_config.max_blocked_ips,
+            state_ttl_secs: config.l4_config.state_ttl_secs,
+            bloom_filter_scale: config.l4_config.bloom_filter_scale,
+            runtime_enabled,
+            bloom_enabled: config.bloom_enabled,
+            bloom_false_positive_verification: config.l4_bloom_false_positive_verification,
+            runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+        }
+    }
+}
+
 impl SafeLineSettingsResponse {
     fn from_config(config: &SafeLineConfig) -> Self {
         Self {
@@ -995,6 +1099,23 @@ impl SafeLineSettingsResponse {
             blocklist_delete_path: config.blocklist_delete_path.clone(),
             blocklist_ip_group_ids: config.blocklist_ip_group_ids.clone(),
         }
+    }
+}
+
+impl L4ConfigUpdateRequest {
+    fn into_config(self, mut current: Config) -> Config {
+        current.l4_config = L4Config {
+            ddos_protection_enabled: self.ddos_protection_enabled,
+            advanced_ddos_enabled: self.advanced_ddos_enabled,
+            connection_rate_limit: self.connection_rate_limit,
+            syn_flood_threshold: self.syn_flood_threshold,
+            max_tracked_ips: self.max_tracked_ips,
+            max_blocked_ips: self.max_blocked_ips,
+            state_ttl_secs: self.state_ttl_secs,
+            bloom_filter_scale: self.bloom_filter_scale,
+        };
+
+        current.normalized()
     }
 }
 
@@ -1067,6 +1188,51 @@ impl SafeLineTestRequest {
             blocklist_sync_path: self.blocklist_sync_path,
             blocklist_delete_path: self.blocklist_delete_path,
             blocklist_ip_group_ids: self.blocklist_ip_group_ids,
+        }
+    }
+}
+
+impl L4StatsResponse {
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            connections: crate::l4::connection::ConnectionStats {
+                total_connections: 0,
+                active_connections: 0,
+                blocked_connections: 0,
+                rate_limit_hits: 0,
+            },
+            ddos_events: 0,
+            protocol_anomalies: 0,
+            traffic: 0,
+            defense_actions: 0,
+            bloom_stats: None,
+            false_positive_stats: None,
+            per_port_stats: Vec::new(),
+        }
+    }
+
+    fn from_stats(stats: crate::l4::inspector::L4Statistics) -> Self {
+        let mut per_port_stats = stats.per_port_stats.into_values().collect::<Vec<_>>();
+        per_port_stats.sort_by(|left, right| {
+            right
+                .blocks
+                .cmp(&left.blocks)
+                .then(right.ddos_events.cmp(&left.ddos_events))
+                .then(right.connections.cmp(&left.connections))
+                .then(left.port.cmp(&right.port))
+        });
+
+        Self {
+            enabled: true,
+            connections: stats.connections,
+            ddos_events: stats.ddos_events,
+            protocol_anomalies: stats.protocol_anomalies,
+            traffic: stats.traffic,
+            defense_actions: stats.defense_actions,
+            bloom_stats: stats.bloom_stats,
+            false_positive_stats: stats.false_positive_stats,
+            per_port_stats,
         }
     }
 }
@@ -1361,6 +1527,13 @@ fn non_empty_string(value: String) -> Option<String> {
         None
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+fn runtime_profile_label(profile: RuntimeProfile) -> &'static str {
+    match profile {
+        RuntimeProfile::Minimal => "minimal",
+        RuntimeProfile::Standard => "standard",
     }
 }
 

@@ -138,6 +138,7 @@ export interface SafeLineSettings {
   auth_probe_path: string
   site_list_path: string
   event_list_path: string
+  blocklist_sync_path: string
 }
 
 export interface SettingsPayload {
@@ -220,6 +221,15 @@ export interface SafeLineSyncStateResponse {
   last_imported_count: number
   last_skipped_count: number
   updated_at: number
+}
+
+export interface SafeLineBlocklistSyncResponse {
+  success: boolean
+  synced: number
+  skipped: number
+  failed: number
+  last_cursor: number | null
+  message: string
 }
 
 export interface DashboardPayload {

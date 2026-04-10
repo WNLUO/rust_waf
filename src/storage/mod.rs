@@ -156,6 +156,14 @@ pub struct SafeLineSyncStateEntry {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SafeLineBlocklistSyncResult {
+    pub synced: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub last_cursor: Option<i64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SecurityEventRecord {
     pub layer: String,
@@ -533,6 +541,76 @@ impl SqliteStore {
         Ok(row)
     }
 
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn import_safeline_blocked_ips_sync_result(
+        &self,
+        synced_records: &[BlockedIpEntry],
+        failed: usize,
+    ) -> Result<SafeLineBlocklistSyncResult> {
+        let mut tx = self.pool.begin().await?;
+        let mut synced = 0usize;
+        let mut skipped = 0usize;
+        let mut last_cursor = None;
+
+        for record in synced_records {
+            let fingerprint = fingerprint_blocked_ip(record);
+            let result = sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO safeline_blocked_ip_sync_dedup (
+                    fingerprint, ip, expires_at, synced_at
+                )
+                VALUES (?, ?, ?, ?)
+                "#,
+            )
+            .bind(&fingerprint)
+            .bind(&record.ip)
+            .bind(record.expires_at)
+            .bind(unix_timestamp())
+            .execute(&mut *tx)
+            .await?;
+
+            if result.rows_affected() == 0 {
+                skipped += 1;
+            } else {
+                synced += 1;
+                last_cursor = Some(last_cursor.map_or(record.expires_at, |current: i64| current.max(record.expires_at)));
+            }
+        }
+
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO safeline_sync_state (
+                resource, last_cursor, last_success_at, last_imported_count, last_skipped_count, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(resource) DO UPDATE SET
+                last_cursor = excluded.last_cursor,
+                last_success_at = excluded.last_success_at,
+                last_imported_count = excluded.last_imported_count,
+                last_skipped_count = excluded.last_skipped_count,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind("blocked_ips_push")
+        .bind(last_cursor)
+        .bind(now)
+        .bind(synced as i64)
+        .bind((skipped + failed) as i64)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(SafeLineBlocklistSyncResult {
+            synced,
+            skipped,
+            failed,
+            last_cursor,
+        })
+    }
+
     pub async fn latest_rules_version(&self) -> Result<i64> {
         let latest_version: Option<i64> = sqlx::query_scalar("SELECT MAX(updated_at) FROM rules")
             .fetch_one(&self.pool)
@@ -888,6 +966,13 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             last_skipped_count INTEGER NOT NULL DEFAULT 0,
             updated_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS safeline_blocked_ip_sync_dedup (
+            fingerprint TEXT PRIMARY KEY,
+            ip TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            synced_at INTEGER NOT NULL
+        );
         "#,
     )
     .execute(pool)
@@ -977,6 +1062,17 @@ fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
     hasher.update(event.http_version.as_deref().unwrap_or_default().as_bytes());
     hasher.update([0]);
     hasher.update(event.created_at.to_le_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn fingerprint_blocked_ip(record: &BlockedIpEntry) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(record.ip.as_bytes());
+    hasher.update([0]);
+    hasher.update(record.reason.as_bytes());
+    hasher.update([0]);
+    hasher.update(record.blocked_at.to_le_bytes());
+    hasher.update(record.expires_at.to_le_bytes());
     format!("{:x}", hasher.finalize())
 }
 

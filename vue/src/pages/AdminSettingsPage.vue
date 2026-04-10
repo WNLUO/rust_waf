@@ -7,6 +7,7 @@ import {
   fetchSafeLineSites,
   fetchSafeLineSyncState,
   fetchSettings,
+  syncSafeLineBlockedIps,
   syncSafeLineEvents,
   testSafeLineConnection,
   updateSafeLineMappings,
@@ -31,6 +32,7 @@ const testing = ref(false)
 const loadingSites = ref(false)
 const savingMappings = ref(false)
 const syncingEvents = ref(false)
+const syncingBlockedIps = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const testResult = ref<SafeLineTestResponse | null>(null)
@@ -59,6 +61,7 @@ const systemSettings = reactive<SystemSettingsForm>({
     auth_probe_path: '/api/IPGroupAPI',
     site_list_path: '/api/WebsiteAPI',
     event_list_path: '/api/AttackLogAPI',
+    blocklist_sync_path: '/api/IPGroupAPI',
   },
 })
 
@@ -289,6 +292,21 @@ async function runEventSync() {
   }
 }
 
+async function runBlockedIpSync() {
+  syncingBlockedIps.value = true
+  error.value = ''
+  successMessage.value = ''
+
+  try {
+    const response = await syncSafeLineBlockedIps()
+    successMessage.value = response.message
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '同步本地封禁到雷池失败'
+  } finally {
+    syncingBlockedIps.value = false
+  }
+}
+
 onMounted(async () => {
   await loadSettings()
   await loadMappings()
@@ -484,6 +502,10 @@ onMounted(async () => {
                   <span class="text-sm text-cyber-muted">事件列表路径</span>
                   <input v-model="systemSettings.safeline.event_list_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
                 </label>
+                <label class="space-y-2 md:col-span-2">
+                  <span class="text-sm text-cyber-muted">封禁同步路径</span>
+                  <input v-model="systemSettings.safeline.blocklist_sync_path" type="text" class="w-full rounded-[20px] border border-cyber-border bg-white px-4 py-3 outline-none transition focus:border-cyber-accent" />
+                </label>
               </div>
 
               <label class="flex items-start gap-3 rounded-[24px] border border-cyber-border/70 bg-cyber-surface-strong p-4">
@@ -526,6 +548,14 @@ onMounted(async () => {
                 >
                   <BellRing :size="14" />
                   {{ syncingEvents ? '同步中...' : '立即同步雷池事件' }}
+                </button>
+                <button
+                  @click="runBlockedIpSync"
+                  :disabled="syncingBlockedIps"
+                  class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/25 bg-white px-4 py-2 text-xs font-semibold text-cyber-accent-strong transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ShieldCheck :size="14" />
+                  {{ syncingBlockedIps ? '同步中...' : '同步本地封禁到雷池' }}
                 </button>
                 <p class="text-xs leading-6 text-cyber-muted">当前测试不会改动雷池配置，只会做连通性和鉴权探测。</p>
               </div>

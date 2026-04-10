@@ -48,6 +48,7 @@ pub struct SafeLineSettingsResponse {
     auth_probe_path: String,
     site_list_path: String,
     event_list_path: String,
+    blocklist_sync_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +76,7 @@ pub struct SafeLineSettingsRequest {
     auth_probe_path: String,
     site_list_path: String,
     event_list_path: String,
+    blocklist_sync_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +88,7 @@ pub struct SafeLineTestRequest {
     auth_probe_path: String,
     site_list_path: String,
     event_list_path: String,
+    blocklist_sync_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,6 +168,16 @@ pub struct SafeLineSyncStateResponse {
     last_imported_count: u32,
     last_skipped_count: u32,
     updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineBlocklistSyncResponse {
+    success: bool,
+    synced: u32,
+    skipped: u32,
+    failed: u32,
+    last_cursor: Option<i64>,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -354,6 +367,10 @@ impl ApiServer {
                 get(get_safeline_sync_state_handler),
             )
             .route(
+                "/integrations/safeline/sync/blocked-ips",
+                axum::routing::post(sync_safeline_blocked_ips_handler),
+            )
+            .route(
                 "/rules/:id",
                 get(get_rule_handler)
                     .put(update_rule_handler)
@@ -536,6 +553,58 @@ async fn get_safeline_sync_state_handler(
         .map_err(ApiError::internal)?;
 
     Ok(Json(state.map(SafeLineSyncStateResponse::from)))
+}
+
+async fn sync_safeline_blocked_ips_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineBlocklistSyncResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let blocked = store
+        .list_blocked_ips(&crate::storage::BlockedIpQuery {
+            limit: 200,
+            active_only: true,
+            ..crate::storage::BlockedIpQuery::default()
+        })
+        .await
+        .map_err(ApiError::internal)?;
+
+    let mut accepted = Vec::new();
+    let mut failed = 0usize;
+
+    for record in &blocked.items {
+        let result = crate::integrations::safeline::push_blocked_ip(safeline, record)
+            .await
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
+        if result.accepted {
+            accepted.push(record.clone());
+        } else {
+            failed += 1;
+        }
+    }
+
+    let result = store
+        .import_safeline_blocked_ips_sync_result(&accepted, failed)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(SafeLineBlocklistSyncResponse {
+        success: true,
+        synced: result.synced as u32,
+        skipped: result.skipped as u32,
+        failed: result.failed as u32,
+        last_cursor: result.last_cursor,
+        message: format!(
+            "封禁联动完成，成功同步 {} 条，跳过 {} 条重复记录，失败 {} 条。",
+            result.synced, result.skipped, result.failed
+        ),
+    }))
 }
 
 async fn list_security_events_handler(
@@ -807,6 +876,7 @@ impl SafeLineSettingsResponse {
             auth_probe_path: config.auth_probe_path.clone(),
             site_list_path: config.site_list_path.clone(),
             event_list_path: config.event_list_path.clone(),
+            blocklist_sync_path: config.blocklist_sync_path.clone(),
         }
     }
 }
@@ -847,6 +917,7 @@ impl SafeLineSettingsRequest {
             auth_probe_path: self.auth_probe_path,
             site_list_path: self.site_list_path,
             event_list_path: self.event_list_path,
+            blocklist_sync_path: self.blocklist_sync_path,
         }
     }
 }
@@ -862,6 +933,7 @@ impl SafeLineTestRequest {
             auth_probe_path: self.auth_probe_path,
             site_list_path: self.site_list_path,
             event_list_path: self.event_list_path,
+            blocklist_sync_path: self.blocklist_sync_path,
         }
     }
 }

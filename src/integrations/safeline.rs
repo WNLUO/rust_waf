@@ -1,5 +1,5 @@
 use crate::config::SafeLineConfig;
-use crate::storage::SecurityEventRecord;
+use crate::storage::{BlockedIpEntry, SecurityEventRecord};
 use anyhow::{anyhow, Result};
 use reqwest::{Client, StatusCode};
 use serde::Serialize;
@@ -42,6 +42,14 @@ pub struct SafeLineSecurityEventSummary {
     pub http_version: Option<String>,
     pub created_at: i64,
     pub raw: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineBlockedIpSyncSummary {
+    pub ip: String,
+    pub accepted: bool,
+    pub status_code: u16,
+    pub message: String,
 }
 
 pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
@@ -149,6 +157,46 @@ pub async fn list_security_events(
 
     let payload = response.json::<Value>().await?;
     extract_security_events(&payload)
+}
+
+pub async fn push_blocked_ip(
+    config: &SafeLineConfig,
+    blocked_ip: &BlockedIpEntry,
+) -> Result<SafeLineBlockedIpSyncSummary> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if config.api_token.trim().is_empty() {
+        return Err(anyhow!("未填写 API Token，无法同步本地封禁到雷池"));
+    }
+
+    let client = build_client(config)?;
+    let url = format!("{base_url}{}", config.blocklist_sync_path);
+    let response = client
+        .post(&url)
+        .header("API-TOKEN", config.api_token.trim())
+        .json(&serde_json::json!({
+            "ip": blocked_ip.ip,
+            "reason": blocked_ip.reason,
+            "blocked_at": blocked_ip.blocked_at,
+            "expires_at": blocked_ip.expires_at,
+            "source": "waf-local",
+        }))
+        .send()
+        .await?;
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let accepted = status.is_success() || status == StatusCode::CONFLICT;
+
+    Ok(SafeLineBlockedIpSyncSummary {
+        ip: blocked_ip.ip.clone(),
+        accepted,
+        status_code: status.as_u16(),
+        message: if body.trim().is_empty() {
+            status.to_string()
+        } else {
+            body
+        },
+    })
 }
 
 fn build_client(config: &SafeLineConfig) -> Result<Client> {

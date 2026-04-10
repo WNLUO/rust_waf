@@ -2724,6 +2724,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "bytes",
  "dotenvy",
  "env_logger",
@@ -2739,6 +2740,7 @@ dependencies = [
  "log",
  "pnet",
  "quinn",
+ "rand 0.8.5",
  "regex",
  "reqwest",
  "rustls",

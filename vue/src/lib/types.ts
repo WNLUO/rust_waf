@@ -136,6 +136,8 @@ export interface SafeLineSettings {
   enabled: boolean
   base_url: string
   api_token: string
+  username: string
+  password: string
   verify_tls: boolean
   openapi_doc_path: string
   auth_probe_path: string

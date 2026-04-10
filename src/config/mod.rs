@@ -79,6 +79,10 @@ pub struct SafeLineConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_token: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
     #[serde(default = "default_verify_tls")]
     pub verify_tls: bool,
     #[serde(default = "default_openapi_doc_path")]
@@ -437,6 +441,10 @@ impl Config {
             normalize_base_url(&self.integrations.safeline.base_url);
         self.integrations.safeline.api_token =
             self.integrations.safeline.api_token.trim().to_string();
+        self.integrations.safeline.username =
+            self.integrations.safeline.username.trim().to_string();
+        self.integrations.safeline.password =
+            self.integrations.safeline.password.trim().to_string();
         self.integrations.safeline.openapi_doc_path = normalize_path(
             &self.integrations.safeline.openapi_doc_path,
             "/openapi_doc/",
@@ -486,6 +494,8 @@ impl Default for SafeLineConfig {
             enabled: false,
             base_url: String::new(),
             api_token: String::new(),
+            username: String::new(),
+            password: String::new(),
             verify_tls: default_verify_tls(),
             openapi_doc_path: default_openapi_doc_path(),
             auth_probe_path: default_auth_probe_path(),

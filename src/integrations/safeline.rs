@@ -1,10 +1,13 @@
 use crate::config::SafeLineConfig;
 use crate::storage::{BlockedIpEntry, BlockedIpRecord, SecurityEventRecord};
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use rand::{distributions::Alphanumeric, Rng};
 use reqwest::{Client, RequestBuilder, StatusCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 const DEFAULT_OPENAPI_DOC_PATH: &str = "/openapi_doc/";
@@ -16,6 +19,9 @@ const DEFAULT_EVENT_LIST_PATH: &str = "/api/open/records";
 const LEGACY_EVENT_LIST_PATH: &str = "/api/AttackLogAPI";
 const DEFAULT_BLOCKLIST_PATH: &str = "/api/open/ipgroup";
 const LEGACY_BLOCKLIST_PATH: &str = "/api/IPGroupAPI";
+const LOGIN_AES_KEY_PATH: &str = "/api/open/system/key";
+const LOGIN_CSRF_PATH: &str = "/api/open/auth/csrf";
+const LOGIN_PATH: &str = "/api/open/auth/login";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SafeLineProbeResult {
@@ -81,6 +87,40 @@ pub struct SafeLineBlockedIpSummary {
     pub raw: Value,
 }
 
+#[derive(Debug, Clone)]
+struct AuthContext {
+    api_token: Option<String>,
+    bearer_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SafeLineSystemKeyEnvelope {
+    data: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SafeLineCsrfEnvelope {
+    data: SafeLineCsrfPayload,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SafeLineCsrfPayload {
+    csrf_token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SafeLineLoginEnvelope {
+    data: SafeLineLoginPayload,
+    #[allow(dead_code)]
+    err: Option<String>,
+    msg: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SafeLineLoginPayload {
+    jwt: String,
+}
+
 pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
     let base_url = normalize_base_url(&config.base_url)?;
     let openapi_doc_path =
@@ -93,7 +133,7 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
     let openapi_doc_status = openapi_doc_response.status();
     let openapi_doc_reachable = openapi_doc_status.is_success();
 
-    if config.api_token.trim().is_empty() {
+    if !has_any_auth(config) {
         return Ok(SafeLineProbeResult {
             status: if openapi_doc_reachable {
                 "warning".to_string()
@@ -101,7 +141,7 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
                 "error".to_string()
             },
             message: if openapi_doc_reachable {
-                "已访问到雷池 OpenAPI 文档入口，但当前未填写 API Token，无法继续验证鉴权。"
+                "已访问到雷池 OpenAPI 文档入口，但当前既未填写 API Token，也未配置雷池账号密码，无法继续验证鉴权。"
                     .to_string()
             } else {
                 format!(
@@ -141,8 +181,8 @@ pub async fn probe(config: &SafeLineConfig) -> Result<SafeLineProbeResult> {
 
 pub async fn list_sites(config: &SafeLineConfig) -> Result<Vec<SafeLineSiteSummary>> {
     let base_url = normalize_base_url(&config.base_url)?;
-    if config.api_token.trim().is_empty() {
-        return Err(anyhow!("未填写 API Token，无法读取雷池站点列表"));
+    if !has_any_auth(config) {
+        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法读取雷池站点列表"));
     }
 
     let client = build_client(config)?;
@@ -164,8 +204,8 @@ pub async fn list_security_events(
     config: &SafeLineConfig,
 ) -> Result<Vec<SafeLineSecurityEventSummary>> {
     let base_url = normalize_base_url(&config.base_url)?;
-    if config.api_token.trim().is_empty() {
-        return Err(anyhow!("未填写 API Token，无法读取雷池事件列表"));
+    if !has_any_auth(config) {
+        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法读取雷池事件列表"));
     }
 
     let client = build_client(config)?;
@@ -188,8 +228,8 @@ pub async fn push_blocked_ip(
     blocked_ip: &BlockedIpEntry,
 ) -> Result<SafeLineBlockedIpSyncSummary> {
     let base_url = normalize_base_url(&config.base_url)?;
-    if config.api_token.trim().is_empty() {
-        return Err(anyhow!("未填写 API Token，无法同步本地封禁到雷池"));
+    if !has_any_auth(config) {
+        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法同步本地封禁到雷池"));
     }
 
     let client = build_client(config)?;
@@ -200,20 +240,20 @@ pub async fn push_blocked_ip(
         ));
     }
     let url = format!("{base_url}{path}");
-    let response = client.post(&url);
-    let response = with_auth_headers(response, config)
-        .json(&serde_json::json!({
-            "ip": blocked_ip.ip,
-            "reason": blocked_ip.reason,
-            "blocked_at": blocked_ip.blocked_at,
-            "expires_at": blocked_ip.expires_at,
-            "source": "waf-local",
-        }))
-        .send()
-        .await?;
-
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
+    let payload = serde_json::json!({
+        "ip": blocked_ip.ip,
+        "reason": blocked_ip.reason,
+        "blocked_at": blocked_ip.blocked_at,
+        "expires_at": blocked_ip.expires_at,
+        "source": "waf-local",
+    });
+    let (status, body) = send_with_auth(
+        &client,
+        &base_url,
+        config,
+        |auth| with_auth_headers(client.post(&url).json(&payload), auth),
+    )
+    .await?;
     let accepted = status.is_success() || status == StatusCode::CONFLICT;
 
     Ok(SafeLineBlockedIpSyncSummary {
@@ -230,8 +270,8 @@ pub async fn push_blocked_ip(
 
 pub async fn list_blocked_ips(config: &SafeLineConfig) -> Result<Vec<SafeLineBlockedIpSummary>> {
     let base_url = normalize_base_url(&config.base_url)?;
-    if config.api_token.trim().is_empty() {
-        return Err(anyhow!("未填写 API Token，无法读取雷池封禁列表"));
+    if !has_any_auth(config) {
+        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法读取雷池封禁列表"));
     }
 
     let client = build_client(config)?;
@@ -254,8 +294,8 @@ pub async fn delete_blocked_ip(
     blocked_ip: &BlockedIpEntry,
 ) -> Result<SafeLineBlockedIpDeleteSummary> {
     let base_url = normalize_base_url(&config.base_url)?;
-    if config.api_token.trim().is_empty() {
-        return Err(anyhow!("未填写 API Token，无法调用雷池远端解封"));
+    if !has_any_auth(config) {
+        return Err(anyhow!("未填写 API Token，且未配置雷池账号密码，无法调用雷池远端解封"));
     }
 
     let client = build_client(config)?;
@@ -282,32 +322,36 @@ pub async fn delete_blocked_ip(
         "expires_at": blocked_ip.expires_at,
     });
 
-    let mut attempts = Vec::new();
-    if let Some(remote_id) = blocked_ip.provider_remote_id.as_deref() {
-        attempts.push(client.delete(format!("{url}/{remote_id}")));
-    }
-    attempts.push(client.delete(&url).json(&payload));
-    attempts.push(client.post(&url).json(&serde_json::json!({
+    let mut last_status = StatusCode::BAD_GATEWAY;
+    let mut last_message = String::new();
+
+    let delete_action_payload = serde_json::json!({
         "action": "delete",
         "id": blocked_ip.provider_remote_id.as_deref(),
         "remote_id": blocked_ip.provider_remote_id.as_deref(),
         "ip": &blocked_ip.ip,
-    })));
+    });
+    let mut request_kinds = Vec::new();
+    if let Some(remote_id) = blocked_ip.provider_remote_id.as_deref() {
+        request_kinds.push(DeleteAttempt::DeleteById(remote_id.to_string()));
+    }
+    request_kinds.push(DeleteAttempt::DeleteByBody(payload.clone()));
+    request_kinds.push(DeleteAttempt::PostDelete(delete_action_payload));
 
-    let mut last_status = StatusCode::BAD_GATEWAY;
-    let mut last_message = String::new();
+    for attempt in request_kinds {
+        let (status, body) = send_with_auth(&client, &base_url, config, |auth| match &attempt {
+            DeleteAttempt::DeleteById(remote_id) => {
+                with_auth_headers(client.delete(format!("{url}/{remote_id}")), auth)
+            }
+            DeleteAttempt::DeleteByBody(payload) => {
+                with_auth_headers(client.delete(&url).json(payload), auth)
+            }
+            DeleteAttempt::PostDelete(payload) => {
+                with_auth_headers(client.post(&url).json(payload), auth)
+            }
+        })
+        .await?;
 
-    for request in attempts {
-        let response = request
-            .header("API-TOKEN", config.api_token.trim())
-            .header(
-                "Authorization",
-                format!("Bearer {}", config.api_token.trim()),
-            )
-            .send()
-            .await?;
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
         if status.is_success() || status == StatusCode::NOT_FOUND {
             return Ok(SafeLineBlockedIpDeleteSummary {
                 ip: blocked_ip.ip.clone(),
@@ -350,6 +394,12 @@ struct ProbeAttempt {
     status: StatusCode,
 }
 
+enum DeleteAttempt {
+    DeleteById(String),
+    DeleteByBody(Value),
+    PostDelete(Value),
+}
+
 async fn probe_authentication(
     client: &Client,
     base_url: &str,
@@ -364,8 +414,9 @@ async fn probe_authentication(
 
     for path in paths {
         let url = format!("{base_url}{path}");
-        let response = with_auth_headers(client.get(&url), config).send().await?;
-        let status = response.status();
+        let (status, body) =
+            send_with_auth(client, base_url, config, |auth| with_auth_headers(client.get(&url), auth))
+                .await?;
         last_status = status;
         last_path = path.clone();
         if status.is_success()
@@ -378,6 +429,12 @@ async fn probe_authentication(
                     | StatusCode::NOT_FOUND
             )
         {
+            return Ok(ProbeAttempt {
+                path: path.clone(),
+                status,
+            });
+        }
+        if body.contains("login-required") {
             return Ok(ProbeAttempt {
                 path: path.clone(),
                 status,
@@ -402,9 +459,9 @@ async fn get_json_with_fallback(
 
     for path in paths {
         let url = format!("{base_url}{path}");
-        let response = with_auth_headers(client.get(&url), config).send().await?;
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let (status, body) =
+            send_with_auth(client, base_url, config, |auth| with_auth_headers(client.get(&url), auth))
+                .await?;
 
         if status.is_success() {
             if looks_like_html(&body) {
@@ -450,15 +507,208 @@ async fn get_json_with_fallback(
     ))
 }
 
-fn with_auth_headers(request: RequestBuilder, config: &SafeLineConfig) -> RequestBuilder {
+async fn send_with_auth<F>(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+    build_request: F,
+) -> Result<(StatusCode, String)>
+where
+    F: Fn(&AuthContext) -> RequestBuilder,
+{
+    let auth_contexts = resolve_auth_contexts(client, base_url, config).await?;
+    let mut last_status = StatusCode::UNAUTHORIZED;
+    let mut last_body = String::new();
+
+    for auth in &auth_contexts {
+        let response = build_request(auth).send().await?;
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let login_required = body.contains("login-required") || body.contains("Login required");
+        last_status = status;
+        last_body = body.clone();
+        if status.is_success() || !login_required {
+            return Ok((status, body));
+        }
+    }
+
+    Ok((last_status, last_body))
+}
+
+async fn resolve_auth_contexts(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+) -> Result<Vec<AuthContext>> {
+    let mut contexts = Vec::new();
     let token = config.api_token.trim();
-    if token.is_empty() {
-        request
+    if !token.is_empty() {
+        contexts.push(AuthContext {
+            api_token: Some(token.to_string()),
+            bearer_token: Some(token.to_string()),
+        });
+    }
+
+    if has_username_password(config) {
+        let jwt = login_with_password(client, base_url, config).await?;
+        if !jwt.trim().is_empty() {
+            contexts.push(AuthContext {
+                api_token: None,
+                bearer_token: Some(jwt),
+            });
+        }
+    }
+
+    if contexts.is_empty() {
+        contexts.push(AuthContext {
+            api_token: None,
+            bearer_token: None,
+        });
+    }
+
+    Ok(contexts)
+}
+
+fn with_auth_headers(request: RequestBuilder, auth: &AuthContext) -> RequestBuilder {
+    let request = if let Some(api_token) = auth.api_token.as_deref() {
+        request.header("API-TOKEN", api_token)
     } else {
         request
-            .header("API-TOKEN", token)
-            .header("Authorization", format!("Bearer {token}"))
+    };
+
+    if let Some(bearer_token) = auth.bearer_token.as_deref() {
+        request.header("Authorization", format!("Bearer {bearer_token}"))
+    } else {
+        request
     }
+}
+
+fn has_any_auth(config: &SafeLineConfig) -> bool {
+    !config.api_token.trim().is_empty() || has_username_password(config)
+}
+
+fn has_username_password(config: &SafeLineConfig) -> bool {
+    !config.username.trim().is_empty() && !config.password.trim().is_empty()
+}
+
+async fn login_with_password(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+) -> Result<String> {
+    let aes_key_url = format!("{base_url}{LOGIN_AES_KEY_PATH}");
+    let csrf_url = format!("{base_url}{LOGIN_CSRF_PATH}");
+    let login_url = format!("{base_url}{LOGIN_PATH}");
+
+    let aes_key = client
+        .get(&aes_key_url)
+        .send()
+        .await?
+        .json::<SafeLineSystemKeyEnvelope>()
+        .await?
+        .data;
+    if aes_key.len() != 16 {
+        return Err(anyhow!(
+            "雷池登录加密密钥长度异常，期望 16 字节，实际 {}",
+            aes_key.len()
+        ));
+    }
+
+    let csrf_token = client
+        .get(&csrf_url)
+        .send()
+        .await?
+        .json::<SafeLineCsrfEnvelope>()
+        .await?
+        .data
+        .csrf_token;
+
+    let iv = random_iv();
+    let encrypted_password = encrypt_password(&aes_key, &iv, config.password.trim())?;
+    let payload = serde_json::json!({
+        "username": config.username.trim(),
+        "password": encrypted_password,
+        "csrf_token": csrf_token,
+    });
+
+    let response = client.post(&login_url).json(&payload).send().await?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(anyhow!("雷池登录失败，HTTP {}：{}", status, body));
+    }
+
+    let envelope = serde_json::from_str::<SafeLineLoginEnvelope>(&body).map_err(|err| {
+        anyhow!("雷池登录返回了不可解析的 JSON：{}", err)
+    })?;
+    if envelope.data.jwt.trim().is_empty() {
+        return Err(anyhow!(
+            "雷池登录未返回 JWT：{}",
+            if envelope.msg.trim().is_empty() {
+                "空响应".to_string()
+            } else {
+                envelope.msg
+            }
+        ));
+    }
+
+    Ok(envelope.data.jwt)
+}
+
+fn random_iv() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect()
+}
+
+fn encrypt_password(aes_key: &str, iv: &str, password: &str) -> Result<String> {
+    let encrypted = encrypt_password_with_openssl(aes_key, iv, password)?;
+    let mut mixed = Vec::with_capacity(iv.len() + encrypted.len());
+    mixed.extend_from_slice(iv.as_bytes());
+    mixed.extend_from_slice(&encrypted);
+    Ok(BASE64.encode(mixed))
+}
+
+fn encrypt_password_with_openssl(aes_key: &str, iv: &str, password: &str) -> Result<Vec<u8>> {
+    let output = Command::new("/usr/bin/openssl")
+        .arg("enc")
+        .arg("-aes-128-cbc")
+        .arg("-K")
+        .arg(bytes_to_hex(aes_key.as_bytes()))
+        .arg("-iv")
+        .arg(bytes_to_hex(iv.as_bytes()))
+        .arg("-nosalt")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(password.as_bytes())?;
+            }
+            child.wait_with_output()
+        })
+        .map_err(|err| anyhow!("调用 openssl 进行雷池密码加密失败：{}", err))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "openssl 加密失败：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(output.stdout)
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }
 
 fn normalize_base_url(value: &str) -> Result<String> {
@@ -624,31 +874,36 @@ fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlockedIpSummary>>
 
 fn find_array_candidates<'a>(value: &'a Value) -> Vec<&'a Vec<Value>> {
     let mut candidates = Vec::new();
+    collect_array_candidates(value, &mut candidates);
+    candidates
+}
 
+fn collect_array_candidates<'a>(value: &'a Value, candidates: &mut Vec<&'a Vec<Value>>) {
     if let Some(array) = value.as_array() {
         candidates.push(array);
+        for item in array {
+            collect_array_candidates(item, candidates);
+        }
+        return;
     }
 
-    if let Some(object) = value.as_object() {
-        for key in [
-            "data", "list", "items", "nodes", "results", "rows", "records", "objs", "objects",
-        ] {
-            if let Some(array) = object.get(key).and_then(Value::as_array) {
-                candidates.push(array);
-            }
+    let Some(object) = value.as_object() else {
+        return;
+    };
 
-            if let Some(array) = object
-                .get(key)
-                .and_then(Value::as_object)
-                .and_then(|child| child.get("list"))
-                .and_then(Value::as_array)
-            {
-                candidates.push(array);
-            }
+    for key in [
+        "data", "list", "items", "nodes", "results", "rows", "records", "objs", "objects",
+    ] {
+        if let Some(child) = object.get(key) {
+            collect_array_candidates(child, candidates);
         }
     }
 
-    candidates
+    for child in object.values() {
+        if child.is_object() {
+            collect_array_candidates(child, candidates);
+        }
+    }
 }
 
 fn parse_site_summary(value: &Value) -> Option<SafeLineSiteSummary> {
@@ -995,6 +1250,31 @@ mod tests {
     }
 
     #[test]
+    fn extract_sites_supports_nested_data_data_payload() {
+        let payload = json!({
+            "data": {
+                "data": [
+                    {
+                        "id": 13,
+                        "title": "2tos",
+                        "server_names": ["2tos.cn", "www.2tos.cn"],
+                        "is_enabled": true
+                    }
+                ],
+                "total": 1
+            },
+            "err": null,
+            "msg": ""
+        });
+
+        let sites = extract_sites(&payload).unwrap();
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].id, "13");
+        assert_eq!(sites[0].name, "2tos");
+        assert_eq!(sites[0].domain, "2tos.cn");
+    }
+
+    #[test]
     fn extract_security_events_supports_list_payload() {
         let payload = json!({
             "data": {
@@ -1068,5 +1348,24 @@ mod tests {
         assert_eq!(ips.len(), 1);
         assert_eq!(ips[0].ip, "198.51.100.10");
         assert_eq!(ips[0].remote_id.as_deref(), Some("12"));
+    }
+
+    #[test]
+    fn encrypt_password_matches_safeline_login_shape() {
+        let encoded = encrypt_password("KvJFHAoYlLU9xI4j", "260b8bf4f0b6e877", "Qq203342").unwrap();
+        let decoded = BASE64.decode(encoded).unwrap();
+        assert!(decoded.starts_with(b"260b8bf4f0b6e877"));
+        assert!(decoded.len() > 16);
+    }
+
+    #[test]
+    fn has_any_auth_supports_username_password() {
+        let config = SafeLineConfig {
+            username: "wnluo".to_string(),
+            password: "Qq203342".to_string(),
+            ..SafeLineConfig::default()
+        };
+        assert!(has_any_auth(&config));
+        assert!(has_username_password(&config));
     }
 }

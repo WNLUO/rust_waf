@@ -46,6 +46,8 @@ const systemSettings = reactive<SystemSettingsForm>({
     enabled: false,
     base_url: '',
     api_token: '',
+    username: '',
+    password: '',
     verify_tls: false,
     openapi_doc_path: '/openapi_doc/',
     auth_probe_path: '/api/open/system/key',
@@ -61,6 +63,8 @@ function toPlainSafeLineSettings() {
     enabled: systemSettings.safeline.enabled,
     base_url: systemSettings.safeline.base_url,
     api_token: systemSettings.safeline.api_token,
+    username: systemSettings.safeline.username,
+    password: systemSettings.safeline.password,
     verify_tls: systemSettings.safeline.verify_tls,
     openapi_doc_path: systemSettings.safeline.openapi_doc_path,
     auth_probe_path: systemSettings.safeline.auth_probe_path,
@@ -177,6 +181,11 @@ function siteMappingDraft(site: SafeLineSiteItem) {
 }
 
 const mappingDrafts = computed(() => sites.value.map(siteMappingDraft))
+
+function formatTimestamp(timestamp: number | null) {
+  if (!timestamp) return '暂无'
+  return new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false })
+}
 
 async function saveMappings() {
   savingMappings.value = true
@@ -346,6 +355,17 @@ onMounted(async () => {
 
               <div class="grid gap-4 md:grid-cols-2">
                 <label class="space-y-1.5">
+                  <span class="text-xs text-cyber-muted">雷池账号</span>
+                  <input v-model="systemSettings.safeline.username" type="text" placeholder="用户名" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-cyber-muted">雷池密码</span>
+                  <input v-model="systemSettings.safeline.password" type="password" placeholder="密码" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
+                </label>
+              </div>
+
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="space-y-1.5">
                   <span class="text-xs text-cyber-muted">OpenAPI 文档路径</span>
                   <input v-model="systemSettings.safeline.openapi_doc_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
                 </label>
@@ -405,6 +425,91 @@ onMounted(async () => {
                   {{ savingMappings ? '保存中...' : '保存站点映射' }}
                 </button>
                 <p class="text-xs leading-5 text-cyber-muted">当前测试不会改动雷池配置，只会做连通性和鉴权探测。</p>
+              </div>
+
+              <div
+                v-if="testResult"
+                class="rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-stone-900">连通性测试结果</p>
+                    <p class="mt-1 text-xs leading-5 text-cyber-muted">{{ testResult.message }}</p>
+                  </div>
+                  <span
+                    class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium"
+                    :class="
+                      testResult.status === 'ok'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : testResult.status === 'warning'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-rose-100 text-rose-700'
+                    "
+                  >
+                    {{ testResult.status === 'ok' ? '通过' : testResult.status === 'warning' ? '需确认' : '失败' }}
+                  </span>
+                </div>
+
+                <div class="mt-3 grid gap-3 md:grid-cols-2">
+                  <div class="rounded-[16px] border border-cyber-border/60 bg-white px-3.5 py-3">
+                    <p class="text-xs text-cyber-muted">OpenAPI 文档</p>
+                    <p class="mt-1 text-sm font-medium text-stone-900">
+                      {{ testResult.openapi_doc_reachable ? '可访问' : '不可访问' }}
+                      <span v-if="testResult.openapi_doc_status !== null" class="text-cyber-muted">
+                        （HTTP {{ testResult.openapi_doc_status }}）
+                      </span>
+                    </p>
+                  </div>
+                  <div class="rounded-[16px] border border-cyber-border/60 bg-white px-3.5 py-3">
+                    <p class="text-xs text-cyber-muted">鉴权探测</p>
+                    <p class="mt-1 text-sm font-medium text-stone-900">
+                      {{ testResult.authenticated ? '已通过' : '未通过' }}
+                      <span v-if="testResult.auth_probe_status !== null" class="text-cyber-muted">
+                        （HTTP {{ testResult.auth_probe_status }}）
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-if="sitesLoadedAt !== null"
+                class="rounded-[20px] border border-cyber-border/70 bg-cyber-surface-strong p-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-stone-900">站点列表读取结果</p>
+                    <p class="mt-1 text-xs leading-5 text-cyber-muted">
+                      最近读取时间：{{ formatTimestamp(sitesLoadedAt) }}，共 {{ sites.length }} 个站点。
+                    </p>
+                  </div>
+                </div>
+
+                <div v-if="sites.length" class="mt-3 grid gap-3">
+                  <div
+                    v-for="site in sites"
+                    :key="site.id || `${site.name}-${site.domain}`"
+                    class="rounded-[16px] border border-cyber-border/60 bg-white px-4 py-3"
+                  >
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p class="text-sm font-medium text-stone-900">{{ site.name || '未命名站点' }}</p>
+                        <p class="mt-1 font-mono text-xs text-cyber-muted">{{ site.domain || '未提供域名' }}</p>
+                      </div>
+                      <div class="text-right text-xs text-cyber-muted">
+                        <p>ID：{{ site.id || '未提供' }}</p>
+                        <p class="mt-1">状态：{{ site.status || 'unknown' }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  v-else
+                  class="mt-3 rounded-[16px] border border-dashed border-cyber-border/70 bg-white px-4 py-6 text-sm text-cyber-muted"
+                >
+                  接口调用已完成，但当前没有可显示的站点。
+                </div>
               </div>
             </div>
           </div>

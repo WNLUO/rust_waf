@@ -891,9 +891,6 @@ onMounted(loadPageData);
           <div class="flex flex-col gap-4 border-b border-slate-200 px-4 py-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <p class="text-sm font-semibold text-stone-900">站点列表</p>
-              <p class="mt-1 text-xs leading-5 text-slate-500">
-                一行代表一个站点视图。这里只做映射维护和单站点同步，不再提供批量回流或批量推送。
-              </p>
             </div>
             <p class="text-xs text-slate-500">
               {{
@@ -919,7 +916,6 @@ onMounted(loadPageData);
                   <th class="px-4 py-3 font-medium">本地站点</th>
                   <th class="px-4 py-3 font-medium">雷池站点</th>
                   <th class="px-4 py-3 font-medium">状态</th>
-                  <th class="px-4 py-3 font-medium">备注</th>
                   <th class="px-4 py-3 font-medium">操作</th>
                 </tr>
               </thead>
@@ -927,82 +923,56 @@ onMounted(loadPageData);
                 <tr
                   v-for="row in filteredRows"
                   :key="row.row_key"
-                  class="align-top"
+                  class="items-center transition hover:bg-slate-50/50"
                 >
-                  <td class="px-4 py-4">
-                    <div v-if="row.safeline_site_id" class="space-y-2">
-                      <input
-                        v-model="row.local_alias"
-                        type="text"
-                        class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-stone-900 outline-none transition focus:border-blue-500"
-                        placeholder="输入本地别名"
-                      />
-                      <p class="text-xs text-slate-500">
-                        用于事件识别和主站点选择。
+                  <td class="px-4 py-2">
+                    <div v-if="row.safeline_site_id" class="flex items-center">
+                      <p class="font-medium text-stone-900 truncate max-w-[150px]" :title="row.local_alias || row.safeline_site_name || row.local_site_name">
+                        {{ row.local_alias || row.safeline_site_name || row.local_site_name || "未命名" }}
                       </p>
                     </div>
-                    <div v-else class="space-y-1">
-                      <p class="font-medium text-stone-900">
-                        {{ row.local_site_name || "未命名本地站点" }}
-                      </p>
-                      <p class="text-xs text-slate-500">
-                        仅本地站点，不能保存雷池映射。
+                    <div v-else>
+                      <p class="font-medium text-stone-900 truncate max-w-[150px]" :title="row.local_site_name">
+                        {{ row.local_site_name || "未命名本地" }}
                       </p>
                     </div>
                   </td>
 
-                  <td class="px-4 py-4">
-                    <div v-if="row.local_present" class="space-y-1.5">
-                      <p class="font-medium text-stone-900">
-                        {{ row.local_site_name }}
-                      </p>
-                      <p class="font-mono text-xs text-slate-500">
-                        local={{ row.local_site_id }}
-                      </p>
-                      <p class="break-all text-xs text-slate-500">
-                        {{ row.local_primary_hostname }}
-                      </p>
-                      <p
-                        v-if="row.local_listen_ports.length"
-                        class="text-xs text-slate-500"
-                      >
-                        端口：{{ row.local_listen_ports.join(" / ") }}
-                      </p>
+                  <td class="px-4 py-2">
+                    <div v-if="row.local_present" class="flex flex-col">
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-medium text-stone-900">{{ row.local_site_name }}</span>
+                        <span class="font-mono text-[10px] text-slate-400">ID:{{ row.local_site_id }}</span>
+                      </div>
+                      <div class="flex items-center gap-2 text-xs text-slate-500">
+                        <span class="truncate max-w-[180px]" :title="row.local_primary_hostname">{{ row.local_primary_hostname }}</span>
+                        <span v-if="row.local_listen_ports.length" class="shrink-0 text-slate-300">|</span>
+                        <span v-if="row.local_listen_ports.length" class="shrink-0">Port: {{ row.local_listen_ports.join("/") }}</span>
+                      </div>
                     </div>
-                    <p v-else class="text-xs text-slate-500">未落库到本地</p>
+                    <p v-else class="text-xs text-slate-400 italic">未落库</p>
                   </td>
 
-                  <td class="px-4 py-4">
-                    <div v-if="row.remote_present" class="space-y-1.5">
-                      <p class="font-medium text-stone-900">
-                        {{ row.safeline_site_name || "未返回名称" }}
-                      </p>
-                      <p class="font-mono text-xs text-slate-500">
-                        remote={{ row.safeline_site_id }}
-                      </p>
-                      <p class="break-all text-xs text-slate-500">
-                        {{ row.safeline_site_domain || "未返回域名" }}
-                      </p>
-                      <p
-                        v-if="row.server_names.length"
-                        class="break-all text-xs text-slate-500"
-                      >
-                        Server Names：{{ row.server_names.join(" / ") }}
-                      </p>
+                  <td class="px-4 py-2">
+                    <div v-if="row.remote_present" class="flex flex-col">
+                      <div class="flex items-center gap-1.5">
+                        <span class="font-medium text-stone-900">{{ row.safeline_site_name || "未命名" }}</span>
+                        <span class="font-mono text-[10px] text-slate-400">ID:{{ row.safeline_site_id }}</span>
+                      </div>
+                      <div class="flex items-center gap-2 text-xs text-slate-500">
+                        <span class="truncate max-w-[180px]" :title="row.safeline_site_domain">{{ row.safeline_site_domain || "无域名" }}</span>
+                        <span v-if="row.server_names.length" class="shrink-0 text-slate-300">|</span>
+                        <span v-if="row.server_names.length" class="truncate max-w-[100px]" :title="row.server_names.join(' / ')">{{ row.server_names[0] }}{{ row.server_names.length > 1 ? '...' : '' }}</span>
+                      </div>
                     </div>
-                    <div v-else class="space-y-1">
-                      <p class="text-xs text-slate-500">当前未出现在雷池列表</p>
-                      <p
-                        v-if="row.safeline_site_id"
-                        class="font-mono text-xs text-slate-500"
-                      >
-                        记录中的 remote={{ row.safeline_site_id }}
-                      </p>
+                    <div v-else class="flex items-center gap-2">
+                      <span class="text-xs text-slate-400 italic">雷池未见</span>
+                      <span v-if="row.safeline_site_id" class="font-mono text-[10px] text-slate-400">ID:{{ row.safeline_site_id }}</span>
                     </div>
                   </td>
 
-                  <td class="px-4 py-4">
-                    <div class="flex flex-wrap gap-2">
+                  <td class="px-4 py-2">
+                    <div class="flex flex-wrap items-center gap-1.5">
                       <StatusBadge
                         :text="mappingStateText(row)"
                         :type="mappingStateType(row)"
@@ -1010,113 +980,57 @@ onMounted(loadPageData);
                       />
                       <StatusBadge
                         v-if="row.remote_present"
-                        :text="remoteStatusText(row.status)"
+                        :text="isSiteOnline(row.status) ? '在线' : '停用'"
                         :type="remoteStatusType(row.status)"
                         compact
                       />
                       <StatusBadge
-                        v-else-if="row.local_present"
-                        :text="row.local_enabled ? '本地启用' : '本地停用'"
-                        :type="row.local_enabled ? 'success' : 'warning'"
-                        compact
-                      />
-                      <StatusBadge
                         v-if="row.is_primary"
-                        text="主站点"
+                        text="主"
                         type="info"
                         compact
                       />
-                      <StatusBadge
-                        v-if="row.safeline_site_id && !row.enabled"
-                        text="映射已停用"
-                        type="warning"
-                        compact
-                      />
                     </div>
-                    <p
-                      class="mt-2 max-w-[24rem] text-xs leading-5"
-                      :class="row.link_last_error ? 'text-red-600' : 'text-slate-500'"
-                    >
-                      {{ rowSyncText(row) }}
-                    </p>
                   </td>
 
-                  <td class="px-4 py-4">
-                    <textarea
-                      v-if="row.safeline_site_id"
-                      v-model="row.notes"
-                      rows="3"
-                      class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-                      placeholder="例如：核心业务、灰度入口、海外站点等"
-                    />
-                    <p
-                      v-else
-                      class="whitespace-pre-wrap text-sm leading-6 text-slate-600"
-                    >
-                      {{ row.local_notes || "无本地备注" }}
-                    </p>
-                  </td>
-
-                  <td class="px-4 py-4">
-                    <div class="flex min-w-[220px] flex-col gap-2">
+                  <td class="px-4 py-2">
+                    <div class="flex items-center gap-1.5">
                       <button
                         v-if="row.remote_present"
                         @click="syncRemoteSite(row)"
                         :disabled="rowBusy(row) || !hasSavedConfig"
-                        class="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded border border-emerald-200 bg-emerald-50 text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        :title="remoteActionLabel(row)"
                       >
                         <RefreshCw
                           :size="14"
                           :class="{ 'animate-spin': rowActionPending(row, 'pull') }"
                         />
-                        {{
-                          rowActionPending(row, "pull")
-                            ? "处理中..."
-                            : remoteActionLabel(row)
-                        }}
                       </button>
 
                       <button
                         v-if="row.local_present"
                         @click="syncLocalSite(row)"
                         :disabled="rowBusy(row) || !hasSavedConfig"
-                        class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded border border-amber-200 bg-amber-50 text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        :title="localActionLabel(row)"
                       >
                         <RefreshCw
                           :size="14"
                           :class="{ 'animate-spin': rowActionPending(row, 'push') }"
                         />
-                        {{
-                          rowActionPending(row, "push")
-                            ? "处理中..."
-                            : localActionLabel(row)
-                        }}
-                      </button>
-
-                      <button
-                        v-if="row.safeline_site_id"
-                        @click="selectPrimary(row.safeline_site_id)"
-                        class="inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition"
-                        :class="
-                          row.is_primary
-                            ? 'border-blue-500/30 bg-blue-50 text-blue-700'
-                            : 'border-slate-200 bg-white text-stone-700 hover:border-blue-500/40 hover:text-blue-700'
-                        "
-                      >
-                        <ShieldCheck :size="14" />
-                        {{ row.is_primary ? "当前主站点" : "设为主站点" }}
                       </button>
 
                       <label
                         v-if="row.safeline_site_id"
-                        class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700"
+                        class="inline-flex h-8 items-center gap-1 rounded border border-slate-200 bg-white px-2 text-xs text-stone-600 cursor-pointer hover:border-slate-300"
                       >
                         <input
                           v-model="row.enabled"
                           type="checkbox"
                           class="accent-blue-600"
                         />
-                        启用映射
+                        <span>启用</span>
                       </label>
                     </div>
                   </td>

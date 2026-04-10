@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { LayoutDashboard, Shield, ListFilter, Ban, Activity, Cpu, Settings } from 'lucide-vue-next'
+import { LayoutDashboard, Shield, ListFilter, Ban, Activity, Cpu, Settings, Link2 } from 'lucide-vue-next'
 
 const navItems = [
   { name: '总览', path: '/admin', icon: LayoutDashboard },
   { name: '规则中心', path: '/admin/rules', icon: Shield },
   { name: '事件记录', path: '/admin/events', icon: Activity },
   { name: '封禁名单', path: '/admin/blocked', icon: Ban },
+  { name: '雷池联动', path: '/admin/safeline', icon: Link2 },
   { name: '系统设置', path: '/admin/settings', icon: Settings },
 ]
 </script>

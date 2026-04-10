@@ -145,6 +145,7 @@ export interface SafeLineSettings {
   event_list_path: string
   blocklist_sync_path: string
   blocklist_delete_path: string
+  blocklist_ip_group_ids: string[]
 }
 
 export interface SettingsPayload {

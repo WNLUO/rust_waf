@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
-import { fetchBlockedIps, unblockIp } from '../lib/api'
+import { fetchBlockedIps, pullSafeLineBlockedIps, syncSafeLineBlockedIps, unblockIp } from '../lib/api'
 import type { BlockedIpsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import { useFormatters } from '../composables/useFormatters'
@@ -9,9 +9,12 @@ import { Ban, RefreshCw } from 'lucide-vue-next'
 const { formatTimestamp, timeRemaining } = useFormatters()
 const loading = ref(true)
 const refreshing = ref(false)
+const pulling = ref(false)
+const pushing = ref(false)
 const mutatingId = ref<number | null>(null)
 const filtersReady = ref(false)
 const error = ref('')
+const successMessage = ref('')
 const blockedPayload = ref<BlockedIpsResponse>({ total: 0, limit: 0, offset: 0, blocked_ips: [] })
 
 const blockedFilters = reactive({
@@ -38,6 +41,38 @@ const loadBlockedIps = async (showLoader = false) => {
   } finally {
     if (showLoader) loading.value = false
     refreshing.value = false
+  }
+}
+
+const runSafeLinePull = async () => {
+  pulling.value = true
+  error.value = ''
+  successMessage.value = ''
+
+  try {
+    const response = await pullSafeLineBlockedIps()
+    successMessage.value = response.message
+    await loadBlockedIps()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '拉取雷池封禁失败'
+  } finally {
+    pulling.value = false
+  }
+}
+
+const runSafeLinePush = async () => {
+  pushing.value = true
+  error.value = ''
+  successMessage.value = ''
+
+  try {
+    const response = await syncSafeLineBlockedIps()
+    successMessage.value = response.message
+    await loadBlockedIps()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '推送本地封禁失败'
+  } finally {
+    pushing.value = false
   }
 }
 
@@ -72,6 +107,22 @@ watch(
   <AppLayout>
     <template #header-extra>
       <button
+        @click="runSafeLinePull"
+        class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
+        :disabled="pulling"
+      >
+        <RefreshCw :size="14" :class="{ 'animate-spin': pulling }" />
+        {{ pulling ? '拉取中...' : '拉取雷池封禁' }}
+      </button>
+      <button
+        @click="runSafeLinePush"
+        class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
+        :disabled="pushing"
+      >
+        <RefreshCw :size="14" :class="{ 'animate-spin': pushing }" />
+        {{ pushing ? '推送中...' : '推送本地封禁' }}
+      </button>
+      <button
         @click="loadBlockedIps()"
         class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
         :disabled="refreshing"
@@ -95,6 +146,13 @@ watch(
         class="rounded-[24px] border border-cyber-error/25 bg-cyber-error/8 px-5 py-4 text-sm text-cyber-error shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
       >
         {{ error }}
+      </div>
+
+      <div
+        v-if="successMessage"
+        class="rounded-[24px] border border-emerald-300/60 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
+      >
+        {{ successMessage }}
       </div>
 
       <div class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4">

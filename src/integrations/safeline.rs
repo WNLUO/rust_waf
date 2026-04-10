@@ -19,6 +19,8 @@ const DEFAULT_EVENT_LIST_PATH: &str = "/api/open/records";
 const LEGACY_EVENT_LIST_PATH: &str = "/api/AttackLogAPI";
 const DEFAULT_BLOCKLIST_PATH: &str = "/api/open/ipgroup";
 const LEGACY_BLOCKLIST_PATH: &str = "/api/IPGroupAPI";
+const OPEN_BLOCKLIST_APPEND_SUFFIX: &str = "/append";
+const OPEN_BLOCKLIST_REMOVE_SUFFIX: &str = "/remove";
 const LOGIN_AES_KEY_PATH: &str = "/api/open/system/key";
 const LOGIN_CSRF_PATH: &str = "/api/open/auth/csrf";
 const LOGIN_PATH: &str = "/api/open/auth/login";
@@ -235,9 +237,7 @@ pub async fn push_blocked_ip(
     let client = build_client(config)?;
     let path = normalized_or_default(&config.blocklist_sync_path, DEFAULT_BLOCKLIST_PATH);
     if path.contains("/open/ipgroup") {
-        return Err(anyhow!(
-            "当前雷池版本的 IP 组接口为 /api/open/ipgroup/append，需要明确的 ip_group_ids 才能追加封禁，现有接入尚未提供目标分组，暂无法自动推送本地封禁。"
-        ));
+        return push_blocked_ip_via_open_ipgroup(&client, &base_url, config, blocked_ip, &path).await;
     }
     let url = format!("{base_url}{path}");
     let payload = serde_json::json!({
@@ -306,9 +306,8 @@ pub async fn delete_blocked_ip(
     };
     let path = normalized_or_default(path, DEFAULT_BLOCKLIST_PATH);
     if path.contains("/open/ipgroup") {
-        return Err(anyhow!(
-            "当前雷池版本的 IP 组接口没有暴露与旧版兼容的单条远端解封语义，现有接入尚未完成 open/ipgroup 的删除适配。"
-        ));
+        return delete_blocked_ip_via_open_ipgroup(&client, &base_url, config, blocked_ip, &path)
+            .await;
     }
     let url = format!("{base_url}{path}");
 
@@ -381,6 +380,131 @@ pub async fn delete_blocked_ip(
     })
 }
 
+async fn push_blocked_ip_via_open_ipgroup(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+    blocked_ip: &BlockedIpEntry,
+    path: &str,
+) -> Result<SafeLineBlockedIpSyncSummary> {
+    let ip_group_ids = configured_ip_group_ids(config)?;
+    let payload = serde_json::json!({
+        "ip_group_ids": ip_group_ids,
+        "ips": [blocked_ip.ip.clone()],
+    });
+
+    let mut failures = Vec::new();
+    for action_path in open_ipgroup_action_paths(path, OPEN_BLOCKLIST_APPEND_SUFFIX) {
+        let url = format!("{base_url}{action_path}");
+        let (status, body) = send_with_auth(client, base_url, config, |auth| {
+            with_auth_headers(client.post(&url).json(&payload), auth)
+        })
+        .await?;
+
+        if status.is_success() || status == StatusCode::CONFLICT {
+            return Ok(SafeLineBlockedIpSyncSummary {
+                ip: blocked_ip.ip.clone(),
+                accepted: true,
+                status_code: status.as_u16(),
+                message: if body.trim().is_empty() {
+                    status.to_string()
+                } else {
+                    body
+                },
+            });
+        }
+
+        failures.push(format_failure(&action_path, status, &body));
+    }
+
+    Err(anyhow!(
+        "调用新版雷池 IP 组追加接口失败。已尝试：{}",
+        failures.join("；")
+    ))
+}
+
+async fn delete_blocked_ip_via_open_ipgroup(
+    client: &Client,
+    base_url: &str,
+    config: &SafeLineConfig,
+    blocked_ip: &BlockedIpEntry,
+    path: &str,
+) -> Result<SafeLineBlockedIpDeleteSummary> {
+    let ip_group_ids = configured_ip_group_ids(config)?;
+    let payload = serde_json::json!({
+        "ip_group_ids": ip_group_ids.clone(),
+        "ips": [blocked_ip.ip.clone()],
+    });
+
+    let mut attempts = Vec::new();
+    for action_path in open_ipgroup_action_paths(path, OPEN_BLOCKLIST_REMOVE_SUFFIX) {
+        attempts.push(OpenIpGroupDeleteAttempt::PostRemove(action_path.clone(), payload.clone()));
+        attempts.push(OpenIpGroupDeleteAttempt::DeleteRemove(
+            action_path.clone(),
+            payload.clone(),
+        ));
+    }
+
+    let base_path = open_ipgroup_base_path(path);
+    attempts.push(OpenIpGroupDeleteAttempt::PostAction(
+        base_path.clone(),
+        serde_json::json!({
+            "action": "remove",
+            "ip_group_ids": ip_group_ids.clone(),
+            "ips": [blocked_ip.ip.clone()],
+        }),
+    ));
+    attempts.push(OpenIpGroupDeleteAttempt::PostAction(
+        base_path,
+        serde_json::json!({
+            "action": "delete",
+            "ip_group_ids": ip_group_ids,
+            "ips": [blocked_ip.ip.clone()],
+        }),
+    ));
+
+    let mut failures = Vec::new();
+    for attempt in attempts {
+        let path = attempt.path().to_string();
+        let (status, body) = send_with_auth(client, base_url, config, |auth| {
+            let url = format!("{base_url}{path}");
+            match &attempt {
+                OpenIpGroupDeleteAttempt::PostRemove(_, payload)
+                | OpenIpGroupDeleteAttempt::PostAction(_, payload) => {
+                    with_auth_headers(client.post(&url).json(payload), auth)
+                }
+                OpenIpGroupDeleteAttempt::DeleteRemove(_, payload) => {
+                    with_auth_headers(client.delete(&url).json(payload), auth)
+                }
+            }
+        })
+        .await?;
+
+        if status.is_success()
+            || status == StatusCode::NOT_FOUND
+            || status == StatusCode::CONFLICT
+        {
+            return Ok(SafeLineBlockedIpDeleteSummary {
+                ip: blocked_ip.ip.clone(),
+                accepted: true,
+                status_code: status.as_u16(),
+                message: if body.trim().is_empty() {
+                    status.to_string()
+                } else {
+                    body
+                },
+            });
+        }
+
+        failures.push(format_failure(&path, status, &body));
+    }
+
+    Err(anyhow!(
+        "调用新版雷池 IP 组移除接口失败。已尝试：{}",
+        failures.join("；")
+    ))
+}
+
 fn build_client(config: &SafeLineConfig) -> Result<Client> {
     Ok(Client::builder()
         .danger_accept_invalid_certs(!config.verify_tls)
@@ -398,6 +522,22 @@ enum DeleteAttempt {
     DeleteById(String),
     DeleteByBody(Value),
     PostDelete(Value),
+}
+
+enum OpenIpGroupDeleteAttempt {
+    PostRemove(String, Value),
+    DeleteRemove(String, Value),
+    PostAction(String, Value),
+}
+
+impl OpenIpGroupDeleteAttempt {
+    fn path(&self) -> &str {
+        match self {
+            Self::PostRemove(path, _) | Self::DeleteRemove(path, _) | Self::PostAction(path, _) => {
+                path
+            }
+        }
+    }
 }
 
 async fn probe_authentication(
@@ -727,6 +867,57 @@ fn normalized_or_default(value: &str, default: &str) -> String {
         trimmed.to_string()
     } else {
         format!("/{trimmed}")
+    }
+}
+
+fn configured_ip_group_ids(config: &SafeLineConfig) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    for item in &config.blocklist_ip_group_ids {
+        let trimmed = item.trim();
+        if trimmed.is_empty() || ids.iter().any(|value| value == trimmed) {
+            continue;
+        }
+        ids.push(trimmed.to_string());
+    }
+    if ids.is_empty() {
+        return Err(anyhow!(
+            "当前封禁路径使用新版雷池 IP 组接口，但还没有配置 blocklist_ip_group_ids，无法确定要操作的目标 IP 组。"
+        ));
+    }
+    Ok(ids)
+}
+
+fn open_ipgroup_base_path(path: &str) -> String {
+    let normalized = normalized_or_default(path, DEFAULT_BLOCKLIST_PATH);
+    if let Some(base) = normalized.strip_suffix(OPEN_BLOCKLIST_APPEND_SUFFIX) {
+        return base.to_string();
+    }
+    if let Some(base) = normalized.strip_suffix(OPEN_BLOCKLIST_REMOVE_SUFFIX) {
+        return base.to_string();
+    }
+    normalized
+}
+
+fn open_ipgroup_action_paths(path: &str, suffix: &str) -> Vec<String> {
+    let current = normalized_or_default(path, DEFAULT_BLOCKLIST_PATH);
+    let base = open_ipgroup_base_path(&current);
+    let mut seen = HashSet::new();
+    let mut paths = Vec::new();
+
+    for candidate in [format!("{base}{suffix}"), current, base] {
+        if seen.insert(candidate.clone()) {
+            paths.push(candidate);
+        }
+    }
+
+    paths
+}
+
+fn format_failure(path: &str, status: StatusCode, body: &str) -> String {
+    if body.trim().is_empty() {
+        format!("{path} -> HTTP {status}")
+    } else {
+        format!("{path} -> HTTP {status}: {}", body.trim())
     }
 }
 
@@ -1367,5 +1558,35 @@ mod tests {
         };
         assert!(has_any_auth(&config));
         assert!(has_username_password(&config));
+    }
+
+    #[test]
+    fn open_ipgroup_action_paths_prefers_append_and_remove_suffixes() {
+        assert_eq!(
+            open_ipgroup_action_paths("/api/open/ipgroup", OPEN_BLOCKLIST_APPEND_SUFFIX),
+            vec![
+                "/api/open/ipgroup/append".to_string(),
+                "/api/open/ipgroup".to_string(),
+            ]
+        );
+        assert_eq!(
+            open_ipgroup_action_paths("/api/open/ipgroup/remove", OPEN_BLOCKLIST_REMOVE_SUFFIX),
+            vec![
+                "/api/open/ipgroup/remove".to_string(),
+                "/api/open/ipgroup".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn configured_ip_group_ids_requires_non_empty_values() {
+        let config = SafeLineConfig {
+            blocklist_ip_group_ids: vec!["  ".to_string(), "12".to_string(), "12".to_string()],
+            ..SafeLineConfig::default()
+        };
+        assert_eq!(configured_ip_group_ids(&config).unwrap(), vec!["12".to_string()]);
+
+        let empty_config = SafeLineConfig::default();
+        assert!(configured_ip_group_ids(&empty_config).is_err());
     }
 }

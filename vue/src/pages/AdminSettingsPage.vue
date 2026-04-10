@@ -55,6 +55,17 @@ const systemSettings = reactive<SystemSettingsForm>({
     event_list_path: '/api/open/records',
     blocklist_sync_path: '/api/open/ipgroup',
     blocklist_delete_path: '/api/open/ipgroup',
+    blocklist_ip_group_ids: [],
+  },
+})
+
+const blocklistIpGroupIdsText = computed({
+  get: () => systemSettings.safeline.blocklist_ip_group_ids.join(', '),
+  set: (value: string) => {
+    systemSettings.safeline.blocklist_ip_group_ids = value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
   },
 })
 
@@ -72,6 +83,7 @@ function toPlainSafeLineSettings() {
     event_list_path: systemSettings.safeline.event_list_path,
     blocklist_sync_path: systemSettings.safeline.blocklist_sync_path,
     blocklist_delete_path: systemSettings.safeline.blocklist_delete_path,
+    blocklist_ip_group_ids: [...systemSettings.safeline.blocklist_ip_group_ids],
   }
 }
 
@@ -388,6 +400,16 @@ onMounted(async () => {
                 <label class="space-y-1.5 md:col-span-2">
                   <span class="text-xs text-cyber-muted">远端解封路径</span>
                   <input v-model="systemSettings.safeline.blocklist_delete_path" type="text" class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent" />
+                </label>
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-cyber-muted">封禁目标 IP 组 ID</span>
+                  <input
+                    v-model="blocklistIpGroupIdsText"
+                    type="text"
+                    placeholder="多个 ID 用逗号分隔，例如 12, 18"
+                    class="w-full rounded-[16px] border border-cyber-border bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-cyber-accent"
+                  />
+                  <span class="block text-xs leading-5 text-cyber-muted">当封禁路径使用新版 `/api/open/ipgroup` 接口时，推送封禁和远端解封会基于这里填写的 IP 组 ID 执行 append/remove。</span>
                 </label>
               </div>
 

@@ -5,6 +5,7 @@ import AdminRulesPage from '../pages/AdminRulesPage.vue'
 import AdminEventsPage from '../pages/AdminEventsPage.vue'
 import AdminBlockedPage from '../pages/AdminBlockedPage.vue'
 import AdminSettingsPage from '../pages/AdminSettingsPage.vue'
+import AdminSafeLinePage from '../pages/AdminSafeLinePage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -38,6 +39,11 @@ const router = createRouter({
       path: '/admin/settings',
       name: 'admin-settings',
       component: AdminSettingsPage,
+    },
+    {
+      path: '/admin/safeline',
+      name: 'admin-safeline',
+      component: AdminSafeLinePage,
     },
   ],
   scrollBehavior() {

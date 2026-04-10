@@ -97,6 +97,8 @@ pub struct SafeLineConfig {
     pub blocklist_sync_path: String,
     #[serde(default = "default_blocklist_delete_path")]
     pub blocklist_delete_path: String,
+    #[serde(default)]
+    pub blocklist_ip_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -469,6 +471,8 @@ impl Config {
             &self.integrations.safeline.blocklist_delete_path,
             "/api/IPGroupAPI",
         );
+        self.integrations.safeline.blocklist_ip_group_ids =
+            normalize_string_list(&self.integrations.safeline.blocklist_ip_group_ids);
 
         self
     }
@@ -503,6 +507,7 @@ impl Default for SafeLineConfig {
             event_list_path: default_event_list_path(),
             blocklist_sync_path: default_blocklist_sync_path(),
             blocklist_delete_path: default_blocklist_delete_path(),
+            blocklist_ip_group_ids: Vec::new(),
         }
     }
 }
@@ -595,6 +600,21 @@ fn normalize_path(value: &str, default: &str) -> String {
     } else {
         format!("/{trimmed}")
     }
+}
+
+fn normalize_string_list(values: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if normalized.iter().any(|item| item == trimmed) {
+            continue;
+        }
+        normalized.push(trimmed.to_string());
+    }
+    normalized
 }
 
 pub fn resolve_sqlite_path() -> String {

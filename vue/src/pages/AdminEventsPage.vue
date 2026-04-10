@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchSecurityEvents, markSecurityEventHandled } from '../lib/api'
+import { fetchSecurityEvents, markSecurityEventHandled, syncSafeLineEvents } from '../lib/api'
 import type { SecurityEventItem, SecurityEventsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
@@ -10,7 +10,9 @@ import { Check, Copy, RefreshCw } from 'lucide-vue-next'
 const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
 const loading = ref(true)
 const refreshing = ref(false)
+const syncing = ref(false)
 const error = ref('')
+const successMessage = ref('')
 const filtersReady = ref(false)
 const eventsPayload = ref<SecurityEventsResponse>({ total: 0, limit: 0, offset: 0, events: [] })
 
@@ -52,6 +54,22 @@ const loadEvents = async (showLoader = false) => {
   } finally {
     if (showLoader) loading.value = false
     refreshing.value = false
+  }
+}
+
+const runSafeLineSync = async () => {
+  syncing.value = true
+  error.value = ''
+  successMessage.value = ''
+
+  try {
+    const response = await syncSafeLineEvents()
+    successMessage.value = response.message
+    await loadEvents()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '同步雷池事件失败'
+  } finally {
+    syncing.value = false
   }
 }
 
@@ -103,6 +121,14 @@ const siteOptions = computed(() => {
   <AppLayout>
     <template #header-extra>
       <button
+        @click="runSafeLineSync"
+        class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
+        :disabled="syncing"
+      >
+        <RefreshCw :size="14" :class="{ 'animate-spin': syncing }" />
+        {{ syncing ? '同步中...' : '同步雷池事件' }}
+      </button>
+      <button
         @click="loadEvents()"
         class="inline-flex items-center gap-2 rounded-full border border-cyber-border bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong disabled:opacity-60"
         :disabled="refreshing"
@@ -126,6 +152,13 @@ const siteOptions = computed(() => {
         class="rounded-[24px] border border-cyber-error/25 bg-cyber-error/8 px-5 py-4 text-sm text-cyber-error shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
       >
         {{ error }}
+      </div>
+
+      <div
+        v-if="successMessage"
+        class="rounded-[24px] border border-emerald-300/60 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
+      >
+        {{ successMessage }}
       </div>
 
       <div class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4">

@@ -52,6 +52,7 @@ pub struct SafeLineSettingsResponse {
     event_list_path: String,
     blocklist_sync_path: String,
     blocklist_delete_path: String,
+    blocklist_ip_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,6 +84,7 @@ pub struct SafeLineSettingsRequest {
     event_list_path: String,
     blocklist_sync_path: String,
     blocklist_delete_path: String,
+    blocklist_ip_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +100,7 @@ pub struct SafeLineTestRequest {
     event_list_path: String,
     blocklist_sync_path: String,
     blocklist_delete_path: String,
+    blocklist_ip_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1022,6 +1025,7 @@ impl SafeLineSettingsResponse {
             event_list_path: config.event_list_path.clone(),
             blocklist_sync_path: config.blocklist_sync_path.clone(),
             blocklist_delete_path: config.blocklist_delete_path.clone(),
+            blocklist_ip_group_ids: config.blocklist_ip_group_ids.clone(),
         }
     }
 }
@@ -1066,6 +1070,7 @@ impl SafeLineSettingsRequest {
             event_list_path: self.event_list_path,
             blocklist_sync_path: self.blocklist_sync_path,
             blocklist_delete_path: self.blocklist_delete_path,
+            blocklist_ip_group_ids: self.blocklist_ip_group_ids,
         }
     }
 }
@@ -1085,6 +1090,7 @@ impl SafeLineTestRequest {
             event_list_path: self.event_list_path,
             blocklist_sync_path: self.blocklist_sync_path,
             blocklist_delete_path: self.blocklist_delete_path,
+            blocklist_ip_group_ids: self.blocklist_ip_group_ids,
         }
     }
 }

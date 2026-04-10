@@ -161,6 +161,28 @@ pub struct SafeLineSiteMappingEntry {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SafeLineCachedSiteEntry {
+    pub remote_site_id: String,
+    pub name: String,
+    pub domain: String,
+    pub status: String,
+    pub enabled: Option<bool>,
+    pub server_names_json: String,
+    pub ports_json: String,
+    pub ssl_ports_json: String,
+    pub upstreams_json: String,
+    pub ssl_enabled: bool,
+    pub cert_id: Option<i64>,
+    pub cert_type: Option<i64>,
+    pub cert_filename: Option<String>,
+    pub key_filename: Option<String>,
+    pub health_check: Option<bool>,
+    pub raw_json: String,
+    pub updated_at: i64,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct LocalSiteEntry {
     pub id: i64,
     pub name: String,
@@ -977,6 +999,77 @@ impl SqliteStore {
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_safeline_cached_sites(&self) -> Result<Vec<SafeLineCachedSiteEntry>> {
+        let rows = sqlx::query_as::<_, SafeLineCachedSiteEntry>(
+            r#"
+            SELECT remote_site_id, name, domain, status, enabled,
+                   server_names_json, ports_json, ssl_ports_json, upstreams_json,
+                   ssl_enabled, cert_id, cert_type, cert_filename, key_filename,
+                   health_check, raw_json, updated_at
+            FROM safeline_cached_sites
+            ORDER BY updated_at DESC, remote_site_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn replace_safeline_cached_sites(
+        &self,
+        sites: &[SafeLineCachedSiteUpsert],
+    ) -> Result<Option<i64>> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM safeline_cached_sites")
+            .execute(&mut *tx)
+            .await?;
+
+        if sites.is_empty() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+
+        let now = unix_timestamp();
+        for site in sites {
+            sqlx::query(
+                r#"
+                INSERT INTO safeline_cached_sites (
+                    remote_site_id, name, domain, status, enabled,
+                    server_names_json, ports_json, ssl_ports_json, upstreams_json,
+                    ssl_enabled, cert_id, cert_type, cert_filename, key_filename,
+                    health_check, raw_json, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&site.remote_site_id)
+            .bind(&site.name)
+            .bind(&site.domain)
+            .bind(&site.status)
+            .bind(site.enabled)
+            .bind(serialize_string_vec(&site.server_names)?)
+            .bind(serialize_string_vec(&site.ports)?)
+            .bind(serialize_string_vec(&site.ssl_ports)?)
+            .bind(serialize_string_vec(&site.upstreams)?)
+            .bind(site.ssl_enabled)
+            .bind(site.cert_id)
+            .bind(site.cert_type)
+            .bind(&site.cert_filename)
+            .bind(&site.key_filename)
+            .bind(site.health_check)
+            .bind(&site.raw_json)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(Some(now))
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn load_safeline_sync_state(
         &self,
         resource: &str,
@@ -1547,6 +1640,29 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_safeline_site_mappings_updated_at
             ON safeline_site_mappings(updated_at);
 
+        CREATE TABLE IF NOT EXISTS safeline_cached_sites (
+            remote_site_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT '',
+            enabled INTEGER,
+            server_names_json TEXT NOT NULL DEFAULT '[]',
+            ports_json TEXT NOT NULL DEFAULT '[]',
+            ssl_ports_json TEXT NOT NULL DEFAULT '[]',
+            upstreams_json TEXT NOT NULL DEFAULT '[]',
+            ssl_enabled INTEGER NOT NULL DEFAULT 0,
+            cert_id INTEGER,
+            cert_type INTEGER,
+            cert_filename TEXT,
+            key_filename TEXT,
+            health_check INTEGER,
+            raw_json TEXT NOT NULL DEFAULT '{}',
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_safeline_cached_sites_updated_at
+            ON safeline_cached_sites(updated_at);
+
         CREATE TABLE IF NOT EXISTS local_certificates (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -1723,6 +1839,26 @@ pub struct SafeLineSiteMappingUpsert {
     pub enabled: bool,
     pub is_primary: bool,
     pub notes: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeLineCachedSiteUpsert {
+    pub remote_site_id: String,
+    pub name: String,
+    pub domain: String,
+    pub status: String,
+    pub enabled: Option<bool>,
+    pub server_names: Vec<String>,
+    pub ports: Vec<String>,
+    pub ssl_ports: Vec<String>,
+    pub upstreams: Vec<String>,
+    pub ssl_enabled: bool,
+    pub cert_id: Option<i64>,
+    pub cert_type: Option<i64>,
+    pub cert_filename: Option<String>,
+    pub key_filename: Option<String>,
+    pub health_check: Option<bool>,
+    pub raw_json: String,
 }
 
 #[derive(Debug, Clone)]
@@ -2182,6 +2318,12 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let safeline_cached_sites_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'safeline_cached_sites'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         let local_certificates_exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_certificates'",
         )
@@ -2212,6 +2354,7 @@ mod tests {
         assert_eq!(rules_exists, 1);
         assert_eq!(app_config_exists, 1);
         assert_eq!(safeline_site_mappings_exists, 1);
+        assert_eq!(safeline_cached_sites_exists, 1);
         assert_eq!(local_certificates_exists, 1);
         assert_eq!(local_sites_exists, 1);
         assert_eq!(site_sync_links_exists, 1);
@@ -2645,6 +2788,90 @@ mod tests {
         let replaced = store.list_safeline_site_mappings().await.unwrap();
         assert_eq!(replaced.len(), 1);
         assert_eq!(replaced[0].safeline_site_id, "site-3");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_replaces_safeline_cached_sites() {
+        let path = unique_test_db_path("safeline_cached_sites");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let cached_at = store
+            .replace_safeline_cached_sites(&[
+                SafeLineCachedSiteUpsert {
+                    remote_site_id: "site-1".to_string(),
+                    name: "portal".to_string(),
+                    domain: "portal.example.com".to_string(),
+                    status: "online".to_string(),
+                    enabled: Some(true),
+                    server_names: vec!["portal.example.com".to_string()],
+                    ports: vec!["80".to_string()],
+                    ssl_ports: vec!["443".to_string()],
+                    upstreams: vec!["http://127.0.0.1:8080".to_string()],
+                    ssl_enabled: true,
+                    cert_id: Some(10),
+                    cert_type: Some(2),
+                    cert_filename: Some("portal.crt".to_string()),
+                    key_filename: Some("portal.key".to_string()),
+                    health_check: Some(true),
+                    raw_json: "{\"id\":\"site-1\"}".to_string(),
+                },
+                SafeLineCachedSiteUpsert {
+                    remote_site_id: "site-2".to_string(),
+                    name: "admin".to_string(),
+                    domain: "admin.example.com".to_string(),
+                    status: "offline".to_string(),
+                    enabled: Some(false),
+                    server_names: vec!["admin.example.com".to_string()],
+                    ports: vec!["8080".to_string()],
+                    ssl_ports: vec![],
+                    upstreams: vec!["http://127.0.0.1:8081".to_string()],
+                    ssl_enabled: false,
+                    cert_id: None,
+                    cert_type: None,
+                    cert_filename: None,
+                    key_filename: None,
+                    health_check: Some(false),
+                    raw_json: "{\"id\":\"site-2\"}".to_string(),
+                },
+            ])
+            .await
+            .unwrap();
+
+        assert!(cached_at.is_some());
+        let cached = store.list_safeline_cached_sites().await.unwrap();
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[0].updated_at, cached[1].updated_at);
+
+        let replaced_at = store
+            .replace_safeline_cached_sites(&[SafeLineCachedSiteUpsert {
+                remote_site_id: "site-3".to_string(),
+                name: "api".to_string(),
+                domain: "api.example.com".to_string(),
+                status: "online".to_string(),
+                enabled: Some(true),
+                server_names: vec!["api.example.com".to_string()],
+                ports: vec!["80".to_string()],
+                ssl_ports: vec!["443".to_string()],
+                upstreams: vec!["http://127.0.0.1:8082".to_string()],
+                ssl_enabled: true,
+                cert_id: None,
+                cert_type: None,
+                cert_filename: None,
+                key_filename: None,
+                health_check: None,
+                raw_json: "{\"id\":\"site-3\"}".to_string(),
+            }])
+            .await
+            .unwrap();
+
+        assert!(replaced_at.is_some());
+        let replaced = store.list_safeline_cached_sites().await.unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].remote_site_id, "site-3");
+
+        let cleared_at = store.replace_safeline_cached_sites(&[]).await.unwrap();
+        assert_eq!(cleared_at, None);
+        assert!(store.list_safeline_cached_sites().await.unwrap().is_empty());
     }
 
     #[tokio::test]

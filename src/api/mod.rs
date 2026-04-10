@@ -234,6 +234,7 @@ pub struct SafeLineTestResponse {
 #[derive(Debug, Serialize)]
 pub struct SafeLineSitesResponse {
     total: u32,
+    cached_at: Option<i64>,
     sites: Vec<SafeLineSiteResponse>,
 }
 
@@ -742,6 +743,10 @@ impl ApiServer {
                 axum::routing::post(list_safeline_sites_handler),
             )
             .route(
+                "/integrations/safeline/sites/cached",
+                get(list_cached_safeline_sites_handler),
+            )
+            .route(
                 "/integrations/safeline/mappings",
                 get(list_safeline_mappings_handler).put(update_safeline_mappings_handler),
             )
@@ -946,15 +951,62 @@ async fn test_safeline_handler(
 }
 
 async fn list_safeline_sites_handler(
+    State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<SafeLineTestRequest>,
 ) -> ApiResult<Json<SafeLineSitesResponse>> {
     let sites = crate::integrations::safeline::list_sites(&payload.into_config())
         .await
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let cached_at = if let Some(store) = state.context.sqlite_store.as_deref() {
+        Some(
+            store
+                .replace_safeline_cached_sites(
+                    &sites
+                        .iter()
+                        .map(crate::storage::SafeLineCachedSiteUpsert::from_summary)
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(ApiError::internal)?,
+                )
+                .await
+                .map_err(ApiError::internal)?,
+        )
+        .flatten()
+    } else {
+        None
+    };
 
     Ok(Json(SafeLineSitesResponse {
         total: sites.len() as u32,
+        cached_at,
         sites: sites.into_iter().map(SafeLineSiteResponse::from).collect(),
+    }))
+}
+
+async fn list_cached_safeline_sites_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineSitesResponse>> {
+    let Some(store) = state.context.sqlite_store.as_deref() else {
+        return Ok(Json(SafeLineSitesResponse {
+            total: 0,
+            cached_at: None,
+            sites: Vec::new(),
+        }));
+    };
+    let cached_sites = store
+        .list_safeline_cached_sites()
+        .await
+        .map_err(ApiError::internal)?;
+    let cached_at = cached_sites.iter().map(|site| site.updated_at).max();
+    let sites = cached_sites
+        .into_iter()
+        .map(SafeLineSiteResponse::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(SafeLineSitesResponse {
+        total: sites.len() as u32,
+        cached_at,
+        sites,
     }))
 }
 
@@ -2226,6 +2278,54 @@ impl From<SafeLineSiteSummary> for SafeLineSiteResponse {
     }
 }
 
+impl TryFrom<crate::storage::SafeLineCachedSiteEntry> for SafeLineSiteResponse {
+    type Error = anyhow::Error;
+
+    fn try_from(value: crate::storage::SafeLineCachedSiteEntry) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.remote_site_id,
+            name: value.name,
+            domain: value.domain,
+            status: value.status,
+            enabled: value.enabled,
+            server_names: parse_json_string_vec(&value.server_names_json)?,
+            ports: parse_json_string_vec(&value.ports_json)?,
+            ssl_ports: parse_json_string_vec(&value.ssl_ports_json)?,
+            upstreams: parse_json_string_vec(&value.upstreams_json)?,
+            ssl_enabled: value.ssl_enabled,
+            cert_id: value.cert_id,
+            cert_type: value.cert_type,
+            cert_filename: value.cert_filename,
+            key_filename: value.key_filename,
+            health_check: value.health_check,
+            raw: parse_json_value(&value.raw_json)?,
+        })
+    }
+}
+
+impl crate::storage::SafeLineCachedSiteUpsert {
+    fn from_summary(value: &SafeLineSiteSummary) -> Result<Self, anyhow::Error> {
+        Ok(Self {
+            remote_site_id: value.id.clone(),
+            name: value.name.clone(),
+            domain: value.domain.clone(),
+            status: value.status.clone(),
+            enabled: value.enabled,
+            server_names: value.server_names.clone(),
+            ports: value.ports.clone(),
+            ssl_ports: value.ssl_ports.clone(),
+            upstreams: value.upstreams.clone(),
+            ssl_enabled: value.ssl_enabled,
+            cert_id: value.cert_id,
+            cert_type: value.cert_type,
+            cert_filename: value.cert_filename.clone(),
+            key_filename: value.key_filename.clone(),
+            health_check: value.health_check,
+            raw_json: serde_json::to_string(&value.raw)?,
+        })
+    }
+}
+
 impl From<crate::storage::SafeLineSiteMappingEntry> for SafeLineMappingResponse {
     fn from(value: crate::storage::SafeLineSiteMappingEntry) -> Self {
         Self {
@@ -2657,6 +2757,10 @@ fn required_string(value: String, message: &str) -> Result<String, String> {
 
 fn parse_json_string_vec(value: &str) -> Result<Vec<String>, anyhow::Error> {
     Ok(serde_json::from_str::<Vec<String>>(value)?)
+}
+
+fn parse_json_value(value: &str) -> Result<serde_json::Value, anyhow::Error> {
+    Ok(serde_json::from_str::<serde_json::Value>(value)?)
 }
 
 async fn ensure_local_certificate_exists(

@@ -244,6 +244,10 @@ export function fetchSafeLineSites(payload: SettingsPayload["safeline"]) {
   });
 }
 
+export function fetchCachedSafeLineSites() {
+  return apiRequest<SafeLineSitesResponse>("/integrations/safeline/sites/cached");
+}
+
 export function fetchSafeLineMappings() {
   return apiRequest<SafeLineMappingsResponse>(
     "/integrations/safeline/mappings",

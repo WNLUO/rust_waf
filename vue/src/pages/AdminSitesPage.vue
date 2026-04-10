@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import AppLayout from "../components/layout/AppLayout.vue";
 import StatusBadge from "../components/ui/StatusBadge.vue";
 import {
+  fetchCachedSafeLineSites,
   fetchLocalSites,
   fetchSafeLineMappings,
   fetchSafeLineSites,
@@ -482,14 +483,16 @@ const filteredRows = computed(() => {
     });
 });
 
-async function refreshCollections(includeRemote: boolean) {
+async function refreshCollections(remoteSource: "none" | "cached" | "live") {
   const [mappingsResponse, localSitesResponse, siteLinksResponse, remoteSitesResponse] =
     await Promise.all([
       fetchSafeLineMappings(),
       fetchLocalSites(),
       fetchSiteSyncLinks(),
-      includeRemote && settings.value && hasSavedConfig.value
+      remoteSource === "live" && settings.value && hasSavedConfig.value
         ? fetchSafeLineSites(settings.value.safeline)
+        : remoteSource === "cached"
+          ? fetchCachedSafeLineSites()
         : Promise.resolve(null),
     ]);
 
@@ -499,7 +502,7 @@ async function refreshCollections(includeRemote: boolean) {
 
   if (remoteSitesResponse) {
     sites.value = remoteSitesResponse.sites;
-    sitesLoadedAt.value = Math.floor(Date.now() / 1000);
+    sitesLoadedAt.value = remoteSitesResponse.cached_at;
   }
 
   rebuildRows();
@@ -511,7 +514,7 @@ async function loadPageData() {
 
   try {
     settings.value = await fetchSettings();
-    await refreshCollections(false);
+    await refreshCollections("cached");
   } catch (e) {
     error.value = e instanceof Error ? e.message : "读取站点管理信息失败";
   } finally {
@@ -524,7 +527,7 @@ async function refreshPageData() {
   clearFeedback();
 
   try {
-    await refreshCollections(sitesLoadedAt.value !== null);
+    await refreshCollections(sitesLoadedAt.value !== null ? "cached" : "none");
     successMessage.value = "页面数据已刷新。";
   } catch (e) {
     error.value = e instanceof Error ? e.message : "刷新页面数据失败";
@@ -559,7 +562,7 @@ async function loadRemoteSites() {
   try {
     const response = await fetchSafeLineSites(settings.value.safeline);
     sites.value = response.sites;
-    sitesLoadedAt.value = Math.floor(Date.now() / 1000);
+    sitesLoadedAt.value = response.cached_at ?? Math.floor(Date.now() / 1000);
     rebuildRows();
     successMessage.value = `已读取 ${response.total} 个雷池站点。`;
   } catch (e) {
@@ -577,7 +580,7 @@ async function syncRemoteSite(row: SiteRowDraft) {
 
   try {
     const response = await pullSafeLineSite(row.safeline_site_id);
-    await refreshCollections(true);
+    await refreshCollections("live");
     successMessage.value = response.message;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "单站点回流失败";
@@ -594,7 +597,7 @@ async function syncLocalSite(row: SiteRowDraft) {
 
   try {
     const response = await pushSafeLineSite(row.local_site_id);
-    await refreshCollections(true);
+    await refreshCollections("live");
     successMessage.value = response.message;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "单站点推送失败";

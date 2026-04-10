@@ -324,6 +324,7 @@ export interface SafeLineSiteItem {
 
 export interface SafeLineSitesResponse {
   total: number;
+  cached_at: number | null;
   sites: SafeLineSiteItem[];
 }
 

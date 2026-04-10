@@ -10,6 +10,12 @@ import type {
   L4StatsPayload,
   L7ConfigPayload,
   L7StatsPayload,
+  LocalCertificateDraft,
+  LocalCertificateItem,
+  LocalCertificatesResponse,
+  LocalSiteDraft,
+  LocalSiteItem,
+  LocalSitesResponse,
   MetricsResponse,
   RuleDraft,
   RulesResponse,
@@ -23,6 +29,8 @@ import type {
   SafeLineTestResponse,
   SecurityEventsResponse,
   SettingsPayload,
+  SiteSyncLinkDraft,
+  SiteSyncLinksResponse,
   WriteStatusResponse,
 } from "./types";
 
@@ -244,6 +252,79 @@ export function updateSafeLineMappings(payload: SafeLineMappingsUpdateRequest) {
   return apiRequest<WriteStatusResponse>("/integrations/safeline/mappings", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function fetchLocalSites() {
+  return apiRequest<LocalSitesResponse>("/sites/local");
+}
+
+export function fetchLocalSite(id: number) {
+  return apiRequest<LocalSiteItem>(`/sites/local/${id}`);
+}
+
+export function createLocalSite(payload: LocalSiteDraft) {
+  return apiRequest<LocalSiteItem>("/sites/local", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateLocalSite(id: number, payload: LocalSiteDraft) {
+  return apiRequest<WriteStatusResponse>(`/sites/local/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteLocalSite(id: number) {
+  return apiRequest<WriteStatusResponse>(`/sites/local/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchLocalCertificates() {
+  return apiRequest<LocalCertificatesResponse>("/certificates/local");
+}
+
+export function fetchLocalCertificate(id: number) {
+  return apiRequest<LocalCertificateItem>(`/certificates/local/${id}`);
+}
+
+export function createLocalCertificate(payload: LocalCertificateDraft) {
+  return apiRequest<LocalCertificateItem>("/certificates/local", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateLocalCertificate(id: number, payload: LocalCertificateDraft) {
+  return apiRequest<WriteStatusResponse>(`/certificates/local/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteLocalCertificate(id: number) {
+  return apiRequest<WriteStatusResponse>(`/certificates/local/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export function fetchSiteSyncLinks() {
+  return apiRequest<SiteSyncLinksResponse>("/integrations/safeline/site-links");
+}
+
+export function upsertSiteSyncLink(payload: SiteSyncLinkDraft) {
+  return apiRequest<WriteStatusResponse>("/integrations/safeline/site-links", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSiteSyncLink(id: number) {
+  return apiRequest<WriteStatusResponse>(`/integrations/safeline/site-links/${id}`, {
+    method: "DELETE",
   });
 }
 

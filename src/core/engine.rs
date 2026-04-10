@@ -165,12 +165,8 @@ impl WafEngine {
         {
             if let Some(endpoint) = build_http3_endpoint(&self.context.config.http3_config)? {
                 let addr = endpoint.local_addr()?;
-                self.context.set_http3_runtime(
-                    "running",
-                    true,
-                    Some(addr.to_string()),
-                    None,
-                );
+                self.context
+                    .set_http3_runtime("running", true, Some(addr.to_string()), None);
                 quic_listener = Some((addr, endpoint));
             } else {
                 let config = &self.context.config.http3_config;
@@ -2129,8 +2125,7 @@ mod tests {
         );
         let serialized_request = request.to_inspection_string();
 
-        let result =
-            inspect_application_layers(&context, &packet, &request, &serialized_request);
+        let result = inspect_application_layers(&context, &packet, &request, &serialized_request);
 
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L7);

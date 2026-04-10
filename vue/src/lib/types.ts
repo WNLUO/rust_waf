@@ -356,6 +356,114 @@ export interface SafeLineMappingsUpdateRequest {
   }>;
 }
 
+export interface LocalSiteItem {
+  id: number;
+  name: string;
+  primary_hostname: string;
+  hostnames: string[];
+  listen_ports: string[];
+  upstreams: string[];
+  enabled: boolean;
+  tls_enabled: boolean;
+  local_certificate_id: number | null;
+  source: string;
+  sync_mode: string;
+  notes: string;
+  last_synced_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface LocalSitesResponse {
+  total: number;
+  sites: LocalSiteItem[];
+}
+
+export interface LocalSiteDraft {
+  name: string;
+  primary_hostname: string;
+  hostnames: string[];
+  listen_ports: string[];
+  upstreams: string[];
+  enabled: boolean;
+  tls_enabled: boolean;
+  local_certificate_id: number | null;
+  source: string;
+  sync_mode: string;
+  notes: string;
+  last_synced_at: number | null;
+}
+
+export interface LocalCertificateItem {
+  id: number;
+  name: string;
+  domains: string[];
+  issuer: string;
+  valid_from: number | null;
+  valid_to: number | null;
+  source_type: string;
+  provider_remote_id: string | null;
+  trusted: boolean;
+  expired: boolean;
+  notes: string;
+  last_synced_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface LocalCertificatesResponse {
+  total: number;
+  certificates: LocalCertificateItem[];
+}
+
+export interface LocalCertificateDraft {
+  name: string;
+  domains: string[];
+  issuer: string;
+  valid_from: number | null;
+  valid_to: number | null;
+  source_type: string;
+  provider_remote_id: string | null;
+  trusted: boolean;
+  expired: boolean;
+  notes: string;
+  last_synced_at: number | null;
+}
+
+export interface SiteSyncLinkItem {
+  id: number;
+  local_site_id: number;
+  provider: string;
+  remote_site_id: string;
+  remote_site_name: string;
+  remote_cert_id: string | null;
+  sync_mode: string;
+  last_local_hash: string | null;
+  last_remote_hash: string | null;
+  last_error: string | null;
+  last_synced_at: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SiteSyncLinksResponse {
+  total: number;
+  links: SiteSyncLinkItem[];
+}
+
+export interface SiteSyncLinkDraft {
+  local_site_id: number;
+  provider: string;
+  remote_site_id: string;
+  remote_site_name: string;
+  remote_cert_id: string | null;
+  sync_mode: string;
+  last_local_hash: string | null;
+  last_remote_hash: string | null;
+  last_error: string | null;
+  last_synced_at: number | null;
+}
+
 export interface SafeLineEventSyncResponse {
   success: boolean;
   imported: number;

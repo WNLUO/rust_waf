@@ -293,6 +293,123 @@ pub struct SafeLineMappingUpsertRequest {
 }
 
 #[derive(Debug, Serialize)]
+pub struct LocalSitesResponse {
+    total: u32,
+    sites: Vec<LocalSiteResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalSiteResponse {
+    id: i64,
+    name: String,
+    primary_hostname: String,
+    hostnames: Vec<String>,
+    listen_ports: Vec<String>,
+    upstreams: Vec<String>,
+    enabled: bool,
+    tls_enabled: bool,
+    local_certificate_id: Option<i64>,
+    source: String,
+    sync_mode: String,
+    notes: String,
+    last_synced_at: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LocalSiteUpsertRequest {
+    name: String,
+    primary_hostname: String,
+    hostnames: Vec<String>,
+    listen_ports: Vec<String>,
+    upstreams: Vec<String>,
+    enabled: bool,
+    tls_enabled: bool,
+    local_certificate_id: Option<i64>,
+    source: String,
+    sync_mode: String,
+    notes: String,
+    last_synced_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalCertificatesResponse {
+    total: u32,
+    certificates: Vec<LocalCertificateResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalCertificateResponse {
+    id: i64,
+    name: String,
+    domains: Vec<String>,
+    issuer: String,
+    valid_from: Option<i64>,
+    valid_to: Option<i64>,
+    source_type: String,
+    provider_remote_id: Option<String>,
+    trusted: bool,
+    expired: bool,
+    notes: String,
+    last_synced_at: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LocalCertificateUpsertRequest {
+    name: String,
+    domains: Vec<String>,
+    issuer: String,
+    valid_from: Option<i64>,
+    valid_to: Option<i64>,
+    source_type: String,
+    provider_remote_id: Option<String>,
+    trusted: bool,
+    expired: bool,
+    notes: String,
+    last_synced_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SiteSyncLinksResponse {
+    total: u32,
+    links: Vec<SiteSyncLinkResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SiteSyncLinkResponse {
+    id: i64,
+    local_site_id: i64,
+    provider: String,
+    remote_site_id: String,
+    remote_site_name: String,
+    remote_cert_id: Option<String>,
+    sync_mode: String,
+    last_local_hash: Option<String>,
+    last_remote_hash: Option<String>,
+    last_error: Option<String>,
+    last_synced_at: Option<i64>,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SiteSyncLinkUpsertRequest {
+    local_site_id: i64,
+    provider: String,
+    remote_site_id: String,
+    remote_site_name: String,
+    remote_cert_id: Option<String>,
+    sync_mode: String,
+    last_local_hash: Option<String>,
+    last_remote_hash: Option<String>,
+    last_error: Option<String>,
+    last_synced_at: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SafeLineEventSyncResponse {
     success: bool,
     imported: u32,
@@ -565,6 +682,26 @@ impl ApiServer {
             .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
             .route(
+                "/sites/local",
+                get(list_local_sites_handler).post(create_local_site_handler),
+            )
+            .route(
+                "/sites/local/:id",
+                get(get_local_site_handler)
+                    .put(update_local_site_handler)
+                    .delete(delete_local_site_handler),
+            )
+            .route(
+                "/certificates/local",
+                get(list_local_certificates_handler).post(create_local_certificate_handler),
+            )
+            .route(
+                "/certificates/local/:id",
+                get(get_local_certificate_handler)
+                    .put(update_local_certificate_handler)
+                    .delete(delete_local_certificate_handler),
+            )
+            .route(
                 "/integrations/safeline/test",
                 axum::routing::post(test_safeline_handler),
             )
@@ -575,6 +712,14 @@ impl ApiServer {
             .route(
                 "/integrations/safeline/mappings",
                 get(list_safeline_mappings_handler).put(update_safeline_mappings_handler),
+            )
+            .route(
+                "/integrations/safeline/site-links",
+                get(list_site_sync_links_handler).put(upsert_site_sync_link_handler),
+            )
+            .route(
+                "/integrations/safeline/site-links/:id",
+                delete(delete_site_sync_link_handler),
             )
             .route(
                 "/integrations/safeline/sync/events",
@@ -702,8 +847,7 @@ async fn update_l7_config_handler(
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message: "L7 配置已写入数据库。监听、代理与协议栈相关参数需重启服务后生效。"
-            .to_string(),
+        message: "L7 配置已写入数据库。监听、代理与协议栈相关参数需重启服务后生效。".to_string(),
     }))
 }
 
@@ -801,6 +945,273 @@ async fn update_safeline_mappings_handler(
         success: true,
         message: "雷池站点映射已写入数据库。".to_string(),
     }))
+}
+
+async fn list_local_sites_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<LocalSitesResponse>> {
+    let store = sqlite_store(&state)?;
+    let sites = store.list_local_sites().await.map_err(ApiError::internal)?;
+    let sites = sites
+        .into_iter()
+        .map(LocalSiteResponse::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(LocalSitesResponse {
+        total: sites.len() as u32,
+        sites,
+    }))
+}
+
+async fn get_local_site_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<LocalSiteResponse>> {
+    let store = sqlite_store(&state)?;
+    let site = store
+        .load_local_site(id)
+        .await
+        .map_err(ApiError::internal)?;
+    match site {
+        Some(site) => Ok(Json(
+            LocalSiteResponse::try_from(site).map_err(ApiError::internal)?,
+        )),
+        None => Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id))),
+    }
+}
+
+async fn create_local_site_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<LocalSiteUpsertRequest>,
+) -> ApiResult<(StatusCode, Json<LocalSiteResponse>)> {
+    let store = sqlite_store(&state)?;
+    let site = payload
+        .into_storage_site(store)
+        .await
+        .map_err(ApiError::bad_request)?;
+    let id = store
+        .insert_local_site(&site)
+        .await
+        .map_err(map_storage_write_error)?;
+    let created = store
+        .load_local_site(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::internal("新建站点后未能重新读取记录"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(LocalSiteResponse::try_from(created).map_err(ApiError::internal)?),
+    ))
+}
+
+async fn update_local_site_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    ExtractJson(payload): ExtractJson<LocalSiteUpsertRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let site = payload
+        .into_storage_site(store)
+        .await
+        .map_err(ApiError::bad_request)?;
+    let updated = store
+        .update_local_site(id, &site)
+        .await
+        .map_err(map_storage_write_error)?;
+
+    if updated {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("本地站点 {} 已更新。", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id)))
+    }
+}
+
+async fn delete_local_site_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_local_site(id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if deleted {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("本地站点 {} 已删除。", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id)))
+    }
+}
+
+async fn list_local_certificates_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<LocalCertificatesResponse>> {
+    let store = sqlite_store(&state)?;
+    let certificates = store
+        .list_local_certificates()
+        .await
+        .map_err(ApiError::internal)?;
+    let certificates = certificates
+        .into_iter()
+        .map(LocalCertificateResponse::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(LocalCertificatesResponse {
+        total: certificates.len() as u32,
+        certificates,
+    }))
+}
+
+async fn get_local_certificate_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<LocalCertificateResponse>> {
+    let store = sqlite_store(&state)?;
+    let certificate = store
+        .load_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?;
+    match certificate {
+        Some(certificate) => Ok(Json(
+            LocalCertificateResponse::try_from(certificate).map_err(ApiError::internal)?,
+        )),
+        None => Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id))),
+    }
+}
+
+async fn create_local_certificate_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<LocalCertificateUpsertRequest>,
+) -> ApiResult<(StatusCode, Json<LocalCertificateResponse>)> {
+    let store = sqlite_store(&state)?;
+    let certificate = payload
+        .into_storage_certificate()
+        .map_err(ApiError::bad_request)?;
+    let id = store
+        .insert_local_certificate(&certificate)
+        .await
+        .map_err(map_storage_write_error)?;
+    let created = store
+        .load_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::internal("新建证书后未能重新读取记录"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(LocalCertificateResponse::try_from(created).map_err(ApiError::internal)?),
+    ))
+}
+
+async fn update_local_certificate_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    ExtractJson(payload): ExtractJson<LocalCertificateUpsertRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let certificate = payload
+        .into_storage_certificate()
+        .map_err(ApiError::bad_request)?;
+    let updated = store
+        .update_local_certificate(id, &certificate)
+        .await
+        .map_err(map_storage_write_error)?;
+
+    if updated {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("本地证书 {} 已更新。", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))
+    }
+}
+
+async fn delete_local_certificate_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if deleted {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("本地证书 {} 已删除。", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))
+    }
+}
+
+async fn list_site_sync_links_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SiteSyncLinksResponse>> {
+    let store = sqlite_store(&state)?;
+    let links = store
+        .list_site_sync_links()
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(SiteSyncLinksResponse {
+        total: links.len() as u32,
+        links: links.into_iter().map(SiteSyncLinkResponse::from).collect(),
+    }))
+}
+
+async fn upsert_site_sync_link_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<SiteSyncLinkUpsertRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let link = payload
+        .into_storage_link(store)
+        .await
+        .map_err(ApiError::bad_request)?;
+    store
+        .upsert_site_sync_link(&link)
+        .await
+        .map_err(map_storage_write_error)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: format!(
+            "同步链路已写入，provider={}, local_site_id={}",
+            link.provider, link.local_site_id
+        ),
+    }))
+}
+
+async fn delete_site_sync_link_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_site_sync_link(id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if deleted {
+        Ok(Json(WriteStatusResponse {
+            success: true,
+            message: format!("同步链路 {} 已删除。", id),
+        }))
+    } else {
+        Err(ApiError::not_found(format!("同步链路 '{}' 不存在", id)))
+    }
 }
 
 async fn sync_safeline_events_handler(
@@ -1395,8 +1806,7 @@ impl L7ConfigUpdateRequest {
         current.l7_config.upstream_healthcheck_enabled = self.upstream_healthcheck_enabled;
         current.l7_config.upstream_healthcheck_interval_secs =
             self.upstream_healthcheck_interval_secs;
-        current.l7_config.upstream_healthcheck_timeout_ms =
-            self.upstream_healthcheck_timeout_ms;
+        current.l7_config.upstream_healthcheck_timeout_ms = self.upstream_healthcheck_timeout_ms;
         current.l7_config.upstream_failure_mode = match self.upstream_failure_mode.as_str() {
             "fail_open" => crate::config::l7::UpstreamFailureMode::FailOpen,
             "fail_close" => crate::config::l7::UpstreamFailureMode::FailClose,
@@ -1404,8 +1814,7 @@ impl L7ConfigUpdateRequest {
         };
         current.l7_config.bloom_filter_scale = self.bloom_filter_scale;
         current.l7_config.http2_config.enabled = self.http2_enabled;
-        current.l7_config.http2_config.max_concurrent_streams =
-            self.http2_max_concurrent_streams;
+        current.l7_config.http2_config.max_concurrent_streams = self.http2_max_concurrent_streams;
         current.l7_config.http2_config.max_frame_size = self.http2_max_frame_size;
         current.l7_config.http2_config.enable_priorities = self.http2_enable_priorities;
         current.l7_config.http2_config.initial_window_size = self.http2_initial_window_size;
@@ -1554,7 +1963,10 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.proxy_successes)
                 .unwrap_or(0),
-            proxy_failures: metrics.as_ref().map(|value| value.proxy_failures).unwrap_or(0),
+            proxy_failures: metrics
+                .as_ref()
+                .map(|value| value.proxy_failures)
+                .unwrap_or(0),
             proxy_fail_close_rejections: metrics
                 .as_ref()
                 .map(|value| value.proxy_fail_close_rejections)
@@ -1678,6 +2090,175 @@ impl SafeLineMappingsUpdateRequest {
         }
 
         Ok(mappings)
+    }
+}
+
+impl TryFrom<crate::storage::LocalSiteEntry> for LocalSiteResponse {
+    type Error = anyhow::Error;
+
+    fn try_from(value: crate::storage::LocalSiteEntry) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.id,
+            name: value.name,
+            primary_hostname: value.primary_hostname,
+            hostnames: parse_json_string_vec(&value.hostnames_json)?,
+            listen_ports: parse_json_string_vec(&value.listen_ports_json)?,
+            upstreams: parse_json_string_vec(&value.upstreams_json)?,
+            enabled: value.enabled,
+            tls_enabled: value.tls_enabled,
+            local_certificate_id: value.local_certificate_id,
+            source: value.source,
+            sync_mode: value.sync_mode,
+            notes: value.notes,
+            last_synced_at: value.last_synced_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        })
+    }
+}
+
+impl LocalSiteUpsertRequest {
+    async fn into_storage_site(
+        self,
+        store: &crate::storage::SqliteStore,
+    ) -> Result<crate::storage::LocalSiteUpsert, String> {
+        let name = required_string(self.name, "站点名称不能为空")?;
+        let primary_hostname = required_string(self.primary_hostname, "主域名不能为空")?;
+        let mut hostnames = normalize_string_list(self.hostnames);
+        if !hostnames.iter().any(|item| item == &primary_hostname) {
+            hostnames.insert(0, primary_hostname.clone());
+        }
+        let listen_ports = normalize_string_list(self.listen_ports);
+        let upstreams = normalize_string_list(self.upstreams);
+        let source = non_empty_string(self.source).unwrap_or_else(|| "manual".to_string());
+        let sync_mode = non_empty_string(self.sync_mode).unwrap_or_else(|| "manual".to_string());
+        let notes = self.notes.trim().to_string();
+
+        if let Some(local_certificate_id) = self.local_certificate_id {
+            ensure_local_certificate_exists(store, local_certificate_id).await?;
+        }
+
+        Ok(crate::storage::LocalSiteUpsert {
+            name,
+            primary_hostname,
+            hostnames,
+            listen_ports,
+            upstreams,
+            enabled: self.enabled,
+            tls_enabled: self.tls_enabled,
+            local_certificate_id: self.local_certificate_id,
+            source,
+            sync_mode,
+            notes,
+            last_synced_at: self.last_synced_at,
+        })
+    }
+}
+
+impl TryFrom<crate::storage::LocalCertificateEntry> for LocalCertificateResponse {
+    type Error = anyhow::Error;
+
+    fn try_from(value: crate::storage::LocalCertificateEntry) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: value.id,
+            name: value.name,
+            domains: parse_json_string_vec(&value.domains_json)?,
+            issuer: value.issuer,
+            valid_from: value.valid_from,
+            valid_to: value.valid_to,
+            source_type: value.source_type,
+            provider_remote_id: value.provider_remote_id,
+            trusted: value.trusted,
+            expired: value.expired,
+            notes: value.notes,
+            last_synced_at: value.last_synced_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        })
+    }
+}
+
+impl LocalCertificateUpsertRequest {
+    fn into_storage_certificate(self) -> Result<crate::storage::LocalCertificateUpsert, String> {
+        let name = required_string(self.name, "证书名称不能为空")?;
+        let domains = normalize_string_list(self.domains);
+        let issuer = self.issuer.trim().to_string();
+        let source_type =
+            non_empty_string(self.source_type).unwrap_or_else(|| "manual".to_string());
+        let provider_remote_id = self.provider_remote_id.and_then(non_empty_string);
+        let notes = self.notes.trim().to_string();
+
+        if let (Some(valid_from), Some(valid_to)) = (self.valid_from, self.valid_to) {
+            if valid_to < valid_from {
+                return Err("证书有效期结束时间不能早于开始时间".to_string());
+            }
+        }
+
+        Ok(crate::storage::LocalCertificateUpsert {
+            name,
+            domains,
+            issuer,
+            valid_from: self.valid_from,
+            valid_to: self.valid_to,
+            source_type,
+            provider_remote_id,
+            trusted: self.trusted,
+            expired: self.expired,
+            notes,
+            last_synced_at: self.last_synced_at,
+        })
+    }
+}
+
+impl From<crate::storage::SiteSyncLinkEntry> for SiteSyncLinkResponse {
+    fn from(value: crate::storage::SiteSyncLinkEntry) -> Self {
+        Self {
+            id: value.id,
+            local_site_id: value.local_site_id,
+            provider: value.provider,
+            remote_site_id: value.remote_site_id,
+            remote_site_name: value.remote_site_name,
+            remote_cert_id: value.remote_cert_id,
+            sync_mode: value.sync_mode,
+            last_local_hash: value.last_local_hash,
+            last_remote_hash: value.last_remote_hash,
+            last_error: value.last_error,
+            last_synced_at: value.last_synced_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+impl SiteSyncLinkUpsertRequest {
+    async fn into_storage_link(
+        self,
+        store: &crate::storage::SqliteStore,
+    ) -> Result<crate::storage::SiteSyncLinkUpsert, String> {
+        if self.local_site_id <= 0 {
+            return Err("local_site_id 必须大于 0".to_string());
+        }
+        ensure_local_site_exists(store, self.local_site_id).await?;
+
+        let provider = required_string(self.provider, "provider 不能为空")?;
+        let remote_site_id = required_string(self.remote_site_id, "remote_site_id 不能为空")?;
+        let remote_site_name =
+            non_empty_string(self.remote_site_name).unwrap_or_else(|| remote_site_id.clone());
+        let sync_mode =
+            non_empty_string(self.sync_mode).unwrap_or_else(|| "remote_to_local".to_string());
+
+        Ok(crate::storage::SiteSyncLinkUpsert {
+            local_site_id: self.local_site_id,
+            provider,
+            remote_site_id,
+            remote_site_name,
+            remote_cert_id: self.remote_cert_id.and_then(non_empty_string),
+            sync_mode,
+            last_local_hash: self.last_local_hash.and_then(non_empty_string),
+            last_remote_hash: self.last_remote_hash.and_then(non_empty_string),
+            last_error: self.last_error.and_then(non_empty_string),
+            last_synced_at: self.last_synced_at,
+        })
     }
 }
 
@@ -1830,6 +2411,63 @@ fn normalize_optional_query_value(value: Option<String>) -> Option<String> {
     })
 }
 
+fn normalize_string_list(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if seen.insert(value.to_string()) {
+            normalized.push(value.to_string());
+        }
+    }
+
+    normalized
+}
+
+fn required_string(value: String, message: &str) -> Result<String, String> {
+    non_empty_string(value).ok_or_else(|| message.to_string())
+}
+
+fn parse_json_string_vec(value: &str) -> Result<Vec<String>, anyhow::Error> {
+    Ok(serde_json::from_str::<Vec<String>>(value)?)
+}
+
+async fn ensure_local_certificate_exists(
+    store: &crate::storage::SqliteStore,
+    id: i64,
+) -> Result<(), String> {
+    let exists = store
+        .load_local_certificate(id)
+        .await
+        .map_err(|err| err.to_string())?
+        .is_some();
+    if exists {
+        Ok(())
+    } else {
+        Err(format!("本地证书 '{}' 不存在", id))
+    }
+}
+
+async fn ensure_local_site_exists(
+    store: &crate::storage::SqliteStore,
+    id: i64,
+) -> Result<(), String> {
+    let exists = store
+        .load_local_site(id)
+        .await
+        .map_err(|err| err.to_string())?
+        .is_some();
+    if exists {
+        Ok(())
+    } else {
+        Err(format!("本地站点 '{}' 不存在", id))
+    }
+}
+
 fn parse_sort_direction(value: Option<&str>) -> Result<crate::storage::SortDirection, String> {
     match value.unwrap_or("desc").trim().to_ascii_lowercase().as_str() {
         "asc" => Ok(crate::storage::SortDirection::Asc),
@@ -1917,6 +2555,21 @@ fn runtime_profile_label(profile: RuntimeProfile) -> &'static str {
     }
 }
 
+fn map_storage_write_error(error: anyhow::Error) -> ApiError {
+    if let Some(sqlx_error) = error.downcast_ref::<sqlx::Error>() {
+        if let Some(database_error) = sqlx_error.as_database_error() {
+            if database_error.is_unique_violation() {
+                return ApiError::conflict(database_error.message().to_string());
+            }
+            if database_error.is_foreign_key_violation() {
+                return ApiError::bad_request(database_error.message().to_string());
+            }
+        }
+    }
+
+    ApiError::internal(error)
+}
+
 type ApiResult<T> = Result<T, ApiError>;
 
 #[derive(Debug)]
@@ -1971,6 +2624,24 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use crate::config::{RuleAction, RuleLayer, Severity};
+    use crate::storage::{LocalCertificateEntry, LocalSiteEntry, SiteSyncLinkEntry, SqliteStore};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_db_path(name: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "{}_api_{}_{}.db",
+                env!("CARGO_PKG_NAME"),
+                name,
+                nanos
+            ))
+            .display()
+            .to_string()
+    }
 
     #[test]
     fn test_build_metrics_response_without_sources() {
@@ -2212,5 +2883,194 @@ mod tests {
 
         let error = payload.into_storage_mappings().unwrap_err();
         assert!(error.contains("必须保持启用状态"));
+    }
+
+    #[tokio::test]
+    async fn test_local_site_request_normalizes_primary_hostname() {
+        let path = unique_test_db_path("local_site_request");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let site = LocalSiteUpsertRequest {
+            name: " Portal ".to_string(),
+            primary_hostname: " portal.example.com ".to_string(),
+            hostnames: vec!["www.portal.example.com".to_string()],
+            listen_ports: vec![" 443 ".to_string(), "443".to_string()],
+            upstreams: vec![
+                " http://127.0.0.1:8080 ".to_string(),
+                "http://127.0.0.1:8080".to_string(),
+            ],
+            enabled: true,
+            tls_enabled: true,
+            local_certificate_id: None,
+            source: " ".to_string(),
+            sync_mode: " ".to_string(),
+            notes: " prod ".to_string(),
+            last_synced_at: Some(123),
+        }
+        .into_storage_site(&store)
+        .await
+        .unwrap();
+
+        assert_eq!(site.name, "Portal");
+        assert_eq!(site.primary_hostname, "portal.example.com");
+        assert_eq!(
+            site.hostnames,
+            vec![
+                "portal.example.com".to_string(),
+                "www.portal.example.com".to_string()
+            ]
+        );
+        assert_eq!(site.listen_ports, vec!["443".to_string()]);
+        assert_eq!(site.upstreams, vec!["http://127.0.0.1:8080".to_string()]);
+        assert_eq!(site.source, "manual");
+        assert_eq!(site.sync_mode, "manual");
+        assert_eq!(site.notes, "prod");
+    }
+
+    #[tokio::test]
+    async fn test_local_site_request_rejects_missing_certificate_reference() {
+        let path = unique_test_db_path("local_site_missing_cert");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let error = LocalSiteUpsertRequest {
+            name: "Portal".to_string(),
+            primary_hostname: "portal.example.com".to_string(),
+            hostnames: Vec::new(),
+            listen_ports: Vec::new(),
+            upstreams: Vec::new(),
+            enabled: true,
+            tls_enabled: true,
+            local_certificate_id: Some(999),
+            source: "manual".to_string(),
+            sync_mode: "manual".to_string(),
+            notes: String::new(),
+            last_synced_at: None,
+        }
+        .into_storage_site(&store)
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("本地证书"));
+    }
+
+    #[test]
+    fn test_local_certificate_request_validates_time_range() {
+        let error = LocalCertificateUpsertRequest {
+            name: "portal cert".to_string(),
+            domains: vec!["portal.example.com".to_string()],
+            issuer: "Acme".to_string(),
+            valid_from: Some(200),
+            valid_to: Some(100),
+            source_type: "manual".to_string(),
+            provider_remote_id: Some("31".to_string()),
+            trusted: true,
+            expired: false,
+            notes: String::new(),
+            last_synced_at: None,
+        }
+        .into_storage_certificate()
+        .unwrap_err();
+
+        assert!(error.contains("有效期结束时间"));
+    }
+
+    #[tokio::test]
+    async fn test_site_sync_link_request_requires_existing_local_site() {
+        let path = unique_test_db_path("site_link_missing_site");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let error = SiteSyncLinkUpsertRequest {
+            local_site_id: 404,
+            provider: "safeline".to_string(),
+            remote_site_id: "site-1".to_string(),
+            remote_site_name: String::new(),
+            remote_cert_id: None,
+            sync_mode: String::new(),
+            last_local_hash: None,
+            last_remote_hash: None,
+            last_error: None,
+            last_synced_at: None,
+        }
+        .into_storage_link(&store)
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("本地站点"));
+    }
+
+    #[test]
+    fn test_local_site_response_parses_json_fields() {
+        let response = LocalSiteResponse::try_from(LocalSiteEntry {
+            id: 1,
+            name: "Portal".to_string(),
+            primary_hostname: "portal.example.com".to_string(),
+            hostnames_json: r#"["portal.example.com","www.portal.example.com"]"#.to_string(),
+            listen_ports_json: r#"["80","443"]"#.to_string(),
+            upstreams_json: r#"["http://127.0.0.1:8080"]"#.to_string(),
+            enabled: true,
+            tls_enabled: true,
+            local_certificate_id: Some(3),
+            source: "manual".to_string(),
+            sync_mode: "manual".to_string(),
+            notes: String::new(),
+            last_synced_at: Some(123),
+            created_at: 100,
+            updated_at: 200,
+        })
+        .unwrap();
+
+        assert_eq!(response.hostnames.len(), 2);
+        assert_eq!(response.listen_ports, vec!["80", "443"]);
+        assert_eq!(response.upstreams, vec!["http://127.0.0.1:8080"]);
+    }
+
+    #[test]
+    fn test_local_certificate_response_parses_json_fields() {
+        let response = LocalCertificateResponse::try_from(LocalCertificateEntry {
+            id: 1,
+            name: "Portal".to_string(),
+            domains_json: r#"["portal.example.com","api.example.com"]"#.to_string(),
+            issuer: "Acme".to_string(),
+            valid_from: Some(100),
+            valid_to: Some(200),
+            source_type: "manual".to_string(),
+            provider_remote_id: Some("31".to_string()),
+            trusted: true,
+            expired: false,
+            notes: String::new(),
+            last_synced_at: Some(123),
+            created_at: 100,
+            updated_at: 200,
+        })
+        .unwrap();
+
+        assert_eq!(
+            response.domains,
+            vec!["portal.example.com", "api.example.com"]
+        );
+        assert_eq!(response.provider_remote_id.as_deref(), Some("31"));
+    }
+
+    #[test]
+    fn test_site_sync_link_response_from_storage() {
+        let response = SiteSyncLinkResponse::from(SiteSyncLinkEntry {
+            id: 1,
+            local_site_id: 2,
+            provider: "safeline".to_string(),
+            remote_site_id: "site-1".to_string(),
+            remote_site_name: "portal.example.com".to_string(),
+            remote_cert_id: Some("31".to_string()),
+            sync_mode: "bidirectional".to_string(),
+            last_local_hash: Some("local".to_string()),
+            last_remote_hash: Some("remote".to_string()),
+            last_error: None,
+            last_synced_at: Some(123),
+            created_at: 100,
+            updated_at: 200,
+        });
+
+        assert_eq!(response.provider, "safeline");
+        assert_eq!(response.remote_site_id, "site-1");
+        assert_eq!(response.remote_cert_id.as_deref(), Some("31"));
     }
 }

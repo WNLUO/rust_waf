@@ -1710,7 +1710,10 @@ mod tests {
         assert_eq!(sites[0].name, "portal");
         assert_eq!(sites[0].domain, "portal.example.com");
         assert_eq!(sites[0].status, "0");
-        assert_eq!(sites[0].server_names, vec!["portal.example.com", "www.example.com"]);
+        assert_eq!(
+            sites[0].server_names,
+            vec!["portal.example.com", "www.example.com"]
+        );
         assert_eq!(sites[0].ssl_ports, vec!["443_ssl"]);
         assert_eq!(sites[0].upstreams, vec!["https://127.0.0.1:9443"]);
         assert_eq!(sites[0].cert_type, Some(2));

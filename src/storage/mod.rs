@@ -161,6 +161,63 @@ pub struct SafeLineSiteMappingEntry {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LocalSiteEntry {
+    pub id: i64,
+    pub name: String,
+    pub primary_hostname: String,
+    pub hostnames_json: String,
+    pub listen_ports_json: String,
+    pub upstreams_json: String,
+    pub enabled: bool,
+    pub tls_enabled: bool,
+    pub local_certificate_id: Option<i64>,
+    pub source: String,
+    pub sync_mode: String,
+    pub notes: String,
+    pub last_synced_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LocalCertificateEntry {
+    pub id: i64,
+    pub name: String,
+    pub domains_json: String,
+    pub issuer: String,
+    pub valid_from: Option<i64>,
+    pub valid_to: Option<i64>,
+    pub source_type: String,
+    pub provider_remote_id: Option<String>,
+    pub trusted: bool,
+    pub expired: bool,
+    pub notes: String,
+    pub last_synced_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct SiteSyncLinkEntry {
+    pub id: i64,
+    pub local_site_id: i64,
+    pub provider: String,
+    pub remote_site_id: String,
+    pub remote_site_name: String,
+    pub remote_cert_id: Option<String>,
+    pub sync_mode: String,
+    pub last_local_hash: Option<String>,
+    pub last_remote_hash: Option<String>,
+    pub last_error: Option<String>,
+    pub last_synced_at: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SafeLineSyncStateEntry {
     pub resource: String,
     pub last_cursor: Option<i64>,
@@ -491,6 +548,313 @@ impl SqliteStore {
         .await?;
 
         Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_local_sites(&self) -> Result<Vec<LocalSiteEntry>> {
+        let rows = sqlx::query_as::<_, LocalSiteEntry>(
+            r#"
+            SELECT id, name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
+                   enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
+                   last_synced_at, created_at, updated_at
+            FROM local_sites
+            ORDER BY updated_at DESC, id DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn load_local_site(&self, id: i64) -> Result<Option<LocalSiteEntry>> {
+        let row = sqlx::query_as::<_, LocalSiteEntry>(
+            r#"
+            SELECT id, name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
+                   enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
+                   last_synced_at, created_at, updated_at
+            FROM local_sites
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn insert_local_site(&self, site: &LocalSiteUpsert) -> Result<i64> {
+        let now = unix_timestamp();
+        let result = sqlx::query(
+            r#"
+            INSERT INTO local_sites (
+                name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
+                enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
+                last_synced_at, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&site.name)
+        .bind(&site.primary_hostname)
+        .bind(serialize_string_vec(&site.hostnames)?)
+        .bind(serialize_string_vec(&site.listen_ports)?)
+        .bind(serialize_string_vec(&site.upstreams)?)
+        .bind(site.enabled)
+        .bind(site.tls_enabled)
+        .bind(site.local_certificate_id)
+        .bind(&site.source)
+        .bind(&site.sync_mode)
+        .bind(&site.notes)
+        .bind(site.last_synced_at)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn update_local_site(&self, id: i64, site: &LocalSiteUpsert) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE local_sites
+            SET name = ?,
+                primary_hostname = ?,
+                hostnames_json = ?,
+                listen_ports_json = ?,
+                upstreams_json = ?,
+                enabled = ?,
+                tls_enabled = ?,
+                local_certificate_id = ?,
+                source = ?,
+                sync_mode = ?,
+                notes = ?,
+                last_synced_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&site.name)
+        .bind(&site.primary_hostname)
+        .bind(serialize_string_vec(&site.hostnames)?)
+        .bind(serialize_string_vec(&site.listen_ports)?)
+        .bind(serialize_string_vec(&site.upstreams)?)
+        .bind(site.enabled)
+        .bind(site.tls_enabled)
+        .bind(site.local_certificate_id)
+        .bind(&site.source)
+        .bind(&site.sync_mode)
+        .bind(&site.notes)
+        .bind(site.last_synced_at)
+        .bind(unix_timestamp())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_local_site(&self, id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM local_sites WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_local_certificates(&self) -> Result<Vec<LocalCertificateEntry>> {
+        let rows = sqlx::query_as::<_, LocalCertificateEntry>(
+            r#"
+            SELECT id, name, domains_json, issuer, valid_from, valid_to, source_type,
+                   provider_remote_id, trusted, expired, notes, last_synced_at, created_at, updated_at
+            FROM local_certificates
+            ORDER BY updated_at DESC, id DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn load_local_certificate(&self, id: i64) -> Result<Option<LocalCertificateEntry>> {
+        let row = sqlx::query_as::<_, LocalCertificateEntry>(
+            r#"
+            SELECT id, name, domains_json, issuer, valid_from, valid_to, source_type,
+                   provider_remote_id, trusted, expired, notes, last_synced_at, created_at, updated_at
+            FROM local_certificates
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn insert_local_certificate(
+        &self,
+        certificate: &LocalCertificateUpsert,
+    ) -> Result<i64> {
+        let now = unix_timestamp();
+        let result = sqlx::query(
+            r#"
+            INSERT INTO local_certificates (
+                name, domains_json, issuer, valid_from, valid_to, source_type,
+                provider_remote_id, trusted, expired, notes, last_synced_at, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&certificate.name)
+        .bind(serialize_string_vec(&certificate.domains)?)
+        .bind(&certificate.issuer)
+        .bind(certificate.valid_from)
+        .bind(certificate.valid_to)
+        .bind(&certificate.source_type)
+        .bind(&certificate.provider_remote_id)
+        .bind(certificate.trusted)
+        .bind(certificate.expired)
+        .bind(&certificate.notes)
+        .bind(certificate.last_synced_at)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn update_local_certificate(
+        &self,
+        id: i64,
+        certificate: &LocalCertificateUpsert,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE local_certificates
+            SET name = ?,
+                domains_json = ?,
+                issuer = ?,
+                valid_from = ?,
+                valid_to = ?,
+                source_type = ?,
+                provider_remote_id = ?,
+                trusted = ?,
+                expired = ?,
+                notes = ?,
+                last_synced_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&certificate.name)
+        .bind(serialize_string_vec(&certificate.domains)?)
+        .bind(&certificate.issuer)
+        .bind(certificate.valid_from)
+        .bind(certificate.valid_to)
+        .bind(&certificate.source_type)
+        .bind(&certificate.provider_remote_id)
+        .bind(certificate.trusted)
+        .bind(certificate.expired)
+        .bind(&certificate.notes)
+        .bind(certificate.last_synced_at)
+        .bind(unix_timestamp())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_local_certificate(&self, id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM local_certificates WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_site_sync_links(&self) -> Result<Vec<SiteSyncLinkEntry>> {
+        let rows = sqlx::query_as::<_, SiteSyncLinkEntry>(
+            r#"
+            SELECT id, local_site_id, provider, remote_site_id, remote_site_name, remote_cert_id,
+                   sync_mode, last_local_hash, last_remote_hash, last_error,
+                   last_synced_at, created_at, updated_at
+            FROM site_sync_links
+            ORDER BY updated_at DESC, id DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn upsert_site_sync_link(&self, link: &SiteSyncLinkUpsert) -> Result<()> {
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO site_sync_links (
+                local_site_id, provider, remote_site_id, remote_site_name, remote_cert_id,
+                sync_mode, last_local_hash, last_remote_hash, last_error,
+                last_synced_at, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, local_site_id) DO UPDATE SET
+                remote_site_id = excluded.remote_site_id,
+                remote_site_name = excluded.remote_site_name,
+                remote_cert_id = excluded.remote_cert_id,
+                sync_mode = excluded.sync_mode,
+                last_local_hash = excluded.last_local_hash,
+                last_remote_hash = excluded.last_remote_hash,
+                last_error = excluded.last_error,
+                last_synced_at = excluded.last_synced_at,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(link.local_site_id)
+        .bind(&link.provider)
+        .bind(&link.remote_site_id)
+        .bind(&link.remote_site_name)
+        .bind(&link.remote_cert_id)
+        .bind(&link.sync_mode)
+        .bind(&link.last_local_hash)
+        .bind(&link.last_remote_hash)
+        .bind(&link.last_error)
+        .bind(link.last_synced_at)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_site_sync_link(&self, id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM site_sync_links WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
@@ -1116,6 +1480,78 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_safeline_site_mappings_updated_at
             ON safeline_site_mappings(updated_at);
 
+        CREATE TABLE IF NOT EXISTS local_certificates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            domains_json TEXT NOT NULL DEFAULT '[]',
+            issuer TEXT NOT NULL DEFAULT '',
+            valid_from INTEGER,
+            valid_to INTEGER,
+            source_type TEXT NOT NULL DEFAULT 'manual',
+            provider_remote_id TEXT,
+            trusted INTEGER NOT NULL DEFAULT 0,
+            expired INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT '',
+            last_synced_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_local_certificates_updated_at
+            ON local_certificates(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_local_certificates_provider_remote_id
+            ON local_certificates(provider_remote_id);
+
+        CREATE TABLE IF NOT EXISTS local_sites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            primary_hostname TEXT NOT NULL,
+            hostnames_json TEXT NOT NULL DEFAULT '[]',
+            listen_ports_json TEXT NOT NULL DEFAULT '[]',
+            upstreams_json TEXT NOT NULL DEFAULT '[]',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            tls_enabled INTEGER NOT NULL DEFAULT 0,
+            local_certificate_id INTEGER,
+            source TEXT NOT NULL DEFAULT 'manual',
+            sync_mode TEXT NOT NULL DEFAULT 'manual',
+            notes TEXT NOT NULL DEFAULT '',
+            last_synced_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(local_certificate_id) REFERENCES local_certificates(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_local_sites_updated_at
+            ON local_sites(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_local_sites_primary_hostname
+            ON local_sites(primary_hostname);
+        CREATE INDEX IF NOT EXISTS idx_local_sites_local_certificate_id
+            ON local_sites(local_certificate_id);
+
+        CREATE TABLE IF NOT EXISTS site_sync_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            local_site_id INTEGER NOT NULL,
+            provider TEXT NOT NULL,
+            remote_site_id TEXT NOT NULL,
+            remote_site_name TEXT NOT NULL DEFAULT '',
+            remote_cert_id TEXT,
+            sync_mode TEXT NOT NULL DEFAULT 'remote_to_local',
+            last_local_hash TEXT,
+            last_remote_hash TEXT,
+            last_error TEXT,
+            last_synced_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(local_site_id) REFERENCES local_sites(id) ON DELETE CASCADE,
+            UNIQUE(provider, local_site_id),
+            UNIQUE(provider, remote_site_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_site_sync_links_local_site_id
+            ON site_sync_links(local_site_id);
+        CREATE INDEX IF NOT EXISTS idx_site_sync_links_provider_remote_site_id
+            ON site_sync_links(provider, remote_site_id);
+
         CREATE TABLE IF NOT EXISTS safeline_event_dedup (
             fingerprint TEXT PRIMARY KEY,
             created_at INTEGER NOT NULL,
@@ -1214,6 +1650,51 @@ pub struct SafeLineSiteMappingUpsert {
     pub notes: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalSiteUpsert {
+    pub name: String,
+    pub primary_hostname: String,
+    pub hostnames: Vec<String>,
+    pub listen_ports: Vec<String>,
+    pub upstreams: Vec<String>,
+    pub enabled: bool,
+    pub tls_enabled: bool,
+    pub local_certificate_id: Option<i64>,
+    pub source: String,
+    pub sync_mode: String,
+    pub notes: String,
+    pub last_synced_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalCertificateUpsert {
+    pub name: String,
+    pub domains: Vec<String>,
+    pub issuer: String,
+    pub valid_from: Option<i64>,
+    pub valid_to: Option<i64>,
+    pub source_type: String,
+    pub provider_remote_id: Option<String>,
+    pub trusted: bool,
+    pub expired: bool,
+    pub notes: String,
+    pub last_synced_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SiteSyncLinkUpsert {
+    pub local_site_id: i64,
+    pub provider: String,
+    pub remote_site_id: String,
+    pub remote_site_name: String,
+    pub remote_cert_id: Option<String>,
+    pub sync_mode: String,
+    pub last_local_hash: Option<String>,
+    pub last_remote_hash: Option<String>,
+    pub last_error: Option<String>,
+    pub last_synced_at: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SafeLineImportResult {
     pub imported: usize,
@@ -1256,6 +1737,10 @@ fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
     hasher.update([0]);
     hasher.update(event.created_at.to_le_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn serialize_string_vec(values: &[String]) -> Result<String> {
+    Ok(serde_json::to_string(values)?)
 }
 
 fn fingerprint_blocked_ip(record: &BlockedIpEntry) -> String {
@@ -1622,12 +2107,33 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let local_certificates_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_certificates'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let local_sites_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_sites'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let site_sync_links_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'site_sync_links'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         assert_eq!(security_events_exists, 1);
         assert_eq!(blocked_ips_exists, 1);
         assert_eq!(rules_exists, 1);
         assert_eq!(app_config_exists, 1);
         assert_eq!(safeline_site_mappings_exists, 1);
+        assert_eq!(local_certificates_exists, 1);
+        assert_eq!(local_sites_exists, 1);
+        assert_eq!(site_sync_links_exists, 1);
     }
 
     #[tokio::test]
@@ -2057,6 +2563,208 @@ mod tests {
         let replaced = store.list_safeline_site_mappings().await.unwrap();
         assert_eq!(replaced.len(), 1);
         assert_eq!(replaced[0].safeline_site_id, "site-3");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_manages_local_certificates() {
+        let path = unique_test_db_path("local_certificates");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let certificate_id = store
+            .insert_local_certificate(&LocalCertificateUpsert {
+                name: "prod wildcard".to_string(),
+                domains: vec!["example.com".to_string(), "*.example.com".to_string()],
+                issuer: "Let's Encrypt".to_string(),
+                valid_from: Some(1_700_000_000),
+                valid_to: Some(1_800_000_000),
+                source_type: "manual".to_string(),
+                provider_remote_id: Some("31".to_string()),
+                trusted: true,
+                expired: false,
+                notes: "initial import".to_string(),
+                last_synced_at: Some(1_700_000_100),
+            })
+            .await
+            .unwrap();
+
+        let loaded = store
+            .load_local_certificate(certificate_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let domains: Vec<String> = serde_json::from_str(&loaded.domains_json).unwrap();
+        assert_eq!(loaded.name, "prod wildcard");
+        assert_eq!(domains, vec!["example.com", "*.example.com"]);
+        assert_eq!(loaded.provider_remote_id.as_deref(), Some("31"));
+        assert!(loaded.trusted);
+
+        let updated = store
+            .update_local_certificate(
+                certificate_id,
+                &LocalCertificateUpsert {
+                    name: "prod wildcard v2".to_string(),
+                    domains: vec!["example.com".to_string()],
+                    issuer: "Let's Encrypt".to_string(),
+                    valid_from: Some(1_700_000_000),
+                    valid_to: Some(1_900_000_000),
+                    source_type: "safeline".to_string(),
+                    provider_remote_id: Some("32".to_string()),
+                    trusted: true,
+                    expired: false,
+                    notes: "rotated".to_string(),
+                    last_synced_at: Some(1_700_000_200),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(updated);
+
+        let listed = store.list_local_certificates().await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "prod wildcard v2");
+        assert_eq!(listed[0].provider_remote_id.as_deref(), Some("32"));
+
+        let deleted = store
+            .delete_local_certificate(certificate_id)
+            .await
+            .unwrap();
+        assert!(deleted);
+        assert!(store
+            .load_local_certificate(certificate_id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_manages_local_sites_and_sync_links() {
+        let path = unique_test_db_path("local_sites");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let certificate_id = store
+            .insert_local_certificate(&LocalCertificateUpsert {
+                name: "portal cert".to_string(),
+                domains: vec!["portal.example.com".to_string()],
+                issuer: "Acme CA".to_string(),
+                valid_from: None,
+                valid_to: None,
+                source_type: "manual".to_string(),
+                provider_remote_id: None,
+                trusted: false,
+                expired: false,
+                notes: String::new(),
+                last_synced_at: None,
+            })
+            .await
+            .unwrap();
+
+        let site_id = store
+            .insert_local_site(&LocalSiteUpsert {
+                name: "Portal".to_string(),
+                primary_hostname: "portal.example.com".to_string(),
+                hostnames: vec![
+                    "portal.example.com".to_string(),
+                    "www.portal.example.com".to_string(),
+                ],
+                listen_ports: vec!["80".to_string(), "443".to_string()],
+                upstreams: vec!["http://127.0.0.1:8080".to_string()],
+                enabled: true,
+                tls_enabled: true,
+                local_certificate_id: Some(certificate_id),
+                source: "manual".to_string(),
+                sync_mode: "bidirectional".to_string(),
+                notes: "production".to_string(),
+                last_synced_at: Some(1_700_000_300),
+            })
+            .await
+            .unwrap();
+
+        let loaded_site = store.load_local_site(site_id).await.unwrap().unwrap();
+        let hostnames: Vec<String> = serde_json::from_str(&loaded_site.hostnames_json).unwrap();
+        let listen_ports: Vec<String> =
+            serde_json::from_str(&loaded_site.listen_ports_json).unwrap();
+        assert_eq!(loaded_site.primary_hostname, "portal.example.com");
+        assert_eq!(hostnames.len(), 2);
+        assert_eq!(listen_ports, vec!["80", "443"]);
+        assert_eq!(loaded_site.local_certificate_id, Some(certificate_id));
+
+        let updated = store
+            .update_local_site(
+                site_id,
+                &LocalSiteUpsert {
+                    name: "Portal Main".to_string(),
+                    primary_hostname: "portal.example.com".to_string(),
+                    hostnames: vec!["portal.example.com".to_string()],
+                    listen_ports: vec!["443".to_string()],
+                    upstreams: vec![
+                        "http://127.0.0.1:8080".to_string(),
+                        "http://127.0.0.1:8081".to_string(),
+                    ],
+                    enabled: true,
+                    tls_enabled: true,
+                    local_certificate_id: Some(certificate_id),
+                    source: "safeline".to_string(),
+                    sync_mode: "remote_to_local".to_string(),
+                    notes: "synced".to_string(),
+                    last_synced_at: Some(1_700_000_400),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(updated);
+
+        store
+            .upsert_site_sync_link(&SiteSyncLinkUpsert {
+                local_site_id: site_id,
+                provider: "safeline".to_string(),
+                remote_site_id: "remote-1".to_string(),
+                remote_site_name: "portal.example.com".to_string(),
+                remote_cert_id: Some("31".to_string()),
+                sync_mode: "remote_to_local".to_string(),
+                last_local_hash: Some("local-a".to_string()),
+                last_remote_hash: Some("remote-a".to_string()),
+                last_error: None,
+                last_synced_at: Some(1_700_000_500),
+            })
+            .await
+            .unwrap();
+
+        store
+            .upsert_site_sync_link(&SiteSyncLinkUpsert {
+                local_site_id: site_id,
+                provider: "safeline".to_string(),
+                remote_site_id: "remote-2".to_string(),
+                remote_site_name: "portal-new.example.com".to_string(),
+                remote_cert_id: Some("32".to_string()),
+                sync_mode: "bidirectional".to_string(),
+                last_local_hash: Some("local-b".to_string()),
+                last_remote_hash: Some("remote-b".to_string()),
+                last_error: Some("conflict".to_string()),
+                last_synced_at: Some(1_700_000_600),
+            })
+            .await
+            .unwrap();
+
+        let links = store.list_site_sync_links().await.unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].remote_site_id, "remote-2");
+        assert_eq!(links[0].remote_cert_id.as_deref(), Some("32"));
+        assert_eq!(links[0].last_error.as_deref(), Some("conflict"));
+
+        let deleted_link = store.delete_site_sync_link(links[0].id).await.unwrap();
+        assert!(deleted_link);
+        assert!(store.list_site_sync_links().await.unwrap().is_empty());
+
+        let deleted_site = store.delete_local_site(site_id).await.unwrap();
+        assert!(deleted_site);
+        assert!(store.load_local_site(site_id).await.unwrap().is_none());
+
+        let cert_after_site_delete = store
+            .load_local_certificate(certificate_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cert_after_site_delete.id, certificate_id);
     }
 
     #[tokio::test]

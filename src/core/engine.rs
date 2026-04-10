@@ -2346,6 +2346,7 @@ mod tests {
             pattern: r"protocol=UDP".to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
@@ -2365,6 +2366,7 @@ mod tests {
             pattern: r"GET /admin".to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
@@ -2400,6 +2402,7 @@ mod tests {
             pattern: r"protocol=UDP".to_string(),
             action: RuleAction::Alert,
             severity: Severity::Medium,
+            plugin_template_id: None,
             response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
@@ -2420,6 +2423,7 @@ mod tests {
             pattern: r"GET /health".to_string(),
             action: RuleAction::Allow,
             severity: Severity::Low,
+            plugin_template_id: None,
             response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();

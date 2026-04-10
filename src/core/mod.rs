@@ -289,6 +289,7 @@ mod tests {
             pattern: pattern.to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: None,
         }
     }

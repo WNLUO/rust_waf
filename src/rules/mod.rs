@@ -10,7 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
-const RULE_RESPONSE_FILES_DIR: &str = "data/rule_responses";
+pub const RULE_RESPONSE_FILES_DIR: &str = "data/rule_responses";
 
 pub struct RuleEngine {
     rules: Vec<(Rule, Regex)>,
@@ -246,6 +246,7 @@ mod tests {
             pattern: r"dest_port=22".to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: None,
         }])
         .unwrap();
@@ -274,6 +275,7 @@ mod tests {
             pattern: "(".to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: None,
         };
 
@@ -292,6 +294,7 @@ mod tests {
             pattern: "attack".to_string(),
             action: RuleAction::Respond,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: Some(RuleResponseTemplate {
                 status_code: 200,
                 content_type: "text/html; charset=utf-8".to_string(),
@@ -350,6 +353,7 @@ mod tests {
             pattern: "file".to_string(),
             action: RuleAction::Respond,
             severity: Severity::High,
+            plugin_template_id: None,
             response_template: Some(RuleResponseTemplate {
                 status_code: 200,
                 content_type: "text/plain".to_string(),

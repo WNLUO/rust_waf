@@ -18,6 +18,8 @@ import type {
   LocalSiteItem,
   LocalSitesResponse,
   MetricsResponse,
+  RuleActionPluginsResponse,
+  RuleActionTemplatesResponse,
   RuleDraft,
   RulesResponse,
   SafeLineBlocklistPullResponse,
@@ -163,6 +165,21 @@ export function fetchBlockedIps(query?: BlockedIpsQuery) {
 
 export function fetchRulesList() {
   return apiRequest<RulesResponse>("/rules");
+}
+
+export function fetchRuleActionPlugins() {
+  return apiRequest<RuleActionPluginsResponse>("/rule-action-plugins");
+}
+
+export function fetchRuleActionTemplates() {
+  return apiRequest<RuleActionTemplatesResponse>("/rule-action-templates");
+}
+
+export function installRuleActionPlugin(packageUrl: string) {
+  return apiRequest<WriteStatusResponse>("/rule-action-plugins/install", {
+    method: "POST",
+    body: JSON.stringify({ package_url: packageUrl }),
+  });
 }
 
 export function fetchHealth() {

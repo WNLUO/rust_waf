@@ -1,7 +1,21 @@
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted } from "vue";
-import { createRule, deleteRule, fetchRulesList, updateRule } from "../lib/api";
-import type { RuleDraft, RuleItem, RulesResponse } from "../lib/types";
+import {
+  createRule,
+  deleteRule,
+  fetchRuleActionPlugins,
+  fetchRuleActionTemplates,
+  fetchRulesList,
+  installRuleActionPlugin,
+  updateRule,
+} from "../lib/api";
+import type {
+  RuleActionPluginItem,
+  RuleActionTemplateItem,
+  RuleDraft,
+  RuleItem,
+  RulesResponse,
+} from "../lib/types";
 import AppLayout from "../components/layout/AppLayout.vue";
 import StatusBadge from "../components/ui/StatusBadge.vue";
 import { useFormatters } from "../composables/useFormatters";
@@ -20,9 +34,28 @@ const { severityLabel, actionLabel, layerLabel } = useFormatters();
 
 const loading = ref(true);
 const saving = ref(false);
+const installingPlugin = ref(false);
 const error = ref("");
 const rulesPayload = ref<RulesResponse>({ rules: [] });
 const isRuleModalOpen = ref(false);
+const pluginInstallUrl = ref("");
+const installedPlugins = ref<RuleActionPluginItem[]>([]);
+const pluginTemplates = ref<RuleActionTemplateItem[]>([]);
+
+const isPluginActionValue = (value: string) => value.startsWith("plugin:");
+const toPluginActionValue = (templateId: string) => `plugin:${templateId}`;
+const selectedPluginTemplate = computed(() =>
+  pluginTemplates.value.find((item) => item.template_id === ruleForm.plugin_template_id),
+);
+const displayActionLabel = (rule: RuleItem) => {
+  if (rule.plugin_template_id) {
+    const template = pluginTemplates.value.find(
+      (item) => item.template_id === rule.plugin_template_id,
+    );
+    if (template) return `插件 · ${template.name}`;
+  }
+  return actionLabel(rule.action);
+};
 
 const defaultResponseTemplate = () => ({
   status_code: 403,
@@ -82,7 +115,14 @@ const filteredRules = computed(() =>
 const loadRules = async () => {
   loading.value = true;
   try {
-    rulesPayload.value = await fetchRulesList();
+    const [rules, plugins, templates] = await Promise.all([
+      fetchRulesList(),
+      fetchRuleActionPlugins(),
+      fetchRuleActionTemplates(),
+    ]);
+    rulesPayload.value = rules;
+    installedPlugins.value = plugins.plugins;
+    pluginTemplates.value = templates.templates;
     error.value = "";
   } catch (e) {
     error.value = e instanceof Error ? e.message : "读取规则失败";
@@ -100,6 +140,7 @@ const openCreateRule = () => {
     pattern: "",
     action: "block",
     severity: "high",
+    plugin_template_id: null,
     response_template: defaultResponseTemplate(),
   });
   isRuleModalOpen.value = true;
@@ -108,6 +149,9 @@ const openCreateRule = () => {
 const openEditRule = (rule: RuleItem) => {
   Object.assign(ruleForm, {
     ...rule,
+    action: rule.plugin_template_id
+      ? toPluginActionValue(rule.plugin_template_id)
+      : rule.action,
     response_template: rule.response_template
       ? {
           ...rule.response_template,
@@ -121,22 +165,53 @@ const openEditRule = (rule: RuleItem) => {
 const handleCreateOrUpdateRule = async () => {
   saving.value = true;
   try {
+    const pluginTemplate = ruleForm.plugin_template_id
+      ? pluginTemplates.value.find(
+          (item) => item.template_id === ruleForm.plugin_template_id,
+        )
+      : null;
+    const isPluginAction = isPluginActionValue(ruleForm.action);
     const payload: RuleDraft = {
       ...ruleForm,
+      action: isPluginAction ? "respond" : ruleForm.action,
+      layer: pluginTemplate?.layer || ruleForm.layer,
+      severity: pluginTemplate?.severity || ruleForm.severity,
+      pattern: pluginTemplate?.pattern || ruleForm.pattern,
+      plugin_template_id: pluginTemplate?.template_id || null,
       response_template:
-        ruleForm.layer === "l7" && ruleForm.action === "respond"
+        (pluginTemplate?.layer || ruleForm.layer) === "l7" &&
+        ((isPluginAction && pluginTemplate) || ruleForm.action === "respond")
           ? {
-              status_code: Number(ruleForm.response_template?.status_code || 403),
+              status_code: Number(
+                pluginTemplate?.response_template.status_code ||
+                  ruleForm.response_template?.status_code ||
+                  403,
+              ),
               content_type:
+                pluginTemplate?.response_template.content_type ||
                 ruleForm.response_template?.content_type ||
                 "text/html; charset=utf-8",
               body_source:
-                ruleForm.response_template?.body_source || "inline_text",
-              gzip: Boolean(ruleForm.response_template?.gzip),
-              body_text: ruleForm.response_template?.body_text || "",
+                pluginTemplate?.response_template.body_source ||
+                ruleForm.response_template?.body_source ||
+                "inline_text",
+              gzip: Boolean(
+                pluginTemplate?.response_template.gzip ??
+                  ruleForm.response_template?.gzip,
+              ),
+              body_text:
+                pluginTemplate?.response_template.body_text ||
+                ruleForm.response_template?.body_text ||
+                "",
               body_file_path:
-                ruleForm.response_template?.body_file_path?.trim() || "",
-              headers: (ruleForm.response_template?.headers || []).filter(
+                pluginTemplate?.response_template.body_file_path ||
+                ruleForm.response_template?.body_file_path?.trim() ||
+                "",
+              headers: (
+                pluginTemplate?.response_template.headers ||
+                ruleForm.response_template?.headers ||
+                []
+              ).filter(
                 (item) => item.key.trim(),
               ),
             }
@@ -157,6 +232,24 @@ const handleCreateOrUpdateRule = async () => {
 };
 
 const onActionChange = () => {
+  if (isPluginActionValue(ruleForm.action)) {
+    const templateId = ruleForm.action.slice("plugin:".length);
+    const template = pluginTemplates.value.find((item) => item.template_id === templateId);
+    if (!template) return;
+    ruleForm.plugin_template_id = template.template_id;
+    Object.assign(ruleForm, {
+      layer: template.layer,
+      pattern: template.pattern,
+      severity: template.severity,
+      response_template: {
+        ...template.response_template,
+        headers: [...template.response_template.headers],
+      },
+    });
+    return;
+  }
+
+  ruleForm.plugin_template_id = null;
   if (ruleForm.layer !== "l7" && ruleForm.action === "respond") {
     ruleForm.action = "block";
   }
@@ -168,6 +261,25 @@ const addResponseHeader = () => {
 
 const removeResponseHeader = (index: number) => {
   ruleForm.response_template?.headers.splice(index, 1);
+};
+
+const handleInstallPlugin = async () => {
+  const packageUrl = pluginInstallUrl.value.trim();
+  if (!packageUrl) {
+    error.value = "请输入插件包 URL";
+    return;
+  }
+
+  installingPlugin.value = true;
+  try {
+    await installRuleActionPlugin(packageUrl);
+    pluginInstallUrl.value = "";
+    await loadRules();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "插件安装失败";
+  } finally {
+    installingPlugin.value = false;
+  }
 };
 
 const toggleRuleStatus = async (rule: RuleItem) => {
@@ -272,6 +384,40 @@ onMounted(loadRules);
         </button>
       </div>
 
+      <div class="rounded-[28px] border border-white/70 bg-white/60 p-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="min-w-[220px] flex-1">
+            <p class="text-sm font-medium text-stone-900">规则模板插件</p>
+            <p class="text-xs text-slate-500">
+              输入 zip 包 URL，系统会下载并安装为可选的 `respond` 模板。
+            </p>
+          </div>
+          <input
+            v-model="pluginInstallUrl"
+            type="text"
+            class="min-w-[240px] flex-1 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+            placeholder="https://example.com/plugins/gzip-block.zip"
+          />
+          <button
+            @click="handleInstallPlugin"
+            class="inline-flex items-center gap-2 rounded-[18px] bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-60"
+            :disabled="installingPlugin"
+          >
+            {{ installingPlugin ? "安装中..." : "安装插件" }}
+          </button>
+        </div>
+
+        <div v-if="installedPlugins.length" class="mt-4 flex flex-wrap gap-2">
+          <span
+            v-for="plugin in installedPlugins"
+            :key="plugin.plugin_id"
+            class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-stone-700"
+          >
+            {{ plugin.name }} v{{ plugin.version }}
+          </span>
+        </div>
+      </div>
+
       <div
         class="overflow-hidden rounded-xl border border-white/80 bg-white/78 shadow-[0_16px_44px_rgba(90,60,30,0.08)]"
       >
@@ -304,7 +450,7 @@ onMounted(loadRules);
                 <td class="px-4 py-3 font-semibold">{{ rule.name }}</td>
                 <td class="px-4 py-3">{{ layerLabel(rule.layer) }}</td>
                 <td class="px-4 py-3">{{ severityLabel(rule.severity) }}</td>
-                <td class="px-4 py-3">{{ actionLabel(rule.action) }}</td>
+                <td class="px-4 py-3">{{ displayActionLabel(rule) }}</td>
                 <td
                   class="max-w-[360px] px-4 py-3 font-mono text-xs text-slate-500"
                 >
@@ -396,6 +542,7 @@ onMounted(loadRules);
                 v-model="ruleForm.layer"
                 @change="onActionChange"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                :disabled="!!ruleForm.plugin_template_id"
               >
                 <option value="l4">四层</option>
                 <option value="l7">七层</option>
@@ -407,6 +554,7 @@ onMounted(loadRules);
               <select
                 v-model="ruleForm.severity"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                :disabled="!!ruleForm.plugin_template_id"
               >
                 <option value="low">低</option>
                 <option value="medium">中</option>
@@ -428,6 +576,13 @@ onMounted(loadRules);
                 <option value="respond" :disabled="ruleForm.layer !== 'l7'">
                   自定义响应
                 </option>
+                <option
+                  v-for="template in pluginTemplates"
+                  :key="template.template_id"
+                  :value="toPluginActionValue(template.template_id)"
+                >
+                  插件 · {{ template.name }}
+                </option>
               </select>
             </div>
           </div>
@@ -439,18 +594,27 @@ onMounted(loadRules);
               rows="6"
               class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-blue-500"
               required
+              :disabled="!!ruleForm.plugin_template_id"
             ></textarea>
           </div>
 
           <div
-            v-if="ruleForm.layer === 'l7' && ruleForm.action === 'respond'"
+            v-if="
+              ruleForm.layer === 'l7' &&
+              (ruleForm.action === 'respond' || !!ruleForm.plugin_template_id)
+            "
             class="space-y-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4"
           >
             <div>
               <p class="text-sm font-medium text-stone-900">命中后直接回包</p>
               <p class="text-xs text-slate-500">
-                这里写原始文本内容，服务端会按需压缩并自动补齐
-                `Content-Encoding`。
+                <template v-if="selectedPluginTemplate">
+                  当前使用插件动作 `{{ selectedPluginTemplate.name }}`，配置已由插件预设。
+                </template>
+                <template v-else>
+                  这里写原始文本内容，服务端会按需压缩并自动补齐
+                  `Content-Encoding`。
+                </template>
               </p>
             </div>
 
@@ -463,6 +627,7 @@ onMounted(loadRules);
                   min="100"
                   max="599"
                   class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                  :disabled="!!ruleForm.plugin_template_id"
                 />
               </div>
 
@@ -472,6 +637,7 @@ onMounted(loadRules);
                   v-model="ruleForm.response_template!.content_type"
                   type="text"
                   class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                  :disabled="!!ruleForm.plugin_template_id"
                 />
               </div>
             </div>
@@ -501,6 +667,7 @@ onMounted(loadRules);
                 type="text"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                 placeholder="例如 block-page.html 或 pages/block-page.html"
+                :disabled="!!ruleForm.plugin_template_id"
               />
               <textarea
                 v-else
@@ -508,6 +675,7 @@ onMounted(loadRules);
                 rows="8"
                 class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-blue-500"
                 placeholder="例如返回一段 HTML、JSON 或说明文本"
+                :disabled="!!ruleForm.plugin_template_id"
               ></textarea>
             </div>
 
@@ -518,6 +686,7 @@ onMounted(loadRules);
                 v-model="ruleForm.response_template!.gzip"
                 type="checkbox"
                 class="h-4 w-4 accent-blue-600"
+                :disabled="!!ruleForm.plugin_template_id"
               />
               <span class="text-sm text-stone-800">
                 自动 gzip 压缩并添加 `Content-Encoding: gzip`
@@ -531,6 +700,7 @@ onMounted(loadRules);
                   type="button"
                   @click="addResponseHeader"
                   class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                  :disabled="!!ruleForm.plugin_template_id"
                 >
                   添加 Header
                 </button>
@@ -546,17 +716,20 @@ onMounted(loadRules);
                   type="text"
                   class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                   placeholder="Header 名称"
+                  :disabled="!!ruleForm.plugin_template_id"
                 />
                 <input
                   v-model="header.value"
                   type="text"
                   class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
                   placeholder="Header 值"
+                  :disabled="!!ruleForm.plugin_template_id"
                 />
                 <button
                   type="button"
                   @click="removeResponseHeader(index)"
                   class="rounded-full border border-red-500/20 px-3 py-2 text-xs text-red-600 transition hover:bg-red-500/8"
+                  :disabled="!!ruleForm.plugin_template_id"
                 >
                   删除
                 </button>

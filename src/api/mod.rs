@@ -16,10 +16,14 @@ use rand::{distributions::Alphanumeric, Rng};
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::fs;
+use std::io::{Cursor, Read};
 use std::net::SocketAddr;
+use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
+use zip::ZipArchive;
 
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
@@ -571,6 +575,7 @@ pub struct RuleResponse {
     pattern: String,
     action: String,
     severity: String,
+    plugin_template_id: Option<String>,
     response_template: Option<RuleResponseTemplatePayload>,
 }
 
@@ -583,6 +588,7 @@ pub struct RuleUpsertRequest {
     pattern: String,
     action: String,
     severity: String,
+    plugin_template_id: Option<String>,
     response_template: Option<RuleResponseTemplatePayload>,
 }
 
@@ -602,6 +608,47 @@ pub struct RuleResponseTemplatePayload {
 pub struct RuleResponseHeaderPayload {
     key: String,
     value: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuleActionPluginsResponse {
+    total: u32,
+    plugins: Vec<RuleActionPluginResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuleActionPluginResponse {
+    plugin_id: String,
+    name: String,
+    version: String,
+    description: String,
+    installed_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuleActionTemplatesResponse {
+    total: u32,
+    templates: Vec<RuleActionTemplateResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RuleActionTemplateResponse {
+    template_id: String,
+    plugin_id: String,
+    name: String,
+    description: String,
+    layer: String,
+    action: String,
+    pattern: String,
+    severity: String,
+    response_template: RuleResponseTemplatePayload,
+    updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InstallRuleActionPluginRequest {
+    package_url: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -743,6 +790,18 @@ impl ApiServer {
             .route("/blocked-ips", get(list_blocked_ips_handler))
             .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
+            .route(
+                "/rule-action-plugins",
+                get(list_rule_action_plugins_handler),
+            )
+            .route(
+                "/rule-action-plugins/install",
+                axum::routing::post(install_rule_action_plugin_handler),
+            )
+            .route(
+                "/rule-action-templates",
+                get(list_rule_action_templates_handler),
+            )
             .route(
                 "/sites/local",
                 get(list_local_sites_handler).post(create_local_site_handler),
@@ -1765,6 +1824,60 @@ async fn create_rule_handler(
     }
 }
 
+async fn list_rule_action_plugins_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<RuleActionPluginsResponse>> {
+    let store = sqlite_store(&state)?;
+    let plugins = store
+        .list_rule_action_plugins()
+        .await
+        .map_err(ApiError::internal)?;
+    let plugins: Vec<_> = plugins.into_iter().map(Into::into).collect();
+
+    Ok(Json(RuleActionPluginsResponse {
+        total: plugins.len() as u32,
+        plugins,
+    }))
+}
+
+async fn list_rule_action_templates_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<RuleActionTemplatesResponse>> {
+    let store = sqlite_store(&state)?;
+    let templates = store
+        .list_rule_action_templates()
+        .await
+        .map_err(ApiError::internal)?;
+    let templates: Result<Vec<_>, _> = templates
+        .into_iter()
+        .map(RuleActionTemplateResponse::try_from)
+        .collect();
+    let templates = templates.map_err(ApiError::internal)?;
+
+    Ok(Json(RuleActionTemplatesResponse {
+        total: templates.len() as u32,
+        templates,
+    }))
+}
+
+async fn install_rule_action_plugin_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<InstallRuleActionPluginRequest>,
+) -> ApiResult<(StatusCode, Json<WriteStatusResponse>)> {
+    let store = sqlite_store(&state)?;
+    install_rule_action_plugin_from_url(store, &payload.package_url)
+        .await
+        .map_err(ApiError::bad_request)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(WriteStatusResponse {
+            success: true,
+            message: "规则模板插件已安装".to_string(),
+        }),
+    ))
+}
+
 async fn update_rule_handler(
     State(state): State<ApiState>,
     Path(id): Path<String>,
@@ -1950,6 +2063,7 @@ impl RuleResponse {
             pattern: rule.pattern,
             action: rule.action.as_str().to_string(),
             severity: rule.severity.as_str().to_string(),
+            plugin_template_id: rule.plugin_template_id,
             response_template: rule
                 .response_template
                 .map(RuleResponseTemplatePayload::from_template),
@@ -2789,6 +2903,9 @@ impl RuleUpsertRequest {
                 .map_err(|err| err.to_string())?,
             severity: crate::config::Severity::parse(&self.severity)
                 .map_err(|err| err.to_string())?,
+            plugin_template_id: self
+                .plugin_template_id
+                .filter(|value| !value.trim().is_empty()),
             response_template: self.response_template.map(Into::into),
         })
     }
@@ -2857,6 +2974,40 @@ fn parse_rule_response_body_source(value: &str) -> RuleResponseBodySource {
 impl From<Rule> for RuleResponse {
     fn from(rule: Rule) -> Self {
         Self::from_rule(rule)
+    }
+}
+
+impl From<crate::storage::RuleActionPluginEntry> for RuleActionPluginResponse {
+    fn from(value: crate::storage::RuleActionPluginEntry) -> Self {
+        Self {
+            plugin_id: value.plugin_id,
+            name: value.name,
+            version: value.version,
+            description: value.description,
+            installed_at: value.installed_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+impl TryFrom<crate::storage::RuleActionTemplateEntry> for RuleActionTemplateResponse {
+    type Error = anyhow::Error;
+
+    fn try_from(value: crate::storage::RuleActionTemplateEntry) -> Result<Self, Self::Error> {
+        let response_template =
+            serde_json::from_str::<RuleResponseTemplate>(&value.response_template_json)?;
+        Ok(Self {
+            template_id: value.template_id,
+            plugin_id: value.plugin_id,
+            name: value.name,
+            description: value.description,
+            layer: value.layer,
+            action: value.action,
+            pattern: value.pattern,
+            severity: value.severity,
+            response_template: RuleResponseTemplatePayload::from_template(response_template),
+            updated_at: value.updated_at,
+        })
     }
 }
 
@@ -3071,6 +3222,224 @@ async fn ensure_local_site_exists(
     } else {
         Err(format!("本地站点 '{}' 不存在", id))
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct RuleActionPluginManifest {
+    plugin_id: String,
+    name: String,
+    version: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    templates: Vec<RuleActionPluginTemplateManifest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuleActionPluginTemplateManifest {
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default = "default_rule_layer_l7")]
+    layer: String,
+    #[serde(default = "default_rule_action_respond")]
+    action: String,
+    #[serde(default)]
+    pattern: String,
+    #[serde(default = "default_rule_severity_high")]
+    severity: String,
+    response_template: RuleResponseTemplatePayload,
+}
+
+async fn install_rule_action_plugin_from_url(
+    store: &crate::storage::SqliteStore,
+    package_url: &str,
+) -> Result<(), String> {
+    let package_url = required_string(package_url.to_string(), "package_url 不能为空")?;
+    let response = reqwest::Client::new()
+        .get(&package_url)
+        .send()
+        .await
+        .map_err(|err| format!("下载插件包失败: {}", err))?;
+    if !response.status().is_success() {
+        return Err(format!("下载插件包失败: HTTP {}", response.status()));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|err| format!("读取插件包失败: {}", err))?;
+    install_rule_action_plugin_from_bytes(store, bytes.as_ref()).await
+}
+
+async fn install_rule_action_plugin_from_bytes(
+    store: &crate::storage::SqliteStore,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).map_err(|err| format!("解析插件 zip 失败: {}", err))?;
+    let manifest = read_rule_action_plugin_manifest(&mut archive)?;
+    validate_rule_action_plugin_manifest(&manifest)?;
+
+    let plugin_assets_dir = PathBuf::from(crate::rules::RULE_RESPONSE_FILES_DIR)
+        .join("plugins")
+        .join(&manifest.plugin_id);
+    if plugin_assets_dir.exists() {
+        fs::remove_dir_all(&plugin_assets_dir)
+            .map_err(|err| format!("清理旧插件资源失败: {}", err))?;
+    }
+    fs::create_dir_all(&plugin_assets_dir).map_err(|err| format!("创建插件目录失败: {}", err))?;
+
+    let mut templates = Vec::with_capacity(manifest.templates.len());
+    for template in &manifest.templates {
+        let mut response_template: RuleResponseTemplate = template.response_template.clone().into();
+        if matches!(response_template.body_source, RuleResponseBodySource::File) {
+            let relative_asset_path =
+                sanitize_relative_plugin_path(&response_template.body_file_path)?;
+            let zip_entry_path = format!("responses/{}", relative_asset_path.display());
+            extract_plugin_asset(
+                &mut archive,
+                &zip_entry_path,
+                &plugin_assets_dir.join(&relative_asset_path),
+            )?;
+            response_template.body_file_path = format!(
+                "plugins/{}/{}",
+                manifest.plugin_id,
+                relative_asset_path.to_string_lossy()
+            );
+        }
+
+        let rule = Rule {
+            id: format!("plugin:{}:{}", manifest.plugin_id, template.id),
+            name: template.name.clone(),
+            enabled: true,
+            layer: crate::config::RuleLayer::parse(&template.layer)
+                .map_err(|err| err.to_string())?,
+            pattern: template.pattern.clone(),
+            action: crate::config::RuleAction::parse(&template.action)
+                .map_err(|err| err.to_string())?,
+            severity: crate::config::Severity::parse(&template.severity)
+                .map_err(|err| err.to_string())?,
+            plugin_template_id: Some(format!("{}:{}", manifest.plugin_id, template.id)),
+            response_template: Some(response_template.clone()),
+        };
+        crate::rules::validate_rule(&rule).map_err(|err| err.to_string())?;
+
+        templates.push(crate::storage::RuleActionTemplateUpsert {
+            template_id: format!("{}:{}", manifest.plugin_id, template.id),
+            plugin_id: manifest.plugin_id.clone(),
+            name: template.name.clone(),
+            description: template.description.clone(),
+            layer: template.layer.clone(),
+            action: template.action.clone(),
+            pattern: template.pattern.clone(),
+            severity: template.severity.clone(),
+            response_template,
+        });
+    }
+
+    store
+        .upsert_rule_action_plugin(&crate::storage::RuleActionPluginUpsert {
+            plugin_id: manifest.plugin_id.clone(),
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            description: manifest.description.clone(),
+        })
+        .await
+        .map_err(|err| err.to_string())?;
+    store
+        .replace_rule_action_templates(&manifest.plugin_id, &templates)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    Ok(())
+}
+
+fn read_rule_action_plugin_manifest(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+) -> Result<RuleActionPluginManifest, String> {
+    let mut manifest_file = archive
+        .by_name("manifest.json")
+        .map_err(|_| "插件包缺少 manifest.json".to_string())?;
+    let mut manifest_json = String::new();
+    manifest_file
+        .read_to_string(&mut manifest_json)
+        .map_err(|err| format!("读取 manifest.json 失败: {}", err))?;
+    serde_json::from_str::<RuleActionPluginManifest>(&manifest_json)
+        .map_err(|err| format!("解析 manifest.json 失败: {}", err))
+}
+
+fn validate_rule_action_plugin_manifest(manifest: &RuleActionPluginManifest) -> Result<(), String> {
+    if manifest.plugin_id.trim().is_empty() {
+        return Err("plugin_id 不能为空".to_string());
+    }
+    if manifest.name.trim().is_empty() {
+        return Err("插件名称不能为空".to_string());
+    }
+    if manifest.version.trim().is_empty() {
+        return Err("插件版本不能为空".to_string());
+    }
+    if manifest.templates.is_empty() {
+        return Err("插件包至少需要一个模板".to_string());
+    }
+    for template in &manifest.templates {
+        if template.id.trim().is_empty() {
+            return Err("模板 id 不能为空".to_string());
+        }
+        if template.name.trim().is_empty() {
+            return Err("模板名称不能为空".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_relative_plugin_path(value: &str) -> Result<PathBuf, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("文件模板的 body_file_path 不能为空".to_string());
+    }
+    let path = FsPath::new(trimmed);
+    if path.is_absolute() {
+        return Err("插件内文件路径必须使用相对路径".to_string());
+    }
+    for component in path.components() {
+        if matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
+            return Err("插件内文件路径不能包含越界路径".to_string());
+        }
+    }
+    Ok(path.to_path_buf())
+}
+
+fn extract_plugin_asset(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    zip_entry_path: &str,
+    output_path: &PathBuf,
+) -> Result<(), String> {
+    let mut file = archive
+        .by_name(zip_entry_path)
+        .map_err(|_| format!("插件包缺少资源文件 '{}'", zip_entry_path))?;
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| format!("创建插件资源目录失败: {}", err))?;
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|err| format!("读取插件资源失败: {}", err))?;
+    fs::write(output_path, bytes).map_err(|err| format!("写入插件资源失败: {}", err))
+}
+
+fn default_rule_layer_l7() -> String {
+    "l7".to_string()
+}
+
+fn default_rule_action_respond() -> String {
+    "respond".to_string()
+}
+
+fn default_rule_severity_high() -> String {
+    "high".to_string()
 }
 
 fn parse_sort_direction(value: Option<&str>) -> Result<crate::storage::SortDirection, String> {
@@ -3330,6 +3699,7 @@ mod tests {
             pattern: "probe".to_string(),
             action: RuleAction::Alert,
             severity: Severity::Medium,
+            plugin_template_id: None,
             response_template: None,
         });
 

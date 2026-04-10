@@ -111,6 +111,53 @@ pub struct PagedResult<T> {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RuleActionPluginEntry {
+    pub plugin_id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub installed_at: i64,
+    pub updated_at: i64,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RuleActionTemplateEntry {
+    pub template_id: String,
+    pub plugin_id: String,
+    pub name: String,
+    pub description: String,
+    pub layer: String,
+    pub action: String,
+    pub pattern: String,
+    pub severity: String,
+    pub response_template_json: String,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuleActionPluginUpsert {
+    pub plugin_id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuleActionTemplateUpsert {
+    pub template_id: String,
+    pub plugin_id: String,
+    pub name: String,
+    pub description: String,
+    pub layer: String,
+    pub action: String,
+    pub pattern: String,
+    pub severity: String,
+    pub response_template: RuleResponseTemplate,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SecurityEventEntry {
     pub id: i64,
     pub layer: String,
@@ -489,9 +536,9 @@ impl SqliteStore {
             let result = sqlx::query(
                 r#"
                 INSERT OR IGNORE INTO rules (
-                    id, name, enabled, layer, pattern, action, severity, response_template_json, updated_at
+                    id, name, enabled, layer, pattern, action, severity, plugin_template_id, response_template_json, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&rule.id)
@@ -501,6 +548,7 @@ impl SqliteStore {
             .bind(&rule.pattern)
             .bind(rule.action.as_str())
             .bind(rule.severity.as_str())
+            .bind(&rule.plugin_template_id)
             .bind(serialize_rule_response_template(rule.response_template.as_ref())?)
             .bind(unix_timestamp())
             .execute(&self.pool)
@@ -515,7 +563,7 @@ impl SqliteStore {
     pub async fn load_rules(&self) -> Result<Vec<Rule>> {
         let rows = sqlx::query_as::<_, StoredRuleRow>(
             r#"
-            SELECT id, name, enabled, layer, pattern, action, severity, response_template_json
+            SELECT id, name, enabled, layer, pattern, action, severity, plugin_template_id, response_template_json
             FROM rules
             ORDER BY id ASC
             "#,
@@ -524,6 +572,100 @@ impl SqliteStore {
         .await?;
 
         rows.into_iter().map(TryInto::try_into).collect()
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_rule_action_plugins(&self) -> Result<Vec<RuleActionPluginEntry>> {
+        sqlx::query_as::<_, RuleActionPluginEntry>(
+            r#"
+            SELECT plugin_id, name, version, description, installed_at, updated_at
+            FROM rule_action_plugins
+            ORDER BY plugin_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_rule_action_templates(&self) -> Result<Vec<RuleActionTemplateEntry>> {
+        sqlx::query_as::<_, RuleActionTemplateEntry>(
+            r#"
+            SELECT template_id, plugin_id, name, description, layer, action, pattern, severity, response_template_json, updated_at
+            FROM rule_action_templates
+            ORDER BY plugin_id ASC, template_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn upsert_rule_action_plugin(&self, plugin: &RuleActionPluginUpsert) -> Result<()> {
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO rule_action_plugins (plugin_id, name, version, description, installed_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(plugin_id) DO UPDATE SET
+                name = excluded.name,
+                version = excluded.version,
+                description = excluded.description,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&plugin.plugin_id)
+        .bind(&plugin.name)
+        .bind(&plugin.version)
+        .bind(&plugin.description)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn replace_rule_action_templates(
+        &self,
+        plugin_id: &str,
+        templates: &[RuleActionTemplateUpsert],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM rule_action_templates WHERE plugin_id = ?")
+            .bind(plugin_id)
+            .execute(&mut *tx)
+            .await?;
+
+        let now = unix_timestamp();
+        for template in templates {
+            sqlx::query(
+                r#"
+                INSERT INTO rule_action_templates (
+                    template_id, plugin_id, name, description, layer, action, pattern, severity, response_template_json, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+            )
+            .bind(&template.template_id)
+            .bind(&template.plugin_id)
+            .bind(&template.name)
+            .bind(&template.description)
+            .bind(&template.layer)
+            .bind(&template.action)
+            .bind(&template.pattern)
+            .bind(&template.severity)
+            .bind(serde_json::to_string(&template.response_template)?)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn seed_app_config(&self, config: &Config) -> Result<bool> {
@@ -1387,7 +1529,7 @@ impl SqliteStore {
     pub async fn load_rule(&self, id: &str) -> Result<Option<Rule>> {
         let row = sqlx::query_as::<_, StoredRuleRow>(
             r#"
-            SELECT id, name, enabled, layer, pattern, action, severity, response_template_json
+            SELECT id, name, enabled, layer, pattern, action, severity, plugin_template_id, response_template_json
             FROM rules
             WHERE id = ?
             "#,
@@ -1404,9 +1546,9 @@ impl SqliteStore {
         let result = sqlx::query(
             r#"
             INSERT OR IGNORE INTO rules (
-                id, name, enabled, layer, pattern, action, severity, response_template_json, updated_at
+                id, name, enabled, layer, pattern, action, severity, plugin_template_id, response_template_json, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&rule.id)
@@ -1416,6 +1558,7 @@ impl SqliteStore {
         .bind(&rule.pattern)
         .bind(rule.action.as_str())
         .bind(rule.severity.as_str())
+        .bind(&rule.plugin_template_id)
         .bind(serialize_rule_response_template(rule.response_template.as_ref())?)
         .bind(unix_timestamp())
         .execute(&self.pool)
@@ -1428,8 +1571,8 @@ impl SqliteStore {
     pub async fn upsert_rule(&self, rule: &Rule) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO rules (id, name, enabled, layer, pattern, action, severity, response_template_json, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO rules (id, name, enabled, layer, pattern, action, severity, plugin_template_id, response_template_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 enabled = excluded.enabled,
@@ -1437,6 +1580,7 @@ impl SqliteStore {
                 pattern = excluded.pattern,
                 action = excluded.action,
                 severity = excluded.severity,
+                plugin_template_id = excluded.plugin_template_id,
                 response_template_json = excluded.response_template_json,
                 updated_at = excluded.updated_at
             "#,
@@ -1448,6 +1592,7 @@ impl SqliteStore {
         .bind(&rule.pattern)
         .bind(rule.action.as_str())
         .bind(rule.severity.as_str())
+        .bind(&rule.plugin_template_id)
         .bind(serialize_rule_response_template(rule.response_template.as_ref())?)
         .bind(unix_timestamp())
         .execute(&self.pool)
@@ -1617,12 +1762,39 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             pattern TEXT NOT NULL,
             action TEXT NOT NULL,
             severity TEXT NOT NULL,
+            plugin_template_id TEXT,
             response_template_json TEXT,
             updated_at INTEGER NOT NULL
         );
 
         CREATE INDEX IF NOT EXISTS idx_rules_updated_at
             ON rules(updated_at);
+
+        CREATE TABLE IF NOT EXISTS rule_action_plugins (
+            plugin_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            installed_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS rule_action_templates (
+            template_id TEXT PRIMARY KEY,
+            plugin_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            layer TEXT NOT NULL,
+            action TEXT NOT NULL,
+            pattern TEXT NOT NULL DEFAULT '',
+            severity TEXT NOT NULL,
+            response_template_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(plugin_id) REFERENCES rule_action_plugins(plugin_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_rule_action_templates_plugin_id
+            ON rule_action_templates(plugin_id);
 
         CREATE TABLE IF NOT EXISTS app_config (
             id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1816,6 +1988,7 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     for statement in [
         "ALTER TABLE blocked_ips ADD COLUMN provider TEXT",
         "ALTER TABLE blocked_ips ADD COLUMN provider_remote_id TEXT",
+        "ALTER TABLE rules ADD COLUMN plugin_template_id TEXT",
         "ALTER TABLE rules ADD COLUMN response_template_json TEXT",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
@@ -2223,6 +2396,7 @@ struct StoredRuleRow {
     pattern: String,
     action: String,
     severity: String,
+    plugin_template_id: Option<String>,
     response_template_json: Option<String>,
 }
 
@@ -2243,6 +2417,7 @@ impl TryFrom<StoredRuleRow> for Rule {
             pattern: value.pattern,
             action: parse_rule_action(&value.action)?,
             severity: parse_severity(&value.severity)?,
+            plugin_template_id: value.plugin_template_id,
             response_template: deserialize_rule_response_template(
                 value.response_template_json.as_deref(),
             )?,
@@ -2461,6 +2636,7 @@ mod tests {
                 pattern: "(?i)union\\s+select".to_string(),
                 action: RuleAction::Block,
                 severity: Severity::High,
+                plugin_template_id: None,
                 response_template: None,
             },
             Rule {
@@ -2471,6 +2647,7 @@ mod tests {
                 pattern: "scan".to_string(),
                 action: RuleAction::Alert,
                 severity: Severity::Medium,
+                plugin_template_id: None,
                 response_template: None,
             },
         ];
@@ -2498,6 +2675,7 @@ mod tests {
             pattern: "(?i)select".to_string(),
             action: RuleAction::Alert,
             severity: Severity::Critical,
+            plugin_template_id: None,
             response_template: None,
         };
         store.upsert_rule(&updated_rule).await.unwrap();
@@ -2516,6 +2694,7 @@ mod tests {
                 pattern: "syn".to_string(),
                 action: RuleAction::Block,
                 severity: Severity::Low,
+                plugin_template_id: None,
                 response_template: None,
             })
             .await

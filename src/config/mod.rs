@@ -140,6 +140,8 @@ pub struct Rule {
     pub action: RuleAction,
     pub severity: Severity,
     #[serde(default)]
+    pub plugin_template_id: Option<String>,
+    #[serde(default)]
     pub response_template: Option<RuleResponseTemplate>,
 }
 

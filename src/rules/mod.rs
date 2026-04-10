@@ -1,4 +1,4 @@
-use crate::config::{Rule, RuleAction, RuleLayer, RuleResponseTemplate};
+use crate::config::{Rule, RuleAction, RuleLayer, RuleResponseBodySource, RuleResponseTemplate};
 use crate::core::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo,
 };
@@ -6,7 +6,11 @@ use anyhow::Result;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use regex::Regex;
+use std::fs;
 use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+
+const RULE_RESPONSE_FILES_DIR: &str = "data/rule_responses";
 
 pub struct RuleEngine {
     rules: Vec<(Rule, Regex)>,
@@ -122,6 +126,23 @@ fn validate_response_template(template: &RuleResponseTemplate) -> Result<()> {
         anyhow::bail!("Response content_type cannot be empty");
     }
 
+    match template.body_source {
+        RuleResponseBodySource::InlineText => {}
+        RuleResponseBodySource::File => {
+            let path = resolve_response_file_path(template.body_file_path.trim())?;
+            let metadata = fs::metadata(&path).map_err(|err| {
+                anyhow::anyhow!(
+                    "Failed to access response file '{}': {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            if !metadata.is_file() {
+                anyhow::bail!("Response file '{}' is not a regular file", path.display());
+            }
+        }
+    }
+
     for header in &template.headers {
         if header.key.trim().is_empty() {
             anyhow::bail!("Response header key cannot be empty");
@@ -132,12 +153,22 @@ fn validate_response_template(template: &RuleResponseTemplate) -> Result<()> {
 }
 
 fn build_custom_response(template: &RuleResponseTemplate) -> Result<CustomHttpResponse> {
+    let raw_body = match template.body_source {
+        RuleResponseBodySource::InlineText => template.body_text.as_bytes().to_vec(),
+        RuleResponseBodySource::File => {
+            let path = resolve_response_file_path(template.body_file_path.trim())?;
+            fs::read(&path).map_err(|err| {
+                anyhow::anyhow!("Failed to read response file '{}': {}", path.display(), err)
+            })?
+        }
+    };
+
     let body = if template.gzip {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(template.body_text.as_bytes())?;
+        encoder.write_all(&raw_body)?;
         encoder.finish()?
     } else {
-        template.body_text.as_bytes().to_vec()
+        raw_body
     };
 
     let mut headers = Vec::with_capacity(template.headers.len() + 2);
@@ -163,14 +194,47 @@ fn build_custom_response(template: &RuleResponseTemplate) -> Result<CustomHttpRe
     })
 }
 
+fn resolve_response_file_path(value: &str) -> Result<PathBuf> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Response body_file_path cannot be empty when body_source=file");
+    }
+
+    let relative = Path::new(trimmed);
+    if relative.is_absolute() {
+        anyhow::bail!(
+            "Response file path must be relative to {}",
+            RULE_RESPONSE_FILES_DIR
+        );
+    }
+
+    for component in relative.components() {
+        if matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
+            anyhow::bail!(
+                "Response file path must stay within {}",
+                RULE_RESPONSE_FILES_DIR
+            );
+        }
+    }
+
+    let base_dir = PathBuf::from(RULE_RESPONSE_FILES_DIR);
+    fs::create_dir_all(&base_dir)?;
+    Ok(base_dir.join(relative))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{
-        RuleAction, RuleLayer, RuleResponseHeader, RuleResponseTemplate, Severity,
+        RuleAction, RuleLayer, RuleResponseBodySource, RuleResponseHeader, RuleResponseTemplate,
+        Severity,
     };
     use crate::core::Protocol;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_l4_rule_matches_packet_summary() {
@@ -231,8 +295,10 @@ mod tests {
             response_template: Some(RuleResponseTemplate {
                 status_code: 200,
                 content_type: "text/html; charset=utf-8".to_string(),
+                body_source: RuleResponseBodySource::InlineText,
                 gzip: true,
                 body_text: "<h1>blocked</h1>".to_string(),
+                body_file_path: String::new(),
                 headers: vec![RuleResponseHeader {
                     key: "x-test".to_string(),
                     value: "yes".to_string(),
@@ -260,5 +326,55 @@ mod tests {
             .iter()
             .any(|(key, value)| key == "content-encoding" && value == "gzip"));
         assert!(!response.body.is_empty());
+    }
+
+    #[test]
+    fn test_l7_respond_rule_reads_body_from_file() {
+        let temp_name = format!(
+            "waf_rule_response_{}.txt",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let base_dir = PathBuf::from(RULE_RESPONSE_FILES_DIR);
+        fs::create_dir_all(&base_dir).unwrap();
+        let stored_path = base_dir.join(&temp_name);
+        fs::write(&stored_path, b"hello from file").unwrap();
+
+        let engine = RuleEngine::new(vec![Rule {
+            id: "respond-file".to_string(),
+            name: "Respond File".to_string(),
+            enabled: true,
+            layer: RuleLayer::L7,
+            pattern: "file".to_string(),
+            action: RuleAction::Respond,
+            severity: Severity::High,
+            response_template: Some(RuleResponseTemplate {
+                status_code: 200,
+                content_type: "text/plain".to_string(),
+                body_source: RuleResponseBodySource::File,
+                gzip: false,
+                body_text: String::new(),
+                body_file_path: temp_name.clone(),
+                headers: vec![],
+            }),
+        }])
+        .unwrap();
+
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            source_port: 40000,
+            dest_port: 443,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+
+        let result = engine.inspect(&packet, Some("file"));
+        let response = result.custom_response.expect("custom response");
+        assert_eq!(response.body, b"hello from file".to_vec());
+
+        let _ = fs::remove_file(stored_path);
     }
 }

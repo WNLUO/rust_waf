@@ -1,6 +1,6 @@
 use crate::config::{
-    Config, GatewayConfig, Http3Config, L4Config, Rule, RuleResponseHeader, RuleResponseTemplate,
-    RuntimeProfile, SafeLineConfig,
+    Config, GatewayConfig, Http3Config, L4Config, Rule, RuleResponseBodySource, RuleResponseHeader,
+    RuleResponseTemplate, RuntimeProfile, SafeLineConfig,
 };
 use crate::core::WafContext;
 use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
@@ -590,8 +590,10 @@ pub struct RuleUpsertRequest {
 pub struct RuleResponseTemplatePayload {
     status_code: u16,
     content_type: String,
+    body_source: String,
     gzip: bool,
     body_text: String,
+    body_file_path: String,
     #[serde(default)]
     headers: Vec<RuleResponseHeaderPayload>,
 }
@@ -2797,8 +2799,13 @@ impl RuleResponseTemplatePayload {
         Self {
             status_code: template.status_code,
             content_type: template.content_type,
+            body_source: match template.body_source {
+                RuleResponseBodySource::InlineText => "inline_text".to_string(),
+                RuleResponseBodySource::File => "file".to_string(),
+            },
             gzip: template.gzip,
             body_text: template.body_text,
+            body_file_path: template.body_file_path,
             headers: template
                 .headers
                 .into_iter()
@@ -2813,8 +2820,10 @@ impl From<RuleResponseTemplatePayload> for RuleResponseTemplate {
         Self {
             status_code: value.status_code,
             content_type: value.content_type.trim().to_string(),
+            body_source: parse_rule_response_body_source(&value.body_source),
             gzip: value.gzip,
             body_text: value.body_text,
+            body_file_path: value.body_file_path.trim().to_string(),
             headers: value.headers.into_iter().map(Into::into).collect(),
         }
     }
@@ -2835,6 +2844,13 @@ impl From<RuleResponseHeaderPayload> for RuleResponseHeader {
             key: value.key.trim().to_string(),
             value: value.value,
         }
+    }
+}
+
+fn parse_rule_response_body_source(value: &str) -> RuleResponseBodySource {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "file" => RuleResponseBodySource::File,
+        _ => RuleResponseBodySource::InlineText,
     }
 }
 

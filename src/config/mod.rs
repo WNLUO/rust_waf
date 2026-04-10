@@ -149,9 +149,13 @@ pub struct RuleResponseTemplate {
     #[serde(default = "default_rule_response_content_type")]
     pub content_type: String,
     #[serde(default)]
+    pub body_source: RuleResponseBodySource,
+    #[serde(default)]
     pub gzip: bool,
     #[serde(default)]
     pub body_text: String,
+    #[serde(default)]
+    pub body_file_path: String,
     #[serde(default)]
     pub headers: Vec<RuleResponseHeader>,
 }
@@ -160,6 +164,14 @@ pub struct RuleResponseTemplate {
 pub struct RuleResponseHeader {
     pub key: String,
     pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleResponseBodySource {
+    #[default]
+    InlineText,
+    File,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

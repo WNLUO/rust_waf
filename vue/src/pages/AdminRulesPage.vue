@@ -27,8 +27,10 @@ const isRuleModalOpen = ref(false);
 const defaultResponseTemplate = () => ({
   status_code: 403,
   content_type: "text/html; charset=utf-8",
+  body_source: "inline_text",
   gzip: true,
   body_text: "",
+  body_file_path: "",
   headers: [],
 });
 
@@ -128,8 +130,12 @@ const handleCreateOrUpdateRule = async () => {
               content_type:
                 ruleForm.response_template?.content_type ||
                 "text/html; charset=utf-8",
+              body_source:
+                ruleForm.response_template?.body_source || "inline_text",
               gzip: Boolean(ruleForm.response_template?.gzip),
               body_text: ruleForm.response_template?.body_text || "",
+              body_file_path:
+                ruleForm.response_template?.body_file_path?.trim() || "",
               headers: (ruleForm.response_template?.headers || []).filter(
                 (item) => item.key.trim(),
               ),
@@ -471,8 +477,33 @@ onMounted(loadRules);
             </div>
 
             <div class="space-y-2">
-              <label class="text-sm text-slate-500">响应内容</label>
+              <label class="text-sm text-slate-500">响应体来源</label>
+              <select
+                v-model="ruleForm.response_template!.body_source"
+                class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+              >
+                <option value="inline_text">直接填写文本</option>
+                <option value="file">读取文件</option>
+              </select>
+            </div>
+
+            <div class="space-y-2">
+              <label class="text-sm text-slate-500">
+                {{
+                  ruleForm.response_template!.body_source === "file"
+                    ? "文件路径"
+                    : "响应内容"
+                }}
+              </label>
+              <input
+                v-if="ruleForm.response_template!.body_source === 'file'"
+                v-model="ruleForm.response_template!.body_file_path"
+                type="text"
+                class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                placeholder="例如 block-page.html 或 pages/block-page.html"
+              />
               <textarea
+                v-else
                 v-model="ruleForm.response_template!.body_text"
                 rows="8"
                 class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-blue-500"

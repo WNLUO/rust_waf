@@ -59,8 +59,10 @@ export interface RuleResponseHeader {
 export interface RuleResponseTemplate {
   status_code: number;
   content_type: string;
+  body_source: "inline_text" | "file" | string;
   gzip: boolean;
   body_text: string;
+  body_file_path: string;
   headers: RuleResponseHeader[];
 }
 

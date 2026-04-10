@@ -54,6 +54,36 @@ const filteredRules = computed(() =>
 const enabledCount = computed(() => l4Rules.value.filter((rule) => rule.enabled).length)
 const blockCount = computed(() => l4Rules.value.filter((rule) => rule.action === 'block').length)
 
+const l4RuleTemplates = [
+  {
+    label: '封禁 SSH 入口',
+    description: '匹配所有发往 22 端口的连接。',
+    id: 'l4-block-ssh',
+    name: '封禁 SSH 入口',
+    pattern: String.raw`dest_port=22\b`,
+    action: 'block',
+    severity: 'high',
+  },
+  {
+    label: '告警 DNS 异常',
+    description: '适合先观察 UDP 53 端口的异常流量。',
+    id: 'l4-alert-dns-udp',
+    name: 'DNS UDP 异常告警',
+    pattern: String.raw`dest_port=53\b.*protocol=UDP`,
+    action: 'alert',
+    severity: 'medium',
+  },
+  {
+    label: '封禁指定来源段',
+    description: '快速限制指定来源地址段访问入口端口。',
+    id: 'l4-block-source-range',
+    name: '封禁指定来源地址段',
+    pattern: String.raw`source_ip=203\.0\.113\.(10|11)\b.*dest_port=443\b`,
+    action: 'block',
+    severity: 'critical',
+  },
+] as const
+
 const resetForm = () => {
   Object.assign(ruleForm, {
     id: '',
@@ -65,6 +95,18 @@ const resetForm = () => {
     severity: 'high',
   })
   editingId.value = null
+}
+
+const applyTemplate = (template: (typeof l4RuleTemplates)[number]) => {
+  Object.assign(ruleForm, {
+    id: editingId.value ? ruleForm.id : template.id,
+    name: template.name,
+    enabled: true,
+    layer: 'l4',
+    pattern: template.pattern,
+    action: template.action,
+    severity: template.severity,
+  })
 }
 
 const loadRules = async () => {
@@ -176,7 +218,7 @@ onMounted(loadRules)
             <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">L4 规则</p>
             <h2 class="mt-3 font-display text-4xl font-semibold text-stone-900">四层规则编排与启停控制</h2>
             <p class="mt-4 max-w-2xl text-sm leading-7 text-stone-700">
-              这里专门处理 L4 规则，不再混入七层策略。更适合集中维护基于连接、端口和协议特征的快速拦截规则。
+              这里专门处理 L4 规则，不再混入七层策略。规则实际匹配的是数据包摘要字段，更适合集中维护基于连接、端口和协议特征的快速拦截规则。
             </p>
           </div>
           <button
@@ -328,6 +370,29 @@ onMounted(loadRules)
         </div>
 
         <form @submit.prevent="saveRule" class="mt-8 space-y-6">
+          <div class="space-y-3 rounded-[24px] border border-cyber-border/70 bg-white/70 p-4">
+            <div>
+              <p class="text-sm font-medium text-stone-900">快速模板</p>
+              <p class="mt-1 text-xs leading-5 text-cyber-muted">L4 规则会匹配类似 `source_ip=1.1.1.1 dest_port=443 protocol=TCP` 这样的摘要，不是 `tcp:22` 这类简写。</p>
+            </div>
+            <div class="grid gap-3">
+              <button
+                v-for="template in l4RuleTemplates"
+                :key="template.label"
+                type="button"
+                @click="applyTemplate(template)"
+                class="rounded-[18px] border border-cyber-border/70 bg-white px-4 py-3 text-left transition hover:border-cyber-accent/40 hover:bg-[#fff8ef]"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <span class="text-sm font-medium text-stone-900">{{ template.label }}</span>
+                  <span class="text-xs text-cyber-muted">{{ severityLabel(template.severity) }} / {{ actionLabel(template.action) }}</span>
+                </div>
+                <p class="mt-1 text-xs leading-5 text-cyber-muted">{{ template.description }}</p>
+                <p class="mt-2 font-mono text-[11px] text-cyber-muted">{{ template.pattern }}</p>
+              </button>
+            </div>
+          </div>
+
           <div class="space-y-2">
             <label class="text-sm text-cyber-muted">规则 ID</label>
             <input
@@ -372,9 +437,12 @@ onMounted(loadRules)
               v-model="ruleForm.pattern"
               rows="6"
               class="w-full rounded-[24px] border border-cyber-border bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-cyber-accent"
-              placeholder="例如 tcp:22 或 udp:53"
+              placeholder="例如 dest_port=22\\b 或 source_ip=203\\.0\\.113\\.5.*protocol=TCP"
               required
             ></textarea>
+            <div class="rounded-[20px] bg-cyber-surface-strong px-4 py-3 text-xs leading-6 text-cyber-muted">
+              可用字段：`source_ip`、`dest_ip`、`source_port`、`dest_port`、`protocol`。保存时后端会校验正则是否合法，避免写入后运行时加载失败。
+            </div>
           </div>
 
           <label class="flex items-center gap-3 rounded-[24px] border border-cyber-border/70 bg-white/70 p-4">

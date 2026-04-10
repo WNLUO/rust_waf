@@ -394,6 +394,7 @@ pub struct BlockedIpsQueryParams {
     source_scope: Option<String>,
     provider: Option<String>,
     ip: Option<String>,
+    keyword: Option<String>,
     active_only: Option<bool>,
     blocked_from: Option<i64>,
     blocked_to: Option<i64>,
@@ -862,6 +863,7 @@ async fn create_rule_handler(
 ) -> ApiResult<(StatusCode, Json<WriteStatusResponse>)> {
     let store = rules_store(&state)?;
     let rule = payload.into_rule().map_err(ApiError::bad_request)?;
+    crate::rules::validate_rule(&rule).map_err(|err| ApiError::bad_request(err.to_string()))?;
     let inserted = store.insert_rule(&rule).await.map_err(ApiError::internal)?;
 
     if inserted {
@@ -889,6 +891,7 @@ async fn update_rule_handler(
     let rule = payload
         .into_rule_with_id(id)
         .map_err(ApiError::bad_request)?;
+    crate::rules::validate_rule(&rule).map_err(|err| ApiError::bad_request(err.to_string()))?;
     store.upsert_rule(&rule).await.map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
@@ -1443,6 +1446,7 @@ impl BlockedIpsQueryParams {
             source_scope: parse_blocked_ip_source_scope(self.source_scope.as_deref())?,
             provider: self.provider,
             ip: self.ip,
+            keyword: normalize_optional_query_value(self.keyword),
             active_only: self.active_only.unwrap_or(false),
             blocked_from: self.blocked_from,
             blocked_to: self.blocked_to,
@@ -1461,6 +1465,13 @@ fn parse_blocked_ip_source_scope(
         "remote" => Ok(crate::storage::BlockedIpSourceScope::Remote),
         other => Err(format!("Unsupported blocked IP source_scope '{}'", other)),
     }
+}
+
+fn normalize_optional_query_value(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let normalized = value.trim().to_string();
+        (!normalized.is_empty()).then_some(normalized)
+    })
 }
 
 fn parse_sort_direction(value: Option<&str>) -> Result<crate::storage::SortDirection, String> {
@@ -1736,6 +1747,7 @@ mod tests {
             source_scope: Some("local".to_string()),
             provider: Some("safeline".to_string()),
             ip: Some("10.0.0.2".to_string()),
+            keyword: Some(" rate ".to_string()),
             active_only: Some(true),
             blocked_from: Some(300),
             blocked_to: Some(400),
@@ -1753,6 +1765,7 @@ mod tests {
         ));
         assert_eq!(query.provider.as_deref(), Some("safeline"));
         assert_eq!(query.ip.as_deref(), Some("10.0.0.2"));
+        assert_eq!(query.keyword.as_deref(), Some("rate"));
         assert!(query.active_only);
         assert_eq!(query.blocked_from, Some(300));
         assert_eq!(query.blocked_to, Some(400));
@@ -1760,6 +1773,18 @@ mod tests {
             query.sort_by,
             crate::storage::BlockedIpSortField::Ip
         ));
+    }
+
+    #[test]
+    fn test_blocked_ips_query_keyword_empty_becomes_none() {
+        let query = BlockedIpsQueryParams {
+            keyword: Some("   ".to_string()),
+            ..BlockedIpsQueryParams::default()
+        }
+        .into_query()
+        .unwrap();
+
+        assert_eq!(query.keyword, None);
     }
 
     #[test]

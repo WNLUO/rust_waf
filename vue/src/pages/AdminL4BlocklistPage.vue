@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AppLayout from '../components/layout/AppLayout.vue'
 import L4SectionNav from '../components/l4/L4SectionNav.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
@@ -9,6 +9,7 @@ import type { BlockedIpItem, BlockedIpsResponse, L4ConfigPayload, L4StatsPayload
 import { Ban, RefreshCw, Search, Shield } from 'lucide-vue-next'
 
 const { formatTimestamp, timeRemaining } = useFormatters()
+const PAGE_SIZE = 24
 
 const loading = ref(true)
 const refreshing = ref(false)
@@ -16,7 +17,9 @@ const mutatingId = ref<number | null>(null)
 const error = ref('')
 const successMessage = ref('')
 const filtersReady = ref(false)
-const blockedPayload = ref<BlockedIpsResponse>({ total: 0, limit: 0, offset: 0, blocked_ips: [] })
+const page = ref(1)
+const searchTimer = ref<number | null>(null)
+const blockedPayload = ref<BlockedIpsResponse>({ total: 0, limit: PAGE_SIZE, offset: 0, blocked_ips: [] })
 const l4Config = ref<L4ConfigPayload | null>(null)
 const l4Stats = ref<L4StatsPayload | null>(null)
 
@@ -30,32 +33,28 @@ const filters = reactive({
 
 const isLocalBlockedIp = (item: BlockedIpItem) => !item.provider || item.provider === 'local'
 
-const filteredBlockedIps = computed(() =>
-  blockedPayload.value.blocked_ips.filter((item) => {
-    if (filters.search.trim()) {
-      const keyword = filters.search.trim().toLowerCase()
-      const provider = item.provider?.toLowerCase() ?? ''
-      if (
-        !item.ip.toLowerCase().includes(keyword) &&
-        !item.reason.toLowerCase().includes(keyword) &&
-        !provider.includes(keyword)
-      ) {
-        return false
-      }
-    }
-    return true
-  }),
-)
-
+const filteredBlockedIps = computed(() => blockedPayload.value.blocked_ips)
+const matchedTotal = computed(() => blockedPayload.value.total)
 const localBlockedCount = computed(() => filteredBlockedIps.value.filter(isLocalBlockedIp).length)
-const remoteBlockedCount = computed(
-  () => filteredBlockedIps.value.filter((item) => item.provider === 'safeline').length,
-)
+const remoteBlockedCount = computed(() => filteredBlockedIps.value.filter((item) => !isLocalBlockedIp(item)).length)
+const totalPages = computed(() => {
+  const limit = blockedPayload.value.limit || PAGE_SIZE
+  return Math.max(1, Math.ceil((blockedPayload.value.total || 0) / limit))
+})
+const rangeStart = computed(() => (matchedTotal.value ? blockedPayload.value.offset + 1 : 0))
+const rangeEnd = computed(() => blockedPayload.value.offset + filteredBlockedIps.value.length)
+const canGoPrev = computed(() => page.value > 1)
+const canGoNext = computed(() => page.value < totalPages.value)
 const capacityUsage = computed(() => {
   const maxBlocked = l4Config.value?.max_blocked_ips ?? 0
   if (!maxBlocked) return '暂无'
   const current = l4Stats.value?.connections.blocked_connections ?? 0
   return `${current} / ${maxBlocked}`
+})
+const scopeSummary = computed(() => {
+  if (filters.scope === 'local') return '当前只看本地 L4 限流与 DDoS 封禁记录。'
+  if (filters.scope === 'safeline') return '当前只看雷池回流或远端来源封禁记录。'
+  return '当前同时查看本地封禁与远端回流封禁。'
 })
 
 const loadPageData = async (showLoader = false) => {
@@ -64,10 +63,12 @@ const loadPageData = async (showLoader = false) => {
   try {
     const [blocked, config, stats] = await Promise.all([
       fetchBlockedIps({
-        limit: 50,
+        limit: PAGE_SIZE,
+        offset: (page.value - 1) * PAGE_SIZE,
         source_scope:
           filters.scope === 'local' ? 'local' : filters.scope === 'all' ? 'all' : 'remote',
         provider: filters.scope === 'safeline' ? 'safeline' : undefined,
+        keyword: filters.search.trim() || undefined,
         active_only: filters.active_only,
         sort_by: filters.sort_by,
         sort_direction: filters.sort_direction,
@@ -76,6 +77,11 @@ const loadPageData = async (showLoader = false) => {
       fetchL4Stats(),
     ])
     blockedPayload.value = blocked
+    const nextTotalPages = Math.max(1, Math.ceil((blocked.total || 0) / (blocked.limit || PAGE_SIZE)))
+    if (page.value > nextTotalPages) {
+      page.value = nextTotalPages
+      return
+    }
     l4Config.value = config
     l4Stats.value = stats
     error.value = ''
@@ -107,17 +113,47 @@ onMounted(async () => {
   filtersReady.value = true
 })
 
+onBeforeUnmount(() => {
+  if (searchTimer.value) {
+    window.clearTimeout(searchTimer.value)
+  }
+})
+
 watch(
-  () => ({
-    active_only: filters.active_only,
-    sort_by: filters.sort_by,
-    sort_direction: filters.sort_direction,
-  }),
+  () => [filters.scope, filters.active_only, filters.sort_by, filters.sort_direction],
+  () => {
+    if (!filtersReady.value) return
+    if (page.value !== 1) {
+      page.value = 1
+      return
+    }
+    loadPageData()
+  },
+)
+
+watch(
+  () => page.value,
   () => {
     if (!filtersReady.value) return
     loadPageData()
   },
-  { deep: true },
+)
+
+watch(
+  () => filters.search,
+  () => {
+    if (searchTimer.value) {
+      window.clearTimeout(searchTimer.value)
+    }
+    searchTimer.value = window.setTimeout(() => {
+      if (!filtersReady.value) return
+      if (page.value !== 1) {
+        page.value = 1
+        return
+      }
+      loadPageData()
+    }, 250)
+  },
 )
 </script>
 
@@ -145,18 +181,23 @@ watch(
             <p class="mt-4 max-w-3xl text-sm leading-7 text-stone-700">
               这个页面默认优先看本地 L4 连接限流器产生的封禁项，同时保留查看远端回流封禁的能力，方便你判断当前封禁容量和清理节奏。
             </p>
+            <p class="mt-3 text-xs leading-6 text-cyber-muted">{{ scopeSummary }}</p>
           </div>
           <StatusBadge :text="`封禁容量 ${capacityUsage}`" type="info" />
         </div>
       </section>
 
-      <section class="grid gap-4 md:grid-cols-3">
+      <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
-          <p class="text-xs tracking-[0.2em] text-cyber-muted">本地封禁</p>
+          <p class="text-xs tracking-[0.2em] text-cyber-muted">筛选命中总数</p>
+          <p class="mt-3 text-3xl font-semibold text-stone-900">{{ matchedTotal }}</p>
+        </div>
+        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+          <p class="text-xs tracking-[0.2em] text-cyber-muted">当前页本地封禁</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ localBlockedCount }}</p>
         </div>
         <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
-          <p class="text-xs tracking-[0.2em] text-cyber-muted">雷池回流</p>
+          <p class="text-xs tracking-[0.2em] text-cyber-muted">当前页远端回流</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ remoteBlockedCount }}</p>
         </div>
         <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
@@ -186,7 +227,7 @@ watch(
             v-model="filters.search"
             type="text"
             class="w-full bg-transparent text-stone-800 outline-none"
-            placeholder="搜索 IP / 原因 / 来源"
+            placeholder="搜索 IP / 原因 / 来源（后端模糊匹配）"
           />
         </label>
         <select v-model="filters.scope" class="rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-sm text-stone-700">
@@ -207,6 +248,9 @@ watch(
           <option value="desc">降序</option>
           <option value="asc">升序</option>
         </select>
+        <div class="flex items-center rounded-[18px] border border-cyber-border/70 bg-white px-3 py-2 text-xs text-cyber-muted">
+          {{ matchedTotal }} 条命中，当前显示 {{ rangeStart }} - {{ rangeEnd }}
+        </div>
       </div>
 
       <div v-if="loading" class="text-sm text-cyber-muted">正在加载 L4 黑名单...</div>
@@ -254,6 +298,28 @@ watch(
           </div>
         </article>
         <p v-if="!filteredBlockedIps.length" class="text-sm text-cyber-muted">当前筛选条件下没有可显示的 L4 黑名单记录。</p>
+      </div>
+
+      <div v-if="matchedTotal > 0" class="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/60 px-4 py-4 md:flex-row md:items-center md:justify-between">
+        <div class="text-sm text-cyber-muted">
+          第 {{ page }} / {{ totalPages }} 页，共 {{ matchedTotal }} 条，当前显示 {{ rangeStart }} - {{ rangeEnd }}。
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            @click="page -= 1"
+            :disabled="!canGoPrev || refreshing"
+            class="rounded-full border border-cyber-border bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-cyber-accent/40 disabled:opacity-60"
+          >
+            上一页
+          </button>
+          <button
+            @click="page += 1"
+            :disabled="!canGoNext || refreshing"
+            class="rounded-full border border-cyber-border bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-cyber-accent/40 disabled:opacity-60"
+          >
+            下一页
+          </button>
+        </div>
       </div>
     </div>
   </AppLayout>

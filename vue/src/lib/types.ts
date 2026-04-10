@@ -121,6 +121,7 @@ export interface BlockedIpsQuery extends Record<string, ApiQueryValue> {
   source_scope?: 'all' | 'local' | 'remote'
   provider?: string
   ip?: string
+  keyword?: string
   active_only?: boolean
   blocked_from?: number
   blocked_to?: number

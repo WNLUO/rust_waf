@@ -7,12 +7,19 @@ pub struct RuleEngine {
     rules: Vec<(Rule, Regex)>,
 }
 
+pub fn validate_rule(rule: &Rule) -> Result<()> {
+    Regex::new(&rule.pattern)
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Invalid regex in rule {}: {}", rule.id, e))
+}
+
 impl RuleEngine {
     pub fn new(config_rules: Vec<Rule>) -> Result<Self> {
         let rules: Result<Vec<_>> = config_rules
             .into_iter()
             .filter(|rule| rule.enabled)
             .map(|rule| {
+                validate_rule(&rule)?;
                 let regex = Regex::new(&rule.pattern)
                     .map_err(|e| anyhow::anyhow!("Invalid regex in rule {}: {}", rule.id, e))?;
                 Ok((rule, regex))
@@ -103,5 +110,22 @@ mod tests {
         let result = engine.inspect(&packet, None);
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L4);
+    }
+
+    #[test]
+    fn test_validate_rule_rejects_invalid_regex() {
+        let rule = Rule {
+            id: "invalid".to_string(),
+            name: "Invalid".to_string(),
+            enabled: false,
+            layer: RuleLayer::L4,
+            pattern: "(".to_string(),
+            action: RuleAction::Block,
+            severity: Severity::High,
+        };
+
+        let error = validate_rule(&rule).unwrap_err().to_string();
+        assert!(error.contains("Invalid regex"));
+        assert!(error.contains("invalid"));
     }
 }

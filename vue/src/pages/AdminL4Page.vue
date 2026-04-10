@@ -16,7 +16,7 @@ type L4ConfigForm = Omit<
   'runtime_enabled' | 'bloom_enabled' | 'bloom_false_positive_verification' | 'runtime_profile'
 >
 
-const { formatNumber } = useFormatters()
+const { formatBytes, formatNumber } = useFormatters()
 
 const loading = ref(true)
 const refreshing = ref(false)
@@ -147,6 +147,30 @@ const bloomPanels = computed(() => {
     { label: 'IPv6 命中', value: bloomStats.ipv6_filter },
     { label: 'IP:Port 命中', value: bloomStats.ip_port_filter },
   ]
+})
+const falsePositivePanels = computed(() => {
+  const falsePositiveStats = stats.value?.false_positive_stats
+  if (!falsePositiveStats) return []
+
+  return [
+    { label: 'IPv4 精确校验集', value: falsePositiveStats.ipv4_exact_size },
+    { label: 'IPv6 精确校验集', value: falsePositiveStats.ipv6_exact_size },
+    { label: 'IP:Port 精确校验集', value: falsePositiveStats.ip_port_exact_size },
+  ]
+})
+const blockedCapacityRatio = computed(() => {
+  const maxBlocked = configForm.max_blocked_ips
+  if (!maxBlocked) return 0
+  return (stats.value?.connections.blocked_connections ?? 0) / maxBlocked
+})
+const blockedCapacityLabel = computed(() => {
+  if (!configForm.max_blocked_ips) return '未配置上限'
+  return `${Math.min(blockedCapacityRatio.value * 100, 999).toFixed(1)}%`
+})
+const blockedCapacityTone = computed(() => {
+  if (blockedCapacityRatio.value >= 0.85) return 'error'
+  if (blockedCapacityRatio.value >= 0.6) return 'warning'
+  return 'success'
 })
 
 onMounted(async () => {
@@ -382,6 +406,32 @@ onBeforeUnmount(() => {
               当前没有可展示的 Bloom 运行统计。通常是因为运行中的 L4 实例未启用 Bloom，或四层检测尚未加载。
             </div>
           </CyberCard>
+
+          <CyberCard title="误判校验" sub-title="后端已经返回精确校验统计，这里补上展示，方便判断 Bloom 校验成本。">
+            <div v-if="falsePositivePanels.length" class="space-y-4">
+              <div
+                v-for="item in falsePositivePanels"
+                :key="item.label"
+                class="rounded-[24px] border border-cyber-border/60 bg-cyber-surface-strong p-4"
+              >
+                <div class="flex items-center justify-between gap-4">
+                  <p class="text-sm font-medium text-stone-900">{{ item.label }}</p>
+                  <StatusBadge
+                    :text="meta.bloom_false_positive_verification ? '校验开启' : '校验关闭'"
+                    :type="meta.bloom_false_positive_verification ? 'success' : 'muted'"
+                    compact
+                  />
+                </div>
+                <p class="mt-3 text-2xl font-semibold text-stone-900">{{ formatNumber(item.value) }}</p>
+                <p class="mt-2 text-xs leading-6 text-cyber-muted">
+                  表示当前运行态里为了降低 Bloom 误判而维护的精确集合大小。
+                </p>
+              </div>
+            </div>
+            <div v-else class="rounded-[24px] border border-dashed border-cyber-border/70 bg-cyber-surface-strong p-5 text-sm leading-6 text-cyber-muted">
+              当前没有误判校验统计。通常意味着 Bloom 未启用，或者运行实例还没有积累到可展示的校验数据。
+            </div>
+          </CyberCard>
         </div>
       </section>
 
@@ -449,6 +499,15 @@ onBeforeUnmount(() => {
               <span>封禁表上限</span>
               <span class="font-mono font-semibold text-stone-900">{{ formatNumber(configForm.max_blocked_ips) }}</span>
             </div>
+            <div class="flex items-center justify-between rounded-[18px] bg-cyber-surface-strong px-4 py-3">
+              <span>当前封禁占用</span>
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-semibold text-stone-900">
+                  {{ formatNumber(stats?.connections.blocked_connections || 0) }} / {{ formatNumber(configForm.max_blocked_ips) }}
+                </span>
+                <StatusBadge :text="blockedCapacityLabel" :type="blockedCapacityTone" compact />
+              </div>
+            </div>
           </div>
         </CyberCard>
 
@@ -461,6 +520,12 @@ onBeforeUnmount(() => {
             <div class="flex items-center justify-between rounded-[18px] bg-cyber-surface-strong px-4 py-3">
               <span>Bloom 缩放</span>
               <span class="font-mono font-semibold text-stone-900">{{ configForm.bloom_filter_scale.toFixed(2) }}</span>
+            </div>
+            <div class="flex items-center justify-between rounded-[18px] bg-cyber-surface-strong px-4 py-3">
+              <span>端口画像累计流量</span>
+              <span class="font-mono font-semibold text-stone-900">
+                {{ formatBytes(topPorts.reduce((sum, item) => sum + item.bytes_processed, 0)) }}
+              </span>
             </div>
           </div>
         </CyberCard>

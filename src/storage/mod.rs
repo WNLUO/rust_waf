@@ -57,6 +57,7 @@ pub struct BlockedIpQuery {
     pub source_scope: BlockedIpSourceScope,
     pub provider: Option<String>,
     pub ip: Option<String>,
+    pub keyword: Option<String>,
     pub active_only: bool,
     pub blocked_from: Option<i64>,
     pub blocked_to: Option<i64>,
@@ -1449,6 +1450,16 @@ fn append_blocked_ip_filters<'a>(
         builder.push(" AND ip = ");
         builder.push_bind(ip);
     }
+    if let Some(keyword) = query.keyword.as_deref() {
+        let like_keyword = format!("%{}%", keyword);
+        builder.push(" AND (ip LIKE ");
+        builder.push_bind(like_keyword.clone());
+        builder.push(" OR reason LIKE ");
+        builder.push_bind(like_keyword.clone());
+        builder.push(" OR COALESCE(provider, 'local') LIKE ");
+        builder.push_bind(like_keyword);
+        builder.push(")");
+    }
     if query.active_only {
         builder.push(" AND expires_at > ");
         builder.push_bind(unix_timestamp());
@@ -1984,6 +1995,16 @@ mod tests {
         assert_eq!(paged_blocks.limit, 1);
         assert_eq!(paged_blocks.offset, 1);
         assert_eq!(paged_blocks.items.len(), 1);
+
+        let keyword_blocks = store
+            .list_blocked_ips(&BlockedIpQuery {
+                keyword: Some("rate limit".to_string()),
+                ..BlockedIpQuery::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(keyword_blocks.total, 1);
+        assert_eq!(keyword_blocks.items[0].ip, "10.0.0.1");
     }
 
     #[tokio::test]

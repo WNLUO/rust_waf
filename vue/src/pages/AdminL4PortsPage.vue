@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
     <div class="space-y-6">
       <L4SectionNav />
 
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
+      <section class="rounded-2xl border border-cyber-border/60 bg-white p-6 shadow-sm">
         <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">端口画像</p>
         <h2 class="mt-3 font-display text-4xl font-semibold text-stone-900">按端口观察连接、拦截与 DDoS 热点</h2>
         <p class="mt-4 max-w-3xl text-sm leading-7 text-stone-700">

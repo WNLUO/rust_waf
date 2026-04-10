@@ -29,15 +29,13 @@ const highlights = [
 
 <template>
   <div class="relative min-h-screen overflow-hidden text-stone-900">
-    <div class="absolute inset-0 pointer-events-none">
-      <div class="absolute -top-24 left-[-12%] h-80 w-80 rounded-full bg-cyber-accent/18 blur-3xl"></div>
-      <div class="absolute top-1/3 right-[-10%] h-96 w-96 rounded-full bg-cyber-success/12 blur-3xl"></div>
-      <div class="absolute inset-x-0 top-24 h-px bg-gradient-to-r from-transparent via-cyber-accent/30 to-transparent"></div>
-    </div>
+    <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyber-accent/20 to-transparent pointer-events-none"></div>
+    <div class="absolute inset-x-0 top-24 h-px bg-gradient-to-r from-transparent via-cyber-border/80 to-transparent pointer-events-none"></div>
+    <div class="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-[#f3ede5] to-transparent pointer-events-none"></div>
 
     <header class="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-6 md:px-10">
       <div class="flex items-center gap-4">
-        <div class="flex h-14 w-14 items-center justify-center rounded-full border border-cyber-accent/20 bg-white/70 shadow-cyber backdrop-blur">
+        <div class="flex h-14 w-14 items-center justify-center rounded-full border border-cyber-accent/20 bg-white">
           <Blocks :size="24" class="text-cyber-accent-strong" />
         </div>
         <div>
@@ -52,7 +50,7 @@ const highlights = [
         </a>
         <RouterLink
           to="/admin"
-          class="inline-flex items-center gap-2 rounded-full bg-cyber-accent px-5 py-2.5 text-sm font-semibold text-white shadow-cyber transition hover:-translate-y-0.5"
+          class="inline-flex items-center gap-2 rounded-full bg-cyber-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-cyber-accent/90"
         >
           进入控制台
           <ArrowRight :size="16" />
@@ -63,7 +61,7 @@ const highlights = [
     <main class="relative z-10 mx-auto max-w-7xl px-6 pb-16 md:px-10 md:pb-24">
       <section class="grid gap-10 pt-8 md:grid-cols-[1.15fr_0.85fr] md:items-center md:pt-12">
         <div>
-          <div class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/20 bg-white/75 px-4 py-2 text-xs tracking-[0.24em] text-cyber-accent-strong shadow-sm backdrop-blur">
+          <div class="inline-flex items-center gap-2 rounded-full border border-cyber-accent/20 bg-white px-4 py-2 text-xs tracking-[0.18em] text-cyber-accent-strong">
             <Sparkles :size="14" />
             全链路流量防护与观测
           </div>
@@ -83,7 +81,7 @@ const highlights = [
           <div class="mt-8 flex flex-wrap gap-4">
             <RouterLink
               to="/admin"
-              class="inline-flex items-center gap-3 rounded-full bg-cyber-accent px-7 py-4 text-base font-semibold text-white shadow-cyber transition hover:-translate-y-0.5"
+              class="inline-flex items-center gap-3 rounded-full bg-cyber-accent px-7 py-4 text-base font-semibold text-white transition hover:bg-cyber-accent/90"
             >
               立即查看控制台
               <ArrowRight :size="18" />
@@ -100,7 +98,7 @@ const highlights = [
             <li
               v-for="item in highlights"
               :key="item"
-              class="rounded-[22px] border border-white/70 bg-white/55 px-4 py-4 shadow-[0_10px_30px_rgba(80,55,30,0.06)] backdrop-blur"
+              class="rounded-2xl border border-cyber-border/60 bg-white px-4 py-4 shadow-sm"
             >
               {{ item }}
             </li>
@@ -108,9 +106,8 @@ const highlights = [
         </div>
 
         <div class="relative">
-          <div class="absolute -left-8 top-10 hidden h-32 w-32 rounded-full border border-cyber-accent/25 md:block"></div>
-          <div class="rounded-[36px] border border-white/80 bg-white/72 p-6 shadow-[0_24px_80px_rgba(90,60,30,0.14)] backdrop-blur md:p-8">
-            <div class="flex items-center justify-between rounded-[28px] bg-stone-900 px-5 py-4 text-stone-100">
+          <div class="rounded-[28px] border border-cyber-border/60 bg-white p-6 shadow-sm md:p-8">
+            <div class="flex items-center justify-between rounded-2xl bg-stone-900 px-5 py-4 text-stone-100">
               <div>
                 <p class="text-xs tracking-[0.25em] text-stone-400">边界态势</p>
                 <p class="mt-2 text-2xl font-semibold">防护运行中</p>
@@ -121,19 +118,19 @@ const highlights = [
             </div>
 
             <div class="mt-5 grid gap-4 md:grid-cols-2">
-              <div class="rounded-[26px] bg-cyber-surface-strong p-5">
+              <div class="rounded-2xl bg-cyber-surface-strong p-5">
                 <p class="text-sm text-cyber-muted">策略执行</p>
                 <p class="mt-2 text-3xl font-semibold text-cyber-accent-strong">四层 + 七层</p>
                 <p class="mt-3 text-sm leading-6 text-stone-700">将连接层封禁与请求层拦截纳入统一视图，方便值班时快速判断攻击类型。</p>
               </div>
-              <div class="rounded-[26px] bg-[#f4f7f1] p-5">
+              <div class="rounded-2xl border border-cyber-border/60 bg-white p-5">
                 <p class="text-sm text-cyber-muted">观测节奏</p>
                 <p class="mt-2 text-3xl font-semibold text-cyber-success">秒级刷新</p>
                 <p class="mt-3 text-sm leading-6 text-stone-700">在控制台持续轮询实时数据，既保留速度，也兼顾运维场景下的阅读体验。</p>
               </div>
             </div>
 
-            <div class="mt-5 rounded-[28px] border border-cyber-border/80 bg-white/75 p-5">
+            <div class="mt-5 rounded-2xl border border-cyber-border/60 bg-white p-5">
               <p class="text-sm text-cyber-muted">界面基调</p>
               <div class="mt-4 flex items-center gap-3">
                 <span class="h-10 w-10 rounded-full bg-[#7f2f12]"></span>
@@ -161,9 +158,9 @@ const highlights = [
           <article
             v-for="feature in features"
             :key="feature.title"
-            class="group rounded-[30px] border border-white/80 bg-white/70 p-7 shadow-[0_16px_48px_rgba(80,55,30,0.08)] transition hover:-translate-y-1 hover:shadow-[0_20px_54px_rgba(127,47,18,0.14)]"
+            class="group rounded-2xl border border-cyber-border/60 bg-white p-7 shadow-sm transition-colors hover:border-cyber-accent/25"
           >
-            <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyber-surface-strong text-cyber-accent-strong transition group-hover:bg-cyber-accent group-hover:text-white">
+            <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyber-surface-strong text-cyber-accent-strong transition-colors group-hover:bg-cyber-accent/12">
               <component :is="feature.icon" :size="24" />
             </div>
             <h3 class="mt-6 text-2xl font-semibold text-stone-900">{{ feature.title }}</h3>

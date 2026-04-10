@@ -30,14 +30,14 @@ const chartPath = computed(() => {
 </script>
 
 <template>
-  <div class="group relative overflow-hidden rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_22px_50px_rgba(127,47,18,0.14)]">
-    <div class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-cyber-accent to-cyber-success opacity-70"></div>
-    <div class="absolute right-0 top-0 p-4 opacity-25 transition-opacity group-hover:opacity-90">
+  <div class="relative overflow-hidden rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
+    <div class="absolute inset-x-0 top-0 h-1 bg-cyber-accent/70"></div>
+    <div class="absolute right-0 top-0 p-4 opacity-20">
       <component :is="icon" v-if="icon" :size="24" class="text-cyber-accent-strong" />
     </div>
 
     <div class="space-y-2">
-      <p class="text-xs tracking-[0.2em] text-cyber-muted">{{ label }}</p>
+      <p class="text-xs tracking-[0.14em] text-cyber-muted">{{ label }}</p>
       <div class="flex flex-wrap items-end gap-3">
         <h3 class="font-mono text-3xl font-bold text-stone-900">{{ value }}</h3>
         <div v-if="trend" class="mb-1.5 flex items-center gap-1 text-xs" :class="[trend === 'up' ? 'text-cyber-error' : 'text-cyber-success']">

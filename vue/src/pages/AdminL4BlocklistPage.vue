@@ -173,7 +173,7 @@ watch(
     <div class="space-y-6">
       <L4SectionNav />
 
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
+      <section class="rounded-2xl border border-cyber-border/60 bg-white p-6 shadow-sm">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">L4 黑名单</p>
@@ -188,19 +188,19 @@ watch(
       </section>
 
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">筛选命中总数</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ matchedTotal }}</p>
         </div>
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">当前页本地封禁</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ localBlockedCount }}</p>
         </div>
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">当前页远端回流</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ remoteBlockedCount }}</p>
         </div>
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">运行时封禁计数</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ l4Stats?.connections.blocked_connections ?? 0 }}</p>
         </div>

@@ -345,16 +345,16 @@ onBeforeUnmount(() => {
     </template>
 
     <div v-if="loading" class="flex h-72 items-center justify-center">
-      <div class="flex flex-col items-center gap-4 rounded-[28px] border border-white/80 bg-white/75 px-8 py-10 shadow-cyber">
+      <div class="flex flex-col items-center gap-4 rounded-2xl border border-cyber-border/60 bg-white px-8 py-10 shadow-sm">
         <RefreshCw class="animate-spin text-cyber-accent-strong" :size="30" />
-        <p class="text-sm tracking-[0.2em] text-cyber-muted">正在载入 L7 管理面板</p>
+        <p class="text-sm text-cyber-muted">正在载入 L7 管理面板</p>
       </div>
     </div>
 
     <div v-else class="space-y-8">
       <L7SectionNav />
 
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
+      <section class="rounded-2xl border border-cyber-border/60 bg-white p-6 shadow-sm">
         <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div class="max-w-3xl">
             <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">L7 管理</p>

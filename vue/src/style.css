@@ -2,7 +2,6 @@
 
 @theme {
   --color-cyber-bg: #f4efe7;
-  --color-cyber-surface: #fffaf4;
   --color-cyber-surface-strong: #f7efe1;
   --color-cyber-border: #dbc8b0;
   --color-cyber-accent: #b3541e;
@@ -15,10 +14,7 @@
   --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   --font-display: 'STSong', 'Songti SC', 'Noto Serif SC', serif;
 
-  --radius-cyber: 24px;
-
-  --shadow-cyber: 0 22px 60px rgba(127, 47, 18, 0.12);
-  --shadow-cyber-error: 0 18px 40px rgba(166, 30, 77, 0.12);
+  --shadow-cyber: 0 10px 24px rgba(127, 47, 18, 0.08);
 }
 
 @layer base {
@@ -38,24 +34,8 @@
     background-color: var(--color-cyber-bg);
     color: #2b2118;
     font-family: var(--font-sans);
-    background-image:
-      radial-gradient(circle at top left, rgba(179, 84, 30, 0.14), transparent 30%),
-      radial-gradient(circle at right 20%, rgba(45, 106, 79, 0.12), transparent 28%),
-      linear-gradient(180deg, #f9f4ec 0%, #f3ebe0 100%);
+    background-image: linear-gradient(180deg, #faf7f2 0%, #f3ede5 100%);
     min-width: 320px;
-  }
-
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.34;
-    background-image:
-      linear-gradient(rgba(127, 47, 18, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(127, 47, 18, 0.05) 1px, transparent 1px);
-    background-size: 28px 28px;
-    mask-image: radial-gradient(circle at center, black 35%, transparent 85%);
   }
 
   button,

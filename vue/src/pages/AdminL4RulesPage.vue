@@ -212,7 +212,7 @@ onMounted(loadRules)
     <div class="space-y-6">
       <L4SectionNav />
 
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
+      <section class="rounded-2xl border border-cyber-border/60 bg-white p-6 shadow-sm">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">L4 规则</p>
@@ -223,7 +223,7 @@ onMounted(loadRules)
           </div>
           <button
             @click="openCreateRule"
-            class="inline-flex items-center gap-2 self-start rounded-full bg-cyber-accent px-5 py-3 text-sm font-semibold text-white shadow-cyber transition hover:-translate-y-0.5"
+            class="inline-flex items-center gap-2 self-start rounded-full bg-cyber-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyber-accent/90"
           >
             <Plus :size="16" />
             新建 L4 规则
@@ -232,15 +232,15 @@ onMounted(loadRules)
       </section>
 
       <section class="grid gap-4 md:grid-cols-3">
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">L4 规则总数</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ l4Rules.length }}</p>
         </div>
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">已启用规则</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ enabledCount }}</p>
         </div>
-        <div class="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-[0_16px_44px_rgba(90,60,30,0.08)]">
+        <div class="rounded-2xl border border-cyber-border/60 bg-white p-5 shadow-sm">
           <p class="text-xs tracking-[0.2em] text-cyber-muted">拦截动作规则</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">{{ blockCount }}</p>
         </div>

@@ -107,13 +107,13 @@ watch(
 <template>
   <div class="min-h-screen bg-transparent text-stone-900 lg:flex" :style="layoutStyle">
     <aside
-      class="border-b border-cyber-border/80 bg-white/70 backdrop-blur transition-[width] duration-300 ease-out lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:flex lg:w-[var(--sidebar-width)] lg:flex-col lg:border-b-0 lg:border-r"
+      class="border-b border-cyber-border/80 bg-[#fbf7f1] transition-[width] duration-300 ease-out lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:flex lg:w-[var(--sidebar-width)] lg:flex-col lg:border-b-0 lg:border-r"
     >
       <div
         class="flex items-center gap-3 border-b border-cyber-border/70 px-4 py-5 transition-[padding] duration-300 md:px-6 md:py-6"
         :class="sidebarExpanded ? 'justify-start' : 'lg:justify-center lg:px-3'"
       >
-        <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyber-accent text-white shadow-cyber">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-cyber-accent text-white">
           <Cpu :size="22" />
         </div>
         <div v-if="sidebarExpanded" class="min-w-0">
@@ -131,7 +131,7 @@ watch(
           v-for="item in navItems"
           :key="item.path"
           :to="item.path"
-          class="flex items-center rounded-[20px] border transition-all duration-200"
+          class="flex items-center rounded-2xl border transition-colors duration-200"
           :title="sidebarExpanded ? '' : item.name"
           :aria-label="item.name"
           :class="[
@@ -139,8 +139,8 @@ watch(
               ? 'gap-3 px-4 py-3'
               : 'justify-center px-3 py-3 lg:min-h-[52px]',
             isRouteActive(item.path)
-              ? 'border-cyber-accent/30 bg-cyber-accent/10 text-cyber-accent-strong shadow-[0_12px_30px_rgba(179,84,30,0.10)]'
-              : 'border-transparent text-cyber-muted hover:border-cyber-border hover:bg-white/70 hover:text-stone-900'
+              ? 'border-cyber-accent/20 bg-cyber-accent/8 text-cyber-accent-strong'
+              : 'border-transparent text-cyber-muted hover:border-cyber-border hover:bg-white hover:text-stone-900'
           ]"
         >
           <component :is="item.icon" :size="18" />
@@ -167,7 +167,7 @@ watch(
     </aside>
 
     <main class="min-h-screen min-w-0 flex-1 transition-[margin] duration-300 ease-out lg:ml-[var(--sidebar-width)]">
-      <header class="sticky top-0 z-50 flex items-center justify-between gap-4 border-b border-cyber-border/70 bg-[#f8f1e8]/85 px-6 py-4 backdrop-blur md:px-8">
+      <header class="sticky top-0 z-50 flex items-center justify-between gap-4 border-b border-cyber-border/70 bg-[#f7f1e8] px-6 py-4 md:px-8">
         <div class="flex min-w-0 flex-1 items-center gap-3">
           <button
             type="button"

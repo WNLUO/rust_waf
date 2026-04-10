@@ -132,7 +132,7 @@ onMounted(loadRules)
     </template>
 
     <div class="space-y-6">
-      <section class="rounded-[34px] border border-white/85 bg-[linear-gradient(140deg,rgba(255,250,244,0.92),rgba(244,239,231,0.96))] p-7 shadow-[0_26px_80px_rgba(90,60,30,0.10)]">
+      <section class="rounded-2xl border border-cyber-border/60 bg-white p-6 shadow-sm">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p class="text-sm tracking-[0.22em] text-cyber-accent-strong">规则中心</p>
@@ -143,7 +143,7 @@ onMounted(loadRules)
           </div>
           <button
             @click="openCreateRule"
-            class="inline-flex items-center gap-2 self-start rounded-full bg-cyber-accent px-5 py-3 text-sm font-semibold text-white shadow-cyber transition hover:-translate-y-0.5"
+            class="inline-flex items-center gap-2 self-start rounded-full bg-cyber-accent px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyber-accent/90"
           >
             <Plus :size="16" />
             新建规则

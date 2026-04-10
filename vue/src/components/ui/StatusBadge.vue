@@ -26,7 +26,7 @@ const styles = {
 
 <template>
   <div
-    class="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs tracking-[0.12em] transition-all duration-300"
+    class="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs transition-colors"
     :class="[styles[type || 'info'], compact ? 'max-w-[16rem] px-2 py-0.5' : '']"
     :title="text"
   >

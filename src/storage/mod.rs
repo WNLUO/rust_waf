@@ -822,8 +822,6 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON security_events(created_at);
         CREATE INDEX IF NOT EXISTS idx_security_events_source_ip
             ON security_events(source_ip);
-        CREATE INDEX IF NOT EXISTS idx_security_events_provider_site_id
-            ON security_events(provider_site_id);
 
         CREATE TABLE IF NOT EXISTS blocked_ips (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -924,6 +922,11 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             }
         }
     }
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_security_events_provider_site_id ON security_events(provider_site_id)",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

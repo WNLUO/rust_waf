@@ -8,6 +8,7 @@ import {
   fetchSafeLineSites,
   fetchSettings,
   fetchLocalCertificates,
+  generateLocalCertificate,
   testSafeLineConnection,
   updateSafeLineMappings,
   updateSettings,
@@ -20,7 +21,7 @@ import type {
   SafeLineTestResponse,
   SettingsPayload,
 } from "../lib/types";
-import { PlugZap, Save, ServerCog, Settings } from "lucide-vue-next";
+import { PlugZap, RefreshCw, Save, ServerCog, Settings } from "lucide-vue-next";
 
 interface SystemSettingsForm extends SettingsPayload {}
 
@@ -31,6 +32,7 @@ const loadingSites = ref(false);
 const savingMappings = ref(false);
 const loadingCertificates = ref(false);
 const savingCertificate = ref(false);
+const generatingCertificate = ref(false);
 const deletingCertificateId = ref<number | null>(null);
 const error = ref("");
 const successMessage = ref("");
@@ -333,6 +335,35 @@ async function uploadCertificate() {
   }
 }
 
+async function generateCertificate() {
+  generatingCertificate.value = true;
+  error.value = "";
+  successMessage.value = "";
+
+  try {
+    const domains = certificateForm.domains.map((item) => item.trim()).filter(Boolean);
+    const created = await generateLocalCertificate({
+      name: certificateForm.name.trim() || null,
+      domains,
+      notes: certificateForm.notes.trim() || null,
+    });
+
+    certificateForm.name = "";
+    certificateForm.domains = [];
+    certificateForm.issuer = "";
+    certificateForm.notes = "";
+    certificateForm.certificate_pem = "";
+    certificateForm.private_key_pem = "";
+
+    await loadCertificates();
+    successMessage.value = `已生成随机证书「${created.name}」，可直接在下方设为默认证书。`;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "生成随机证书失败";
+  } finally {
+    generatingCertificate.value = false;
+  }
+}
+
 async function removeCertificate(id: number) {
   deletingCertificateId.value = id;
   error.value = "";
@@ -563,7 +594,7 @@ onMounted(async () => {
             <div>
               <p class="text-xs tracking-wide text-blue-700">证书中心</p>
               <h3 class="mt-0.5 text-lg font-semibold text-stone-900">
-                本地证书上传
+                本地证书上传与生成
               </h3>
             </div>
           </div>
@@ -584,7 +615,7 @@ onMounted(async () => {
                 <input
                   v-model="certificateDomainsText"
                   type="text"
-                  placeholder="多个域名用逗号分隔"
+                  placeholder="多个域名用逗号分隔，生成假证书时会写入 SAN"
                   class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
                 />
               </label>
@@ -617,15 +648,23 @@ onMounted(async () => {
 
             <div class="flex flex-wrap items-center gap-2.5">
               <button
+                @click="generateCertificate"
+                :disabled="generatingCertificate || savingCertificate"
+                class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw :size="12" :class="{ 'animate-spin': generatingCertificate }" />
+                {{ generatingCertificate ? "生成中..." : "生成随机证书" }}
+              </button>
+              <button
                 @click="uploadCertificate"
-                :disabled="savingCertificate"
+                :disabled="savingCertificate || generatingCertificate"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save :size="12" />
                 {{ savingCertificate ? "上传中..." : "上传证书" }}
               </button>
               <span class="text-xs leading-5 text-slate-500">
-                上传后可在“默认证书”里指定用于 `IP:端口` 或未知 SNI 的回包证书。
+                可直接填写域名后点“生成随机证书”，也可以继续手动粘贴 PEM 上传。生成或上传后都能在“默认证书”里指定用于 `IP:端口` 或未知 SNI 的回包证书。
               </span>
             </div>
 

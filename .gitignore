@@ -18,3 +18,7 @@
 # 常见日志与缓存
 *.log
 *.cache
+
+# SQLite WAL/SHM 临时文件
+/data/*.db-wal
+/data/*.db-shm

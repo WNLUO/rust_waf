@@ -435,6 +435,12 @@ export interface LocalCertificateDraft {
   private_key_pem?: string | null;
 }
 
+export interface GeneratedLocalCertificateRequest {
+  name?: string | null;
+  domains: string[];
+  notes?: string | null;
+}
+
 export interface SiteSyncLinkItem {
   id: number;
   local_site_id: number;

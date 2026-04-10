@@ -4,6 +4,7 @@ import type {
   BlockedIpsResponse,
   DashboardPayload,
   DashboardQueryOptions,
+  GeneratedLocalCertificateRequest,
   EventsQuery,
   HealthResponse,
   L4ConfigPayload,
@@ -326,6 +327,13 @@ export function fetchLocalCertificate(id: number) {
 
 export function createLocalCertificate(payload: LocalCertificateDraft) {
   return apiRequest<LocalCertificateItem>("/certificates/local", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function generateLocalCertificate(payload: GeneratedLocalCertificateRequest) {
+  return apiRequest<LocalCertificateItem>("/certificates/local/generate", {
     method: "POST",
     body: JSON.stringify(payload),
   });

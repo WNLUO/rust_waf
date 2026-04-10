@@ -3,7 +3,10 @@ import { computed, onMounted, reactive, ref } from "vue";
 import AppLayout from "../components/layout/AppLayout.vue";
 import StatusBadge from "../components/ui/StatusBadge.vue";
 import {
+  createLocalSite,
+  deleteLocalSite,
   fetchCachedSafeLineSites,
+  fetchLocalCertificates,
   fetchLocalSites,
   fetchSafeLineMappings,
   fetchSafeLineSites,
@@ -12,8 +15,11 @@ import {
   pullSafeLineSite,
   pushSafeLineSite,
   testSafeLineConnection,
+  updateLocalSite,
 } from "../lib/api";
 import type {
+  LocalCertificateItem,
+  LocalSiteDraft,
   LocalSiteItem,
   SafeLineMappingItem,
   SafeLineSiteItem,
@@ -24,11 +30,15 @@ import type {
 import { useFormatters } from "../composables/useFormatters";
 import {
   Link2,
+  PencilLine,
+  Plus,
   PlugZap,
   RefreshCw,
+  RotateCcw,
   Search,
   ServerCog,
   Settings2,
+  Trash2,
 } from "lucide-vue-next";
 
 type ScopeFilter =
@@ -91,15 +101,20 @@ const settings = ref<SettingsPayload | null>(null);
 const mappings = ref<SafeLineMappingItem[]>([]);
 const sites = ref<SafeLineSiteItem[]>([]);
 const localSites = ref<LocalSiteItem[]>([]);
+const localCertificates = ref<LocalCertificateItem[]>([]);
 const siteLinks = ref<SiteSyncLinkItem[]>([]);
 const testResult = ref<SafeLineTestResponse | null>(null);
 const siteRows = ref<SiteRowDraft[]>([]);
 const sitesLoadedAt = ref<number | null>(null);
+const editingLocalSiteId = ref<number | null>(null);
 
 const actions = reactive({
   refreshing: false,
   testing: false,
   loadingSites: false,
+  loadingCertificates: false,
+  savingLocalSite: false,
+  deletingLocalSite: false,
 });
 
 const rowActions = reactive<Record<string, "pull" | "push" | undefined>>({});
@@ -110,10 +125,56 @@ const filters = reactive({
   state: "all" as StateFilter,
 });
 
+const localSiteForm = reactive<LocalSiteDraft>({
+  name: "",
+  primary_hostname: "",
+  hostnames: [],
+  listen_ports: [],
+  upstreams: [],
+  enabled: true,
+  tls_enabled: true,
+  local_certificate_id: null,
+  source: "manual",
+  sync_mode: "manual",
+  notes: "",
+  last_synced_at: null,
+});
+
 function clearFeedback() {
   error.value = "";
   successMessage.value = "";
 }
+
+const hostnamesText = computed({
+  get: () => localSiteForm.hostnames.join(", "),
+  set: (value: string) => {
+    localSiteForm.hostnames = splitEditorList(value);
+  },
+});
+
+const listenPortsText = computed({
+  get: () => localSiteForm.listen_ports.join(", "),
+  set: (value: string) => {
+    localSiteForm.listen_ports = splitEditorList(value);
+  },
+});
+
+const upstreamsText = computed({
+  get: () => localSiteForm.upstreams.join(", "),
+  set: (value: string) => {
+    localSiteForm.upstreams = splitEditorList(value);
+  },
+});
+
+const currentLocalSite = computed(() =>
+  editingLocalSiteId.value === null
+    ? null
+    : localSites.value.find((item) => item.id === editingLocalSiteId.value) ?? null,
+);
+
+const editorTitle = computed(() =>
+  editingLocalSiteId.value === null ? "新建本地站点" : `编辑本地站点 #${editingLocalSiteId.value}`,
+);
 
 function statusNormalized(value: string) {
   return value.trim().toLowerCase();
@@ -322,6 +383,127 @@ function syncModeLabel(value: string) {
   }
 }
 
+function splitEditorList(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function defaultListenPorts() {
+  const httpsListenAddr = settings.value?.https_listen_addr?.trim() ?? "";
+  if (!httpsListenAddr) return [];
+  const port = httpsListenAddr.split(":").pop()?.trim();
+  return port ? [port] : [];
+}
+
+function resetLocalSiteForm() {
+  editingLocalSiteId.value = null;
+  localSiteForm.name = "";
+  localSiteForm.primary_hostname = "";
+  localSiteForm.hostnames = [];
+  localSiteForm.listen_ports = defaultListenPorts();
+  localSiteForm.upstreams = [];
+  localSiteForm.enabled = true;
+  localSiteForm.tls_enabled = true;
+  localSiteForm.local_certificate_id = settings.value?.default_certificate_id ?? null;
+  localSiteForm.source = "manual";
+  localSiteForm.sync_mode = "manual";
+  localSiteForm.notes = "";
+  localSiteForm.last_synced_at = null;
+}
+
+function populateLocalSiteForm(site: LocalSiteDraft, localSiteId: number | null) {
+  editingLocalSiteId.value = localSiteId;
+  localSiteForm.name = site.name;
+  localSiteForm.primary_hostname = site.primary_hostname;
+  localSiteForm.hostnames = [...site.hostnames];
+  localSiteForm.listen_ports = [...site.listen_ports];
+  localSiteForm.upstreams = [...site.upstreams];
+  localSiteForm.enabled = site.enabled;
+  localSiteForm.tls_enabled = site.tls_enabled;
+  localSiteForm.local_certificate_id = site.local_certificate_id;
+  localSiteForm.source = site.source;
+  localSiteForm.sync_mode = site.sync_mode;
+  localSiteForm.notes = site.notes;
+  localSiteForm.last_synced_at = site.last_synced_at;
+}
+
+function siteDraftFromItem(site: LocalSiteItem): LocalSiteDraft {
+  return {
+    name: site.name,
+    primary_hostname: site.primary_hostname,
+    hostnames: [...site.hostnames],
+    listen_ports: [...site.listen_ports],
+    upstreams: [...site.upstreams],
+    enabled: site.enabled,
+    tls_enabled: site.tls_enabled,
+    local_certificate_id: site.local_certificate_id,
+    source: site.source,
+    sync_mode: site.sync_mode,
+    notes: site.notes,
+    last_synced_at: site.last_synced_at,
+  };
+}
+
+function siteDraftFromRow(row: SiteRowDraft): LocalSiteDraft {
+  const localSite =
+    row.local_present && row.local_site_id
+      ? localSites.value.find((item) => item.id === row.local_site_id) ?? null
+      : null;
+  const primaryHostname =
+    row.local_primary_hostname ||
+    row.safeline_site_domain ||
+    row.server_names[0] ||
+    "";
+  const hostnames = row.local_hostnames.length
+    ? [...row.local_hostnames]
+    : row.server_names.length
+      ? [...row.server_names]
+      : primaryHostname
+        ? [primaryHostname]
+        : [];
+  const listenPorts = row.local_listen_ports.length
+    ? [...row.local_listen_ports]
+    : row.remote_ssl_ports.length
+      ? [...row.remote_ssl_ports]
+      : row.remote_ports.length
+        ? [...row.remote_ports]
+        : defaultListenPorts();
+  const upstreams = row.local_upstreams.length
+    ? [...row.local_upstreams]
+    : row.remote_upstreams.length
+      ? [...row.remote_upstreams]
+      : [];
+
+  return {
+    name: row.local_site_name || row.local_alias || row.safeline_site_name || primaryHostname,
+    primary_hostname: primaryHostname,
+    hostnames,
+    listen_ports: listenPorts,
+    upstreams,
+    enabled: row.local_present ? row.local_enabled : true,
+    tls_enabled: localSite?.tls_enabled ?? row.remote_ssl_enabled ?? false,
+    local_certificate_id: localSite?.local_certificate_id ?? settings.value?.default_certificate_id ?? null,
+    source: row.local_present ? "manual" : "manual",
+    sync_mode: row.local_sync_mode || "manual",
+    notes: row.local_notes || row.notes || "",
+    last_synced_at: row.link_last_synced_at,
+  };
+}
+
+function editLocalSite(row: SiteRowDraft) {
+  if (row.local_present && row.local_site_id) {
+    const site = localSites.value.find((item) => item.id === row.local_site_id);
+    if (site) {
+      populateLocalSiteForm(siteDraftFromItem(site), site.id);
+      return;
+    }
+  }
+
+  populateLocalSiteForm(siteDraftFromRow(row), null);
+}
+
 const hasSavedConfig = computed(() =>
   Boolean(settings.value?.safeline.base_url.trim()),
 );
@@ -433,17 +615,95 @@ async function refreshCollections(remoteSource: "none" | "cached" | "live") {
   rebuildRows();
 }
 
+async function loadLocalCertificates() {
+  actions.loadingCertificates = true;
+
+  try {
+    const response = await fetchLocalCertificates();
+    localCertificates.value = response.certificates;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "读取本地证书失败";
+  } finally {
+    actions.loadingCertificates = false;
+  }
+}
+
 async function loadPageData() {
   loading.value = true;
   clearFeedback();
 
   try {
     settings.value = await fetchSettings();
+    resetLocalSiteForm();
+    await loadLocalCertificates();
     await refreshCollections("cached");
   } catch (e) {
     error.value = e instanceof Error ? e.message : "读取站点管理信息失败";
   } finally {
     loading.value = false;
+  }
+}
+
+async function saveLocalSite() {
+  actions.savingLocalSite = true;
+  clearFeedback();
+
+  try {
+    const payload: LocalSiteDraft = {
+      name: localSiteForm.name.trim(),
+      primary_hostname: localSiteForm.primary_hostname.trim(),
+      hostnames: localSiteForm.hostnames.map((item) => item.trim()).filter(Boolean),
+      listen_ports: localSiteForm.listen_ports.map((item) => item.trim()).filter(Boolean),
+      upstreams: localSiteForm.upstreams.map((item) => item.trim()).filter(Boolean),
+      enabled: localSiteForm.enabled,
+      tls_enabled: localSiteForm.tls_enabled,
+      local_certificate_id: localSiteForm.local_certificate_id,
+      source: "manual",
+      sync_mode: localSiteForm.sync_mode.trim() || "manual",
+      notes: localSiteForm.notes.trim(),
+      last_synced_at: currentLocalSite.value?.last_synced_at ?? null,
+    };
+
+    if (editingLocalSiteId.value === null) {
+      const created = await createLocalSite(payload);
+      successMessage.value = `本地站点 ${created.name} 已创建。重启服务后生效。`;
+      editingLocalSiteId.value = created.id;
+    } else {
+      const response = await updateLocalSite(editingLocalSiteId.value, payload);
+      successMessage.value = response.message;
+    }
+
+    await refreshCollections(sitesLoadedAt.value !== null ? "cached" : "none");
+
+    if (editingLocalSiteId.value !== null) {
+      const updatedSite =
+        localSites.value.find((item) => item.id === editingLocalSiteId.value) ?? null;
+      if (updatedSite) {
+        populateLocalSiteForm(siteDraftFromItem(updatedSite), updatedSite.id);
+      }
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "保存本地站点失败";
+  } finally {
+    actions.savingLocalSite = false;
+  }
+}
+
+async function removeCurrentLocalSite() {
+  if (editingLocalSiteId.value === null) return;
+
+  actions.deletingLocalSite = true;
+  clearFeedback();
+
+  try {
+    const response = await deleteLocalSite(editingLocalSiteId.value);
+    successMessage.value = response.message;
+    resetLocalSiteForm();
+    await refreshCollections(sitesLoadedAt.value !== null ? "cached" : "none");
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "删除本地站点失败";
+  } finally {
+    actions.deletingLocalSite = false;
   }
 }
 
@@ -579,6 +839,13 @@ onMounted(loadPageData);
       <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
           <div class="flex flex-wrap gap-2">
+            <button
+              @click="resetLocalSiteForm"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+            >
+              <Plus :size="14" />
+              新建本地站点
+            </button>
             <button
               @click="refreshPageData"
               :disabled="actions.refreshing"
@@ -785,6 +1052,198 @@ onMounted(loadPageData);
       </div>
 
       <template v-else>
+        <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div class="border-b border-slate-200 px-4 py-4">
+            <div class="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
+              <div>
+                <p class="text-sm font-semibold text-stone-900">{{ editorTitle }}</p>
+                <p class="mt-1 text-xs text-slate-500">
+                  在这里直接维护本地运行站点。保存后会写入数据库，重启服务后生效。
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <StatusBadge
+                  :text="actions.loadingCertificates ? '证书读取中' : `可选证书 ${formatNumber(localCertificates.length)} 张`"
+                  :type="actions.loadingCertificates ? 'muted' : 'info'"
+                  compact
+                />
+                <StatusBadge
+                  :text="`本地站点 ${formatNumber(localSites.length)} 条`"
+                  type="muted"
+                  compact
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-4 px-4 py-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]">
+            <div class="space-y-4">
+              <div class="grid gap-4 md:grid-cols-2">
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">站点名称</span>
+                  <input
+                    v-model="localSiteForm.name"
+                    type="text"
+                    placeholder="例如 Portal"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">主域名</span>
+                  <input
+                    v-model="localSiteForm.primary_hostname"
+                    type="text"
+                    placeholder="例如 portal.example.com"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-slate-500">Hostnames</span>
+                  <input
+                    v-model="hostnamesText"
+                    type="text"
+                    placeholder="多个域名用逗号分隔"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">监听端口</span>
+                  <input
+                    v-model="listenPortsText"
+                    type="text"
+                    placeholder="例如 660"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  />
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">证书</span>
+                  <select
+                    v-model="localSiteForm.local_certificate_id"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  >
+                    <option :value="null">未设置</option>
+                    <option
+                      v-for="certificate in localCertificates"
+                      :key="certificate.id"
+                      :value="certificate.id"
+                    >
+                      #{{ certificate.id }} · {{ certificate.name }}
+                    </option>
+                  </select>
+                </label>
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-slate-500">上游地址</span>
+                  <input
+                    v-model="upstreamsText"
+                    type="text"
+                    placeholder="多个地址用逗号分隔，例如 127.0.0.1:880"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  />
+                  <span class="block text-xs text-slate-400">
+                    当前运行时会优先使用第一个有效上游地址。
+                  </span>
+                </label>
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="text-xs text-slate-500">备注</span>
+                  <textarea
+                    v-model="localSiteForm.notes"
+                    rows="3"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  />
+                </label>
+              </div>
+
+              <div class="grid gap-3 md:grid-cols-3">
+                <label
+                  class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                >
+                  <input
+                    v-model="localSiteForm.enabled"
+                    type="checkbox"
+                    class="mt-0.5 accent-blue-600"
+                  />
+                  <span>
+                    <span class="block text-sm font-medium text-stone-900">启用站点</span>
+                    <span class="mt-0.5 block text-xs text-slate-500">关闭后不会参与运行时匹配。</span>
+                  </span>
+                </label>
+                <label
+                  class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                >
+                  <input
+                    v-model="localSiteForm.tls_enabled"
+                    type="checkbox"
+                    class="mt-0.5 accent-blue-600"
+                  />
+                  <span>
+                    <span class="block text-sm font-medium text-stone-900">启用 TLS 站点证书</span>
+                    <span class="mt-0.5 block text-xs text-slate-500">启用后会参与 SNI 证书匹配。</span>
+                  </span>
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">同步模式</span>
+                  <select
+                    v-model="localSiteForm.sync_mode"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  >
+                    <option value="manual">手动</option>
+                    <option value="pull_only">仅回流</option>
+                    <option value="push_only">仅推送</option>
+                    <option value="bidirectional">双向同步</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  @click="saveLocalSite"
+                  :disabled="actions.savingLocalSite"
+                  class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <PencilLine :size="14" />
+                  {{ actions.savingLocalSite ? "保存中..." : editingLocalSiteId === null ? "创建本地站点" : "保存本地站点" }}
+                </button>
+                <button
+                  @click="resetLocalSiteForm"
+                  class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                >
+                  <RotateCcw :size="14" />
+                  重置表单
+                </button>
+                <button
+                  v-if="editingLocalSiteId !== null"
+                  @click="removeCurrentLocalSite"
+                  :disabled="actions.deletingLocalSite"
+                  class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 :size="14" />
+                  {{ actions.deletingLocalSite ? "删除中..." : "删除本地站点" }}
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div>
+                <p class="text-sm font-medium text-stone-900">编辑提示</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  你可以直接从右侧对账列表点“编辑本地”带入，也可以手动新建。对同一个域名，建议统一走系统设置里的 HTTPS 入口端口。
+                </p>
+              </div>
+              <div class="grid gap-2 text-xs text-slate-500">
+                <p>监听端口：建议填统一入口端口，例如 `660`。</p>
+                <p>证书：TLS 站点建议绑定真实证书；`IP:660` 回包用系统设置里的默认证书。</p>
+                <p>上游地址：支持 `127.0.0.1:880` 或 `http://127.0.0.1:880`。</p>
+                <p>保存后写入数据库，当前服务需要重启才会加载新的监听与站点路由。</p>
+              </div>
+              <div v-if="currentLocalSite" class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500">
+                <p class="font-medium text-stone-900">{{ currentLocalSite.name }}</p>
+                <p class="mt-1">最近更新：{{ formatTimestamp(currentLocalSite.updated_at) }}</p>
+                <p class="mt-1">当前主域名：{{ currentLocalSite.primary_hostname }}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div class="flex flex-col gap-4 border-b border-slate-200 px-4 py-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
@@ -1052,6 +1511,14 @@ onMounted(loadPageData);
 
                   <td class="px-4 py-2">
                     <div class="flex flex-wrap items-center gap-2">
+                      <button
+                        @click="editLocalSite(row)"
+                        class="inline-flex h-8 items-center gap-1.5 rounded border border-slate-200 bg-white px-2.5 text-xs text-stone-700 transition hover:border-blue-400 hover:text-blue-700"
+                      >
+                        <PencilLine :size="14" />
+                        <span>{{ row.local_present ? "编辑本地" : "新建本地" }}</span>
+                      </button>
+
                       <button
                         v-if="row.remote_present"
                         @click="syncRemoteSite(row)"

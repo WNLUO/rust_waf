@@ -11,10 +11,13 @@ use axum::{
     routing::{delete, get, patch},
     Json, Router,
 };
+use rand::{distributions::Alphanumeric, Rng};
+use rcgen::{generate_simple_self_signed, CertifiedKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 
 #[derive(Debug, Serialize)]
@@ -381,6 +384,13 @@ pub struct LocalCertificateUpsertRequest {
     private_key_pem: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GeneratedLocalCertificateRequest {
+    name: Option<String>,
+    domains: Vec<String>,
+    notes: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SiteSyncLinksResponse {
     total: u32,
@@ -422,6 +432,12 @@ pub struct SiteSyncLinkUpsertRequest {
 struct LocalCertificateSecretDraft {
     certificate_pem: String,
     private_key_pem: String,
+}
+
+#[derive(Debug, Clone)]
+struct GeneratedLocalCertificateDraft {
+    certificate: crate::storage::LocalCertificateUpsert,
+    secret: LocalCertificateSecretDraft,
 }
 
 #[derive(Debug, Serialize)]
@@ -733,6 +749,10 @@ impl ApiServer {
             .route(
                 "/certificates/local",
                 get(list_local_certificates_handler).post(create_local_certificate_handler),
+            )
+            .route(
+                "/certificates/local/generate",
+                axum::routing::post(generate_local_certificate_handler),
             )
             .route(
                 "/certificates/local/:id",
@@ -1213,6 +1233,38 @@ async fn create_local_certificate_handler(
             .await
             .map_err(map_storage_write_error)?;
     }
+    let created = store
+        .load_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::internal("新建证书后未能重新读取记录"))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(LocalCertificateResponse::try_from(created).map_err(ApiError::internal)?),
+    ))
+}
+
+async fn generate_local_certificate_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<GeneratedLocalCertificateRequest>,
+) -> ApiResult<(StatusCode, Json<LocalCertificateResponse>)> {
+    let store = sqlite_store(&state)?;
+    let generated = payload
+        .into_generated_certificate()
+        .map_err(ApiError::bad_request)?;
+    let id = store
+        .insert_local_certificate(&generated.certificate)
+        .await
+        .map_err(map_storage_write_error)?;
+    store
+        .upsert_local_certificate_secret(
+            id,
+            &generated.secret.certificate_pem,
+            &generated.secret.private_key_pem,
+        )
+        .await
+        .map_err(map_storage_write_error)?;
     let created = store
         .load_local_certificate(id)
         .await
@@ -2594,6 +2646,49 @@ impl LocalCertificateUpsertRequest {
     }
 }
 
+impl GeneratedLocalCertificateRequest {
+    fn into_generated_certificate(self) -> Result<GeneratedLocalCertificateDraft, String> {
+        let domains = normalize_string_list(self.domains);
+        if domains.is_empty() {
+            return Err("至少填写一个域名才能生成证书".to_string());
+        }
+
+        let primary_domain = domains[0].clone();
+        let name = self
+            .name
+            .and_then(non_empty_string)
+            .unwrap_or_else(|| default_generated_certificate_name(&primary_domain));
+        let notes = self
+            .notes
+            .and_then(non_empty_string)
+            .unwrap_or_else(|| "系统设置中生成的随机假证书".to_string());
+        let now = unix_timestamp();
+        let valid_to = now.saturating_add(3600 * 24 * 365);
+        let CertifiedKey { cert, key_pair } =
+            generate_simple_self_signed(domains.clone()).map_err(|err| err.to_string())?;
+
+        Ok(GeneratedLocalCertificateDraft {
+            certificate: crate::storage::LocalCertificateUpsert {
+                name,
+                domains,
+                issuer: "WAF Auto Generated".to_string(),
+                valid_from: Some(now),
+                valid_to: Some(valid_to),
+                source_type: "generated".to_string(),
+                provider_remote_id: None,
+                trusted: false,
+                expired: false,
+                notes,
+                last_synced_at: None,
+            },
+            secret: LocalCertificateSecretDraft {
+                certificate_pem: cert.pem(),
+                private_key_pem: key_pair.serialize_pem(),
+            },
+        })
+    }
+}
+
 impl From<crate::storage::SiteSyncLinkEntry> for SiteSyncLinkResponse {
     fn from(value: crate::storage::SiteSyncLinkEntry) -> Self {
         Self {
@@ -2795,6 +2890,36 @@ fn normalize_optional_query_value(value: Option<String>) -> Option<String> {
     })
 }
 
+fn default_generated_certificate_name(primary_domain: &str) -> String {
+    let random_suffix: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(6)
+        .map(char::from)
+        .collect();
+    format!(
+        "fake-{}-{}",
+        sanitize_certificate_name(primary_domain),
+        random_suffix
+    )
+}
+
+fn sanitize_certificate_name(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => ch.to_ascii_lowercase(),
+            '.' | '-' | '_' => ch,
+            _ => '-',
+        })
+        .collect::<String>();
+    let sanitized = sanitized.trim_matches('-').to_string();
+    if sanitized.is_empty() {
+        "generated-cert".to_string()
+    } else {
+        sanitized
+    }
+}
+
 fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
@@ -2960,6 +3085,13 @@ fn non_empty_string(value: String) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn unix_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn runtime_profile_label(profile: RuntimeProfile) -> &'static str {

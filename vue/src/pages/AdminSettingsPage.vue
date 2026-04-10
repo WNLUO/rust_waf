@@ -21,7 +21,7 @@ import type {
   SafeLineTestResponse,
   SettingsPayload,
 } from "../lib/types";
-import { PlugZap, RefreshCw, Save, ServerCog, Settings } from "lucide-vue-next";
+import { PlugZap, RefreshCw, Save, ServerCog, Settings, X } from "lucide-vue-next";
 
 interface SystemSettingsForm extends SettingsPayload {}
 
@@ -33,7 +33,11 @@ const savingMappings = ref(false);
 const loadingCertificates = ref(false);
 const savingCertificate = ref(false);
 const generatingCertificate = ref(false);
+const savingDefaultCertificate = ref(false);
+const readingClipboard = ref(false);
 const deletingCertificateId = ref<number | null>(null);
+const showGenerateModal = ref(false);
+const showUploadModal = ref(false);
 const error = ref("");
 const successMessage = ref("");
 const testResult = ref<SafeLineTestResponse | null>(null);
@@ -76,7 +80,12 @@ const systemSettings = reactive<SystemSettingsForm>({
   },
 });
 
-const certificateForm = reactive<LocalCertificateDraft>({
+const generateCertificateForm = reactive({
+  name: "",
+  domainsText: "",
+});
+
+const uploadCertificateForm = reactive<LocalCertificateDraft>({
   name: "",
   domains: [],
   issuer: "",
@@ -92,10 +101,10 @@ const certificateForm = reactive<LocalCertificateDraft>({
   private_key_pem: "",
 });
 
-const certificateDomainsText = computed({
-  get: () => certificateForm.domains.join(", "),
+const uploadCertificateDomainsText = computed({
+  get: () => uploadCertificateForm.domains.join(", "),
   set: (value: string) => {
-    certificateForm.domains = value
+    uploadCertificateForm.domains = value
       .split(/[\n,]/)
       .map((item) => item.trim())
       .filter(Boolean);
@@ -302,6 +311,131 @@ async function saveMappings() {
   }
 }
 
+function normalizeDomainList(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function defaultGeneratedDomain() {
+  return `fake-${Date.now().toString(36)}.local`;
+}
+
+function defaultCertificateName(primaryDomain?: string) {
+  if (primaryDomain?.trim()) {
+    return `cert-${primaryDomain.trim()}`;
+  }
+  return `cert-${Date.now().toString(36)}`;
+}
+
+function resetGenerateModal() {
+  generateCertificateForm.name = "";
+  generateCertificateForm.domainsText = "";
+}
+
+function resetUploadModal() {
+  uploadCertificateForm.name = "";
+  uploadCertificateForm.domains = [];
+  uploadCertificateForm.issuer = "";
+  uploadCertificateForm.notes = "";
+  uploadCertificateForm.certificate_pem = "";
+  uploadCertificateForm.private_key_pem = "";
+}
+
+function openGenerateModal() {
+  error.value = "";
+  successMessage.value = "";
+  resetGenerateModal();
+  showGenerateModal.value = true;
+}
+
+function closeGenerateModal() {
+  showGenerateModal.value = false;
+}
+
+function closeUploadModal() {
+  showUploadModal.value = false;
+}
+
+function extractPemBlocks(source: string) {
+  const certificateMatches = [
+    ...source.matchAll(
+      /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g,
+    ),
+  ].map((match) => match[0].trim());
+  const privateKeyMatch = source.match(
+    /-----BEGIN (?:RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----/,
+  );
+
+  return {
+    certificate_pem: certificateMatches.join("\n"),
+    private_key_pem: privateKeyMatch?.[0].trim() ?? "",
+  };
+}
+
+async function tryFillCertificateFromClipboard() {
+  if (!navigator.clipboard?.readText) return;
+
+  readingClipboard.value = true;
+  try {
+    const text = await navigator.clipboard.readText();
+    const detected = extractPemBlocks(text);
+    if (detected.certificate_pem && !uploadCertificateForm.certificate_pem?.trim()) {
+      uploadCertificateForm.certificate_pem = detected.certificate_pem;
+    }
+    if (detected.private_key_pem && !uploadCertificateForm.private_key_pem?.trim()) {
+      uploadCertificateForm.private_key_pem = detected.private_key_pem;
+    }
+  } catch {
+    // 浏览器权限或非安全上下文下读取失败时静默降级。
+  } finally {
+    readingClipboard.value = false;
+  }
+}
+
+async function openUploadModal() {
+  error.value = "";
+  successMessage.value = "";
+  resetUploadModal();
+  showUploadModal.value = true;
+  await tryFillCertificateFromClipboard();
+}
+
+async function persistDefaultCertificate(
+  id: number | null,
+  successText = "默认证书已保存。",
+) {
+  savingDefaultCertificate.value = true;
+  error.value = "";
+  successMessage.value = "";
+
+  try {
+    const latest = await fetchSettings();
+    const nextId =
+      typeof id === "number" && Number.isFinite(id) && id > 0 ? id : null;
+    latest.default_certificate_id = nextId;
+    const response = await updateSettings(latest);
+    systemSettings.default_certificate_id = nextId;
+    successMessage.value = successText || response.message;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "默认证书保存失败";
+    await loadSettings();
+  } finally {
+    savingDefaultCertificate.value = false;
+  }
+}
+
+async function handleDefaultCertificateChange(event: Event) {
+  const target = event.target as HTMLSelectElement | null;
+  const rawValue = target?.value ?? "";
+  const nextId =
+    rawValue === "" || rawValue === "null" ? null : Number.parseInt(rawValue, 10);
+  await persistDefaultCertificate(
+    Number.isFinite(nextId as number) ? (nextId as number) : null,
+  );
+}
+
 async function uploadCertificate() {
   savingCertificate.value = true;
   error.value = "";
@@ -309,25 +443,24 @@ async function uploadCertificate() {
 
   try {
     const payload: LocalCertificateDraft = {
-      ...certificateForm,
-      name: certificateForm.name.trim(),
-      domains: certificateForm.domains.map((item) => item.trim()).filter(Boolean),
-      issuer: certificateForm.issuer.trim(),
-      notes: certificateForm.notes.trim(),
-      certificate_pem: certificateForm.certificate_pem?.trim() ?? "",
-      private_key_pem: certificateForm.private_key_pem?.trim() ?? "",
+      ...uploadCertificateForm,
+      name:
+        uploadCertificateForm.name.trim() ||
+        defaultCertificateName(uploadCertificateForm.domains[0]),
+      domains: uploadCertificateForm.domains
+        .map((item) => item.trim())
+        .filter(Boolean),
+      issuer: uploadCertificateForm.issuer.trim(),
+      notes: uploadCertificateForm.notes.trim(),
+      certificate_pem: uploadCertificateForm.certificate_pem?.trim() ?? "",
+      private_key_pem: uploadCertificateForm.private_key_pem?.trim() ?? "",
     };
 
     await createLocalCertificate(payload);
-    certificateForm.name = "";
-    certificateForm.domains = [];
-    certificateForm.issuer = "";
-    certificateForm.notes = "";
-    certificateForm.certificate_pem = "";
-    certificateForm.private_key_pem = "";
-
+    closeUploadModal();
+    resetUploadModal();
     await loadCertificates();
-    successMessage.value = "证书已上传，可在下方设为默认证书。";
+    successMessage.value = "证书已上传。";
   } catch (e) {
     error.value = e instanceof Error ? e.message : "上传本地证书失败";
   } finally {
@@ -341,22 +474,20 @@ async function generateCertificate() {
   successMessage.value = "";
 
   try {
-    const domains = certificateForm.domains.map((item) => item.trim()).filter(Boolean);
+    const domains = normalizeDomainList(generateCertificateForm.domainsText);
+    const normalizedDomains = domains.length ? domains : [defaultGeneratedDomain()];
     const created = await generateLocalCertificate({
-      name: certificateForm.name.trim() || null,
-      domains,
-      notes: certificateForm.notes.trim() || null,
+      name: generateCertificateForm.name.trim() || null,
+      domains: normalizedDomains,
+      notes: "系统设置中生成的随机假证书",
     });
-
-    certificateForm.name = "";
-    certificateForm.domains = [];
-    certificateForm.issuer = "";
-    certificateForm.notes = "";
-    certificateForm.certificate_pem = "";
-    certificateForm.private_key_pem = "";
-
     await loadCertificates();
-    successMessage.value = `已生成随机证书「${created.name}」，可直接在下方设为默认证书。`;
+    await persistDefaultCertificate(
+      created.id,
+      `已生成随机证书「${created.name}」并设为默认证书。`,
+    );
+    closeGenerateModal();
+    resetGenerateModal();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "生成随机证书失败";
   } finally {
@@ -372,7 +503,7 @@ async function removeCertificate(id: number) {
   try {
     const response = await deleteLocalCertificate(id);
     if (systemSettings.default_certificate_id === id) {
-      systemSettings.default_certificate_id = null;
+      await persistDefaultCertificate(null, "已删除证书并清空默认证书。");
     }
     await loadCertificates();
     successMessage.value = response.message;
@@ -504,6 +635,8 @@ onMounted(async () => {
               <span class="text-xs text-slate-500">默认证书</span>
               <select
                 v-model="systemSettings.default_certificate_id"
+                @change="handleDefaultCertificateChange"
+                :disabled="savingDefaultCertificate"
                 class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
               >
                 <option :value="null">未设置</option>
@@ -600,71 +733,32 @@ onMounted(async () => {
           </div>
 
           <div class="mt-3 space-y-4">
-            <div class="grid gap-4 md:grid-cols-2">
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">证书名称</span>
-                <input
-                  v-model="certificateForm.name"
-                  type="text"
-                  placeholder="例如 default-fake-cert"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">域名列表</span>
-                <input
-                  v-model="certificateDomainsText"
-                  type="text"
-                  placeholder="多个域名用逗号分隔，生成假证书时会写入 SAN"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5 md:col-span-2">
-                <span class="text-xs text-slate-500">备注</span>
-                <input
-                  v-model="certificateForm.notes"
-                  type="text"
-                  placeholder="例如：用于 IP 直连时返回的假证书"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5 md:col-span-2">
-                <span class="text-xs text-slate-500">证书 PEM</span>
-                <textarea
-                  v-model="certificateForm.certificate_pem"
-                  rows="8"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5 md:col-span-2">
-                <span class="text-xs text-slate-500">私钥 PEM</span>
-                <textarea
-                  v-model="certificateForm.private_key_pem"
-                  rows="8"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
-                />
-              </label>
+            <div class="rounded-[16px] border border-slate-200 bg-slate-50/80 p-4">
+              <p class="text-sm font-medium text-stone-900">快速操作</p>
+              <p class="mt-1 text-xs leading-5 text-slate-500">
+                生成随机证书会自动设为默认证书；上传证书会弹出表单，并优先尝试从剪切板识别 PEM 内容。
+              </p>
             </div>
 
             <div class="flex flex-wrap items-center gap-2.5">
               <button
-                @click="generateCertificate"
-                :disabled="generatingCertificate || savingCertificate"
+                @click="openGenerateModal"
+                :disabled="generatingCertificate || savingCertificate || savingDefaultCertificate"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <RefreshCw :size="12" :class="{ 'animate-spin': generatingCertificate }" />
-                {{ generatingCertificate ? "生成中..." : "生成随机证书" }}
+                <RefreshCw :size="12" />
+                生成随机证书
               </button>
               <button
-                @click="uploadCertificate"
+                @click="openUploadModal"
                 :disabled="savingCertificate || generatingCertificate"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save :size="12" />
-                {{ savingCertificate ? "上传中..." : "上传证书" }}
+                上传证书
               </button>
               <span class="text-xs leading-5 text-slate-500">
-                可直接填写域名后点“生成随机证书”，也可以继续手动粘贴 PEM 上传。生成或上传后都能在“默认证书”里指定用于 `IP:端口` 或未知 SNI 的回包证书。
+                切换默认证书会立即保存，刷新页面后也会保留。
               </span>
             </div>
 
@@ -709,8 +803,9 @@ onMounted(async () => {
                         当前默认
                       </span>
                       <button
-                        @click="systemSettings.default_certificate_id = certificate.id"
-                        class="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                        @click="persistDefaultCertificate(certificate.id)"
+                        :disabled="savingDefaultCertificate"
+                        class="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         设为默认
                       </button>
@@ -1130,6 +1225,178 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showGenerateModal"
+      class="fixed inset-0 z-[100] flex items-center justify-center px-4 py-8"
+    >
+      <div
+        class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
+        @click="closeGenerateModal"
+      ></div>
+      <div
+        class="relative w-full max-w-xl rounded-xl border border-white/85 bg-[linear-gradient(160deg,rgba(255,250,244,0.98),rgba(244,239,231,0.98))] p-5 shadow-[0_24px_80px_rgba(60,40,20,0.24)]"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm tracking-wide text-emerald-700">证书生成</p>
+            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+              生成随机假证书
+            </h3>
+            <p class="mt-2 text-sm leading-6 text-slate-500">
+              名称和域名都可留空。留空域名时系统会自动补一个 `.local` 域名，并在生成后自动设为默认证书。
+            </p>
+          </div>
+          <button
+            @click="closeGenerateModal"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-emerald-500/40 hover:text-emerald-700"
+          >
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div class="mt-5 grid gap-4">
+          <label class="space-y-1.5">
+            <span class="text-xs text-slate-500">证书名称</span>
+            <input
+              v-model="generateCertificateForm.name"
+              type="text"
+              placeholder="可留空，系统自动命名"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-emerald-500"
+            />
+          </label>
+          <label class="space-y-1.5">
+            <span class="text-xs text-slate-500">域名列表</span>
+            <input
+              v-model="generateCertificateForm.domainsText"
+              type="text"
+              placeholder="多个域名用逗号分隔，可留空"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-emerald-500"
+            />
+          </label>
+        </div>
+
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            @click="generateCertificate"
+            :disabled="generatingCertificate || savingDefaultCertificate"
+            class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw :size="14" :class="{ 'animate-spin': generatingCertificate }" />
+            {{ generatingCertificate ? "生成中..." : "生成并设为默认" }}
+          </button>
+          <button
+            @click="closeGenerateModal"
+            class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white/75 px-4 py-2 text-sm text-stone-700 transition hover:border-slate-300"
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showUploadModal"
+      class="fixed inset-0 z-[100] flex items-center justify-center px-4 py-8"
+    >
+      <div
+        class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
+        @click="closeUploadModal"
+      ></div>
+      <div
+        class="relative w-full max-w-3xl rounded-xl border border-white/85 bg-[linear-gradient(160deg,rgba(255,250,244,0.98),rgba(244,239,231,0.98))] p-5 shadow-[0_24px_80px_rgba(60,40,20,0.24)]"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm tracking-wide text-blue-700">证书上传</p>
+            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+              上传本地证书
+            </h3>
+            <p class="mt-2 text-sm leading-6 text-slate-500">
+              名称和域名可以留空。弹窗打开后会优先尝试从剪切板识别证书 PEM 和私钥 PEM，你也可以手动修改。
+            </p>
+          </div>
+          <button
+            @click="closeUploadModal"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+          >
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div class="mt-5 grid gap-4 md:grid-cols-2">
+          <label class="space-y-1.5">
+            <span class="text-xs text-slate-500">证书名称</span>
+            <input
+              v-model="uploadCertificateForm.name"
+              type="text"
+              placeholder="可留空，系统自动命名"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            />
+          </label>
+          <label class="space-y-1.5">
+            <span class="text-xs text-slate-500">域名列表</span>
+            <input
+              v-model="uploadCertificateDomainsText"
+              type="text"
+              placeholder="多个域名用逗号分隔，可留空"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            />
+          </label>
+          <label class="space-y-1.5 md:col-span-2">
+            <span class="text-xs text-slate-500">备注</span>
+            <input
+              v-model="uploadCertificateForm.notes"
+              type="text"
+              placeholder="例如：用于 IP 直连时返回的假证书"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            />
+          </label>
+          <label class="space-y-1.5 md:col-span-2">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-xs text-slate-500">证书 PEM</span>
+              <button
+                @click="tryFillCertificateFromClipboard"
+                type="button"
+                class="text-xs font-medium text-blue-700 transition hover:text-blue-900"
+              >
+                {{ readingClipboard ? "识别中..." : "重新识别剪切板" }}
+              </button>
+            </div>
+            <textarea
+              v-model="uploadCertificateForm.certificate_pem"
+              rows="8"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
+            />
+          </label>
+          <label class="space-y-1.5 md:col-span-2">
+            <span class="text-xs text-slate-500">私钥 PEM</span>
+            <textarea
+              v-model="uploadCertificateForm.private_key_pem"
+              rows="8"
+              class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
+            />
+          </label>
+        </div>
+
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            @click="uploadCertificate"
+            :disabled="savingCertificate"
+            class="inline-flex items-center gap-2 rounded-lg border border-blue-500/25 bg-white px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Save :size="14" />
+            {{ savingCertificate ? "上传中..." : "确认上传" }}
+          </button>
+          <button
+            @click="closeUploadModal"
+            class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white/75 px-4 py-2 text-sm text-stone-700 transition hover:border-slate-300"
+          >
+            取消
+          </button>
         </div>
       </div>
     </div>

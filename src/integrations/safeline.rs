@@ -41,6 +41,17 @@ pub struct SafeLineSiteSummary {
     pub name: String,
     pub domain: String,
     pub status: String,
+    pub enabled: Option<bool>,
+    pub server_names: Vec<String>,
+    pub ports: Vec<String>,
+    pub ssl_ports: Vec<String>,
+    pub upstreams: Vec<String>,
+    pub ssl_enabled: bool,
+    pub cert_id: Option<i64>,
+    pub cert_type: Option<i64>,
+    pub cert_filename: Option<String>,
+    pub key_filename: Option<String>,
+    pub health_check: Option<bool>,
     pub raw: Value,
 }
 
@@ -1110,6 +1121,20 @@ fn collect_array_candidates<'a>(value: &'a Value, candidates: &mut Vec<&'a Vec<V
 
 fn parse_site_summary(value: &Value) -> Option<SafeLineSiteSummary> {
     let object = value.as_object()?;
+    let server_names = pick_array_strings(object, &["server_names", "hosts"]).unwrap_or_default();
+    let ports = pick_array_strings(object, &["ports"]).unwrap_or_default();
+    let ssl_ports = ports
+        .iter()
+        .filter(|port| port.to_ascii_lowercase().contains("ssl"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let upstreams = pick_array_strings(object, &["upstreams"]).unwrap_or_default();
+    let enabled = pick_bool(object, &["is_enabled", "enabled"]);
+    let cert_id = pick_i64(object, &["cert_id"]);
+    let cert_type = pick_i64(object, &["cert_type"]);
+    let cert_filename = pick_string(object, &["cert_filename"]);
+    let key_filename = pick_string(object, &["key_filename"]);
+    let health_check = pick_bool(object, &["health_check"]);
     let id = pick_string(
         object,
         &["id", "uuid", "site_id", "siteId", "website_id", "uid"],
@@ -1133,16 +1158,41 @@ fn parse_site_summary(value: &Value) -> Option<SafeLineSiteSummary> {
         object,
         &["domain", "hostname", "host", "server", "origin", "upstream"],
     )
-    .or_else(|| pick_first_array_string(object, &["server_names", "hosts"]))
+    .or_else(|| server_names.first().cloned())
     .unwrap_or_default();
-    let status = pick_string(object, &["status", "state", "enabled", "mode"])
+    let status = enabled
+        .map(|value| {
+            if value {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            }
+        })
+        .or_else(|| pick_string(object, &["status", "state", "mode"]))
         .unwrap_or_else(|| "unknown".to_string());
+    let ssl_enabled = !ssl_ports.is_empty()
+        || cert_id.unwrap_or_default() > 0
+        || cert_filename
+            .as_ref()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
 
     Some(SafeLineSiteSummary {
         id,
         name,
         domain,
         status,
+        enabled,
+        server_names,
+        ports,
+        ssl_ports,
+        upstreams,
+        ssl_enabled,
+        cert_id,
+        cert_type,
+        cert_filename,
+        key_filename,
+        health_check,
         raw: value.clone(),
     })
 }
@@ -1390,6 +1440,34 @@ fn pick_i64(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i6
     None
 }
 
+fn pick_bool(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<bool> {
+    for key in keys {
+        let Some(value) = object.get(*key) else {
+            continue;
+        };
+
+        match value {
+            Value::Bool(flag) => return Some(*flag),
+            Value::Number(number) => {
+                if let Some(parsed) = number.as_i64() {
+                    return Some(parsed != 0);
+                }
+            }
+            Value::String(inner) => {
+                let normalized = inner.trim().to_ascii_lowercase();
+                match normalized.as_str() {
+                    "true" | "1" | "yes" | "on" | "enabled" => return Some(true),
+                    "false" | "0" | "no" | "off" | "disabled" => return Some(false),
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
 fn pick_timestamp(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
     for key in keys {
         let Some(value) = object.get(*key) else {
@@ -1586,7 +1664,10 @@ mod tests {
                 "id": 1,
                 "site_name": "api",
                 "host": "api.example.com",
-                "enabled": true
+                "enabled": true,
+                "ports": ["80", "443_ssl"],
+                "upstreams": ["http://127.0.0.1:8080"],
+                "cert_id": 9
             }
         ]);
 
@@ -1594,7 +1675,12 @@ mod tests {
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].id, "1");
         assert_eq!(sites[0].domain, "api.example.com");
-        assert_eq!(sites[0].status, "true");
+        assert_eq!(sites[0].status, "enabled");
+        assert_eq!(sites[0].ports, vec!["80", "443_ssl"]);
+        assert_eq!(sites[0].ssl_ports, vec!["443_ssl"]);
+        assert_eq!(sites[0].upstreams, vec!["http://127.0.0.1:8080"]);
+        assert_eq!(sites[0].cert_id, Some(9));
+        assert!(sites[0].ssl_enabled);
     }
 
     #[test]
@@ -1607,6 +1693,12 @@ mod tests {
                     "title": "portal",
                     "comment": "portal-comment",
                     "server_names": ["portal.example.com", "www.example.com"],
+                    "ports": ["443_ssl"],
+                    "upstreams": ["https://127.0.0.1:9443"],
+                    "cert_type": 2,
+                    "cert_filename": "portal.crt",
+                    "key_filename": "portal.key",
+                    "health_check": true,
                     "mode": 0
                 }
             ]
@@ -1618,6 +1710,14 @@ mod tests {
         assert_eq!(sites[0].name, "portal");
         assert_eq!(sites[0].domain, "portal.example.com");
         assert_eq!(sites[0].status, "0");
+        assert_eq!(sites[0].server_names, vec!["portal.example.com", "www.example.com"]);
+        assert_eq!(sites[0].ssl_ports, vec!["443_ssl"]);
+        assert_eq!(sites[0].upstreams, vec!["https://127.0.0.1:9443"]);
+        assert_eq!(sites[0].cert_type, Some(2));
+        assert_eq!(sites[0].cert_filename.as_deref(), Some("portal.crt"));
+        assert_eq!(sites[0].key_filename.as_deref(), Some("portal.key"));
+        assert_eq!(sites[0].health_check, Some(true));
+        assert!(sites[0].ssl_enabled);
     }
 
     #[test]
@@ -1643,6 +1743,8 @@ mod tests {
         assert_eq!(sites[0].id, "13");
         assert_eq!(sites[0].name, "2tos");
         assert_eq!(sites[0].domain, "2tos.cn");
+        assert_eq!(sites[0].enabled, Some(true));
+        assert_eq!(sites[0].status, "enabled");
     }
 
     #[test]

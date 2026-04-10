@@ -10,6 +10,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -242,6 +243,17 @@ pub struct SafeLineSiteResponse {
     name: String,
     domain: String,
     status: String,
+    enabled: Option<bool>,
+    server_names: Vec<String>,
+    ports: Vec<String>,
+    ssl_ports: Vec<String>,
+    upstreams: Vec<String>,
+    ssl_enabled: bool,
+    cert_id: Option<i64>,
+    cert_type: Option<i64>,
+    cert_filename: Option<String>,
+    key_filename: Option<String>,
+    health_check: Option<bool>,
     raw: serde_json::Value,
 }
 
@@ -1587,6 +1599,17 @@ impl From<SafeLineSiteSummary> for SafeLineSiteResponse {
             name: value.name,
             domain: value.domain,
             status: value.status,
+            enabled: value.enabled,
+            server_names: value.server_names,
+            ports: value.ports,
+            ssl_ports: value.ssl_ports,
+            upstreams: value.upstreams,
+            ssl_enabled: value.ssl_enabled,
+            cert_id: value.cert_id,
+            cert_type: value.cert_type,
+            cert_filename: value.cert_filename,
+            key_filename: value.key_filename,
+            health_check: value.health_check,
             raw: value.raw,
         }
     }
@@ -1613,6 +1636,7 @@ impl SafeLineMappingsUpdateRequest {
         self,
     ) -> Result<Vec<crate::storage::SafeLineSiteMappingUpsert>, String> {
         let mut primary_count = 0usize;
+        let mut seen_site_ids = HashSet::new();
         let mut mappings = Vec::with_capacity(self.mappings.len());
 
         for item in self.mappings {
@@ -1625,11 +1649,17 @@ impl SafeLineMappingsUpdateRequest {
             if safeline_site_id.is_empty() {
                 return Err("映射里的雷池站点 ID 不能为空".to_string());
             }
+            if !seen_site_ids.insert(safeline_site_id.clone()) {
+                return Err(format!("雷池站点 {} 存在重复映射", safeline_site_id));
+            }
             if local_alias.is_empty() {
                 return Err(format!("站点 {} 的本地别名不能为空", safeline_site_id));
             }
             if item.is_primary {
                 primary_count += 1;
+                if !item.enabled {
+                    return Err(format!("主站点 {} 必须保持启用状态", safeline_site_id));
+                }
             }
 
             mappings.push(crate::storage::SafeLineSiteMappingUpsert {
@@ -2135,5 +2165,52 @@ mod tests {
         }
         .into_query();
         assert!(invalid_blocked_sort.is_err());
+    }
+
+    #[test]
+    fn test_safeline_mapping_update_rejects_duplicate_site_ids() {
+        let payload = SafeLineMappingsUpdateRequest {
+            mappings: vec![
+                SafeLineMappingUpsertRequest {
+                    safeline_site_id: "site-1".to_string(),
+                    safeline_site_name: "portal".to_string(),
+                    safeline_site_domain: "portal.example.com".to_string(),
+                    local_alias: "门户".to_string(),
+                    enabled: true,
+                    is_primary: false,
+                    notes: "".to_string(),
+                },
+                SafeLineMappingUpsertRequest {
+                    safeline_site_id: "site-1".to_string(),
+                    safeline_site_name: "portal-dup".to_string(),
+                    safeline_site_domain: "portal-dup.example.com".to_string(),
+                    local_alias: "门户副本".to_string(),
+                    enabled: true,
+                    is_primary: false,
+                    notes: "".to_string(),
+                },
+            ],
+        };
+
+        let error = payload.into_storage_mappings().unwrap_err();
+        assert!(error.contains("重复映射"));
+    }
+
+    #[test]
+    fn test_safeline_mapping_update_rejects_disabled_primary() {
+        let payload = SafeLineMappingsUpdateRequest {
+            mappings: vec![SafeLineMappingUpsertRequest {
+                safeline_site_id: "site-1".to_string(),
+                safeline_site_name: "portal".to_string(),
+                safeline_site_domain: "portal.example.com".to_string(),
+                local_alias: "门户".to_string(),
+                enabled: false,
+                is_primary: true,
+                notes: "".to_string(),
+            }],
+        };
+
+        let error = payload.into_storage_mappings().unwrap_err();
+        assert!(error.contains("必须保持启用状态"));
     }
 }

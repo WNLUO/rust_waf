@@ -1,20 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --color-cyber-bg: #f4efe7;
-  --color-cyber-surface-strong: #f7efe1;
-  --color-cyber-border: #dbc8b0;
-  --color-cyber-accent: #b3541e;
-  --color-cyber-accent-strong: #7f2f12;
-  --color-cyber-success: #2d6a4f;
-  --color-cyber-error: #a61e4d;
-  --color-cyber-muted: #7a6c5d;
-
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', monospace;
-  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
-  --font-display: 'STSong', 'Songti SC', 'Noto Serif SC', serif;
-
-  --shadow-cyber: 0 10px 24px rgba(127, 47, 18, 0.08);
+  --font-sans: 'Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', sans-serif;
 }
 
 @layer base {
@@ -31,10 +19,9 @@
   }
 
   body {
-    background-color: var(--color-cyber-bg);
-    color: #2b2118;
+    background-color: #f8fafc; /* bg-slate-50 */
+    color: #0f172a; /* text-slate-900 */
     font-family: var(--font-sans);
-    background-image: linear-gradient(180deg, #faf7f2 0%, #f3ede5 100%);
     min-width: 320px;
   }
 
@@ -48,10 +35,5 @@
   a {
     color: inherit;
     text-decoration: none;
-  }
-
-  ::selection {
-    background: rgba(179, 84, 30, 0.2);
-    color: #2b2118;
   }
 }

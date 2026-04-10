@@ -139,6 +139,27 @@ pub struct Rule {
     pub pattern: String,
     pub action: RuleAction,
     pub severity: Severity,
+    #[serde(default)]
+    pub response_template: Option<RuleResponseTemplate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleResponseTemplate {
+    pub status_code: u16,
+    #[serde(default = "default_rule_response_content_type")]
+    pub content_type: String,
+    #[serde(default)]
+    pub gzip: bool,
+    #[serde(default)]
+    pub body_text: String,
+    #[serde(default)]
+    pub headers: Vec<RuleResponseHeader>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuleResponseHeader {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,6 +173,7 @@ pub enum RuleAction {
     Allow,
     Block,
     Alert,
+    Respond,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,6 +207,7 @@ impl RuleAction {
             Self::Allow => "allow",
             Self::Block => "block",
             Self::Alert => "alert",
+            Self::Respond => "respond",
         }
     }
 
@@ -193,6 +216,7 @@ impl RuleAction {
             "allow" => Ok(Self::Allow),
             "block" => Ok(Self::Block),
             "alert" => Ok(Self::Alert),
+            "respond" => Ok(Self::Respond),
             other => Err(format!("Unsupported rule action '{}'", other)),
         }
     }
@@ -249,6 +273,10 @@ impl Default for Config {
         }
         .normalized()
     }
+}
+
+fn default_rule_response_content_type() -> String {
+    "text/plain; charset=utf-8".to_string()
 }
 
 impl Config {

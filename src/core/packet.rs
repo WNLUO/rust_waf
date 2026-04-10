@@ -27,6 +27,7 @@ pub struct InspectionResult {
     pub layer: InspectionLayer,
     pub action: InspectionAction,
     pub persist_blocked_ip: bool,
+    pub custom_response: Option<CustomHttpResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,6 +41,14 @@ pub enum InspectionAction {
     Allow,
     Block,
     Alert,
+    Respond,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomHttpResponse {
+    pub status_code: u16,
+    pub headers: Vec<(String, String)>,
+    pub body: Vec<u8>,
 }
 
 impl PacketInfo {
@@ -66,6 +75,7 @@ impl InspectionResult {
             layer,
             action: InspectionAction::Allow,
             persist_blocked_ip: false,
+            custom_response: None,
         }
     }
 
@@ -76,6 +86,7 @@ impl InspectionResult {
             layer,
             action: InspectionAction::Allow,
             persist_blocked_ip: false,
+            custom_response: None,
         }
     }
 
@@ -86,6 +97,7 @@ impl InspectionResult {
             layer,
             action: InspectionAction::Alert,
             persist_blocked_ip: false,
+            custom_response: None,
         }
     }
 
@@ -96,6 +108,22 @@ impl InspectionResult {
             layer,
             action: InspectionAction::Block,
             persist_blocked_ip: false,
+            custom_response: None,
+        }
+    }
+
+    pub fn respond(
+        layer: InspectionLayer,
+        reason: impl Into<String>,
+        custom_response: CustomHttpResponse,
+    ) -> Self {
+        Self {
+            blocked: true,
+            reason: reason.into(),
+            layer,
+            action: InspectionAction::Respond,
+            persist_blocked_ip: false,
+            custom_response: Some(custom_response),
         }
     }
 
@@ -107,7 +135,11 @@ impl InspectionResult {
     }
 
     pub fn should_persist_event(&self) -> bool {
-        self.blocked || matches!(self.action, InspectionAction::Alert)
+        self.blocked
+            || matches!(
+                self.action,
+                InspectionAction::Alert | InspectionAction::Respond
+            )
     }
 
     pub fn event_action(&self) -> &'static str {
@@ -115,6 +147,7 @@ impl InspectionResult {
             InspectionAction::Allow => "allow",
             InspectionAction::Block => "block",
             InspectionAction::Alert => "alert",
+            InspectionAction::Respond => "respond",
         }
     }
 }

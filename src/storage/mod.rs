@@ -1,4 +1,4 @@
-use crate::config::{Config, Rule, RuleAction, RuleLayer, Severity};
+use crate::config::{Config, Rule, RuleAction, RuleLayer, RuleResponseTemplate, Severity};
 use anyhow::Result;
 use log::{debug, warn};
 use serde_json;
@@ -489,9 +489,9 @@ impl SqliteStore {
             let result = sqlx::query(
                 r#"
                 INSERT OR IGNORE INTO rules (
-                    id, name, enabled, layer, pattern, action, severity, updated_at
+                    id, name, enabled, layer, pattern, action, severity, response_template_json, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&rule.id)
@@ -501,6 +501,7 @@ impl SqliteStore {
             .bind(&rule.pattern)
             .bind(rule.action.as_str())
             .bind(rule.severity.as_str())
+            .bind(serialize_rule_response_template(rule.response_template.as_ref())?)
             .bind(unix_timestamp())
             .execute(&self.pool)
             .await?;
@@ -514,7 +515,7 @@ impl SqliteStore {
     pub async fn load_rules(&self) -> Result<Vec<Rule>> {
         let rows = sqlx::query_as::<_, StoredRuleRow>(
             r#"
-            SELECT id, name, enabled, layer, pattern, action, severity
+            SELECT id, name, enabled, layer, pattern, action, severity, response_template_json
             FROM rules
             ORDER BY id ASC
             "#,
@@ -1386,7 +1387,7 @@ impl SqliteStore {
     pub async fn load_rule(&self, id: &str) -> Result<Option<Rule>> {
         let row = sqlx::query_as::<_, StoredRuleRow>(
             r#"
-            SELECT id, name, enabled, layer, pattern, action, severity
+            SELECT id, name, enabled, layer, pattern, action, severity, response_template_json
             FROM rules
             WHERE id = ?
             "#,
@@ -1403,9 +1404,9 @@ impl SqliteStore {
         let result = sqlx::query(
             r#"
             INSERT OR IGNORE INTO rules (
-                id, name, enabled, layer, pattern, action, severity, updated_at
+                id, name, enabled, layer, pattern, action, severity, response_template_json, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&rule.id)
@@ -1415,6 +1416,7 @@ impl SqliteStore {
         .bind(&rule.pattern)
         .bind(rule.action.as_str())
         .bind(rule.severity.as_str())
+        .bind(serialize_rule_response_template(rule.response_template.as_ref())?)
         .bind(unix_timestamp())
         .execute(&self.pool)
         .await?;
@@ -1426,8 +1428,8 @@ impl SqliteStore {
     pub async fn upsert_rule(&self, rule: &Rule) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO rules (id, name, enabled, layer, pattern, action, severity, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO rules (id, name, enabled, layer, pattern, action, severity, response_template_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 enabled = excluded.enabled,
@@ -1435,6 +1437,7 @@ impl SqliteStore {
                 pattern = excluded.pattern,
                 action = excluded.action,
                 severity = excluded.severity,
+                response_template_json = excluded.response_template_json,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -1445,6 +1448,7 @@ impl SqliteStore {
         .bind(&rule.pattern)
         .bind(rule.action.as_str())
         .bind(rule.severity.as_str())
+        .bind(serialize_rule_response_template(rule.response_template.as_ref())?)
         .bind(unix_timestamp())
         .execute(&self.pool)
         .await?;
@@ -1613,6 +1617,7 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             pattern TEXT NOT NULL,
             action TEXT NOT NULL,
             severity TEXT NOT NULL,
+            response_template_json TEXT,
             updated_at INTEGER NOT NULL
         );
 
@@ -1811,6 +1816,7 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     for statement in [
         "ALTER TABLE blocked_ips ADD COLUMN provider TEXT",
         "ALTER TABLE blocked_ips ADD COLUMN provider_remote_id TEXT",
+        "ALTER TABLE rules ADD COLUMN response_template_json TEXT",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {
@@ -2217,6 +2223,7 @@ struct StoredRuleRow {
     pattern: String,
     action: String,
     severity: String,
+    response_template_json: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -2236,8 +2243,28 @@ impl TryFrom<StoredRuleRow> for Rule {
             pattern: value.pattern,
             action: parse_rule_action(&value.action)?,
             severity: parse_severity(&value.severity)?,
+            response_template: deserialize_rule_response_template(
+                value.response_template_json.as_deref(),
+            )?,
         })
     }
+}
+
+fn serialize_rule_response_template(
+    template: Option<&RuleResponseTemplate>,
+) -> Result<Option<String>> {
+    template
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(Into::into)
+}
+
+fn deserialize_rule_response_template(value: Option<&str>) -> Result<Option<RuleResponseTemplate>> {
+    value
+        .filter(|raw| !raw.trim().is_empty())
+        .map(serde_json::from_str::<RuleResponseTemplate>)
+        .transpose()
+        .map_err(Into::into)
 }
 
 impl TryFrom<StoredAppConfigRow> for Config {
@@ -2434,6 +2461,7 @@ mod tests {
                 pattern: "(?i)union\\s+select".to_string(),
                 action: RuleAction::Block,
                 severity: Severity::High,
+                response_template: None,
             },
             Rule {
                 id: "rule-2".to_string(),
@@ -2443,6 +2471,7 @@ mod tests {
                 pattern: "scan".to_string(),
                 action: RuleAction::Alert,
                 severity: Severity::Medium,
+                response_template: None,
             },
         ];
 
@@ -2469,6 +2498,7 @@ mod tests {
             pattern: "(?i)select".to_string(),
             action: RuleAction::Alert,
             severity: Severity::Critical,
+            response_template: None,
         };
         store.upsert_rule(&updated_rule).await.unwrap();
         let fetched_updated = store.load_rule("rule-1").await.unwrap().unwrap();
@@ -2486,6 +2516,7 @@ mod tests {
                 pattern: "syn".to_string(),
                 action: RuleAction::Block,
                 severity: Severity::Low,
+                response_template: None,
             })
             .await
             .unwrap();

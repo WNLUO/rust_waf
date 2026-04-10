@@ -1,5 +1,6 @@
 use crate::config::{
-    Config, GatewayConfig, Http3Config, L4Config, Rule, RuntimeProfile, SafeLineConfig,
+    Config, GatewayConfig, Http3Config, L4Config, Rule, RuleResponseHeader, RuleResponseTemplate,
+    RuntimeProfile, SafeLineConfig,
 };
 use crate::core::WafContext;
 use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
@@ -570,6 +571,7 @@ pub struct RuleResponse {
     pattern: String,
     action: String,
     severity: String,
+    response_template: Option<RuleResponseTemplatePayload>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -581,6 +583,23 @@ pub struct RuleUpsertRequest {
     pattern: String,
     action: String,
     severity: String,
+    response_template: Option<RuleResponseTemplatePayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleResponseTemplatePayload {
+    status_code: u16,
+    content_type: String,
+    gzip: bool,
+    body_text: String,
+    #[serde(default)]
+    headers: Vec<RuleResponseHeaderPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleResponseHeaderPayload {
+    key: String,
+    value: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1929,6 +1948,9 @@ impl RuleResponse {
             pattern: rule.pattern,
             action: rule.action.as_str().to_string(),
             severity: rule.severity.as_str().to_string(),
+            response_template: rule
+                .response_template
+                .map(RuleResponseTemplatePayload::from_template),
         }
     }
 }
@@ -2765,7 +2787,54 @@ impl RuleUpsertRequest {
                 .map_err(|err| err.to_string())?,
             severity: crate::config::Severity::parse(&self.severity)
                 .map_err(|err| err.to_string())?,
+            response_template: self.response_template.map(Into::into),
         })
+    }
+}
+
+impl RuleResponseTemplatePayload {
+    fn from_template(template: RuleResponseTemplate) -> Self {
+        Self {
+            status_code: template.status_code,
+            content_type: template.content_type,
+            gzip: template.gzip,
+            body_text: template.body_text,
+            headers: template
+                .headers
+                .into_iter()
+                .map(RuleResponseHeaderPayload::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<RuleResponseTemplatePayload> for RuleResponseTemplate {
+    fn from(value: RuleResponseTemplatePayload) -> Self {
+        Self {
+            status_code: value.status_code,
+            content_type: value.content_type.trim().to_string(),
+            gzip: value.gzip,
+            body_text: value.body_text,
+            headers: value.headers.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<RuleResponseHeader> for RuleResponseHeaderPayload {
+    fn from(value: RuleResponseHeader) -> Self {
+        Self {
+            key: value.key,
+            value: value.value,
+        }
+    }
+}
+
+impl From<RuleResponseHeaderPayload> for RuleResponseHeader {
+    fn from(value: RuleResponseHeaderPayload) -> Self {
+        Self {
+            key: value.key.trim().to_string(),
+            value: value.value,
+        }
     }
 }
 
@@ -3245,6 +3314,7 @@ mod tests {
             pattern: "probe".to_string(),
             action: RuleAction::Alert,
             severity: Severity::Medium,
+            response_template: None,
         });
 
         assert_eq!(response.id, "rule-2");

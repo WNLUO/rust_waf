@@ -932,6 +932,16 @@ async fn handle_http3_request(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
+        if let Some(response) = inspection_result.custom_response.as_ref() {
+            send_http3_response(
+                &mut stream,
+                response.status_code,
+                &response.headers,
+                response.body.clone(),
+            )
+            .await?;
+            return Ok(());
+        }
         send_http3_response(
             &mut stream,
             403,
@@ -1467,6 +1477,18 @@ async fn handle_http1_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
+        if let Some(response) = inspection_result.custom_response.as_ref() {
+            http1_handler
+                .write_response_with_headers(
+                    &mut stream,
+                    response.status_code,
+                    http_status_text(response.status_code),
+                    &response.headers,
+                    &response.body,
+                )
+                .await?;
+            return Ok(());
+        }
         http1_handler
             .write_response(
                 &mut stream,
@@ -1629,6 +1651,13 @@ async fn handle_http2_connection(
                         if let Some(metrics) = context.metrics.as_ref() {
                             metrics.record_block(inspection_result.layer.clone());
                         }
+                        if let Some(response) = inspection_result.custom_response.as_ref() {
+                            return Ok(Http2Response {
+                                status_code: response.status_code,
+                                headers: response.headers.clone(),
+                                body: response.body.clone(),
+                            });
+                        }
                         return Ok(Http2Response {
                             status_code: 403,
                             headers: vec![],
@@ -1753,6 +1782,33 @@ fn inspect_application_layers(
     InspectionResult::allow(InspectionLayer::L7)
 }
 
+fn http_status_text(status_code: u16) -> &'static str {
+    match status_code {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        410 => "Gone",
+        413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
+        418 => "I'm a teapot",
+        421 => "Misdirected Request",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "OK",
+    }
+}
+
 fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> InspectionResult {
     let rule_engine_guard = context
         .rule_engine
@@ -1774,6 +1830,13 @@ fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> InspectionResu
             }
             InspectionAction::Allow => {
                 debug!("L4 allow rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Respond => {
+                debug!(
+                    "L4 respond rule matched unexpectedly: {}",
+                    rule_result.reason
+                );
                 return rule_result;
             }
             InspectionAction::Block => {}
@@ -1808,6 +1871,10 @@ fn inspect_l7_rules(
             }
             InspectionAction::Allow => {
                 debug!("L7 allow rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Respond => {
+                debug!("L7 respond rule matched: {}", rule_result.reason);
                 return rule_result;
             }
             InspectionAction::Block => {}
@@ -2279,6 +2346,7 @@ mod tests {
             pattern: r"protocol=UDP".to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
 
@@ -2297,6 +2365,7 @@ mod tests {
             pattern: r"GET /admin".to_string(),
             action: RuleAction::Block,
             severity: Severity::High,
+            response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
         let packet = PacketInfo {
@@ -2331,6 +2400,7 @@ mod tests {
             pattern: r"protocol=UDP".to_string(),
             action: RuleAction::Alert,
             severity: Severity::Medium,
+            response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
 
@@ -2350,6 +2420,7 @@ mod tests {
             pattern: r"GET /health".to_string(),
             action: RuleAction::Allow,
             severity: Severity::Low,
+            response_template: None,
         };
         let context = WafContext::new(test_config(vec![rule])).await.unwrap();
         let packet = PacketInfo {

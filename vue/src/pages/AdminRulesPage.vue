@@ -24,6 +24,14 @@ const error = ref("");
 const rulesPayload = ref<RulesResponse>({ rules: [] });
 const isRuleModalOpen = ref(false);
 
+const defaultResponseTemplate = () => ({
+  status_code: 403,
+  content_type: "text/html; charset=utf-8",
+  gzip: true,
+  body_text: "",
+  headers: [],
+});
+
 const ruleForm = reactive<RuleDraft>({
   id: "",
   name: "",
@@ -32,6 +40,7 @@ const ruleForm = reactive<RuleDraft>({
   pattern: "",
   action: "block",
   severity: "high",
+  response_template: defaultResponseTemplate(),
 });
 
 const ruleFilters = reactive({
@@ -89,22 +98,48 @@ const openCreateRule = () => {
     pattern: "",
     action: "block",
     severity: "high",
+    response_template: defaultResponseTemplate(),
   });
   isRuleModalOpen.value = true;
 };
 
 const openEditRule = (rule: RuleItem) => {
-  Object.assign(ruleForm, rule);
+  Object.assign(ruleForm, {
+    ...rule,
+    response_template: rule.response_template
+      ? {
+          ...rule.response_template,
+          headers: [...rule.response_template.headers],
+        }
+      : defaultResponseTemplate(),
+  });
   isRuleModalOpen.value = true;
 };
 
 const handleCreateOrUpdateRule = async () => {
   saving.value = true;
   try {
+    const payload: RuleDraft = {
+      ...ruleForm,
+      response_template:
+        ruleForm.layer === "l7" && ruleForm.action === "respond"
+          ? {
+              status_code: Number(ruleForm.response_template?.status_code || 403),
+              content_type:
+                ruleForm.response_template?.content_type ||
+                "text/html; charset=utf-8",
+              gzip: Boolean(ruleForm.response_template?.gzip),
+              body_text: ruleForm.response_template?.body_text || "",
+              headers: (ruleForm.response_template?.headers || []).filter(
+                (item) => item.key.trim(),
+              ),
+            }
+          : null,
+    };
     if (ruleForm.id) {
-      await updateRule(ruleForm);
+      await updateRule(payload);
     } else {
-      await createRule(ruleForm);
+      await createRule(payload);
     }
     isRuleModalOpen.value = false;
     await loadRules();
@@ -113,6 +148,20 @@ const handleCreateOrUpdateRule = async () => {
   } finally {
     saving.value = false;
   }
+};
+
+const onActionChange = () => {
+  if (ruleForm.layer !== "l7" && ruleForm.action === "respond") {
+    ruleForm.action = "block";
+  }
+};
+
+const addResponseHeader = () => {
+  ruleForm.response_template?.headers.push({ key: "", value: "" });
+};
+
+const removeResponseHeader = (index: number) => {
+  ruleForm.response_template?.headers.splice(index, 1);
 };
 
 const toggleRuleStatus = async (rule: RuleItem) => {
@@ -188,7 +237,7 @@ onMounted(loadRules);
           <option value="block">拦截</option>
           <option value="allow">放行</option>
           <option value="alert">告警</option>
-          <option value="log">记录</option>
+          <option value="respond">自定义响应</option>
         </select>
         <select
           v-model="ruleFilters.severity"
@@ -339,6 +388,7 @@ onMounted(loadRules);
               <label class="text-sm text-slate-500">层级</label>
               <select
                 v-model="ruleForm.layer"
+                @change="onActionChange"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
               >
                 <option value="l4">四层</option>
@@ -363,12 +413,15 @@ onMounted(loadRules);
               <label class="text-sm text-slate-500">动作</label>
               <select
                 v-model="ruleForm.action"
+                @change="onActionChange"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
               >
                 <option value="block">拦截</option>
                 <option value="allow">放行</option>
                 <option value="alert">告警</option>
-                <option value="log">记录</option>
+                <option value="respond" :disabled="ruleForm.layer !== 'l7'">
+                  自定义响应
+                </option>
               </select>
             </div>
           </div>
@@ -381,6 +434,103 @@ onMounted(loadRules);
               class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-blue-500"
               required
             ></textarea>
+          </div>
+
+          <div
+            v-if="ruleForm.layer === 'l7' && ruleForm.action === 'respond'"
+            class="space-y-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-4"
+          >
+            <div>
+              <p class="text-sm font-medium text-stone-900">命中后直接回包</p>
+              <p class="text-xs text-slate-500">
+                这里写原始文本内容，服务端会按需压缩并自动补齐
+                `Content-Encoding`。
+              </p>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="space-y-2">
+                <label class="text-sm text-slate-500">HTTP 状态码</label>
+                <input
+                  v-model.number="ruleForm.response_template!.status_code"
+                  type="number"
+                  min="100"
+                  max="599"
+                  class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                />
+              </div>
+
+              <div class="space-y-2">
+                <label class="text-sm text-slate-500">Content-Type</label>
+                <input
+                  v-model="ruleForm.response_template!.content_type"
+                  type="text"
+                  class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <label class="text-sm text-slate-500">响应内容</label>
+              <textarea
+                v-model="ruleForm.response_template!.body_text"
+                rows="8"
+                class="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-blue-500"
+                placeholder="例如返回一段 HTML、JSON 或说明文本"
+              ></textarea>
+            </div>
+
+            <label
+              class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white/80 p-4"
+            >
+              <input
+                v-model="ruleForm.response_template!.gzip"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
+              <span class="text-sm text-stone-800">
+                自动 gzip 压缩并添加 `Content-Encoding: gzip`
+              </span>
+            </label>
+
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <label class="text-sm text-slate-500">附加响应头</label>
+                <button
+                  type="button"
+                  @click="addResponseHeader"
+                  class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                >
+                  添加 Header
+                </button>
+              </div>
+
+              <div
+                v-for="(header, index) in ruleForm.response_template!.headers"
+                :key="index"
+                class="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+              >
+                <input
+                  v-model="header.key"
+                  type="text"
+                  class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                  placeholder="Header 名称"
+                />
+                <input
+                  v-model="header.value"
+                  type="text"
+                  class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+                  placeholder="Header 值"
+                />
+                <button
+                  type="button"
+                  @click="removeResponseHeader(index)"
+                  class="rounded-full border border-red-500/20 px-3 py-2 text-xs text-red-600 transition hover:bg-red-500/8"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
           </div>
 
           <label

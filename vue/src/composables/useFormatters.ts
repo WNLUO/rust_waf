@@ -9,7 +9,7 @@ const actionMap: Record<string, string> = {
   block: "拦截",
   allow: "放行",
   alert: "告警",
-  log: "记录",
+  respond: "自定义响应",
 };
 
 const layerMap: Record<string, string> = {

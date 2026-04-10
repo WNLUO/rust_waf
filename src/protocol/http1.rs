@@ -178,20 +178,57 @@ impl Http1Handler {
     where
         W: AsyncWriteExt + Unpin,
     {
-        let response = format!(
-            "HTTP/1.1 {} {}\r\n\
-             Content-Type: text/plain\r\n\
-             Content-Length: {}\r\n\
-             Connection: close\r\n\
-             \r\n\
-             {}",
+        self.write_response_with_headers(
+            writer,
             status_code,
             status_text,
-            body.len(),
-            String::from_utf8_lossy(body)
-        );
+            &[("Content-Type".to_string(), "text/plain".to_string())],
+            body,
+        )
+        .await
+    }
 
-        writer.write_all(response.as_bytes()).await?;
+    pub async fn write_response_with_headers<W>(
+        &self,
+        writer: &mut W,
+        status_code: u16,
+        status_text: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<(), ProtocolError>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let mut response = format!("HTTP/1.1 {} {}\r\n", status_code, status_text).into_bytes();
+        let mut has_content_type = false;
+        let mut has_connection = false;
+        let mut has_content_length = false;
+
+        for (key, value) in headers {
+            if key.eq_ignore_ascii_case("content-type") {
+                has_content_type = true;
+            } else if key.eq_ignore_ascii_case("connection") {
+                has_connection = true;
+            } else if key.eq_ignore_ascii_case("content-length") {
+                has_content_length = true;
+            }
+            response.extend_from_slice(format!("{}: {}\r\n", key, value).as_bytes());
+        }
+
+        if !has_content_type {
+            response.extend_from_slice(b"Content-Type: text/plain\r\n");
+        }
+        if !has_content_length {
+            response.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+        }
+        if !has_connection {
+            response.extend_from_slice(b"Connection: close\r\n");
+        }
+
+        response.extend_from_slice(b"\r\n");
+        response.extend_from_slice(body);
+
+        writer.write_all(&response).await?;
         writer.flush().await?;
 
         debug!("Wrote HTTP/1.1 response: {} {}", status_code, status_text);

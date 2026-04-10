@@ -37,6 +37,7 @@ export interface RuleItem {
   pattern: string;
   action: string;
   severity: string;
+  response_template?: RuleResponseTemplate | null;
 }
 
 export interface RuleDraft {
@@ -47,6 +48,20 @@ export interface RuleDraft {
   pattern: string;
   action: string;
   severity: string;
+  response_template?: RuleResponseTemplate | null;
+}
+
+export interface RuleResponseHeader {
+  key: string;
+  value: string;
+}
+
+export interface RuleResponseTemplate {
+  status_code: number;
+  content_type: string;
+  gzip: boolean;
+  body_text: string;
+  headers: RuleResponseHeader[];
 }
 
 export interface RulesResponse {

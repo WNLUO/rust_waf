@@ -53,9 +53,6 @@ const systemSettings = reactive<SystemSettingsForm>({
   default_certificate_id: null,
   upstream_endpoint: "",
   api_endpoint: "127.0.0.1:3000",
-  emergency_mode: false,
-  sqlite_persistence: true,
-  notify_by_sound: false,
   notification_level: "critical",
   retain_days: 30,
   notes: "",
@@ -111,19 +108,9 @@ const uploadCertificateDomainsText = computed({
   },
 });
 
-const blocklistIpGroupIdsText = computed({
-  get: () => systemSettings.safeline.blocklist_ip_group_ids.join(", "),
-  set: (value: string) => {
-    systemSettings.safeline.blocklist_ip_group_ids = value
-      .split(/[\n,]/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  },
-});
-
 function toPlainSafeLineSettings() {
   return {
-    enabled: systemSettings.safeline.enabled,
+    enabled: true,
     auto_sync_events: systemSettings.safeline.auto_sync_events,
     auto_sync_blocked_ips_push:
       systemSettings.safeline.auto_sync_blocked_ips_push,
@@ -153,9 +140,6 @@ function toPlainSettingsPayload(): SettingsPayload {
     default_certificate_id: systemSettings.default_certificate_id,
     upstream_endpoint: systemSettings.upstream_endpoint,
     api_endpoint: systemSettings.api_endpoint,
-    emergency_mode: systemSettings.emergency_mode,
-    sqlite_persistence: systemSettings.sqlite_persistence,
-    notify_by_sound: systemSettings.notify_by_sound,
     notification_level: systemSettings.notification_level,
     retain_days: systemSettings.retain_days,
     notes: systemSettings.notes,
@@ -574,70 +558,70 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="mt-3 grid gap-4 md:grid-cols-3">
-            <label class="space-y-1.5">
+          <div class="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">网关名称</span>
               <input
                 v-model="systemSettings.gateway_name"
                 type="text"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">自动刷新频率（秒）</span>
               <input
                 v-model.number="systemSettings.auto_refresh_seconds"
                 type="number"
                 min="3"
                 max="60"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">统一 HTTPS 入口</span>
               <input
                 v-model="systemSettings.https_listen_addr"
                 type="text"
                 placeholder="例如 0.0.0.0:660"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">控制面 API 地址</span>
               <input
                 v-model="systemSettings.api_endpoint"
                 type="text"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">事件保留天数</span>
               <input
                 v-model.number="systemSettings.retain_days"
                 type="number"
                 min="1"
                 max="365"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">通知级别</span>
               <select
                 v-model="systemSettings.notification_level"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               >
                 <option value="critical">仅高风险事件</option>
                 <option value="blocked_only">仅拦截事件</option>
                 <option value="all">全部事件</option>
               </select>
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1">
               <span class="text-xs text-slate-500">默认证书</span>
               <select
                 v-model="systemSettings.default_certificate_id"
                 @change="handleDefaultCertificateChange"
                 :disabled="savingDefaultCertificate"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               >
                 <option :value="null">未设置</option>
                 <option
@@ -649,70 +633,17 @@ onMounted(async () => {
                 </option>
               </select>
             </label>
-            <label class="space-y-1.5">
+            <label class="space-y-1 md:col-span-2 xl:col-span-1">
               <span class="text-xs text-slate-500">默认回源地址</span>
               <input
                 v-model="systemSettings.upstream_endpoint"
                 type="text"
                 placeholder="未命中站点时使用，可留空"
-                class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               />
             </label>
           </div>
 
-          <div class="mt-4 grid gap-3 md:grid-cols-3">
-            <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
-            >
-              <input
-                v-model="systemSettings.emergency_mode"
-                type="checkbox"
-                class="mt-0.5 accent-blue-600"
-              />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >紧急模式</span
-                >
-                <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                  >面向突发攻击时的高敏感运行状态。</span
-                >
-              </span>
-            </label>
-            <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
-            >
-              <input
-                v-model="systemSettings.sqlite_persistence"
-                type="checkbox"
-                class="mt-0.5 accent-blue-600"
-              />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >启用持久化</span
-                >
-                <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                  >保存到后端 SQLite 配置与事件库。</span
-                >
-              </span>
-            </label>
-            <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
-            >
-              <input
-                v-model="systemSettings.notify_by_sound"
-                type="checkbox"
-                class="mt-0.5 accent-blue-600"
-              />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >声音提醒</span
-                >
-                <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                  >在控制台打开期间对关键事件进行即时提示。</span
-                >
-              </span>
-            </label>
-          </div>
         </div>
 
         <div
@@ -846,103 +777,57 @@ onMounted(async () => {
           </div>
 
           <div class="mt-3 space-y-4">
-            <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
-            >
-              <input
-                v-model="systemSettings.safeline.enabled"
-                type="checkbox"
-                class="mt-0.5 accent-blue-600"
-              />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >启用雷池集成</span
-                >
-                <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                  >保存后写入 SQLite，供后续日志同步和策略联动复用。</span
-                >
-              </span>
-            </label>
-
-            <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <div class="flex flex-col gap-1">
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div class="flex items-center justify-between gap-3">
                 <p class="text-sm font-medium text-stone-900">自动联动</p>
-                <p class="text-xs leading-5 text-slate-500">
-                  由服务端后台周期执行，不依赖页面停留。手动按钮仍可继续用于立即触发。
-                </p>
+                <label class="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-500">
+                  <span>间隔</span>
+                  <input
+                    v-model.number="
+                      systemSettings.safeline.auto_sync_interval_secs
+                    "
+                    type="number"
+                    min="15"
+                    max="86400"
+                    step="15"
+                    class="w-20 border-0 bg-transparent p-0 text-right text-sm text-stone-900 outline-none"
+                  />
+                  <span>秒</span>
+                </label>
               </div>
 
-              <div class="mt-4 grid gap-3 md:grid-cols-3">
+              <div class="mt-3 grid gap-2 md:grid-cols-3">
                 <label
-                  class="flex items-start gap-2.5 rounded-[16px] border border-slate-200 bg-white px-3 py-3"
+                  class="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2"
                 >
                   <input
                     v-model="systemSettings.safeline.auto_sync_events"
                     type="checkbox"
-                    class="mt-0.5 accent-blue-600"
+                    class="accent-blue-600"
                   />
-                  <span>
-                    <span class="block text-sm font-medium text-stone-900"
-                      >自动同步事件</span
-                    >
-                    <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                      >定时拉取雷池攻击日志并写入本地事件库。</span
-                    >
-                  </span>
+                  <span class="text-sm font-medium text-stone-900">同步事件</span>
                 </label>
                 <label
-                  class="flex items-start gap-2.5 rounded-[16px] border border-slate-200 bg-white px-3 py-3"
+                  class="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2"
                 >
                   <input
                     v-model="systemSettings.safeline.auto_sync_blocked_ips_push"
                     type="checkbox"
-                    class="mt-0.5 accent-blue-600"
+                    class="accent-blue-600"
                   />
-                  <span>
-                    <span class="block text-sm font-medium text-stone-900"
-                      >自动推送封禁</span
-                    >
-                    <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                      >把本地仍生效的封禁周期性同步到雷池。</span
-                    >
-                  </span>
+                  <span class="text-sm font-medium text-stone-900">推送封禁</span>
                 </label>
                 <label
-                  class="flex items-start gap-2.5 rounded-[16px] border border-slate-200 bg-white px-3 py-3"
+                  class="flex items-center gap-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2"
                 >
                   <input
                     v-model="systemSettings.safeline.auto_sync_blocked_ips_pull"
                     type="checkbox"
-                    class="mt-0.5 accent-blue-600"
+                    class="accent-blue-600"
                   />
-                  <span>
-                    <span class="block text-sm font-medium text-stone-900"
-                      >自动回流封禁</span
-                    >
-                    <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                      >定时把雷池远端封禁拉回本地，保持控制台名单同步。</span
-                    >
-                  </span>
+                  <span class="text-sm font-medium text-stone-900">回流封禁</span>
                 </label>
               </div>
-
-              <label class="mt-4 block space-y-1.5">
-                <span class="text-xs text-slate-500">自动联动间隔（秒）</span>
-                <input
-                  v-model.number="
-                    systemSettings.safeline.auto_sync_interval_secs
-                  "
-                  type="number"
-                  min="15"
-                  max="86400"
-                  step="15"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-                <span class="block text-xs leading-5 text-slate-500"
-                  >建议从 60 到 300
-                  秒开始。保存后后台任务会自动读取新配置，无需页面保持打开。</span
-                >
-              </label>
             </div>
 
             <div class="grid gap-4 md:grid-cols-2">
@@ -988,88 +873,15 @@ onMounted(async () => {
               </label>
             </div>
 
-            <div class="grid gap-4 md:grid-cols-3">
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">OpenAPI 文档路径</span>
-                <input
-                  v-model="systemSettings.safeline.openapi_doc_path"
-                  type="text"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">鉴权探测路径</span>
-                <input
-                  v-model="systemSettings.safeline.auth_probe_path"
-                  type="text"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">站点列表路径</span>
-                <input
-                  v-model="systemSettings.safeline.site_list_path"
-                  type="text"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">事件列表路径</span>
-                <input
-                  v-model="systemSettings.safeline.event_list_path"
-                  type="text"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">封禁同步路径</span>
-                <input
-                  v-model="systemSettings.safeline.blocklist_sync_path"
-                  type="text"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">远端解封路径</span>
-                <input
-                  v-model="systemSettings.safeline.blocklist_delete_path"
-                  type="text"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-              </label>
-              <label class="space-y-1.5 md:col-span-3">
-                <span class="text-xs text-slate-500">封禁目标 IP 组 ID</span>
-                <input
-                  v-model="blocklistIpGroupIdsText"
-                  type="text"
-                  placeholder="多个 ID 用逗号分隔，例如 12, 18"
-                  class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                />
-                <span class="block text-xs leading-5 text-slate-500"
-                  >当封禁路径使用新版 `/api/open/ipgroup`
-                  接口时，推送封禁和远端解封会基于这里填写的 IP 组 ID 执行
-                  append/remove。</span
-                >
-              </label>
-            </div>
-
             <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
+              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
             >
               <input
                 v-model="systemSettings.safeline.verify_tls"
                 type="checkbox"
-                class="mt-0.5 accent-blue-600"
+                class="accent-blue-600"
               />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >校验证书</span
-                >
-                <span class="mt-0.5 block text-xs leading-5 text-slate-500"
-                  >开启后会严格校验雷池 HTTPS
-                  证书；自签名环境建议先关闭测试。</span
-                >
-              </span>
+              <span>校验证书</span>
             </label>
 
             <div class="flex flex-wrap items-center gap-2.5">

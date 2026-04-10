@@ -35,7 +35,7 @@ pub struct Config {
     pub http3_config: Http3Config,
     pub rules: Vec<Rule>,
     pub metrics_enabled: bool,
-    #[serde(default)]
+    #[serde(default = "default_sqlite_enabled")]
     pub sqlite_enabled: bool,
     #[serde(default = "default_sqlite_path")]
     pub sqlite_path: String,
@@ -59,8 +59,6 @@ pub struct ConsoleSettings {
     pub auto_refresh_seconds: u32,
     #[serde(default)]
     pub emergency_mode: bool,
-    #[serde(default = "default_notify_by_sound")]
-    pub notify_by_sound: bool,
     #[serde(default = "default_notification_level")]
     pub notification_level: String,
     #[serde(default = "default_retain_days")]
@@ -77,7 +75,7 @@ pub struct IntegrationsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SafeLineConfig {
-    #[serde(default)]
+    #[serde(default = "default_safeline_enabled")]
     pub enabled: bool,
     #[serde(default)]
     pub auto_sync_events: bool,
@@ -241,7 +239,7 @@ impl Default for Config {
             http3_config: Http3Config::default(),
             rules: vec![],
             metrics_enabled: true,
-            sqlite_enabled: false,
+            sqlite_enabled: default_sqlite_enabled(),
             sqlite_path: default_sqlite_path(),
             sqlite_auto_migrate: default_sqlite_auto_migrate(),
             sqlite_rules_enabled: false,
@@ -457,6 +455,7 @@ impl Config {
             self.gateway_config.default_certificate_id = None;
         }
 
+        self.integrations.safeline.enabled = true;
         self.integrations.safeline.base_url =
             normalize_base_url(&self.integrations.safeline.base_url);
         self.integrations.safeline.auto_sync_interval_secs = clamp_u64(
@@ -508,7 +507,6 @@ impl Default for ConsoleSettings {
             gateway_name: default_gateway_name(),
             auto_refresh_seconds: default_auto_refresh_seconds(),
             emergency_mode: false,
-            notify_by_sound: default_notify_by_sound(),
             notification_level: default_notification_level(),
             retain_days: default_retain_days(),
             notes: String::new(),
@@ -519,7 +517,7 @@ impl Default for ConsoleSettings {
 impl Default for SafeLineConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_safeline_enabled(),
             auto_sync_events: false,
             auto_sync_blocked_ips_push: false,
             auto_sync_blocked_ips_pull: false,
@@ -566,12 +564,16 @@ const fn default_auto_refresh_seconds() -> u32 {
     5
 }
 
-const fn default_notify_by_sound() -> bool {
-    false
+const fn default_sqlite_enabled() -> bool {
+    true
 }
 
 fn default_notification_level() -> String {
     "critical".to_string()
+}
+
+const fn default_safeline_enabled() -> bool {
+    true
 }
 
 const fn default_retain_days() -> u32 {

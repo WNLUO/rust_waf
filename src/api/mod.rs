@@ -37,9 +37,6 @@ pub struct SettingsResponse {
     default_certificate_id: Option<i64>,
     upstream_endpoint: String,
     api_endpoint: String,
-    emergency_mode: bool,
-    sqlite_persistence: bool,
-    notify_by_sound: bool,
     notification_level: String,
     retain_days: u32,
     notes: String,
@@ -132,9 +129,6 @@ pub struct SettingsUpdateRequest {
     default_certificate_id: Option<i64>,
     upstream_endpoint: String,
     api_endpoint: String,
-    emergency_mode: bool,
-    sqlite_persistence: bool,
-    notify_by_sound: bool,
     notification_level: String,
     retain_days: u32,
     notes: String,
@@ -195,7 +189,6 @@ pub struct L7ConfigUpdateRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct SafeLineSettingsRequest {
-    enabled: bool,
     auto_sync_events: bool,
     auto_sync_blocked_ips_push: bool,
     auto_sync_blocked_ips_pull: bool,
@@ -205,13 +198,6 @@ pub struct SafeLineSettingsRequest {
     username: String,
     password: String,
     verify_tls: bool,
-    openapi_doc_path: String,
-    auth_probe_path: String,
-    site_list_path: String,
-    event_list_path: String,
-    blocklist_sync_path: String,
-    blocklist_delete_path: String,
-    blocklist_ip_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1956,9 +1942,6 @@ impl SettingsResponse {
             default_certificate_id: config.gateway_config.default_certificate_id,
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             api_endpoint: config.api_bind.clone(),
-            emergency_mode: config.console_settings.emergency_mode,
-            sqlite_persistence: config.sqlite_enabled,
-            notify_by_sound: config.console_settings.notify_by_sound,
             notification_level: config.console_settings.notification_level.clone(),
             retain_days: config.console_settings.retain_days,
             notes: config.console_settings.notes.clone(),
@@ -2197,9 +2180,7 @@ impl SettingsUpdateRequest {
         };
         current.tcp_upstream_addr = non_empty_string(self.upstream_endpoint);
         current.api_bind = self.api_endpoint.trim().to_string();
-        current.console_settings.emergency_mode = self.emergency_mode;
-        current.sqlite_enabled = self.sqlite_persistence;
-        current.console_settings.notify_by_sound = self.notify_by_sound;
+        current.sqlite_enabled = true;
         current.console_settings.notification_level = self.notification_level;
         current.console_settings.retain_days = self.retain_days;
         current.console_settings.notes = self.notes;
@@ -2212,7 +2193,7 @@ impl SettingsUpdateRequest {
 impl SafeLineSettingsRequest {
     fn into_config(self) -> SafeLineConfig {
         SafeLineConfig {
-            enabled: self.enabled,
+            enabled: true,
             auto_sync_events: self.auto_sync_events,
             auto_sync_blocked_ips_push: self.auto_sync_blocked_ips_push,
             auto_sync_blocked_ips_pull: self.auto_sync_blocked_ips_pull,
@@ -2222,13 +2203,13 @@ impl SafeLineSettingsRequest {
             username: self.username,
             password: self.password,
             verify_tls: self.verify_tls,
-            openapi_doc_path: self.openapi_doc_path,
-            auth_probe_path: self.auth_probe_path,
-            site_list_path: self.site_list_path,
-            event_list_path: self.event_list_path,
-            blocklist_sync_path: self.blocklist_sync_path,
-            blocklist_delete_path: self.blocklist_delete_path,
-            blocklist_ip_group_ids: self.blocklist_ip_group_ids,
+            openapi_doc_path: "/openapi_doc/".to_string(),
+            auth_probe_path: "/api/open/system/key".to_string(),
+            site_list_path: "/api/open/site".to_string(),
+            event_list_path: "/api/open/records".to_string(),
+            blocklist_sync_path: "/api/open/ipgroup".to_string(),
+            blocklist_delete_path: "/api/open/ipgroup".to_string(),
+            blocklist_ip_group_ids: Vec::new(),
         }
     }
 }

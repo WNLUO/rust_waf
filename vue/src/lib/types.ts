@@ -161,9 +161,6 @@ export interface SettingsPayload {
   default_certificate_id: number | null;
   upstream_endpoint: string;
   api_endpoint: string;
-  emergency_mode: boolean;
-  sqlite_persistence: boolean;
-  notify_by_sound: boolean;
   notification_level: "all" | "critical" | "blocked_only";
   retain_days: number;
   notes: string;

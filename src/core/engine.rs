@@ -1835,6 +1835,7 @@ mod tests {
             sqlite_auto_migrate: false,
             sqlite_rules_enabled: false,
             max_concurrent_tasks: 16,
+            ..Config::default()
         }
     }
 

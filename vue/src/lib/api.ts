@@ -9,7 +9,9 @@ import type {
   MetricsResponse,
   RuleDraft,
   RulesResponse,
+  SafeLineTestResponse,
   SecurityEventsResponse,
+  SettingsPayload,
   WriteStatusResponse,
 } from './types'
 
@@ -134,5 +136,23 @@ export function markSecurityEventHandled(id: number, handled: boolean) {
   return apiRequest<WriteStatusResponse>(`/events/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ handled }),
+  })
+}
+
+export function fetchSettings() {
+  return apiRequest<SettingsPayload>('/settings')
+}
+
+export function updateSettings(payload: SettingsPayload) {
+  return apiRequest<WriteStatusResponse>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function testSafeLineConnection(payload: SettingsPayload['safeline']) {
+  return apiRequest<SafeLineTestResponse>('/integrations/safeline/test', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }

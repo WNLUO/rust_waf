@@ -252,6 +252,7 @@ mod tests {
             sqlite_auto_migrate: true,
             sqlite_rules_enabled: true,
             max_concurrent_tasks: 128,
+            ..Config::default()
         };
 
         let context = WafContext::new(config).await.unwrap();

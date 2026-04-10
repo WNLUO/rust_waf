@@ -54,12 +54,6 @@ const successRate = computed(() => {
   return `${((metrics.proxy_successes / total) * 100).toFixed(1)}%`
 })
 
-const blockRate = computed(() => {
-  const metrics = dashboard.value?.metrics
-  if (!metrics || metrics.total_packets === 0) return '0%'
-  return `${((metrics.blocked_packets / metrics.total_packets) * 100).toFixed(2)}%`
-})
-
 const requestStatus = computed(() => {
   if (refreshing.value) return '实时同步中...'
   if (lastUpdated.value) {

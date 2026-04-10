@@ -123,6 +123,38 @@ export interface WriteStatusResponse {
   message: string
 }
 
+export interface SafeLineSettings {
+  enabled: boolean
+  base_url: string
+  api_token: string
+  verify_tls: boolean
+  openapi_doc_path: string
+  auth_probe_path: string
+}
+
+export interface SettingsPayload {
+  gateway_name: string
+  auto_refresh_seconds: number
+  upstream_endpoint: string
+  api_endpoint: string
+  emergency_mode: boolean
+  sqlite_persistence: boolean
+  notify_by_sound: boolean
+  notification_level: 'all' | 'critical' | 'blocked_only'
+  retain_days: number
+  notes: string
+  safeline: SafeLineSettings
+}
+
+export interface SafeLineTestResponse {
+  status: string
+  message: string
+  openapi_doc_reachable: boolean
+  openapi_doc_status: number | null
+  authenticated: boolean
+  auth_probe_status: number | null
+}
+
 export interface DashboardPayload {
   health: HealthResponse
   metrics: MetricsResponse

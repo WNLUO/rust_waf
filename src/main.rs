@@ -10,6 +10,7 @@ mod protocol;
 mod rules;
 mod storage;
 mod tls;
+mod integrations;
 
 use anyhow::Result;
 use env_logger::Env;

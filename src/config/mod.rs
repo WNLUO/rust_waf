@@ -41,6 +41,50 @@ pub struct Config {
     pub sqlite_rules_enabled: bool,
     #[serde(default)]
     pub max_concurrent_tasks: usize,
+    #[serde(default)]
+    pub console_settings: ConsoleSettings,
+    #[serde(default)]
+    pub integrations: IntegrationsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsoleSettings {
+    #[serde(default = "default_gateway_name")]
+    pub gateway_name: String,
+    #[serde(default = "default_auto_refresh_seconds")]
+    pub auto_refresh_seconds: u32,
+    #[serde(default)]
+    pub emergency_mode: bool,
+    #[serde(default = "default_notify_by_sound")]
+    pub notify_by_sound: bool,
+    #[serde(default = "default_notification_level")]
+    pub notification_level: String,
+    #[serde(default = "default_retain_days")]
+    pub retain_days: u32,
+    #[serde(default)]
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IntegrationsConfig {
+    #[serde(default)]
+    pub safeline: SafeLineConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SafeLineConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_token: String,
+    #[serde(default = "default_verify_tls")]
+    pub verify_tls: bool,
+    #[serde(default = "default_openapi_doc_path")]
+    pub openapi_doc_path: String,
+    #[serde(default = "default_auth_probe_path")]
+    pub auth_probe_path: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -175,6 +219,8 @@ impl Default for Config {
             sqlite_auto_migrate: default_sqlite_auto_migrate(),
             sqlite_rules_enabled: false,
             max_concurrent_tasks: 0,
+            console_settings: ConsoleSettings::default(),
+            integrations: IntegrationsConfig::default(),
         }
         .normalized()
     }
@@ -368,7 +414,54 @@ impl Config {
             .max_concurrent_tasks
             .clamp(min_concurrency, max_concurrency);
 
+        self.console_settings.gateway_name = self.console_settings.gateway_name.trim().to_string();
+        if self.console_settings.gateway_name.is_empty() {
+            self.console_settings.gateway_name = default_gateway_name();
+        }
+        self.console_settings.auto_refresh_seconds =
+            self.console_settings.auto_refresh_seconds.clamp(3, 60);
+        self.console_settings.notification_level =
+            normalize_notification_level(&self.console_settings.notification_level);
+        self.console_settings.retain_days = self.console_settings.retain_days.clamp(1, 365);
+        self.console_settings.notes = self.console_settings.notes.trim().to_string();
+
+        self.integrations.safeline.base_url =
+            normalize_base_url(&self.integrations.safeline.base_url);
+        self.integrations.safeline.api_token =
+            self.integrations.safeline.api_token.trim().to_string();
+        self.integrations.safeline.openapi_doc_path =
+            normalize_path(&self.integrations.safeline.openapi_doc_path, "/openapi_doc/");
+        self.integrations.safeline.auth_probe_path =
+            normalize_path(&self.integrations.safeline.auth_probe_path, "/api/IPGroupAPI");
+
         self
+    }
+}
+
+impl Default for ConsoleSettings {
+    fn default() -> Self {
+        Self {
+            gateway_name: default_gateway_name(),
+            auto_refresh_seconds: default_auto_refresh_seconds(),
+            emergency_mode: false,
+            notify_by_sound: default_notify_by_sound(),
+            notification_level: default_notification_level(),
+            retain_days: default_retain_days(),
+            notes: String::new(),
+        }
+    }
+}
+
+impl Default for SafeLineConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: String::new(),
+            api_token: String::new(),
+            verify_tls: default_verify_tls(),
+            openapi_doc_path: default_openapi_doc_path(),
+            auth_probe_path: default_auth_probe_path(),
+        }
     }
 }
 
@@ -388,6 +481,62 @@ fn clamp_u64(value: u64, min: u64, max: u64, default: u64) -> u64 {
 fn clamp_scale(value: f64, default: f64, min: f64, max: f64) -> f64 {
     let initial = if value == 0.0 { default } else { value };
     initial.clamp(min, max)
+}
+
+fn default_gateway_name() -> String {
+    "玄枢防护网关".to_string()
+}
+
+const fn default_auto_refresh_seconds() -> u32 {
+    5
+}
+
+const fn default_notify_by_sound() -> bool {
+    false
+}
+
+fn default_notification_level() -> String {
+    "critical".to_string()
+}
+
+const fn default_retain_days() -> u32 {
+    30
+}
+
+const fn default_verify_tls() -> bool {
+    false
+}
+
+fn default_openapi_doc_path() -> String {
+    "/openapi_doc/".to_string()
+}
+
+fn default_auth_probe_path() -> String {
+    "/api/IPGroupAPI".to_string()
+}
+
+fn normalize_notification_level(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "all" => "all".to_string(),
+        "blocked_only" => "blocked_only".to_string(),
+        _ => "critical".to_string(),
+    }
+}
+
+fn normalize_base_url(value: &str) -> String {
+    value.trim().trim_end_matches('/').to_string()
+}
+
+fn normalize_path(value: &str, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return default.to_string();
+    }
+    if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
 }
 
 pub fn resolve_sqlite_path() -> String {

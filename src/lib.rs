@@ -11,6 +11,7 @@ pub mod protocol;
 pub mod rules;
 pub mod storage;
 pub mod tls;
+pub mod integrations;
 
 #[cfg(feature = "api")]
 pub mod api;

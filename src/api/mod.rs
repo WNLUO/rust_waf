@@ -1,5 +1,6 @@
-use crate::config::Rule;
+use crate::config::{Config, Rule, SafeLineConfig};
 use crate::core::WafContext;
+use crate::integrations::safeline::SafeLineProbeResult;
 use axum::{
     extract::Json as ExtractJson,
     extract::{Path, Query, State},
@@ -20,6 +21,75 @@ pub struct HealthResponse {
     upstream_healthy: bool,
     upstream_last_check_at: Option<i64>,
     upstream_last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SettingsResponse {
+    gateway_name: String,
+    auto_refresh_seconds: u32,
+    upstream_endpoint: String,
+    api_endpoint: String,
+    emergency_mode: bool,
+    sqlite_persistence: bool,
+    notify_by_sound: bool,
+    notification_level: String,
+    retain_days: u32,
+    notes: String,
+    safeline: SafeLineSettingsResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineSettingsResponse {
+    enabled: bool,
+    base_url: String,
+    api_token: String,
+    verify_tls: bool,
+    openapi_doc_path: String,
+    auth_probe_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SettingsUpdateRequest {
+    gateway_name: String,
+    auto_refresh_seconds: u32,
+    upstream_endpoint: String,
+    api_endpoint: String,
+    emergency_mode: bool,
+    sqlite_persistence: bool,
+    notify_by_sound: bool,
+    notification_level: String,
+    retain_days: u32,
+    notes: String,
+    safeline: SafeLineSettingsRequest,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SafeLineSettingsRequest {
+    enabled: bool,
+    base_url: String,
+    api_token: String,
+    verify_tls: bool,
+    openapi_doc_path: String,
+    auth_probe_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SafeLineTestRequest {
+    base_url: String,
+    api_token: String,
+    verify_tls: bool,
+    openapi_doc_path: String,
+    auth_probe_path: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineTestResponse {
+    status: String,
+    message: String,
+    openapi_doc_reachable: bool,
+    openapi_doc_status: Option<u16>,
+    authenticated: bool,
+    auth_probe_status: Option<u16>,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,11 +252,13 @@ impl ApiServer {
         let app = Router::new()
             .route("/health", get(health_handler))
             .route("/metrics", get(metrics_handler))
+            .route("/settings", get(get_settings_handler).put(update_settings_handler))
             .route("/events", get(list_security_events_handler))
             .route("/events/:id", patch(update_security_event_handler))
             .route("/blocked-ips", get(list_blocked_ips_handler))
             .route("/blocked-ips/:id", delete(delete_blocked_ip_handler))
             .route("/rules", get(list_rules_handler).post(create_rule_handler))
+            .route("/integrations/safeline/test", axum::routing::post(test_safeline_handler))
             .route(
                 "/rules/:id",
                 get(get_rule_handler)
@@ -237,6 +309,40 @@ async fn metrics_handler(State(state): State<ApiState>) -> Json<MetricsResponse>
         state.context.active_rule_count(),
         storage_summary,
     ))
+}
+
+async fn get_settings_handler(State(state): State<ApiState>) -> ApiResult<Json<SettingsResponse>> {
+    let config = persisted_config(&state).await?;
+    Ok(Json(SettingsResponse::from_config(&config)))
+}
+
+async fn update_settings_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<SettingsUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let current = persisted_config(&state).await?;
+    let next = payload.into_config(current).map_err(ApiError::bad_request)?;
+
+    store
+        .upsert_app_config(&next)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "设置已写入数据库。运行时监听与转发类参数需重启服务后生效。".to_string(),
+    }))
+}
+
+async fn test_safeline_handler(
+    ExtractJson(payload): ExtractJson<SafeLineTestRequest>,
+) -> ApiResult<Json<SafeLineTestResponse>> {
+    let result = crate::integrations::safeline::probe(&payload.into_config())
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(SafeLineTestResponse::from(result)))
 }
 
 async fn list_security_events_handler(
@@ -479,6 +585,101 @@ impl RuleResponse {
     }
 }
 
+impl SettingsResponse {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            gateway_name: config.console_settings.gateway_name.clone(),
+            auto_refresh_seconds: config.console_settings.auto_refresh_seconds,
+            upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
+            api_endpoint: config.api_bind.clone(),
+            emergency_mode: config.console_settings.emergency_mode,
+            sqlite_persistence: config.sqlite_enabled,
+            notify_by_sound: config.console_settings.notify_by_sound,
+            notification_level: config.console_settings.notification_level.clone(),
+            retain_days: config.console_settings.retain_days,
+            notes: config.console_settings.notes.clone(),
+            safeline: SafeLineSettingsResponse::from_config(&config.integrations.safeline),
+        }
+    }
+}
+
+impl SafeLineSettingsResponse {
+    fn from_config(config: &SafeLineConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            base_url: config.base_url.clone(),
+            api_token: config.api_token.clone(),
+            verify_tls: config.verify_tls,
+            openapi_doc_path: config.openapi_doc_path.clone(),
+            auth_probe_path: config.auth_probe_path.clone(),
+        }
+    }
+}
+
+impl SettingsUpdateRequest {
+    fn into_config(self, mut current: Config) -> Result<Config, String> {
+        if self.gateway_name.trim().is_empty() {
+            return Err("网关名称不能为空".to_string());
+        }
+        if self.api_endpoint.trim().is_empty() {
+            return Err("控制面 API 地址不能为空".to_string());
+        }
+
+        current.console_settings.gateway_name = self.gateway_name;
+        current.console_settings.auto_refresh_seconds = self.auto_refresh_seconds;
+        current.tcp_upstream_addr = non_empty_string(self.upstream_endpoint);
+        current.api_bind = self.api_endpoint.trim().to_string();
+        current.console_settings.emergency_mode = self.emergency_mode;
+        current.sqlite_enabled = self.sqlite_persistence;
+        current.console_settings.notify_by_sound = self.notify_by_sound;
+        current.console_settings.notification_level = self.notification_level;
+        current.console_settings.retain_days = self.retain_days;
+        current.console_settings.notes = self.notes;
+        current.integrations.safeline = self.safeline.into_config();
+
+        Ok(current.normalized())
+    }
+}
+
+impl SafeLineSettingsRequest {
+    fn into_config(self) -> SafeLineConfig {
+        SafeLineConfig {
+            enabled: self.enabled,
+            base_url: self.base_url,
+            api_token: self.api_token,
+            verify_tls: self.verify_tls,
+            openapi_doc_path: self.openapi_doc_path,
+            auth_probe_path: self.auth_probe_path,
+        }
+    }
+}
+
+impl SafeLineTestRequest {
+    fn into_config(self) -> SafeLineConfig {
+        SafeLineConfig {
+            enabled: true,
+            base_url: self.base_url,
+            api_token: self.api_token,
+            verify_tls: self.verify_tls,
+            openapi_doc_path: self.openapi_doc_path,
+            auth_probe_path: self.auth_probe_path,
+        }
+    }
+}
+
+impl From<SafeLineProbeResult> for SafeLineTestResponse {
+    fn from(value: SafeLineProbeResult) -> Self {
+        Self {
+            status: value.status,
+            message: value.message,
+            openapi_doc_reachable: value.openapi_doc_reachable,
+            openapi_doc_status: value.openapi_doc_status,
+            authenticated: value.authenticated,
+            auth_probe_status: value.auth_probe_status,
+        }
+    }
+}
+
 impl RuleUpsertRequest {
     fn into_rule(self) -> Result<Rule, String> {
         let id = self.id.clone();
@@ -646,6 +847,24 @@ fn rules_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
         ));
     }
     Ok(store)
+}
+
+async fn persisted_config(state: &ApiState) -> ApiResult<Config> {
+    let store = sqlite_store(state)?;
+    store
+        .load_app_config()
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::conflict("数据库中未找到系统配置".to_string()))
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 type ApiResult<T> = Result<T, ApiError>;

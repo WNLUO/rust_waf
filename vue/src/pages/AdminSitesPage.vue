@@ -3,15 +3,21 @@ import { computed, onMounted, reactive, ref } from "vue";
 import AppLayout from "../components/layout/AppLayout.vue";
 import StatusBadge from "../components/ui/StatusBadge.vue";
 import {
+  fetchLocalSites,
   fetchSafeLineMappings,
   fetchSafeLineSites,
+  fetchSiteSyncLinks,
   fetchSettings,
+  pullSafeLineSites,
+  pushSafeLineSites,
   testSafeLineConnection,
   updateSafeLineMappings,
 } from "../lib/api";
 import type {
+  LocalSiteItem,
   SafeLineMappingItem,
   SafeLineSiteItem,
+  SiteSyncLinkItem,
   SafeLineTestResponse,
   SettingsPayload,
 } from "../lib/types";
@@ -64,6 +70,8 @@ const successMessage = ref("");
 const settings = ref<SettingsPayload | null>(null);
 const mappings = ref<SafeLineMappingItem[]>([]);
 const sites = ref<SafeLineSiteItem[]>([]);
+const localSites = ref<LocalSiteItem[]>([]);
+const siteLinks = ref<SiteSyncLinkItem[]>([]);
 const testResult = ref<SafeLineTestResponse | null>(null);
 const mappingDrafts = ref<SiteMappingDraft[]>([]);
 const sitesLoadedAt = ref<number | null>(null);
@@ -72,6 +80,8 @@ const actions = reactive({
   refreshing: false,
   testing: false,
   loadingSites: false,
+  pullingSites: false,
+  pushingSites: false,
   savingMappings: false,
 });
 
@@ -267,6 +277,16 @@ const totalOrphaned = computed(
   () => mappingDrafts.value.filter((item) => item.orphaned).length,
 );
 
+const totalLocalSites = computed(() => localSites.value.length);
+
+const totalLinkedSites = computed(
+  () => siteLinks.value.filter((item) => item.provider === "safeline").length,
+);
+
+const totalSyncErrors = computed(
+  () => siteLinks.value.filter((item) => Boolean(item.last_error)).length,
+);
+
 const totalEnabled = computed(
   () => mappingDrafts.value.filter((item) => item.enabled).length,
 );
@@ -407,13 +427,17 @@ async function loadPageData() {
   clearFeedback();
 
   try {
-    const [settingsResponse, mappingsResponse] = await Promise.all([
+    const [settingsResponse, mappingsResponse, localSitesResponse, siteLinksResponse] = await Promise.all([
       fetchSettings(),
       fetchSafeLineMappings(),
+      fetchLocalSites(),
+      fetchSiteSyncLinks(),
     ]);
 
     settings.value = settingsResponse;
     mappings.value = mappingsResponse.mappings;
+    localSites.value = localSitesResponse.sites;
+    siteLinks.value = siteLinksResponse.links;
     mergeMappingDrafts(sites.value, mappings.value);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "读取站点管理信息失败";
@@ -467,6 +491,50 @@ async function loadRemoteSites() {
     error.value = e instanceof Error ? e.message : "读取雷池站点失败";
   } finally {
     actions.loadingSites = false;
+  }
+}
+
+async function pullRemoteSitesToLocal() {
+  actions.pullingSites = true;
+  clearFeedback();
+
+  try {
+    const response = await pullSafeLineSites();
+    const [localSitesResponse, siteLinksResponse, safeLineMappingsResponse] =
+      await Promise.all([
+        fetchLocalSites(),
+        fetchSiteSyncLinks(),
+        fetchSafeLineMappings(),
+      ]);
+    localSites.value = localSitesResponse.sites;
+    siteLinks.value = siteLinksResponse.links;
+    mappings.value = safeLineMappingsResponse.mappings;
+    mergeMappingDrafts(sites.value, mappings.value);
+    successMessage.value = response.message;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "雷池站点回流失败";
+  } finally {
+    actions.pullingSites = false;
+  }
+}
+
+async function pushLocalSitesToRemote() {
+  actions.pushingSites = true;
+  clearFeedback();
+
+  try {
+    const response = await pushSafeLineSites();
+    const [siteLinksResponse, localSitesResponse] = await Promise.all([
+      fetchSiteSyncLinks(),
+      fetchLocalSites(),
+    ]);
+    siteLinks.value = siteLinksResponse.links;
+    localSites.value = localSitesResponse.sites;
+    successMessage.value = response.message;
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "本地站点推送失败";
+  } finally {
+    actions.pushingSites = false;
   }
 }
 
@@ -587,6 +655,22 @@ onMounted(loadPageData);
               >
                 <ServerCog :size="14" :class="{ 'animate-spin': actions.loadingSites }" />
                 {{ actions.loadingSites ? "读取中..." : "读取远端站点" }}
+              </button>
+              <button
+                @click="pullRemoteSitesToLocal"
+                :disabled="actions.pullingSites || !hasSavedConfig"
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-emerald-500/40 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pullingSites }" />
+                {{ actions.pullingSites ? "回流中..." : "雷池回流到本地" }}
+              </button>
+              <button
+                @click="pushLocalSitesToRemote"
+                :disabled="actions.pushingSites || !hasSavedConfig"
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-1.5 text-xs text-stone-700 transition hover:border-amber-500/40 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pushingSites }" />
+                {{ actions.pushingSites ? "推送中..." : "本地推送到雷池" }}
               </button>
               <RouterLink
                 to="/admin/settings"
@@ -719,6 +803,151 @@ onMounted(loadPageData);
               数据库里还在，但本次远端列表未返回对应站点。
             </p>
           </article>
+
+          <article
+            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+          >
+            <p class="text-xs text-slate-500">本地站点</p>
+            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
+              {{ formatNumber(totalLocalSites) }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500">
+              已落库的本系统站点实体数量，可作为双向同步的本地源。
+            </p>
+          </article>
+
+          <article
+            class="rounded-2xl border border-white/80 bg-white/80 p-4 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+          >
+            <p class="text-xs text-slate-500">同步链路</p>
+            <p class="mt-2 text-2xl font-semibold tracking-tight text-stone-900">
+              {{ formatNumber(totalLinkedSites) }}
+            </p>
+            <p class="mt-1 text-xs text-slate-500">
+              {{
+                totalSyncErrors
+                  ? `其中 ${formatNumber(totalSyncErrors)} 条存在最近一次同步错误。`
+                  : "当前没有记录到站点同步错误。"
+              }}
+            </p>
+          </article>
+        </section>
+
+        <section class="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+          <div
+            class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-stone-900">同步编排</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  现在支持两条显式路径：把雷池站点和证书回流到本地，或把本地站点推送到雷池。
+                </p>
+              </div>
+              <StatusBadge
+                :text="siteLinks.length ? '链路已建立' : '尚未建立链路'"
+                :type="siteLinks.length ? 'success' : 'muted'"
+                compact
+              />
+            </div>
+
+            <div class="mt-4 grid gap-3 md:grid-cols-2">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs text-slate-500">雷池回流到本地</p>
+                <p class="mt-2 text-sm leading-6 text-slate-600">
+                  拉取雷池站点、证书元数据和可读取的证书材料，写入本地站点、证书和同步链路。
+                </p>
+              </div>
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs text-slate-500">本地推送到雷池</p>
+                <p class="mt-2 text-sm leading-6 text-slate-600">
+                  按本地站点和证书定义创建或更新雷池站点；证书变更会采用新建证书后重绑站点的策略。
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-2.5">
+              <button
+                @click="pullRemoteSitesToLocal"
+                :disabled="actions.pullingSites || !hasSavedConfig"
+                class="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-1.5 text-xs text-emerald-800 transition hover:border-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pullingSites }" />
+                {{ actions.pullingSites ? "正在回流..." : "执行回流" }}
+              </button>
+              <button
+                @click="pushLocalSitesToRemote"
+                :disabled="actions.pushingSites || !hasSavedConfig"
+                class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 transition hover:border-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshCw :size="14" :class="{ 'animate-spin': actions.pushingSites }" />
+                {{ actions.pushingSites ? "正在推送..." : "执行推送" }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            class="rounded-2xl border border-white/80 bg-white/80 p-5 shadow-[0_14px_30px_rgba(90,60,30,0.06)]"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-stone-900">本地链路状态</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  这里展示数据库中已经建立的雷池站点同步链路和最近一次错误。
+                </p>
+              </div>
+              <StatusBadge
+                :text="`共 ${formatNumber(siteLinks.length)} 条`"
+                type="info"
+                compact
+              />
+            </div>
+
+            <div
+              v-if="siteLinks.length === 0"
+              class="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"
+            >
+              还没有建立任何站点同步链路。先执行一次“雷池回流到本地”或保存本地链路配置。
+            </div>
+
+            <div v-else class="mt-4 grid gap-3">
+              <article
+                v-for="link in siteLinks.slice(0, 6)"
+                :key="link.id"
+                class="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-stone-900">
+                      {{ link.remote_site_name || `Remote #${link.remote_site_id}` }}
+                    </p>
+                    <p class="mt-1 font-mono text-xs text-slate-500">
+                      remote={{ link.remote_site_id }} · local={{ link.local_site_id }}
+                    </p>
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    <StatusBadge
+                      :text="link.sync_mode || 'manual'"
+                      type="info"
+                      compact
+                    />
+                    <StatusBadge
+                      :text="link.last_error ? '最近一次失败' : '最近一次成功'"
+                      :type="link.last_error ? 'warning' : 'success'"
+                      compact
+                    />
+                  </div>
+                </div>
+
+                <p class="mt-3 text-xs leading-5 text-slate-600">
+                  {{
+                    link.last_error ||
+                    `最近同步时间：${formatTimestamp(link.last_synced_at)}`
+                  }}
+                </p>
+              </article>
+            </div>
+          </div>
         </section>
 
         <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">

@@ -370,6 +370,8 @@ pub struct LocalCertificateUpsertRequest {
     expired: bool,
     notes: String,
     last_synced_at: Option<i64>,
+    certificate_pem: Option<String>,
+    private_key_pem: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -407,6 +409,36 @@ pub struct SiteSyncLinkUpsertRequest {
     last_remote_hash: Option<String>,
     last_error: Option<String>,
     last_synced_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+struct LocalCertificateSecretDraft {
+    certificate_pem: String,
+    private_key_pem: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineSitesPullResponse {
+    success: bool,
+    imported_sites: u32,
+    updated_sites: u32,
+    imported_certificates: u32,
+    updated_certificates: u32,
+    linked_sites: u32,
+    skipped_sites: u32,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineSitesPushResponse {
+    success: bool,
+    created_sites: u32,
+    updated_sites: u32,
+    created_certificates: u32,
+    reused_certificates: u32,
+    skipped_sites: u32,
+    failed_sites: u32,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -712,6 +744,14 @@ impl ApiServer {
             .route(
                 "/integrations/safeline/mappings",
                 get(list_safeline_mappings_handler).put(update_safeline_mappings_handler),
+            )
+            .route(
+                "/integrations/safeline/pull/sites",
+                axum::routing::post(pull_safeline_sites_handler),
+            )
+            .route(
+                "/integrations/safeline/push/sites",
+                axum::routing::post(push_safeline_sites_handler),
             )
             .route(
                 "/integrations/safeline/site-links",
@@ -1093,13 +1133,19 @@ async fn create_local_certificate_handler(
     ExtractJson(payload): ExtractJson<LocalCertificateUpsertRequest>,
 ) -> ApiResult<(StatusCode, Json<LocalCertificateResponse>)> {
     let store = sqlite_store(&state)?;
-    let certificate = payload
+    let (certificate, secret) = payload
         .into_storage_certificate()
         .map_err(ApiError::bad_request)?;
     let id = store
         .insert_local_certificate(&certificate)
         .await
         .map_err(map_storage_write_error)?;
+    if let Some(secret) = secret {
+        store
+            .upsert_local_certificate_secret(id, &secret.certificate_pem, &secret.private_key_pem)
+            .await
+            .map_err(map_storage_write_error)?;
+    }
     let created = store
         .load_local_certificate(id)
         .await
@@ -1118,7 +1164,7 @@ async fn update_local_certificate_handler(
     ExtractJson(payload): ExtractJson<LocalCertificateUpsertRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let certificate = payload
+    let (certificate, secret) = payload
         .into_storage_certificate()
         .map_err(ApiError::bad_request)?;
     let updated = store
@@ -1127,6 +1173,23 @@ async fn update_local_certificate_handler(
         .map_err(map_storage_write_error)?;
 
     if updated {
+        if let Some(secret) = secret {
+            if secret.certificate_pem.is_empty() && secret.private_key_pem.is_empty() {
+                store
+                    .delete_local_certificate_secret(id)
+                    .await
+                    .map_err(ApiError::internal)?;
+            } else {
+                store
+                    .upsert_local_certificate_secret(
+                        id,
+                        &secret.certificate_pem,
+                        &secret.private_key_pem,
+                    )
+                    .await
+                    .map_err(map_storage_write_error)?;
+            }
+        }
         Ok(Json(WriteStatusResponse {
             success: true,
             message: format!("本地证书 {} 已更新。", id),
@@ -1212,6 +1275,72 @@ async fn delete_site_sync_link_handler(
     } else {
         Err(ApiError::not_found(format!("同步链路 '{}' 不存在", id)))
     }
+}
+
+async fn pull_safeline_sites_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineSitesPullResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let result = crate::integrations::safeline_sync::pull_sites(store, safeline)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(SafeLineSitesPullResponse {
+        success: true,
+        imported_sites: result.imported_sites as u32,
+        updated_sites: result.updated_sites as u32,
+        imported_certificates: result.imported_certificates as u32,
+        updated_certificates: result.updated_certificates as u32,
+        linked_sites: result.linked_sites as u32,
+        skipped_sites: result.skipped_sites as u32,
+        message: format!(
+            "雷池站点回流完成，新增站点 {} 个、更新站点 {} 个，新增证书 {} 个、更新证书 {} 个。",
+            result.imported_sites,
+            result.updated_sites,
+            result.imported_certificates,
+            result.updated_certificates
+        ),
+    }))
+}
+
+async fn push_safeline_sites_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineSitesPushResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let result = crate::integrations::safeline_sync::push_sites(store, safeline)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(SafeLineSitesPushResponse {
+        success: true,
+        created_sites: result.created_sites as u32,
+        updated_sites: result.updated_sites as u32,
+        created_certificates: result.created_certificates as u32,
+        reused_certificates: result.reused_certificates as u32,
+        skipped_sites: result.skipped_sites as u32,
+        failed_sites: result.failed_sites as u32,
+        message: format!(
+            "本地站点推送完成，新建站点 {} 个、更新站点 {} 个，证书新建 {} 个，失败 {} 个。",
+            result.created_sites,
+            result.updated_sites,
+            result.created_certificates,
+            result.failed_sites
+        ),
+    }))
 }
 
 async fn sync_safeline_events_handler(
@@ -2179,7 +2308,15 @@ impl TryFrom<crate::storage::LocalCertificateEntry> for LocalCertificateResponse
 }
 
 impl LocalCertificateUpsertRequest {
-    fn into_storage_certificate(self) -> Result<crate::storage::LocalCertificateUpsert, String> {
+    fn into_storage_certificate(
+        self,
+    ) -> Result<
+        (
+            crate::storage::LocalCertificateUpsert,
+            Option<LocalCertificateSecretDraft>,
+        ),
+        String,
+    > {
         let name = required_string(self.name, "证书名称不能为空")?;
         let domains = normalize_string_list(self.domains);
         let issuer = self.issuer.trim().to_string();
@@ -2187,6 +2324,8 @@ impl LocalCertificateUpsertRequest {
             non_empty_string(self.source_type).unwrap_or_else(|| "manual".to_string());
         let provider_remote_id = self.provider_remote_id.and_then(non_empty_string);
         let notes = self.notes.trim().to_string();
+        let certificate_pem = self.certificate_pem.unwrap_or_default().trim().to_string();
+        let private_key_pem = self.private_key_pem.unwrap_or_default().trim().to_string();
 
         if let (Some(valid_from), Some(valid_to)) = (self.valid_from, self.valid_to) {
             if valid_to < valid_from {
@@ -2194,19 +2333,33 @@ impl LocalCertificateUpsertRequest {
             }
         }
 
-        Ok(crate::storage::LocalCertificateUpsert {
-            name,
-            domains,
-            issuer,
-            valid_from: self.valid_from,
-            valid_to: self.valid_to,
-            source_type,
-            provider_remote_id,
-            trusted: self.trusted,
-            expired: self.expired,
-            notes,
-            last_synced_at: self.last_synced_at,
-        })
+        let secret = match (certificate_pem.is_empty(), private_key_pem.is_empty()) {
+            (true, true) => None,
+            (false, false) => Some(LocalCertificateSecretDraft {
+                certificate_pem,
+                private_key_pem,
+            }),
+            _ => {
+                return Err("证书 PEM 与私钥 PEM 需要同时填写，或同时留空".to_string());
+            }
+        };
+
+        Ok((
+            crate::storage::LocalCertificateUpsert {
+                name,
+                domains,
+                issuer,
+                valid_from: self.valid_from,
+                valid_to: self.valid_to,
+                source_type,
+                provider_remote_id,
+                trusted: self.trusted,
+                expired: self.expired,
+                notes,
+                last_synced_at: self.last_synced_at,
+            },
+            secret,
+        ))
     }
 }
 
@@ -2967,6 +3120,8 @@ mod tests {
             expired: false,
             notes: String::new(),
             last_synced_at: None,
+            certificate_pem: None,
+            private_key_pem: None,
         }
         .into_storage_certificate()
         .unwrap_err();

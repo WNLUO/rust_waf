@@ -198,6 +198,15 @@ pub struct LocalCertificateEntry {
     pub updated_at: i64,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LocalCertificateSecretEntry {
+    pub certificate_id: i64,
+    pub certificate_pem: String,
+    pub private_key_pem: String,
+    pub updated_at: i64,
+}
+
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SiteSyncLinkEntry {
@@ -783,6 +792,64 @@ impl SqliteStore {
     pub async fn delete_local_certificate(&self, id: i64) -> Result<bool> {
         let result = sqlx::query("DELETE FROM local_certificates WHERE id = ?")
             .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn load_local_certificate_secret(
+        &self,
+        certificate_id: i64,
+    ) -> Result<Option<LocalCertificateSecretEntry>> {
+        let row = sqlx::query_as::<_, LocalCertificateSecretEntry>(
+            r#"
+            SELECT certificate_id, certificate_pem, private_key_pem, updated_at
+            FROM local_certificate_secrets
+            WHERE certificate_id = ?
+            "#,
+        )
+        .bind(certificate_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn upsert_local_certificate_secret(
+        &self,
+        certificate_id: i64,
+        certificate_pem: &str,
+        private_key_pem: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO local_certificate_secrets (
+                certificate_id, certificate_pem, private_key_pem, updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(certificate_id) DO UPDATE SET
+                certificate_pem = excluded.certificate_pem,
+                private_key_pem = excluded.private_key_pem,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(certificate_id)
+        .bind(certificate_pem)
+        .bind(private_key_pem)
+        .bind(unix_timestamp())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_local_certificate_secret(&self, certificate_id: i64) -> Result<bool> {
+        let result = sqlx::query("DELETE FROM local_certificate_secrets WHERE certificate_id = ?")
+            .bind(certificate_id)
             .execute(&self.pool)
             .await?;
 
@@ -1502,6 +1569,14 @@ async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_local_certificates_provider_remote_id
             ON local_certificates(provider_remote_id);
 
+        CREATE TABLE IF NOT EXISTS local_certificate_secrets (
+            certificate_id INTEGER PRIMARY KEY,
+            certificate_pem TEXT NOT NULL DEFAULT '',
+            private_key_pem TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY(certificate_id) REFERENCES local_certificates(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS local_sites (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -2125,6 +2200,12 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
+        let local_certificate_secrets_exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'local_certificate_secrets'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         assert_eq!(security_events_exists, 1);
         assert_eq!(blocked_ips_exists, 1);
@@ -2134,6 +2215,7 @@ mod tests {
         assert_eq!(local_certificates_exists, 1);
         assert_eq!(local_sites_exists, 1);
         assert_eq!(site_sync_links_exists, 1);
+        assert_eq!(local_certificate_secrets_exists, 1);
     }
 
     #[tokio::test]
@@ -2598,6 +2680,22 @@ mod tests {
         assert_eq!(loaded.provider_remote_id.as_deref(), Some("31"));
         assert!(loaded.trusted);
 
+        store
+            .upsert_local_certificate_secret(
+                certificate_id,
+                "-----BEGIN CERTIFICATE-----\nCERT\n-----END CERTIFICATE-----",
+                "-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----",
+            )
+            .await
+            .unwrap();
+        let secret = store
+            .load_local_certificate_secret(certificate_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(secret.certificate_pem.contains("BEGIN CERTIFICATE"));
+        assert!(secret.private_key_pem.contains("BEGIN PRIVATE KEY"));
+
         let updated = store
             .update_local_certificate(
                 certificate_id,
@@ -2624,6 +2722,21 @@ mod tests {
         assert_eq!(listed[0].name, "prod wildcard v2");
         assert_eq!(listed[0].provider_remote_id.as_deref(), Some("32"));
 
+        store
+            .upsert_local_certificate_secret(
+                certificate_id,
+                "-----BEGIN CERTIFICATE-----\nCERT-V2\n-----END CERTIFICATE-----",
+                "-----BEGIN PRIVATE KEY-----\nKEY-V2\n-----END PRIVATE KEY-----",
+            )
+            .await
+            .unwrap();
+        let updated_secret = store
+            .load_local_certificate_secret(certificate_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(updated_secret.certificate_pem.contains("CERT-V2"));
+
         let deleted = store
             .delete_local_certificate(certificate_id)
             .await
@@ -2631,6 +2744,11 @@ mod tests {
         assert!(deleted);
         assert!(store
             .load_local_certificate(certificate_id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .load_local_certificate_secret(certificate_id)
             .await
             .unwrap()
             .is_none());

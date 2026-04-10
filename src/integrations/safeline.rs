@@ -19,6 +19,7 @@ const DEFAULT_EVENT_LIST_PATH: &str = "/api/open/records";
 const LEGACY_EVENT_LIST_PATH: &str = "/api/AttackLogAPI";
 const DEFAULT_BLOCKLIST_PATH: &str = "/api/open/ipgroup";
 const LEGACY_BLOCKLIST_PATH: &str = "/api/IPGroupAPI";
+const DEFAULT_CERT_PATH: &str = "/api/open/cert";
 const OPEN_BLOCKLIST_APPEND_SUFFIX: &str = "/append";
 const OPEN_BLOCKLIST_REMOVE_SUFFIX: &str = "/remove";
 const LOGIN_AES_KEY_PATH: &str = "/api/open/system/key";
@@ -98,6 +99,67 @@ pub struct SafeLineBlockedIpSummary {
     pub blocked_at: i64,
     pub expires_at: i64,
     pub raw: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineCertificateSummary {
+    pub id: String,
+    pub domains: Vec<String>,
+    pub issuer: String,
+    pub trusted: bool,
+    pub revoked: bool,
+    pub expired: bool,
+    pub cert_type: Option<i64>,
+    pub valid_from: Option<i64>,
+    pub valid_to: Option<i64>,
+    pub related_sites: Vec<String>,
+    pub raw: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineCertificateDetail {
+    pub id: String,
+    pub domains: Vec<String>,
+    pub cert_type: Option<i64>,
+    pub certificate_pem: Option<String>,
+    pub private_key_pem: Option<String>,
+    pub raw: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeLineCertificateUpsert {
+    pub domains: Vec<String>,
+    pub certificate_pem: String,
+    pub private_key_pem: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SafeLineSiteUpsert {
+    pub remote_id: Option<String>,
+    pub name: String,
+    pub server_names: Vec<String>,
+    pub ports: Vec<String>,
+    pub upstreams: Vec<String>,
+    pub enabled: bool,
+    pub health_check: bool,
+    pub cert_id: Option<i64>,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineCertificateWriteSummary {
+    pub remote_id: Option<String>,
+    pub accepted: bool,
+    pub status_code: u16,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineSiteWriteSummary {
+    pub remote_id: Option<String>,
+    pub accepted: bool,
+    pub status_code: u16,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -238,6 +300,191 @@ pub async fn list_security_events(
     )
     .await?;
     extract_security_events(&payload)
+}
+
+pub async fn list_certificates(config: &SafeLineConfig) -> Result<Vec<SafeLineCertificateSummary>> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if !has_any_auth(config) {
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法读取雷池证书列表"
+        ));
+    }
+
+    let client = build_client(config)?;
+    let payload = get_json_with_fallback(
+        &client,
+        &base_url,
+        config,
+        &candidate_paths(DEFAULT_CERT_PATH, &[DEFAULT_CERT_PATH]),
+        "证书列表",
+    )
+    .await?;
+    extract_certificates(&payload)
+}
+
+pub async fn load_certificate(
+    config: &SafeLineConfig,
+    certificate_id: &str,
+) -> Result<SafeLineCertificateDetail> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if !has_any_auth(config) {
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法读取雷池证书详情"
+        ));
+    }
+
+    let client = build_client(config)?;
+    let url = format!(
+        "{base_url}{}/{}",
+        normalized_or_default(DEFAULT_CERT_PATH, DEFAULT_CERT_PATH),
+        certificate_id.trim()
+    );
+    let (status, body) = send_with_auth(&client, &base_url, config, |auth| {
+        with_auth_headers(client.get(&url), auth)
+    })
+    .await?;
+
+    if !status.is_success() {
+        return Err(anyhow!(
+            "雷池证书详情接口返回 HTTP {}：{}",
+            status,
+            body.trim()
+        ));
+    }
+
+    let payload = serde_json::from_str::<Value>(&body)
+        .map_err(|err| anyhow!("雷池证书详情返回了不可解析的 JSON：{}", err))?;
+    parse_certificate_detail(&payload).ok_or_else(|| {
+        anyhow!(
+            "已拿到雷池证书详情响应，但未能识别证书内容。请检查 /api/open/cert/{{id}} 的返回结构。"
+        )
+    })
+}
+
+pub async fn create_certificate(
+    config: &SafeLineConfig,
+    certificate: &SafeLineCertificateUpsert,
+) -> Result<SafeLineCertificateWriteSummary> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if !has_any_auth(config) {
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法创建雷池证书"
+        ));
+    }
+
+    let client = build_client(config)?;
+    let path = normalized_or_default(DEFAULT_CERT_PATH, DEFAULT_CERT_PATH);
+    let url = format!("{base_url}{path}");
+    let payload = serde_json::json!({
+        "type": 0,
+        "domains": certificate.domains,
+        "manual": {
+            "crt": certificate.certificate_pem,
+            "key": certificate.private_key_pem,
+        }
+    });
+
+    let (status, body) = send_with_auth(&client, &base_url, config, |auth| {
+        with_auth_headers(client.post(&url).json(&payload), auth)
+    })
+    .await?;
+
+    if status.is_success() {
+        let remote_id = extract_write_response_id_from_body(&body);
+        return Ok(SafeLineCertificateWriteSummary {
+            remote_id,
+            accepted: true,
+            status_code: status.as_u16(),
+            message: body_or_status(status, &body),
+        });
+    }
+
+    Ok(SafeLineCertificateWriteSummary {
+        remote_id: None,
+        accepted: false,
+        status_code: status.as_u16(),
+        message: body_or_status(status, &body),
+    })
+}
+
+pub async fn upsert_site(
+    config: &SafeLineConfig,
+    site: &SafeLineSiteUpsert,
+) -> Result<SafeLineSiteWriteSummary> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if !has_any_auth(config) {
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法写入雷池站点"
+        ));
+    }
+
+    let client = build_client(config)?;
+    let path = normalized_or_default(&config.site_list_path, DEFAULT_SITE_LIST_PATH);
+    let base_payload = build_site_upsert_payload(site);
+    let mut attempts = Vec::new();
+
+    if let Some(remote_id) = site.remote_id.as_deref() {
+        let remote_id = remote_id.trim();
+        if !remote_id.is_empty() {
+            attempts.push(SiteWriteAttempt::Put(
+                format!("{path}/{remote_id}"),
+                base_payload.clone(),
+            ));
+            let mut payload_with_id = base_payload.clone();
+            if let Some(object) = payload_with_id.as_object_mut() {
+                object.insert("id".to_string(), Value::String(remote_id.to_string()));
+            }
+            attempts.push(SiteWriteAttempt::Put(path.clone(), payload_with_id.clone()));
+            attempts.push(SiteWriteAttempt::Post(path.clone(), payload_with_id));
+        }
+    } else {
+        attempts.push(SiteWriteAttempt::Post(path.clone(), base_payload.clone()));
+    }
+
+    if attempts.is_empty() {
+        attempts.push(SiteWriteAttempt::Post(path.clone(), base_payload));
+    }
+
+    let mut last_failure = SafeLineSiteWriteSummary {
+        remote_id: site.remote_id.clone(),
+        accepted: false,
+        status_code: StatusCode::BAD_GATEWAY.as_u16(),
+        message: "未执行任何站点写入尝试".to_string(),
+    };
+
+    for attempt in attempts {
+        let (status, body) = send_with_auth(&client, &base_url, config, |auth| {
+            let url = format!("{base_url}{}", attempt.path());
+            match &attempt {
+                SiteWriteAttempt::Post(_, payload) => {
+                    with_auth_headers(client.post(&url).json(payload), auth)
+                }
+                SiteWriteAttempt::Put(_, payload) => {
+                    with_auth_headers(client.put(&url).json(payload), auth)
+                }
+            }
+        })
+        .await?;
+
+        if status.is_success() {
+            return Ok(SafeLineSiteWriteSummary {
+                remote_id: extract_write_response_id_from_body(&body)
+                    .or_else(|| site.remote_id.clone()),
+                accepted: true,
+                status_code: status.as_u16(),
+                message: body_or_status(status, &body),
+            });
+        }
+
+        last_failure = SafeLineSiteWriteSummary {
+            remote_id: site.remote_id.clone(),
+            accepted: false,
+            status_code: status.as_u16(),
+            message: format_failure(attempt.path(), status, &body),
+        };
+    }
+
+    Ok(last_failure)
 }
 
 pub async fn push_blocked_ip(
@@ -542,6 +789,19 @@ enum DeleteAttempt {
     DeleteById(String),
     DeleteByBody(Value),
     PostDelete(Value),
+}
+
+enum SiteWriteAttempt {
+    Post(String, Value),
+    Put(String, Value),
+}
+
+impl SiteWriteAttempt {
+    fn path(&self) -> &str {
+        match self {
+            Self::Post(path, _) | Self::Put(path, _) => path,
+        }
+    }
 }
 
 enum OpenIpGroupDeleteAttempt {
@@ -942,6 +1202,63 @@ fn format_failure(path: &str, status: StatusCode, body: &str) -> String {
     }
 }
 
+fn body_or_status(status: StatusCode, body: &str) -> String {
+    if body.trim().is_empty() {
+        status.to_string()
+    } else {
+        body.trim().to_string()
+    }
+}
+
+fn extract_write_response_id_from_body(body: &str) -> Option<String> {
+    let payload = serde_json::from_str::<Value>(body).ok()?;
+    extract_write_response_id(&payload)
+}
+
+fn extract_write_response_id(payload: &Value) -> Option<String> {
+    for candidate in find_object_candidates(payload) {
+        if let Some(id) = pick_string(candidate, &["id", "site_id", "cert_id", "uuid", "uid"]) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+fn build_site_upsert_payload(site: &SafeLineSiteUpsert) -> Value {
+    let primary_name = site
+        .server_names
+        .first()
+        .cloned()
+        .unwrap_or_else(|| site.name.clone());
+
+    serde_json::json!({
+        "comment": site.notes,
+        "title": site.name,
+        "server_names": site.server_names,
+        "ports": site.ports,
+        "upstreams": site.upstreams,
+        "is_enabled": site.enabled,
+        "health_check": site.health_check,
+        "cert_id": site.cert_id.unwrap_or_default(),
+        "cert_type": if site.cert_id.is_some() { 0 } else { -1 },
+        "group_id": 0,
+        "mode": 0,
+        "static": false,
+        "type": 0,
+        "index": "index.html",
+        "static_default": 1,
+        "redirect_status_code": 301,
+        "load_balance": { "balance_type": 1 },
+        "acl_enabled": false,
+        "portal": false,
+        "portal_redirect": "",
+        "position": 0,
+        "cc_bot": false,
+        "semantics": true,
+        "name": primary_name,
+    })
+}
+
 fn candidate_paths(current: &str, fallbacks: &[&str]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
@@ -1085,6 +1402,23 @@ fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlockedIpSummary>>
     ))
 }
 
+fn extract_certificates(payload: &Value) -> Result<Vec<SafeLineCertificateSummary>> {
+    let candidates = find_array_candidates(payload);
+    for candidate in candidates {
+        let certificates = candidate
+            .iter()
+            .filter_map(parse_certificate_summary)
+            .collect::<Vec<_>>();
+        if !certificates.is_empty() {
+            return Ok(certificates);
+        }
+    }
+
+    Err(anyhow!(
+        "已拿到雷池响应，但未能从 JSON 中识别证书数组。请检查 /api/open/cert 的返回结构。"
+    ))
+}
+
 fn find_array_candidates<'a>(value: &'a Value) -> Vec<&'a Vec<Value>> {
     let mut candidates = Vec::new();
     collect_array_candidates(value, &mut candidates);
@@ -1115,6 +1449,31 @@ fn collect_array_candidates<'a>(value: &'a Value, candidates: &mut Vec<&'a Vec<V
     for child in object.values() {
         if child.is_object() {
             collect_array_candidates(child, candidates);
+        }
+    }
+}
+
+fn find_object_candidates<'a>(value: &'a Value) -> Vec<&'a serde_json::Map<String, Value>> {
+    let mut candidates = Vec::new();
+    collect_object_candidates(value, &mut candidates);
+    candidates
+}
+
+fn collect_object_candidates<'a>(
+    value: &'a Value,
+    candidates: &mut Vec<&'a serde_json::Map<String, Value>>,
+) {
+    if let Some(object) = value.as_object() {
+        candidates.push(object);
+        for child in object.values() {
+            collect_object_candidates(child, candidates);
+        }
+        return;
+    }
+
+    if let Some(array) = value.as_array() {
+        for item in array {
+            collect_object_candidates(item, candidates);
         }
     }
 }
@@ -1194,6 +1553,49 @@ fn parse_site_summary(value: &Value) -> Option<SafeLineSiteSummary> {
         key_filename,
         health_check,
         raw: value.clone(),
+    })
+}
+
+fn parse_certificate_summary(value: &Value) -> Option<SafeLineCertificateSummary> {
+    let object = value.as_object()?;
+    let id = pick_string(object, &["id", "cert_id", "uuid", "uid"])?;
+    let domains = pick_array_strings(object, &["domains"])
+        .or_else(|| pick_array_strings(object, &["related_sites"]))
+        .unwrap_or_default();
+
+    Some(SafeLineCertificateSummary {
+        id,
+        domains,
+        issuer: pick_string(object, &["issuer"]).unwrap_or_default(),
+        trusted: pick_bool(object, &["trusted"]).unwrap_or(false),
+        revoked: pick_bool(object, &["revoked"]).unwrap_or(false),
+        expired: pick_bool(object, &["expired"]).unwrap_or(false),
+        cert_type: pick_i64(object, &["type", "cert_type"]),
+        valid_from: pick_timestamp(object, &["valid_after", "valid_from", "created_at"]),
+        valid_to: pick_timestamp(object, &["valid_before", "valid_to", "expires_at"]),
+        related_sites: pick_array_strings(object, &["related_sites"]).unwrap_or_default(),
+        raw: value.clone(),
+    })
+}
+
+fn parse_certificate_detail(payload: &Value) -> Option<SafeLineCertificateDetail> {
+    let object = find_object_candidates(payload)
+        .into_iter()
+        .find(|candidate| candidate.contains_key("manual") || candidate.contains_key("acme"))?;
+    let id = pick_string(object, &["id", "cert_id", "uuid", "uid"])?;
+    let manual = object.get("manual").and_then(Value::as_object);
+    let acme = object.get("acme").and_then(Value::as_object);
+    let domains = pick_array_strings(object, &["domains"])
+        .or_else(|| acme.and_then(|item| pick_array_strings(item, &["domains"])))
+        .unwrap_or_default();
+
+    Some(SafeLineCertificateDetail {
+        id,
+        domains,
+        cert_type: pick_i64(object, &["type", "cert_type"]),
+        certificate_pem: manual.and_then(|item| pick_string(item, &["crt", "cert", "fullchain"])),
+        private_key_pem: manual.and_then(|item| pick_string(item, &["key", "private_key"])),
+        raw: payload.clone(),
     })
 }
 

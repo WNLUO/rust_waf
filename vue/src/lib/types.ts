@@ -428,6 +428,8 @@ export interface LocalCertificateDraft {
   expired: boolean;
   notes: string;
   last_synced_at: number | null;
+  certificate_pem?: string | null;
+  private_key_pem?: string | null;
 }
 
 export interface SiteSyncLinkItem {
@@ -462,6 +464,28 @@ export interface SiteSyncLinkDraft {
   last_remote_hash: string | null;
   last_error: string | null;
   last_synced_at: number | null;
+}
+
+export interface SafeLineSitesPullResponse {
+  success: boolean;
+  imported_sites: number;
+  updated_sites: number;
+  imported_certificates: number;
+  updated_certificates: number;
+  linked_sites: number;
+  skipped_sites: number;
+  message: string;
+}
+
+export interface SafeLineSitesPushResponse {
+  success: boolean;
+  created_sites: number;
+  updated_sites: number;
+  created_certificates: number;
+  reused_certificates: number;
+  skipped_sites: number;
+  failed_sites: number;
+  message: string;
 }
 
 export interface SafeLineEventSyncResponse {

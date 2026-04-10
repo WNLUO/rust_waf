@@ -24,6 +24,8 @@ import type {
   SafeLineEventSyncResponse,
   SafeLineMappingsResponse,
   SafeLineMappingsUpdateRequest,
+  SafeLineSitesPullResponse,
+  SafeLineSitesPushResponse,
   SafeLineSyncOverviewResponse,
   SafeLineSitesResponse,
   SafeLineTestResponse,
@@ -252,6 +254,18 @@ export function updateSafeLineMappings(payload: SafeLineMappingsUpdateRequest) {
   return apiRequest<WriteStatusResponse>("/integrations/safeline/mappings", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function pullSafeLineSites() {
+  return apiRequest<SafeLineSitesPullResponse>("/integrations/safeline/pull/sites", {
+    method: "POST",
+  });
+}
+
+export function pushSafeLineSites() {
+  return apiRequest<SafeLineSitesPushResponse>("/integrations/safeline/push/sites", {
+    method: "POST",
   });
 }
 

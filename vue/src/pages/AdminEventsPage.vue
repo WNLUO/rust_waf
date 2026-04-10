@@ -103,6 +103,62 @@ const closePreview = () => {
   previewContent.value = ''
 }
 
+const safeLineActionMap: Record<string, string> = {
+  '0': '检测',
+  '1': '拦截',
+}
+
+const safeLineAttackTypeMap: Record<string, string> = {
+  '7': '漏洞利用',
+  '8': '代码注入',
+  '10': '文件上传',
+}
+
+const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
+  if (event.layer !== 'safeline') return null
+  const matched = event.reason.match(/^safeline:([^:]+):/)
+  return matched?.[1] ?? null
+}
+
+const eventActionLabel = (action: string) => {
+  const normalized = action.trim().toLowerCase()
+  if (normalized in safeLineActionMap) {
+    return safeLineActionMap[normalized]
+  }
+  if (['block', 'allow', 'alert', 'log'].includes(normalized)) {
+    return actionLabel(normalized)
+  }
+  return `未知动作(${action})`
+}
+
+const eventActionBadgeType = (action: string) => {
+  const normalized = action.trim().toLowerCase()
+  if (normalized === '1' || normalized === 'block') return 'error'
+  if (normalized === 'allow') return 'success'
+  if (normalized === '0' || normalized === 'alert' || normalized === 'log') return 'warning'
+  return 'warning'
+}
+
+const eventAttackTypeLabel = (event: SecurityEventItem) => {
+  const code = getSafeLineAttackTypeCode(event)
+  if (!code) return ''
+  return safeLineAttackTypeMap[code] || `未知类型(${code})`
+}
+
+const eventReasonLabel = (event: SecurityEventItem) => {
+  if (event.layer !== 'safeline') return event.reason
+
+  const attackTypeCode = getSafeLineAttackTypeCode(event)
+  const attackTypeLabel = attackTypeCode ? safeLineAttackTypeMap[attackTypeCode] : ''
+  const normalized = event.reason.replace(/^safeline:[^:]+:/, '').trim()
+
+  if (attackTypeCode && normalized === `检测到 ${attackTypeCode} 攻击`) {
+    return attackTypeLabel || normalized
+  }
+
+  return normalized || event.reason
+}
+
 onMounted(async () => {
   await loadEvents(true)
   filtersReady.value = true
@@ -260,10 +316,10 @@ const siteOptions = computed(() => {
                     </div>
                   </td>
                   <td class="px-5 py-4">
-                    <div class="flex min-w-[176px] flex-nowrap items-center gap-2 whitespace-nowrap">
+                    <div class="flex min-w-[236px] flex-nowrap items-center gap-2 whitespace-nowrap">
                       <StatusBadge :text="layerLabel(event.layer)" :type="event.layer === 'l7' ? 'info' : 'warning'" />
-                      <StatusBadge :text="actionLabel(event.action)" :type="event.action === 'block' ? 'error' : 'warning'" />
-                      <StatusBadge v-if="event.provider" :text="event.provider" type="muted" compact />
+                      <StatusBadge :text="eventActionLabel(event.action)" :type="eventActionBadgeType(event.action)" />
+                      <StatusBadge v-if="eventAttackTypeLabel(event)" :text="eventAttackTypeLabel(event)" type="muted" compact />
                       <button
                         v-if="event.provider_site_name || event.provider_site_domain"
                         class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-cyber-border/60 bg-white/85 text-stone-700 transition hover:border-cyber-accent/40 hover:text-cyber-accent-strong"
@@ -276,7 +332,7 @@ const siteOptions = computed(() => {
                   </td>
                   <td class="px-5 py-4">
                     <div class="w-[300px] min-w-[300px] max-w-[300px]">
-                      <p class="truncate font-medium leading-6 text-stone-900" :title="event.reason">{{ event.reason }}</p>
+                      <p class="truncate font-medium leading-6 text-stone-900" :title="eventReasonLabel(event)">{{ eventReasonLabel(event) }}</p>
                     </div>
                   </td>
                   <td class="px-5 py-4">

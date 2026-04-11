@@ -130,7 +130,9 @@ function sameResponseTemplate(
 const enabledActionTemplates = computed(() =>
   [
     ...actionTemplates.value,
-    ...actionIdeaPresets.value.map((idea) => ({
+    ...actionIdeaPresets.value
+      .filter((idea) => !idea.requires_upload || idea.uploaded_file_ready)
+      .map((idea) => ({
       template_id: `${idea.plugin_id}:${idea.template_local_id}`,
       plugin_id: idea.plugin_id,
       name: idea.title,
@@ -144,10 +146,10 @@ const enabledActionTemplates = computed(() =>
       response_template: {
         status_code: idea.status_code,
         content_type: idea.content_type,
-        body_source: 'inline_text',
+        body_source: idea.body_source,
         gzip: idea.gzip,
-        body_text: idea.response_content,
-        body_file_path: '',
+        body_text: idea.body_source === 'inline_text' ? idea.response_content : '',
+        body_file_path: idea.body_source === 'file' ? idea.runtime_body_file_path : '',
         headers: idea.headers,
       },
       updated_at: idea.updated_at,

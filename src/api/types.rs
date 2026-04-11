@@ -686,8 +686,13 @@ pub struct ActionIdeaPresetResponse {
     pub(crate) content_type: String,
     pub(crate) status_code: u16,
     pub(crate) gzip: bool,
+    pub(crate) body_source: String,
+    pub(crate) runtime_body_file_path: String,
     pub(crate) headers: Vec<RuleResponseHeaderPayload>,
     pub(crate) response_content: String,
+    pub(crate) requires_upload: bool,
+    pub(crate) uploaded_file_name: Option<String>,
+    pub(crate) uploaded_file_ready: bool,
     pub(crate) has_overrides: bool,
     pub(crate) updated_at: i64,
 }
@@ -698,6 +703,11 @@ pub struct UpdateActionIdeaPresetRequest {
     pub(crate) status_code: u16,
     pub(crate) content_type: String,
     pub(crate) response_content: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ActionIdeaUploadResponse {
+    pub(crate) idea: ActionIdeaPresetResponse,
 }
 
 #[derive(Debug, Deserialize)]

@@ -382,7 +382,7 @@ impl SqliteStore {
     pub async fn list_action_idea_overrides(&self) -> Result<Vec<ActionIdeaOverrideEntry>> {
         sqlx::query_as::<_, ActionIdeaOverrideEntry>(
             r#"
-            SELECT idea_id, title, status_code, content_type, response_content, updated_at
+            SELECT idea_id, title, status_code, content_type, response_content, body_file_path, uploaded_file_name, updated_at
             FROM action_idea_overrides
             ORDER BY idea_id ASC
             "#,
@@ -400,13 +400,15 @@ impl SqliteStore {
         let now = unix_timestamp();
         sqlx::query(
             r#"
-            INSERT INTO action_idea_overrides (idea_id, title, status_code, content_type, response_content, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO action_idea_overrides (idea_id, title, status_code, content_type, response_content, body_file_path, uploaded_file_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(idea_id) DO UPDATE SET
                 title = excluded.title,
                 status_code = excluded.status_code,
                 content_type = excluded.content_type,
                 response_content = excluded.response_content,
+                body_file_path = excluded.body_file_path,
+                uploaded_file_name = excluded.uploaded_file_name,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -415,6 +417,8 @@ impl SqliteStore {
         .bind(override_entry.status_code)
         .bind(&override_entry.content_type)
         .bind(&override_entry.response_content)
+        .bind(&override_entry.body_file_path)
+        .bind(&override_entry.uploaded_file_name)
         .bind(now)
         .execute(&self.pool)
         .await?;

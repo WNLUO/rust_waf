@@ -11,6 +11,7 @@ import {
   fetchRuleActionTemplatePreview,
   fetchRuleActionPlugins,
   fetchRuleActionTemplates,
+  uploadActionIdeaGzip,
   updateActionIdeaPreset,
   updateRuleActionPlugin,
   uploadRuleActionPlugin,
@@ -26,11 +27,13 @@ const loading = ref(true)
 const refreshing = ref(false)
 const installingPlugin = ref(false)
 const savingIdea = ref(false)
+const uploadingIdeaAsset = ref(false)
 const error = ref('')
 const installedPlugins = ref<RuleActionPluginItem[]>([])
 const pluginTemplates = ref<RuleActionTemplateItem[]>([])
 const actionIdeas = ref<ActionIdeaPreset[]>([])
 const pluginFileInput = ref<HTMLInputElement | null>(null)
+const actionIdeaFileInput = ref<HTMLInputElement | null>(null)
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const previewTitle = ref('')
@@ -44,6 +47,7 @@ const previewDraftContentType = ref('')
 const previewDraftContent = ref('')
 const pagePreviewOpen = ref(false)
 const downloadingIdeaId = ref('')
+const uploadingIdeaId = ref('')
 
 const ideaTemplateMatchers: Record<
   string,
@@ -53,6 +57,7 @@ const ideaTemplateMatchers: Record<
     templates.find((item) =>
       item.response_template.content_type.includes('application/json'),
     ) ?? null,
+  'gzip-response': () => null,
   'maintenance-page': (templates) =>
     templates.find(
       (item) => item.name.includes('Block') || item.name.includes('Hello'),
@@ -172,8 +177,10 @@ const createActionIdeaPreviewPayload = (
   content_type: idea.content_type,
   status_code: idea.status_code,
   gzip: idea.gzip,
-  body_source: 'file',
-  body_preview: idea.response_content,
+  body_source: idea.body_source,
+  body_preview: idea.requires_upload
+    ? `已上传文件：${idea.uploaded_file_name || '未上传 gzip 文件'}`
+    : idea.response_content,
   truncated: false,
 })
 
@@ -235,6 +242,10 @@ const closePreview = () => {
 const downloadGeneratedPlugin = async (ideaId: string) => {
   const idea = actionIdeasById.value.get(ideaId)
   if (!idea) return
+  if (idea.requires_upload) {
+    error.value = '响应Gzip 需要先在预览弹窗里上传 gzip 文件，不提供本地样例下载。'
+    return
+  }
 
   downloadingIdeaId.value = ideaId
   try {
@@ -304,13 +315,17 @@ const previewRenderedBody = computed(() =>
     : (previewPayload.value?.body_preview ?? ''),
 )
 
-const previewIsHtml = computed(() =>
-  (
-    previewIsActionIdea.value
-      ? previewDraftContentType.value
-      : (previewPayload.value?.content_type ?? '')
-  ).includes('text/html'),
-)
+const previewCanPagePreview = computed(() => {
+  const idea = currentPreviewIdea.value
+  if (idea?.requires_upload) return false
+  return (
+    (
+      previewIsActionIdea.value
+        ? previewDraftContentType.value
+        : (previewPayload.value?.content_type ?? '')
+    ).includes('text/html')
+  )
+})
 
 const previewDirty = computed(() => {
   const idea = currentPreviewIdea.value
@@ -319,7 +334,7 @@ const previewDirty = computed(() => {
     previewDraftTitle.value !== idea.title ||
     previewDraftStatusCode.value !== idea.status_code ||
     previewDraftContentType.value !== idea.content_type ||
-    previewDraftContent.value !== idea.response_content
+    (!idea.requires_upload && previewDraftContent.value !== idea.response_content)
   )
 })
 
@@ -342,7 +357,7 @@ const saveActionIdeaPreview = async () => {
     error.value = '状态码必须在 100 到 599 之间'
     return
   }
-  if (!previewDraftContent.value.trim()) {
+  if (!idea.requires_upload && !previewDraftContent.value.trim()) {
     error.value = '原始内容不能为空'
     return
   }
@@ -353,7 +368,7 @@ const saveActionIdeaPreview = async () => {
       title: previewDraftTitle.value,
       status_code: previewDraftStatusCode.value,
       content_type: previewDraftContentType.value,
-      response_content: previewDraftContent.value,
+      response_content: idea.requires_upload ? '' : previewDraftContent.value,
     })
     actionIdeas.value = actionIdeas.value.map((item) =>
       item.id === updated.id ? updated : item,
@@ -375,12 +390,47 @@ const saveActionIdeaPreview = async () => {
 }
 
 const openPagePreview = () => {
-  if (!previewIsHtml.value) return
+  if (!previewCanPagePreview.value) return
   pagePreviewOpen.value = true
 }
 
 const closePagePreview = () => {
   pagePreviewOpen.value = false
+}
+
+const openActionIdeaAssetPicker = () => {
+  if (!currentPreviewIdea.value?.requires_upload || uploadingIdeaAsset.value) return
+  actionIdeaFileInput.value?.click()
+}
+
+const handleActionIdeaAssetPicked = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  const idea = currentPreviewIdea.value
+  if (!file || !idea?.requires_upload) return
+
+  uploadingIdeaAsset.value = true
+  uploadingIdeaId.value = idea.id
+  try {
+    const payload = await uploadActionIdeaGzip(idea.id, file)
+    const updated = payload.idea
+    actionIdeas.value = actionIdeas.value.map((item) =>
+      item.id === updated.id ? updated : item,
+    )
+    previewPayload.value = createActionIdeaPreviewPayload(updated)
+    previewDraftTitle.value = updated.title
+    previewDraftStatusCode.value = updated.status_code
+    previewDraftContentType.value = updated.content_type
+    previewDraftContent.value = updated.response_content
+    previewSourceLabel.value = '动作方案 · 已保存自定义版本'
+    error.value = ''
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '上传 gzip 文件失败'
+  } finally {
+    uploadingIdeaAsset.value = false
+    uploadingIdeaId.value = ''
+  }
 }
 
 onMounted(loadActionCenter)
@@ -397,6 +447,13 @@ onMounted(loadActionCenter)
         <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
         刷新动作库
       </button>
+      <input
+        ref="actionIdeaFileInput"
+        type="file"
+        accept=".gz,application/gzip,application/x-gzip"
+        class="hidden"
+        @change="handleActionIdeaAssetPicked"
+      />
     </template>
 
     <div class="space-y-6">
@@ -571,6 +628,12 @@ onMounted(loadActionCenter)
                   可直接复用模板
                 </span>
                 <span
+                  v-if="idea.requires_upload"
+                  class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700"
+                >
+                  需上传 gzip
+                </span>
+                <span
                   v-if="idea.has_overrides"
                   class="rounded-full bg-amber-100 px-2.5 py-1 text-amber-700"
                 >
@@ -607,9 +670,16 @@ onMounted(loadActionCenter)
                 </button>
                 <button
                   class="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                  :disabled="idea.requires_upload"
                   @click="downloadGeneratedPlugin(idea.id)"
                 >
-                  {{ downloadingIdeaId === idea.id ? '打包中...' : '下载插件样例' }}
+                  {{
+                    idea.requires_upload
+                      ? '需在弹窗上传'
+                      : downloadingIdeaId === idea.id
+                        ? '打包中...'
+                        : '下载插件样例'
+                  }}
                 </button>
               </div>
             </div>
@@ -728,9 +798,53 @@ onMounted(loadActionCenter)
             </div>
 
             <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+              <div
+                v-if="previewIsActionIdea && currentPreviewIdea?.requires_upload"
+                class="rounded-xl border border-slate-200 bg-white/80 p-5"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-xs tracking-wide text-slate-500">Gzip 文件</p>
+                    <p class="mt-2 text-sm text-stone-800">
+                      {{
+                        currentPreviewIdea.uploaded_file_name ||
+                        '还没有上传 gzip 文件'
+                      }}
+                    </p>
+                  </div>
+                  <button
+                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
+                    :disabled="uploadingIdeaAsset"
+                    @click="openActionIdeaAssetPicker"
+                  >
+                    <RefreshCw
+                      v-if="uploadingIdeaAsset && uploadingIdeaId === currentPreviewIdea.id"
+                      :size="14"
+                      class="animate-spin"
+                    />
+                    {{
+                      uploadingIdeaAsset && uploadingIdeaId === currentPreviewIdea.id
+                        ? '上传中...'
+                        : currentPreviewIdea.uploaded_file_ready
+                          ? '重新上传 Gzip'
+                          : '上传 Gzip 文件'
+                    }}
+                  </button>
+                </div>
+                <p class="mt-3 text-xs leading-6 text-slate-500">
+                  这里上传的是已经压缩好的 `.gz` 文件。系统会把它保存在本地数据目录里，更新代码时不会覆盖。
+                </p>
+              </div>
+
               <div class="mt-4 rounded-xl border border-slate-200 bg-white/80 p-5">
                 <div class="flex items-center justify-between gap-4">
-                  <p class="text-xs tracking-wide text-slate-500">原始内容</p>
+                  <p class="text-xs tracking-wide text-slate-500">
+                    {{
+                      previewIsActionIdea && currentPreviewIdea?.requires_upload
+                        ? '文件说明'
+                        : '原始内容'
+                    }}
+                  </p>
                   <span
                     v-if="previewPayload.truncated"
                     class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] text-amber-700"
@@ -738,11 +852,22 @@ onMounted(loadActionCenter)
                     已截断
                   </span>
                 </div>
-                <div v-if="previewIsActionIdea" class="mt-3 space-y-3">
+                <div
+                  v-if="previewIsActionIdea && !currentPreviewIdea?.requires_upload"
+                  class="mt-3 space-y-3"
+                >
                   <textarea
                     v-model="previewDraftContent"
                     class="min-h-[min(42vh,28rem)] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-blue-500/50"
                   ></textarea>
+                </div>
+                <div
+                  v-else-if="previewIsActionIdea && currentPreviewIdea?.requires_upload"
+                  class="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-6 text-slate-600"
+                >
+                  这个动作不会编辑文本内容，而是直接返回你上传的 gzip 文件。
+                  <br />
+                  建议配合合适的 `内容类型` 使用，例如 `text/html; charset=utf-8` 或 `application/json`。
                 </div>
                 <pre
                   v-else
@@ -753,6 +878,7 @@ onMounted(loadActionCenter)
 
             <div class="mt-4 flex flex-wrap gap-3">
               <button
+                v-if="!currentPreviewIdea?.requires_upload"
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                 @click="copyToClipboard(previewRenderedBody)"
               >
@@ -769,7 +895,7 @@ onMounted(loadActionCenter)
                 {{ savingIdea ? '保存中...' : '保存修改' }}
               </button>
               <button
-                v-if="previewIsHtml"
+                v-if="previewCanPagePreview"
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                 @click="openPagePreview"
               >

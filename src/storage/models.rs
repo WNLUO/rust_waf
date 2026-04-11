@@ -61,6 +61,8 @@ pub struct ActionIdeaOverrideEntry {
     pub status_code: Option<i64>,
     pub content_type: Option<String>,
     pub response_content: Option<String>,
+    pub body_file_path: Option<String>,
+    pub uploaded_file_name: Option<String>,
     pub updated_at: i64,
 }
 
@@ -71,6 +73,8 @@ pub struct ActionIdeaOverrideUpsert {
     pub status_code: Option<i64>,
     pub content_type: Option<String>,
     pub response_content: Option<String>,
+    pub body_file_path: Option<String>,
+    pub uploaded_file_name: Option<String>,
 }
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]

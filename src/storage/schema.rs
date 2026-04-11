@@ -95,6 +95,8 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             status_code INTEGER,
             content_type TEXT,
             response_content TEXT,
+            body_file_path TEXT,
+            uploaded_file_name TEXT,
             updated_at INTEGER NOT NULL
         );
 
@@ -298,6 +300,8 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         "ALTER TABLE local_sites ADD COLUMN safeline_intercept_json TEXT",
         "ALTER TABLE action_idea_overrides ADD COLUMN status_code INTEGER",
         "ALTER TABLE action_idea_overrides ADD COLUMN content_type TEXT",
+        "ALTER TABLE action_idea_overrides ADD COLUMN body_file_path TEXT",
+        "ALTER TABLE action_idea_overrides ADD COLUMN uploaded_file_name TEXT",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {

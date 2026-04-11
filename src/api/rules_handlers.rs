@@ -1,6 +1,8 @@
 use super::*;
 use axum::extract::Multipart;
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 struct BuiltinActionIdeaPreset {
@@ -23,7 +25,9 @@ struct BuiltinActionIdeaPreset {
     content_type: &'static str,
     status_code: u16,
     gzip: bool,
+    body_source: &'static str,
     response_content: &'static str,
+    requires_upload: bool,
 }
 
 fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
@@ -48,7 +52,9 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             content_type: "application/json; charset=utf-8",
             status_code: 200,
             gzip: true,
+            body_source: "inline_text",
             response_content: "{\n  \"status\": \"ok\",\n  \"trace_id\": \"demo-honeypot-001\",\n  \"message\": \"request accepted\",\n  \"note\": \"this is a deceptive sample response for scanners\"\n}",
+            requires_upload: false,
         },
         BuiltinActionIdeaPreset {
             id: "maintenance-page",
@@ -70,7 +76,33 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             content_type: "text/html; charset=utf-8",
             status_code: 503,
             gzip: true,
+            body_source: "inline_text",
             response_content: "<!doctype html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"utf-8\"><title>维护中</title></head>\n<body style=\"font-family: sans-serif; padding: 48px;\">\n  <h1>服务维护中</h1>\n  <p>当前入口正在进行短时维护，请稍后重试。</p>\n</body>\n</html>",
+            requires_upload: false,
+        },
+        BuiltinActionIdeaPreset {
+            id: "gzip-response",
+            title: "响应Gzip",
+            mood: "传输",
+            summary: "上传一个已经压缩好的 .gz 响应体，命中后原样返回给客户端。",
+            mechanism: "适合直接复用预压缩资源；系统会保存你上传的 gzip 文件并在规则命中时作为文件响应返回。",
+            performance: "低",
+            fallback_path: "/admin/rules",
+            plugin_id: "gzip-response-fun",
+            file_name: "gzip-response-fun.zip",
+            response_file_path: "payload.gz",
+            plugin_name: "Gzip Response Fun",
+            plugin_description: "上传预压缩 gzip 响应体的示例动作",
+            template_local_id: "gzip_response",
+            template_description: "返回用户上传的 gzip 文件内容",
+            pattern: "(?i)gzip|compressed|archive",
+            severity: "medium",
+            content_type: "application/octet-stream",
+            status_code: 200,
+            gzip: false,
+            body_source: "file",
+            response_content: "",
+            requires_upload: true,
         },
     ]
 }
@@ -86,7 +118,86 @@ fn action_idea_headers(idea_id: &str) -> Vec<RuleResponseHeaderPayload> {
             value: "120".to_string(),
         });
     }
+    if idea_id == "gzip-response" {
+        headers.push(RuleResponseHeaderPayload {
+            key: "content-encoding".to_string(),
+            value: "gzip".to_string(),
+        });
+    }
     headers
+}
+
+fn action_idea_asset_relative_path(idea_id: &str) -> String {
+    format!("action_ideas/{}/payload.gz", idea_id)
+}
+
+fn build_action_idea_response(
+    builtin: &BuiltinActionIdeaPreset,
+    override_entry: Option<&crate::storage::ActionIdeaOverrideEntry>,
+) -> ActionIdeaPresetResponse {
+    let title = override_entry
+        .and_then(|entry| entry.title.clone())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| builtin.title.to_string());
+    let response_content = if builtin.requires_upload {
+        String::new()
+    } else {
+        override_entry
+            .and_then(|entry| entry.response_content.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| builtin.response_content.to_string())
+    };
+    let status_code = override_entry
+        .and_then(|entry| entry.status_code)
+        .and_then(|value| u16::try_from(value).ok())
+        .unwrap_or(builtin.status_code);
+    let content_type = override_entry
+        .and_then(|entry| entry.content_type.clone())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| builtin.content_type.to_string());
+    let runtime_body_file_path = if builtin.requires_upload {
+        override_entry
+            .and_then(|entry| entry.body_file_path.clone())
+            .unwrap_or_else(|| action_idea_asset_relative_path(builtin.id))
+    } else {
+        String::new()
+    };
+    let uploaded_file_name = override_entry.and_then(|entry| entry.uploaded_file_name.clone());
+    let uploaded_file_ready = builtin.requires_upload && uploaded_file_name.is_some();
+
+    ActionIdeaPresetResponse {
+        id: builtin.id.to_string(),
+        title: title.clone(),
+        mood: builtin.mood.to_string(),
+        summary: builtin.summary.to_string(),
+        mechanism: builtin.mechanism.to_string(),
+        performance: builtin.performance.to_string(),
+        fallback_path: builtin.fallback_path.to_string(),
+        plugin_id: builtin.plugin_id.to_string(),
+        file_name: builtin.file_name.to_string(),
+        response_file_path: builtin.response_file_path.to_string(),
+        plugin_name: builtin.plugin_name.to_string(),
+        plugin_description: builtin.plugin_description.to_string(),
+        template_local_id: builtin.template_local_id.to_string(),
+        template_name: title,
+        template_description: builtin.template_description.to_string(),
+        pattern: builtin.pattern.to_string(),
+        severity: builtin.severity.to_string(),
+        content_type,
+        status_code,
+        gzip: builtin.gzip,
+        body_source: builtin.body_source.to_string(),
+        runtime_body_file_path,
+        headers: action_idea_headers(builtin.id),
+        response_content,
+        requires_upload: builtin.requires_upload,
+        uploaded_file_name,
+        uploaded_file_ready,
+        has_overrides: override_entry.is_some(),
+        updated_at: override_entry
+            .map(|entry| entry.updated_at)
+            .unwrap_or_default(),
+    }
 }
 
 pub(super) async fn list_action_idea_presets_handler(
@@ -104,53 +215,7 @@ pub(super) async fn list_action_idea_presets_handler(
 
     let ideas: Vec<_> = builtin_action_idea_presets()
         .into_iter()
-        .map(|builtin| {
-            let override_entry = overrides_by_id.get(builtin.id);
-            let title = override_entry
-                .and_then(|entry| entry.title.clone())
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| builtin.title.to_string());
-            let response_content = override_entry
-                .and_then(|entry| entry.response_content.clone())
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| builtin.response_content.to_string());
-            let status_code = override_entry
-                .and_then(|entry| entry.status_code)
-                .and_then(|value| u16::try_from(value).ok())
-                .unwrap_or(builtin.status_code);
-            let content_type = override_entry
-                .and_then(|entry| entry.content_type.clone())
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| builtin.content_type.to_string());
-            ActionIdeaPresetResponse {
-                id: builtin.id.to_string(),
-                title: title.clone(),
-                mood: builtin.mood.to_string(),
-                summary: builtin.summary.to_string(),
-                mechanism: builtin.mechanism.to_string(),
-                performance: builtin.performance.to_string(),
-                fallback_path: builtin.fallback_path.to_string(),
-                plugin_id: builtin.plugin_id.to_string(),
-                file_name: builtin.file_name.to_string(),
-                response_file_path: builtin.response_file_path.to_string(),
-                plugin_name: builtin.plugin_name.to_string(),
-                plugin_description: builtin.plugin_description.to_string(),
-                template_local_id: builtin.template_local_id.to_string(),
-                template_name: title,
-                template_description: builtin.template_description.to_string(),
-                pattern: builtin.pattern.to_string(),
-                severity: builtin.severity.to_string(),
-                content_type,
-                status_code,
-                gzip: builtin.gzip,
-                headers: action_idea_headers(builtin.id),
-                response_content,
-                has_overrides: override_entry.is_some(),
-                updated_at: override_entry
-                    .map(|entry| entry.updated_at)
-                    .unwrap_or_default(),
-            }
-        })
+        .map(|builtin| build_action_idea_response(&builtin, overrides_by_id.get(builtin.id)))
         .collect();
 
     Ok(Json(ActionIdeaPresetsResponse {
@@ -184,18 +249,36 @@ pub(super) async fn update_action_idea_preset_handler(
     }
 
     let response_content = payload.response_content.trim().to_string();
-    if response_content.is_empty() {
+    if !builtin.requires_upload && response_content.is_empty() {
         return Err(ApiError::bad_request("原始内容不能为空".to_string()));
     }
 
     let store = sqlite_store(&state)?;
+    let existing_override = store
+        .list_action_idea_overrides()
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .find(|entry| entry.idea_id == idea_id);
     store
         .upsert_action_idea_override(&crate::storage::ActionIdeaOverrideUpsert {
             idea_id: idea_id.clone(),
             title: Some(title.clone()),
             status_code: Some(i64::from(payload.status_code)),
             content_type: Some(content_type.clone()),
-            response_content: Some(payload.response_content),
+            response_content: if builtin.requires_upload {
+                existing_override
+                    .as_ref()
+                    .and_then(|entry| entry.response_content.clone())
+            } else {
+                Some(payload.response_content)
+            },
+            body_file_path: existing_override
+                .as_ref()
+                .and_then(|entry| entry.body_file_path.clone()),
+            uploaded_file_name: existing_override
+                .as_ref()
+                .and_then(|entry| entry.uploaded_file_name.clone()),
         })
         .await
         .map_err(ApiError::internal)?;
@@ -209,31 +292,112 @@ pub(super) async fn update_action_idea_preset_handler(
         .find(|entry| entry.idea_id == idea_id)
         .ok_or_else(|| ApiError::internal(anyhow::anyhow!("动作方案覆盖写入后未找到记录")))?;
 
-    Ok(Json(ActionIdeaPresetResponse {
-        id: builtin.id.to_string(),
-        title: title.clone(),
-        mood: builtin.mood.to_string(),
-        summary: builtin.summary.to_string(),
-        mechanism: builtin.mechanism.to_string(),
-        performance: builtin.performance.to_string(),
-        fallback_path: builtin.fallback_path.to_string(),
-        plugin_id: builtin.plugin_id.to_string(),
-        file_name: builtin.file_name.to_string(),
-        response_file_path: builtin.response_file_path.to_string(),
-        plugin_name: builtin.plugin_name.to_string(),
-        plugin_description: builtin.plugin_description.to_string(),
-        template_local_id: builtin.template_local_id.to_string(),
-        template_name: title,
-        template_description: builtin.template_description.to_string(),
-        pattern: builtin.pattern.to_string(),
-        severity: builtin.severity.to_string(),
-        content_type,
-        status_code: payload.status_code,
-        gzip: builtin.gzip,
-        headers: action_idea_headers(builtin.id),
-        response_content,
-        has_overrides: true,
-        updated_at: updated_entry.updated_at,
+    Ok(Json(build_action_idea_response(
+        &builtin,
+        Some(&updated_entry),
+    )))
+}
+
+pub(super) async fn upload_action_idea_gzip_handler(
+    State(state): State<ApiState>,
+    Path(idea_id): Path<String>,
+    mut multipart: Multipart,
+) -> ApiResult<Json<ActionIdeaUploadResponse>> {
+    let builtin = builtin_action_idea_presets()
+        .into_iter()
+        .find(|item| item.id == idea_id)
+        .ok_or_else(|| ApiError::not_found(format!("Action idea '{}' not found", idea_id)))?;
+    if !builtin.requires_upload {
+        return Err(ApiError::bad_request(
+            "这个动作不支持上传 gzip 文件".to_string(),
+        ));
+    }
+
+    let mut upload_bytes = None;
+    let mut upload_name = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|err| ApiError::bad_request(format!("读取上传字段失败: {}", err)))?
+    {
+        if field.name() != Some("file") {
+            continue;
+        }
+        upload_name = field.file_name().map(|value| value.to_string());
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|err| ApiError::bad_request(format!("读取上传文件失败: {}", err)))?;
+        upload_bytes = Some(bytes);
+    }
+
+    let upload_bytes =
+        upload_bytes.ok_or_else(|| ApiError::bad_request("缺少 gzip 文件".to_string()))?;
+    if upload_bytes.is_empty() {
+        return Err(ApiError::bad_request("gzip 文件不能为空".to_string()));
+    }
+    if upload_bytes.len() > 8 * 1024 * 1024 {
+        return Err(ApiError::bad_request("gzip 文件不能超过 8MB".to_string()));
+    }
+    if upload_bytes.len() < 2 || upload_bytes[0] != 0x1f || upload_bytes[1] != 0x8b {
+        return Err(ApiError::bad_request(
+            "上传文件不是有效的 gzip 文件".to_string(),
+        ));
+    }
+
+    let relative_path = action_idea_asset_relative_path(&idea_id);
+    let absolute_path = crate::rules::resolve_response_file_path(&relative_path)
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let parent = absolute_path
+        .parent()
+        .map(PathBuf::from)
+        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("无法确定 gzip 资产目录")))?;
+    fs::create_dir_all(&parent).map_err(ApiError::internal)?;
+    fs::write(&absolute_path, upload_bytes.as_ref()).map_err(ApiError::internal)?;
+
+    let store = sqlite_store(&state)?;
+    let existing_override = store
+        .list_action_idea_overrides()
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .find(|entry| entry.idea_id == idea_id);
+
+    store
+        .upsert_action_idea_override(&crate::storage::ActionIdeaOverrideUpsert {
+            idea_id: idea_id.clone(),
+            title: existing_override
+                .as_ref()
+                .and_then(|entry| entry.title.clone()),
+            status_code: existing_override
+                .as_ref()
+                .and_then(|entry| entry.status_code),
+            content_type: existing_override
+                .as_ref()
+                .and_then(|entry| entry.content_type.clone()),
+            response_content: existing_override
+                .as_ref()
+                .and_then(|entry| entry.response_content.clone()),
+            body_file_path: Some(relative_path),
+            uploaded_file_name: Some(
+                upload_name
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| "payload.gz".to_string()),
+            ),
+        })
+        .await
+        .map_err(ApiError::internal)?;
+
+    let updated_override = store
+        .list_action_idea_overrides()
+        .await
+        .map_err(ApiError::internal)?
+        .into_iter()
+        .find(|entry| entry.idea_id == idea_id)
+        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("上传 gzip 后未找到动作方案记录")))?;
+
+    Ok(Json(ActionIdeaUploadResponse {
+        idea: build_action_idea_response(&builtin, Some(&updated_override)),
     }))
 }
 

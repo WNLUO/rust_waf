@@ -102,8 +102,13 @@ export interface ActionIdeaPreset {
   content_type: string
   status_code: number
   gzip: boolean
+  body_source: string
+  runtime_body_file_path: string
   headers: RuleResponseHeader[]
   response_content: string
+  requires_upload: boolean
+  uploaded_file_name?: string | null
+  uploaded_file_ready: boolean
   has_overrides: boolean
   updated_at: number
 }

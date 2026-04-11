@@ -143,6 +143,10 @@ fn build_router(state: ApiState) -> Router {
             patch(rules_handlers::update_action_idea_preset_handler),
         )
         .route(
+            "/action-idea-presets/:idea_id/upload-gzip",
+            axum::routing::post(rules_handlers::upload_action_idea_gzip_handler),
+        )
+        .route(
             "/sites/local",
             get(sites_handlers::list_local_sites_handler)
                 .post(sites_handlers::create_local_site_handler),

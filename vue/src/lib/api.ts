@@ -211,6 +211,37 @@ export function updateActionIdeaPreset(
   })
 }
 
+export async function uploadActionIdeaGzip(ideaId: string, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch(
+    `${API_BASE}/action-idea-presets/${encodeURIComponent(ideaId)}/upload-gzip`,
+    {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+      },
+      body: formData,
+    },
+  )
+
+  if (!response.ok) {
+    let message = `请求失败：${response.status}`
+    try {
+      const payload = (await response.json()) as { error?: string }
+      if (payload.error) {
+        message = payload.error
+      }
+    } catch {
+      // Keep fallback message.
+    }
+    throw new Error(message)
+  }
+
+  return (await response.json()) as { idea: ActionIdeaPreset }
+}
+
 export function installRuleActionPlugin(
   packageUrl: string,
   sha256?: string,

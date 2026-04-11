@@ -16,6 +16,16 @@ const INTERNAL_TARPIT_BYTES_PER_CHUNK_HEADER: &str = "x-rust-waf-tarpit-bytes-pe
 const INTERNAL_TARPIT_INTERVAL_MS_HEADER: &str = "x-rust-waf-tarpit-interval-ms";
 const INTERNAL_RANDOM_STATUSES_HEADER: &str = "x-rust-waf-random-statuses";
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RandomResponseBodyConfig {
+    #[serde(default)]
+    success_rate_percent: Option<u8>,
+    #[serde(default)]
+    success_body: Option<String>,
+    #[serde(default)]
+    failure_body: Option<String>,
+}
+
 pub struct RuleEngine {
     rules: Vec<CompiledRule>,
 }
@@ -196,7 +206,7 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
     };
 
     let tarpit = extract_tarpit_config(&template.headers)?;
-    let random_status = extract_random_status_config(&template.headers)?;
+    let random_status = extract_random_status_config(&template.headers, &body)?;
 
     let mut headers = Vec::with_capacity(template.headers.len() + 2);
     headers.push(("content-type".to_string(), template.content_type.clone()));
@@ -273,6 +283,7 @@ fn extract_tarpit_config(
 
 fn extract_random_status_config(
     headers: &[crate::config::RuleResponseHeader],
+    body: &[u8],
 ) -> Result<Option<RandomStatusConfig>> {
     let Some(raw) = headers.iter().find_map(|header| {
         header
@@ -284,7 +295,7 @@ fn extract_random_status_config(
         return Ok(None);
     };
 
-    let statuses: Result<Vec<_>> = raw
+    let failure_statuses: Result<Vec<_>> = raw
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -301,11 +312,37 @@ fn extract_random_status_config(
             Ok(parsed)
         })
         .collect();
-    let statuses = statuses?;
-    if statuses.is_empty() {
+    let failure_statuses = failure_statuses?;
+    if failure_statuses.is_empty() {
         anyhow::bail!("Random status response requires at least one status code");
     }
-    Ok(Some(RandomStatusConfig { statuses }))
+
+    let parsed_body = std::str::from_utf8(body)
+        .ok()
+        .and_then(|text| serde_json::from_str::<RandomResponseBodyConfig>(text).ok());
+
+    let success_rate_percent = parsed_body
+        .as_ref()
+        .and_then(|item| item.success_rate_percent)
+        .unwrap_or(25)
+        .min(100);
+    let success_body = parsed_body
+        .as_ref()
+        .and_then(|item| item.success_body.clone())
+        .unwrap_or_else(|| "request completed successfully".to_string())
+        .into_bytes();
+    let failure_body = parsed_body
+        .as_ref()
+        .and_then(|item| item.failure_body.clone())
+        .unwrap_or_else(|| String::from_utf8_lossy(body).to_string())
+        .into_bytes();
+
+    Ok(Some(RandomStatusConfig {
+        failure_statuses,
+        success_rate_percent,
+        success_body,
+        failure_body,
+    }))
 }
 
 pub(crate) fn resolve_response_file_path(value: &str) -> Result<PathBuf> {

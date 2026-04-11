@@ -1049,10 +1049,14 @@ enum UpstreamResponseDisposition {
 fn resolve_runtime_custom_response(response: &CustomHttpResponse) -> CustomHttpResponse {
     let mut resolved = response.clone();
     if let Some(random_status) = response.random_status.as_ref() {
-        let len = random_status.statuses.len();
-        if len > 0 {
-            let index = rand::thread_rng().gen_range(0..len);
-            resolved.status_code = random_status.statuses[index];
+        let roll = rand::thread_rng().gen_range(0..100);
+        if roll < u32::from(random_status.success_rate_percent) {
+            resolved.status_code = 200;
+            resolved.body = random_status.success_body.clone();
+        } else if !random_status.failure_statuses.is_empty() {
+            let index = rand::thread_rng().gen_range(0..random_status.failure_statuses.len());
+            resolved.status_code = random_status.failure_statuses[index];
+            resolved.body = random_status.failure_body.clone();
         }
     }
     resolved

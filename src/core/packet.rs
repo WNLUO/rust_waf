@@ -61,7 +61,10 @@ pub struct TarpitConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RandomStatusConfig {
-    pub statuses: Vec<u16>,
+    pub failure_statuses: Vec<u16>,
+    pub success_rate_percent: u8,
+    pub success_body: Vec<u8>,
+    pub failure_body: Vec<u8>,
 }
 
 impl PacketInfo {

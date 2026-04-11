@@ -51,6 +51,10 @@ const previewDraftXssPayload = ref('')
 const previewDraftTarpitBytesPerChunk = ref(1)
 const previewDraftTarpitIntervalMs = ref(1000)
 const previewDraftTarpitBody = ref('')
+const previewDraftRandomStatuses = ref('500,502,403')
+const previewDraftRandomSuccessRate = ref(25)
+const previewDraftRandomSuccessBody = ref('')
+const previewDraftRandomFailureBody = ref('')
 const pagePreviewOpen = ref(false)
 const downloadingIdeaId = ref('')
 const uploadingIdeaId = ref('')
@@ -197,6 +201,9 @@ const isFakeXssIdea = (idea: ActionIdeaPreset | null | undefined) =>
 const isTarpitIdea = (idea: ActionIdeaPreset | null | undefined) =>
   idea?.id === 'smart-tarpit'
 
+const isRandomErrorIdea = (idea: ActionIdeaPreset | null | undefined) =>
+  idea?.id === 'random-error-system'
+
 const wrapRedirectContent = (target: string, title: string) => {
   const normalizedTarget = target.trim() || 'https://www.war.gov/'
   return `<!doctype html>
@@ -229,6 +236,10 @@ const defaultFakeSqlResult =
 
 const defaultFakeXssPayload = "<script>alert('xss')<\\/script>"
 const defaultTarpitBody = 'processing request, please wait...'
+const defaultRandomStatuses = '500,502,403'
+const defaultRandomSuccessRate = 25
+const defaultRandomSuccessBody = 'request completed successfully'
+const defaultRandomFailureBody = 'upstream system unstable, retry later'
 
 const wrapFakeSqlContent = (sqlError: string, sqlResult: string) => `<!doctype html>
 <html lang="en">
@@ -321,6 +332,57 @@ const serializeTarpitConfig = (bytesPerChunk: number, intervalMs: number, bodyTe
     bytes_per_chunk: bytesPerChunk,
     chunk_interval_ms: intervalMs,
     body_text: bodyText,
+  })
+
+const parseRandomStatuses = (value: string) =>
+  value
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isInteger(item) && item >= 100 && item <= 599 && item !== 200)
+
+const extractRandomErrorConfig = (content: string) => {
+  try {
+    const parsed = JSON.parse(content) as {
+      failure_statuses?: number[]
+      success_rate_percent?: number
+      success_body?: string
+      failure_body?: string
+    }
+    const statuses = Array.isArray(parsed.failure_statuses)
+      ? parsed.failure_statuses
+          .map((item) => Number(item))
+          .filter((item) => Number.isInteger(item) && item >= 100 && item <= 599 && item !== 200)
+      : []
+    return {
+      statuses: statuses.length ? statuses.join(',') : defaultRandomStatuses,
+      successRate:
+        Number.isFinite(parsed.success_rate_percent) && (parsed.success_rate_percent ?? -1) >= 0
+          ? Math.min(100, Math.max(0, Math.floor(parsed.success_rate_percent as number)))
+          : defaultRandomSuccessRate,
+      successBody: parsed.success_body?.trim() || defaultRandomSuccessBody,
+      failureBody: parsed.failure_body?.trim() || defaultRandomFailureBody,
+    }
+  } catch {
+    return {
+      statuses: defaultRandomStatuses,
+      successRate: defaultRandomSuccessRate,
+      successBody: defaultRandomSuccessBody,
+      failureBody: content.trim() || defaultRandomFailureBody,
+    }
+  }
+}
+
+const serializeRandomErrorConfig = (
+  statuses: string,
+  successRate: number,
+  successBody: string,
+  failureBody: string,
+) =>
+  JSON.stringify({
+    failure_statuses: parseRandomStatuses(statuses),
+    success_rate_percent: successRate,
+    success_body: successBody,
+    failure_body: failureBody,
   })
 
 const extractFakeSqlFields = (content: string) => {
@@ -417,6 +479,10 @@ const openGeneratedPreview = (idea: ActionIdeaPreset) => {
   previewDraftTarpitBytesPerChunk.value = 1
   previewDraftTarpitIntervalMs.value = 1000
   previewDraftTarpitBody.value = ''
+  previewDraftRandomStatuses.value = defaultRandomStatuses
+  previewDraftRandomSuccessRate.value = defaultRandomSuccessRate
+  previewDraftRandomSuccessBody.value = defaultRandomSuccessBody
+  previewDraftRandomFailureBody.value = defaultRandomFailureBody
   if (isFakeSqlIdea(idea)) {
     const fields = extractFakeSqlFields(idea.response_content)
     previewDraftSqlError.value = fields.error
@@ -430,6 +496,13 @@ const openGeneratedPreview = (idea: ActionIdeaPreset) => {
     previewDraftTarpitBytesPerChunk.value = config.bytesPerChunk
     previewDraftTarpitIntervalMs.value = config.intervalMs
     previewDraftTarpitBody.value = config.bodyText
+  }
+  if (isRandomErrorIdea(idea)) {
+    const config = extractRandomErrorConfig(idea.response_content)
+    previewDraftRandomStatuses.value = config.statuses
+    previewDraftRandomSuccessRate.value = config.successRate
+    previewDraftRandomSuccessBody.value = config.successBody
+    previewDraftRandomFailureBody.value = config.failureBody
   }
   previewTitle.value = idea.title
   previewSourceLabel.value = idea.has_overrides
@@ -456,6 +529,10 @@ const closePreview = () => {
   previewDraftTarpitBytesPerChunk.value = 1
   previewDraftTarpitIntervalMs.value = 1000
   previewDraftTarpitBody.value = ''
+  previewDraftRandomStatuses.value = defaultRandomStatuses
+  previewDraftRandomSuccessRate.value = defaultRandomSuccessRate
+  previewDraftRandomSuccessBody.value = defaultRandomSuccessBody
+  previewDraftRandomFailureBody.value = defaultRandomFailureBody
   pagePreviewOpen.value = false
 }
 
@@ -510,6 +587,8 @@ const downloadGeneratedPlugin = async (ideaId: string) => {
         ? wrapRedirectContent(idea.response_content, idea.title)
       : isTarpitIdea(idea)
         ? extractTarpitConfig(idea.response_content).bodyText
+      : isRandomErrorIdea(idea)
+        ? extractRandomErrorConfig(idea.response_content).failureBody
       : isFakeSqlIdea(idea)
         ? wrapFakeSqlContent(
             extractFakeSqlFields(idea.response_content).error,
@@ -560,6 +639,8 @@ const previewRenderedBody = computed(() =>
         ? wrapFakeXssContent(escapeHtml(previewDraftXssPayload.value.trim() || defaultFakeXssPayload))
       : currentPreviewIdea.value && isTarpitIdea(currentPreviewIdea.value)
         ? previewDraftTarpitBody.value.trim() || defaultTarpitBody
+      : currentPreviewIdea.value && isRandomErrorIdea(currentPreviewIdea.value)
+        ? `失败状态码: ${parseRandomStatuses(previewDraftRandomStatuses.value).join(', ') || defaultRandomStatuses}\n成功概率: ${previewDraftRandomSuccessRate.value}%\n\n失败文案:\n${previewDraftRandomFailureBody.value.trim() || defaultRandomFailureBody}\n\n成功文案:\n${previewDraftRandomSuccessBody.value.trim() || defaultRandomSuccessBody}`
       : previewDraftContent.value
     : (previewPayload.value?.body_preview ?? ''),
 )
@@ -598,6 +679,13 @@ const previewDirty = computed(() => {
                 Math.max(1, Math.floor(previewDraftTarpitBytesPerChunk.value || 1)),
                 Math.max(1, Math.floor(previewDraftTarpitIntervalMs.value || 1000)),
                 previewDraftTarpitBody.value.trim() || defaultTarpitBody,
+              ) !== idea.response_content
+          : isRandomErrorIdea(idea)
+            ? serializeRandomErrorConfig(
+                previewDraftRandomStatuses.value,
+                Math.min(100, Math.max(0, Math.floor(previewDraftRandomSuccessRate.value || 0))),
+                previewDraftRandomSuccessBody.value.trim() || defaultRandomSuccessBody,
+                previewDraftRandomFailureBody.value.trim() || defaultRandomFailureBody,
               ) !== idea.response_content
           : previewDraftContent.value !== idea.response_content))
   )
@@ -658,6 +746,28 @@ const saveActionIdeaPreview = async () => {
       return
     }
   }
+  if (isRandomErrorIdea(idea)) {
+    if (!parseRandomStatuses(previewDraftRandomStatuses.value).length) {
+      error.value = '请至少填写一个有效的失败状态码，例如 500,502,403'
+      return
+    }
+    if (
+      !Number.isInteger(previewDraftRandomSuccessRate.value) ||
+      previewDraftRandomSuccessRate.value < 0 ||
+      previewDraftRandomSuccessRate.value > 100
+    ) {
+      error.value = '成功概率必须在 0 到 100 之间'
+      return
+    }
+    if (!previewDraftRandomSuccessBody.value.trim()) {
+      error.value = '成功文案不能为空'
+      return
+    }
+    if (!previewDraftRandomFailureBody.value.trim()) {
+      error.value = '失败文案不能为空'
+      return
+    }
+  }
 
   savingIdea.value = true
   try {
@@ -673,6 +783,13 @@ const saveActionIdeaPreview = async () => {
             Math.max(1, Math.floor(previewDraftTarpitBytesPerChunk.value)),
             Math.max(1, Math.floor(previewDraftTarpitIntervalMs.value)),
             previewDraftTarpitBody.value.trim(),
+          )
+      : isRandomErrorIdea(idea)
+        ? serializeRandomErrorConfig(
+            previewDraftRandomStatuses.value,
+            Math.min(100, Math.max(0, Math.floor(previewDraftRandomSuccessRate.value))),
+            previewDraftRandomSuccessBody.value.trim(),
+            previewDraftRandomFailureBody.value.trim(),
           )
         : idea.requires_upload
           ? ''
@@ -706,6 +823,13 @@ const saveActionIdeaPreview = async () => {
       previewDraftTarpitBytesPerChunk.value = config.bytesPerChunk
       previewDraftTarpitIntervalMs.value = config.intervalMs
       previewDraftTarpitBody.value = config.bodyText
+    }
+    if (isRandomErrorIdea(updated)) {
+      const config = extractRandomErrorConfig(updated.response_content)
+      previewDraftRandomStatuses.value = config.statuses
+      previewDraftRandomSuccessRate.value = config.successRate
+      previewDraftRandomSuccessBody.value = config.successBody
+      previewDraftRandomFailureBody.value = config.failureBody
     }
     editingPreviewTitle.value = false
     error.value = ''
@@ -1202,6 +1326,12 @@ onMounted(loadActionCenter)
                   >
                     这里配置慢速返回的节奏和拖延文案。保存后会按设定的字节数与间隔缓慢响应。
                   </p>
+                  <p
+                    v-else-if="currentPreviewIdea && isRandomErrorIdea(currentPreviewIdea)"
+                    class="text-xs leading-6 text-slate-500"
+                  >
+                    这里配置失败状态码、成功概率和两套文案。运行时会随机决定这次请求是成功还是失败。
+                  </p>
                   <div
                     v-if="currentPreviewIdea && isRedirectIdea(currentPreviewIdea)"
                     class="rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(248,250,252,0.96),_rgba(239,246,255,0.96))] p-4"
@@ -1320,6 +1450,59 @@ onMounted(loadActionCenter)
                     </div>
                     <p class="text-xs leading-6 text-slate-500">
                       例如 `1` 字节 + `1000ms` 间隔，配合 30 多字节正文，就会把一次请求拖到 30 秒以上。
+                    </p>
+                  </div>
+                  <div
+                    v-else-if="currentPreviewIdea && isRandomErrorIdea(currentPreviewIdea)"
+                    class="grid gap-4 rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(255,247,237,0.96),_rgba(248,250,252,0.96))] p-4"
+                  >
+                    <div class="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                      <div>
+                        <label class="block text-xs tracking-wide text-slate-500">
+                          失败状态码列表
+                        </label>
+                        <input
+                          v-model="previewDraftRandomStatuses"
+                          type="text"
+                          class="mt-3 w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 font-mono text-sm text-stone-900 outline-none transition focus:border-amber-400/70"
+                          placeholder="500,502,403"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-xs tracking-wide text-slate-500">
+                          成功概率（%）
+                        </label>
+                        <input
+                          v-model.number="previewDraftRandomSuccessRate"
+                          type="number"
+                          min="0"
+                          max="100"
+                          class="mt-3 w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-amber-400/70"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label class="block text-xs tracking-wide text-slate-500">
+                        成功文案
+                      </label>
+                      <textarea
+                        v-model="previewDraftRandomSuccessBody"
+                        class="mt-3 min-h-24 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-emerald-400/70"
+                        placeholder="request completed successfully"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label class="block text-xs tracking-wide text-slate-500">
+                        失败文案
+                      </label>
+                      <textarea
+                        v-model="previewDraftRandomFailureBody"
+                        class="mt-3 min-h-28 w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-rose-400/70"
+                        placeholder="upstream system unstable, retry later"
+                      ></textarea>
+                    </div>
+                    <p class="text-xs leading-6 text-slate-500">
+                      失败时会从你填写的状态码里随机挑一个；成功时固定返回 `200` 和成功文案。
                     </p>
                   </div>
                   <textarea

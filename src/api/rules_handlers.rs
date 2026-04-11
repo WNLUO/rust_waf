@@ -38,6 +38,14 @@ struct TarpitIdeaConfig {
     body_text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RandomErrorIdeaConfig {
+    failure_statuses: Vec<u16>,
+    success_rate_percent: u8,
+    success_body: String,
+    failure_body: String,
+}
+
 fn is_redirect_action_idea(idea_id: &str) -> bool {
     idea_id == "redirect-302"
 }
@@ -93,6 +101,67 @@ fn serialize_tarpit_idea_config(config: &TarpitIdeaConfig) -> String {
             "bytes_per_chunk": config.bytes_per_chunk,
             "chunk_interval_ms": config.chunk_interval_ms,
             "body_text": config.body_text,
+        })
+        .to_string()
+    })
+}
+
+fn default_random_error_idea_config() -> RandomErrorIdeaConfig {
+    RandomErrorIdeaConfig {
+        failure_statuses: vec![500, 502, 403],
+        success_rate_percent: 25,
+        success_body: "request completed successfully".to_string(),
+        failure_body: "upstream system unstable, retry later".to_string(),
+    }
+}
+
+fn parse_random_error_idea_config(value: &str) -> RandomErrorIdeaConfig {
+    let parsed = serde_json::from_str::<RandomErrorIdeaConfig>(value).ok();
+    let default = default_random_error_idea_config();
+    let Some(parsed) = parsed else {
+        return if value.trim().is_empty() {
+            default
+        } else {
+            RandomErrorIdeaConfig {
+                failure_body: value.trim().to_string(),
+                ..default
+            }
+        };
+    };
+
+    let failure_statuses = parsed
+        .failure_statuses
+        .into_iter()
+        .filter(|status| (100..=599).contains(status) && *status != 200)
+        .collect::<Vec<_>>();
+
+    RandomErrorIdeaConfig {
+        failure_statuses: if failure_statuses.is_empty() {
+            default.failure_statuses
+        } else {
+            failure_statuses
+        },
+        success_rate_percent: parsed.success_rate_percent.min(100),
+        success_body: if parsed.success_body.trim().is_empty() {
+            default.success_body
+        } else {
+            parsed.success_body.trim().to_string()
+        },
+        failure_body: if parsed.failure_body.trim().is_empty() {
+            default.failure_body
+        } else {
+            parsed.failure_body.trim().to_string()
+        },
+    }
+}
+
+fn serialize_random_error_idea_config(config: &RandomErrorIdeaConfig) -> String {
+    serde_json::to_string(config).unwrap_or_else(|_| {
+        serde_json::json!({
+            "failure_statuses": config.failure_statuses,
+            "success_rate_percent": config.success_rate_percent,
+            "success_body": config.success_body,
+            "failure_body": config.failure_body,
         })
         .to_string()
     })
@@ -290,7 +359,8 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             status_code: 500,
             gzip: false,
             body_source: "inline_text",
-            response_content: "upstream system unstable, retry later",
+            response_content:
+                "{\"failure_statuses\":[500,502,403],\"success_rate_percent\":25,\"success_body\":\"request completed successfully\",\"failure_body\":\"upstream system unstable, retry later\"}",
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
@@ -352,9 +422,15 @@ fn action_idea_headers(
         });
     }
     if is_random_error_action_idea(builtin.id) {
+        let config = parse_random_error_idea_config(response_content);
         headers.push(RuleResponseHeaderPayload {
             key: "x-rust-waf-random-statuses".to_string(),
-            value: "500,502,403,200".to_string(),
+            value: config
+                .failure_statuses
+                .iter()
+                .map(u16::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
         });
     }
     if is_redirect_action_idea(builtin.id) {
@@ -411,6 +487,8 @@ fn build_action_idea_response(
         }
     } else if is_tarpit_action_idea(builtin.id) {
         serialize_tarpit_idea_config(&parse_tarpit_idea_config(&response_content))
+    } else if is_random_error_action_idea(builtin.id) {
+        serialize_random_error_idea_config(&parse_random_error_idea_config(&response_content))
     } else {
         response_content
     };

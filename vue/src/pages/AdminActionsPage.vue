@@ -12,31 +12,22 @@ import {
   X,
 } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
+import AdminRulesPluginSection from '../components/rules/AdminRulesPluginSection.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
 import {
+  deleteRuleActionPlugin,
   fetchRuleActionTemplatePreview,
   fetchRuleActionPlugins,
   fetchRuleActionTemplates,
-  fetchRulesList,
+  installRuleActionPlugin,
+  updateRuleActionPlugin,
+  uploadRuleActionPlugin,
 } from '../lib/api'
 import type {
   RuleActionPluginItem,
   RuleActionTemplatePreviewResponse,
   RuleActionTemplateItem,
-  RulesResponse,
 } from '../lib/types'
-
-type BuiltinAction = {
-  id: string
-  title: string
-  action: string
-  layer: string
-  performance: '低' | '中'
-  tone: string
-  summary: string
-  scenes: string[]
-  ctaPath: string
-}
 
 type FunActionIdea = {
   id: string
@@ -60,63 +51,19 @@ type GeneratedPluginDefinition = {
 
 const loading = ref(true)
 const refreshing = ref(false)
+const installingPlugin = ref(false)
 const error = ref('')
-const rulesPayload = ref<RulesResponse>({ rules: [] })
 const installedPlugins = ref<RuleActionPluginItem[]>([])
 const pluginTemplates = ref<RuleActionTemplateItem[]>([])
+const pluginInstallUrl = ref('')
+const pluginInstallFile = ref<File | null>(null)
+const pluginInstallSha256 = ref('')
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const previewTitle = ref('')
 const previewSourceLabel = ref('')
 const previewPayload = ref<RuleActionTemplatePreviewResponse | null>(null)
 const downloadingIdeaId = ref('')
-
-const builtinActions: BuiltinAction[] = [
-  {
-    id: 'block',
-    title: '拦截',
-    action: 'block',
-    layer: 'L4 / L7',
-    performance: '低',
-    tone: '直接拒绝命中请求，适合大多数生产防护。',
-    summary: '命中后立刻阻断，不返回自定义页面。',
-    scenes: ['暴力扫描', '固定恶意特征', '低成本快速止损'],
-    ctaPath: '/admin/rules?create=1&action=block',
-  },
-  {
-    id: 'allow',
-    title: '放行',
-    action: 'allow',
-    layer: 'L4 / L7',
-    performance: '低',
-    tone: '给白名单、回源探测或可信业务兜底。',
-    summary: '在命中条件后显式放行，适合例外规则。',
-    scenes: ['白名单接口', '内部探针', '运维旁路'],
-    ctaPath: '/admin/rules?create=1&action=allow',
-  },
-  {
-    id: 'alert',
-    title: '告警',
-    action: 'alert',
-    layer: 'L4 / L7',
-    performance: '低',
-    tone: '先观察再收紧，适合灰度期。',
-    summary: '只记录事件，不阻断请求。',
-    scenes: ['新规则试运行', '流量基线观察', '行为画像'],
-    ctaPath: '/admin/rules?create=1&action=alert',
-  },
-  {
-    id: 'respond',
-    title: '自定义响应',
-    action: 'respond',
-    layer: 'L7',
-    performance: '中',
-    tone: '适合品牌化拦截页、JSON 提示页和演示动作。',
-    summary: '命中后直接返回自定义 HTTP 响应。',
-    scenes: ['品牌化拦截页', '蜜罐 JSON', '维护通知'],
-    ctaPath: '/admin/rules?create=1&action=respond',
-  },
-]
 
 const funActionIdeas: FunActionIdea[] = [
   {
@@ -126,7 +73,7 @@ const funActionIdeas: FunActionIdea[] = [
     summary: '把默认 403 升级为带品牌、联络入口和操作建议的页面。',
     mechanism: '优先复用 HTML 模板插件，没有模板时回退到自定义 respond。',
     performance: '中',
-    fallbackPath: '/admin/rules?create=1&action=respond',
+    fallbackPath: '/admin/rules',
     templateMatcher: (templates) =>
       templates.find(
         (item) =>
@@ -141,7 +88,7 @@ const funActionIdeas: FunActionIdea[] = [
     summary: '对扫描器返回结构化 JSON，让自动化攻击以为请求成功。',
     mechanism: '优先复用 JSON 插件模板，没有模板时用自定义 respond 构造。',
     performance: '中',
-    fallbackPath: '/admin/rules?create=1&action=respond',
+    fallbackPath: '/admin/rules',
     templateMatcher: (templates) =>
       templates.find((item) =>
         item.response_template.content_type.includes('application/json'),
@@ -154,7 +101,7 @@ const funActionIdeas: FunActionIdea[] = [
     summary: '做一个简化回显页，用来验证规则是否按预期命中。',
     mechanism: '通过自定义 respond 快速搭一个内联文本或 HTML 页面。',
     performance: '中',
-    fallbackPath: '/admin/rules?create=1&action=respond',
+    fallbackPath: '/admin/rules',
     templateMatcher: () => null,
   },
   {
@@ -164,7 +111,7 @@ const funActionIdeas: FunActionIdea[] = [
     summary: '给自动化工具返回静态成功页或伪接口数据，降低即时反馈。',
     mechanism: '推荐用 HTML 或 JSON 模板动作来做低成本误导。',
     performance: '中',
-    fallbackPath: '/admin/rules?create=1&action=respond',
+    fallbackPath: '/admin/rules',
     templateMatcher: (templates) => templates[0] ?? null,
   },
   {
@@ -174,7 +121,7 @@ const funActionIdeas: FunActionIdea[] = [
     summary: '在命中特定路径或来源时返回维护公告，不影响整体站点。',
     mechanism: '用 respond 搭一个静态公告，比切全站维护更细粒度。',
     performance: '中',
-    fallbackPath: '/admin/rules?create=1&action=respond',
+    fallbackPath: '/admin/rules',
     templateMatcher: (templates) =>
       templates.find((item) =>
         item.name.includes('Block') || item.name.includes('Hello'),
@@ -186,9 +133,6 @@ const installedPluginCount = computed(
   () => installedPlugins.value.filter((item) => item.enabled).length,
 )
 const templateCount = computed(() => pluginTemplates.value.length)
-const responseRuleCount = computed(
-  () => rulesPayload.value.rules.filter((rule) => rule.action === 'respond').length,
-)
 const pluginsById = computed(() =>
   new Map(installedPlugins.value.map((item) => [item.plugin_id, item])),
 )
@@ -200,7 +144,7 @@ const funIdeaCards = computed(() =>
       ...idea,
       template,
       ctaPath: template
-        ? `/admin/rules?create=1&template=${encodeURIComponent(template.template_id)}`
+        ? `/admin/rules?template=${encodeURIComponent(template.template_id)}`
         : idea.fallbackPath,
     }
   }),
@@ -478,12 +422,10 @@ const loadActionCenter = async () => {
   loading.value = true
   refreshing.value = true
   try {
-    const [rules, plugins, templates] = await Promise.all([
-      fetchRulesList(),
+    const [plugins, templates] = await Promise.all([
       fetchRuleActionPlugins(),
       fetchRuleActionTemplates(),
     ])
-    rulesPayload.value = rules
     installedPlugins.value = plugins.plugins
     pluginTemplates.value = templates.templates
     error.value = ''
@@ -492,6 +434,55 @@ const loadActionCenter = async () => {
   } finally {
     loading.value = false
     refreshing.value = false
+  }
+}
+
+const handleInstallPlugin = async () => {
+  const packageUrl = pluginInstallUrl.value.trim()
+  if (!packageUrl && !pluginInstallFile.value) {
+    error.value = '请输入插件包 URL 或选择本地 zip 文件'
+    return
+  }
+
+  installingPlugin.value = true
+  try {
+    if (pluginInstallFile.value) {
+      await uploadRuleActionPlugin(
+        pluginInstallFile.value,
+        pluginInstallSha256.value,
+      )
+    } else {
+      await installRuleActionPlugin(packageUrl, pluginInstallSha256.value)
+    }
+    pluginInstallUrl.value = ''
+    pluginInstallFile.value = null
+    pluginInstallSha256.value = ''
+    await loadActionCenter()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '插件安装失败'
+  } finally {
+    installingPlugin.value = false
+  }
+}
+
+const togglePluginStatus = async (plugin: RuleActionPluginItem) => {
+  try {
+    await updateRuleActionPlugin(plugin.plugin_id, !plugin.enabled)
+    await loadActionCenter()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '更新插件状态失败'
+  }
+}
+
+const handleDeletePlugin = async (pluginId: string) => {
+  if (!window.confirm('确认卸载这个动作插件吗？相关动作模板会一并移除。')) {
+    return
+  }
+  try {
+    await deleteRuleActionPlugin(pluginId)
+    await loadActionCenter()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '插件卸载失败'
   }
 }
 
@@ -610,20 +601,12 @@ onMounted(loadActionCenter)
               把“规则命中后做什么”集中管理
             </h1>
             <p class="mt-3 text-sm leading-7 text-slate-600">
-              这里把内置动作、插件模板动作和一些适合演示或运营的有趣动作放在一起，
-              方便直接理解能力边界，并从卡片一键跳去创建规则。
+              这里集中展示可复用的动作模板、插件能力，以及一些适合演示或运营场景的动作方案。
+              插件的安装、启停和卸载也都统一收在这里，规则中心只负责把动作绑定到站点。
             </p>
           </div>
 
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
-              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                内置动作
-              </p>
-              <p class="mt-2 text-2xl font-semibold text-slate-900">
-                {{ builtinActions.length }}
-              </p>
-            </div>
             <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
               <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
                 已启用插件
@@ -634,10 +617,18 @@ onMounted(loadActionCenter)
             </div>
             <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
               <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                响应型规则
+                模板动作
               </p>
               <p class="mt-2 text-2xl font-semibold text-slate-900">
-                {{ responseRuleCount }}
+                {{ templateCount }}
+              </p>
+            </div>
+            <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
+              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
+                动作方案
+              </p>
+              <p class="mt-2 text-2xl font-semibold text-slate-900">
+                {{ funIdeaCards.length }}
               </p>
             </div>
           </div>
@@ -651,46 +642,19 @@ onMounted(loadActionCenter)
         {{ error }}
       </div>
 
-      <section class="grid gap-4 lg:grid-cols-4">
-        <CyberCard
-          v-for="item in builtinActions"
-          :key="item.id"
-          :title="item.title"
-          :sub-title="item.tone"
-        >
-          <div class="space-y-4">
-            <div class="flex flex-wrap items-center gap-2 text-xs">
-              <span class="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
-                {{ item.layer }}
-              </span>
-              <span
-                class="rounded-full px-2.5 py-1"
-                :class="performanceClass(item.performance)"
-              >
-                性能 {{ item.performance }}
-              </span>
-            </div>
-            <p class="text-sm leading-6 text-slate-600">
-              {{ item.summary }}
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="scene in item.scenes"
-                :key="scene"
-                class="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600"
-              >
-                {{ scene }}
-              </span>
-            </div>
-            <RouterLink
-              :to="item.ctaPath"
-              class="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800"
-            >
-              去创建规则
-            </RouterLink>
-          </div>
-        </CyberCard>
-      </section>
+      <AdminRulesPluginSection
+        :installed-plugins="installedPlugins"
+        :installing-plugin="installingPlugin"
+        :plugin-install-file="pluginInstallFile"
+        :plugin-install-sha256="pluginInstallSha256"
+        :plugin-install-url="pluginInstallUrl"
+        @delete-plugin="handleDeletePlugin"
+        @install="handleInstallPlugin"
+        @toggle-plugin="togglePluginStatus"
+        @update:plugin-install-file="pluginInstallFile = $event"
+        @update:plugin-install-sha256="pluginInstallSha256 = $event"
+        @update:plugin-install-url="pluginInstallUrl = $event"
+      />
 
       <CyberCard
         title="模板动作"
@@ -703,7 +667,7 @@ onMounted(loadActionCenter)
           v-else-if="!templateCount"
           class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"
         >
-          当前还没有可用的模板动作。你可以先去规则中心安装示例插件，再回来浏览动作库。
+          当前还没有可用的模板动作。你可以先在本页安装动作插件，再回来浏览动作库。
         </div>
         <div v-else class="grid gap-4 xl:grid-cols-2">
           <article
@@ -773,16 +737,16 @@ onMounted(loadActionCenter)
 
             <div class="mt-4 flex flex-wrap gap-3">
               <RouterLink
-                :to="`/admin/rules?create=1&template=${encodeURIComponent(template.template_id)}`"
+                :to="`/admin/rules?template=${encodeURIComponent(template.template_id)}`"
                 class="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800"
               >
-                套用模板
+                去规则中心绑定
               </RouterLink>
               <RouterLink
                 to="/admin/rules"
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"
               >
-                去规则中心
+                查看规则中心
               </RouterLink>
               <button
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"

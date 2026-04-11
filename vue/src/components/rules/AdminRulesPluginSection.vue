@@ -24,9 +24,9 @@ defineEmits<{
   <div class="rounded-[28px] border border-white/70 bg-white/60 p-4">
     <div class="flex flex-wrap items-center gap-3">
       <div class="min-w-[220px] flex-1">
-        <p class="text-sm font-medium text-stone-900">规则模板插件</p>
+        <p class="text-sm font-medium text-stone-900">动作插件</p>
         <p class="text-xs text-slate-500">
-          支持输入 zip 包 URL，或直接上传本地 zip，安装后会出现在 `respond` 模板列表中。
+          支持输入 zip 包 URL，或直接上传本地 zip。安装后会把动作模板加入动作中心，并可在规则中心绑定到站点。
         </p>
       </div>
       <input
@@ -74,7 +74,7 @@ defineEmits<{
         :disabled="installingPlugin"
         @click="$emit('install')"
       >
-        {{ installingPlugin ? '安装中...' : '安装插件' }}
+        {{ installingPlugin ? '安装中...' : '安装动作插件' }}
       </button>
     </div>
 

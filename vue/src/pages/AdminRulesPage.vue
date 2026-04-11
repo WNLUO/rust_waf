@@ -1,60 +1,464 @@
 <script setup lang="ts">
-import { RefreshCw } from 'lucide-vue-next'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { ArrowRight, PencilLine, RefreshCw, Shield, X } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
-import AdminRuleEditorDialog from '../components/rules/AdminRuleEditorDialog.vue'
-import AdminRulesFilterBar from '../components/rules/AdminRulesFilterBar.vue'
-import AdminRulesPluginSection from '../components/rules/AdminRulesPluginSection.vue'
-import AdminRulesTableSection from '../components/rules/AdminRulesTableSection.vue'
-import { useAdminRules } from '../composables/useAdminRules'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import {
+  fetchL7Config,
+  fetchLocalSites,
+  fetchRuleActionTemplates,
+  updateLocalSite,
+} from '../lib/api'
+import type {
+  L7ConfigPayload,
+  LocalSiteDraft,
+  LocalSiteItem,
+  RuleActionTemplateItem,
+  SafeLineInterceptConfigPayload,
+} from '../lib/types'
 import { useFormatters } from '../composables/useFormatters'
 
-const { actionLabel, layerLabel, severityLabel } = useFormatters()
+type PolicyMode =
+  | 'inherit'
+  | 'disabled'
+  | 'pass'
+  | 'drop'
+  | 'global_replace'
+  | 'global_block'
+  | 'template_replace'
+  | 'template_block'
+  | 'legacy_replace'
+  | 'legacy_block'
 
-const {
-  addResponseHeader,
-  closeRuleModal,
-  displayActionLabel,
-  error,
-  filteredRules,
-  handleCreateOrUpdateRule,
-  handleDeleteRule,
-  handleInstallPlugin,
-  installedPlugins,
-  installingPlugin,
-  isPluginActionValue,
-  isRuleModalOpen,
-  loadRules,
-  loading,
-  onActionChange,
-  openCreateRule,
-  openEditRule,
-  pluginInstallUrl,
-  pluginInstallFile,
-  pluginInstallSha256,
-  pluginTemplates,
-  removeResponseHeader,
-  ruleFilters,
-  ruleForm,
-  saving,
-  selectedPluginTemplate,
-  toPluginActionValue,
-  togglePluginStatus,
-  toggleRuleStatus,
-  handleDeletePlugin,
-} = useAdminRules()
+const route = useRoute()
+const router = useRouter()
+const { formatTimestamp } = useFormatters()
+
+const loading = ref(true)
+const saving = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const siteKeyword = ref('')
+const localSites = ref<LocalSiteItem[]>([])
+const actionTemplates = ref<RuleActionTemplateItem[]>([])
+const l7Config = ref<L7ConfigPayload | null>(null)
+const editingSite = ref<LocalSiteItem | null>(null)
+const isEditorOpen = ref(false)
+
+const policyForm = reactive<{
+  mode: PolicyMode
+  templateId: string
+}>({
+  mode: 'inherit',
+  templateId: '',
+})
+
+function cloneHeaders(headers: { key: string; value: string }[]) {
+  return headers.map((header) => ({ ...header }))
+}
+
+function cloneResponseTemplate(
+  template: SafeLineInterceptConfigPayload['response_template'],
+) {
+  return {
+    ...template,
+    headers: cloneHeaders(template.headers),
+  }
+}
+
+function cloneSafelineIntercept(
+  value: SafeLineInterceptConfigPayload | null | undefined,
+): SafeLineInterceptConfigPayload | null {
+  if (!value) return null
+  return {
+    ...value,
+    response_template: cloneResponseTemplate(value.response_template),
+  }
+}
+
+function siteDraftFromItem(site: LocalSiteItem): LocalSiteDraft {
+  return {
+    name: site.name,
+    primary_hostname: site.primary_hostname,
+    hostnames: [...site.hostnames],
+    listen_ports: [...site.listen_ports],
+    upstreams: [...site.upstreams],
+    safeline_intercept: cloneSafelineIntercept(site.safeline_intercept),
+    enabled: site.enabled,
+    tls_enabled: site.tls_enabled,
+    local_certificate_id: site.local_certificate_id,
+    source: site.source,
+    sync_mode: site.sync_mode,
+    notes: site.notes,
+    last_synced_at: site.last_synced_at,
+  }
+}
+
+function normalizeTemplateHeaders(headers: { key: string; value: string }[]) {
+  return headers
+    .map((item) => ({
+      key: item.key.trim().toLowerCase(),
+      value: item.value.trim(),
+    }))
+    .filter((item) => item.key)
+    .sort((left, right) =>
+      `${left.key}:${left.value}`.localeCompare(`${right.key}:${right.value}`),
+    )
+}
+
+function sameResponseTemplate(
+  left: SafeLineInterceptConfigPayload['response_template'] | null | undefined,
+  right: SafeLineInterceptConfigPayload['response_template'] | null | undefined,
+) {
+  if (!left || !right) return false
+  return (
+    left.status_code === right.status_code &&
+    left.content_type === right.content_type &&
+    left.body_source === right.body_source &&
+    left.gzip === right.gzip &&
+    left.body_text === right.body_text &&
+    left.body_file_path === right.body_file_path &&
+    JSON.stringify(normalizeTemplateHeaders(left.headers)) ===
+      JSON.stringify(normalizeTemplateHeaders(right.headers))
+  )
+}
+
+const enabledActionTemplates = computed(() =>
+  actionTemplates.value.filter((item) => item.layer === 'l7'),
+)
+
+const pendingTemplate = computed(() => {
+  const templateId =
+    typeof route.query.template === 'string' ? route.query.template : ''
+  return (
+    enabledActionTemplates.value.find((item) => item.template_id === templateId) ??
+    null
+  )
+})
+
+const summaryCards = computed(() => {
+  const overridden = localSites.value.filter(
+    (site) => site.safeline_intercept !== null,
+  ).length
+  const disabled = localSites.value.filter(
+    (site) => site.safeline_intercept && !site.safeline_intercept.enabled,
+  ).length
+  return {
+    total: localSites.value.length,
+    overridden,
+    inherited: localSites.value.length - overridden,
+    disabled,
+    templates: enabledActionTemplates.value.length,
+  }
+})
+
+function actionLabelForConfig(config: SafeLineInterceptConfigPayload | null) {
+  if (!config) return '继承全局'
+  if (!config.enabled) return '本站不接管'
+  switch (config.action) {
+    case 'pass':
+      return '透传雷池原始响应'
+    case 'drop':
+      return '直接丢弃响应'
+    case 'replace':
+      return '替换为自定义动作'
+    case 'replace_and_block_ip':
+      return '替换并封禁来源 IP'
+    default:
+      return config.action
+  }
+}
+
+function matchedTemplateForSite(site: LocalSiteItem) {
+  const config = site.safeline_intercept
+  if (!config?.enabled) return null
+  return (
+    enabledActionTemplates.value.find((template) =>
+      sameResponseTemplate(template.response_template, config.response_template),
+    ) ?? null
+  )
+}
+
+function templateLabelForSite(site: LocalSiteItem) {
+  const config = site.safeline_intercept
+  if (!config?.enabled) return '-'
+  if (config.action !== 'replace' && config.action !== 'replace_and_block_ip') {
+    return '-'
+  }
+  if (
+    l7Config.value &&
+    sameResponseTemplate(
+      config.response_template,
+      l7Config.value.safeline_intercept.response_template,
+    )
+  ) {
+    return '全局默认拦截页'
+  }
+  return matchedTemplateForSite(site)?.name ?? '历史自定义动作'
+}
+
+const filteredSites = computed(() => {
+  const keyword = siteKeyword.value.trim().toLowerCase()
+  return localSites.value
+    .filter((site) => {
+      if (!keyword) return true
+      return [
+        site.name,
+        site.primary_hostname,
+        site.hostnames.join(' '),
+        site.notes,
+        actionLabelForConfig(site.safeline_intercept),
+        templateLabelForSite(site),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(keyword)
+    })
+    .sort((left, right) =>
+      left.primary_hostname.localeCompare(right.primary_hostname, 'zh-CN'),
+    )
+})
+
+function clearFeedback() {
+  error.value = ''
+  successMessage.value = ''
+}
+
+async function loadRulesCenter() {
+  loading.value = true
+  clearFeedback()
+  try {
+    const [sitesResponse, templatesResponse, l7Response] = await Promise.all([
+      fetchLocalSites(),
+      fetchRuleActionTemplates(),
+      fetchL7Config(),
+    ])
+    localSites.value = sitesResponse.sites
+    actionTemplates.value = templatesResponse.templates
+    l7Config.value = l7Response
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取规则中心失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetEditorFromSite(site: LocalSiteItem) {
+  const config = cloneSafelineIntercept(site.safeline_intercept)
+  const matchedTemplate =
+    enabledActionTemplates.value.find((template) =>
+      sameResponseTemplate(template.response_template, config?.response_template),
+    ) ?? null
+
+  policyForm.templateId = matchedTemplate?.template_id ?? ''
+
+  if (!config) {
+    policyForm.mode = pendingTemplate.value ? 'template_replace' : 'inherit'
+    if (pendingTemplate.value) {
+      policyForm.templateId = pendingTemplate.value.template_id
+    }
+    return
+  }
+
+  if (!config.enabled) {
+    policyForm.mode = 'disabled'
+    return
+  }
+
+  if (config.action === 'pass') {
+    policyForm.mode = 'pass'
+    return
+  }
+
+  if (config.action === 'drop') {
+    policyForm.mode = 'drop'
+    return
+  }
+
+  const sameAsGlobal =
+    l7Config.value &&
+    sameResponseTemplate(
+      config.response_template,
+      l7Config.value.safeline_intercept.response_template,
+    )
+
+  if (config.action === 'replace') {
+    if (sameAsGlobal) {
+      policyForm.mode = 'global_replace'
+    } else if (matchedTemplate) {
+      policyForm.mode = 'template_replace'
+    } else {
+      policyForm.mode = 'legacy_replace'
+    }
+    return
+  }
+
+  if (config.action === 'replace_and_block_ip') {
+    if (sameAsGlobal) {
+      policyForm.mode = 'global_block'
+    } else if (matchedTemplate) {
+      policyForm.mode = 'template_block'
+    } else {
+      policyForm.mode = 'legacy_block'
+    }
+    return
+  }
+
+  policyForm.mode = 'inherit'
+}
+
+async function clearPendingTemplateQuery() {
+  if (typeof route.query.template !== 'string') return
+  const nextQuery = { ...route.query }
+  delete nextQuery.template
+  await router.replace({ query: nextQuery })
+}
+
+async function openPolicyEditor(site: LocalSiteItem) {
+  editingSite.value = site
+  resetEditorFromSite(site)
+  isEditorOpen.value = true
+  if (pendingTemplate.value) {
+    await clearPendingTemplateQuery()
+  }
+}
+
+function closePolicyEditor() {
+  isEditorOpen.value = false
+  editingSite.value = null
+  policyForm.mode = 'inherit'
+  policyForm.templateId = ''
+}
+
+const selectedTemplate = computed(() =>
+  enabledActionTemplates.value.find(
+    (item) => item.template_id === policyForm.templateId,
+  ) ?? null,
+)
+
+const canSavePolicy = computed(() => {
+  if (!editingSite.value || !l7Config.value) return false
+  if (policyForm.mode === 'legacy_replace' || policyForm.mode === 'legacy_block') {
+    return false
+  }
+  if (
+    (policyForm.mode === 'template_replace' ||
+      policyForm.mode === 'template_block') &&
+    !selectedTemplate.value
+  ) {
+    return false
+  }
+  return true
+})
+
+function buildInterceptOverride(): SafeLineInterceptConfigPayload | null {
+  if (!l7Config.value) return null
+  const base = cloneSafelineIntercept(l7Config.value.safeline_intercept)
+  if (!base) return null
+
+  switch (policyForm.mode) {
+    case 'inherit':
+      return null
+    case 'disabled':
+      return {
+        ...base,
+        enabled: false,
+      }
+    case 'pass':
+      return {
+        ...base,
+        enabled: true,
+        action: 'pass',
+      }
+    case 'drop':
+      return {
+        ...base,
+        enabled: true,
+        action: 'drop',
+      }
+    case 'global_replace':
+      return {
+        ...base,
+        enabled: true,
+        action: 'replace',
+        response_template: cloneResponseTemplate(base.response_template),
+      }
+    case 'global_block':
+      return {
+        ...base,
+        enabled: true,
+        action: 'replace_and_block_ip',
+        response_template: cloneResponseTemplate(base.response_template),
+      }
+    case 'template_replace':
+      return selectedTemplate.value
+        ? {
+            ...base,
+            enabled: true,
+            action: 'replace',
+            response_template: cloneResponseTemplate(
+              selectedTemplate.value.response_template,
+            ),
+          }
+        : null
+    case 'template_block':
+      return selectedTemplate.value
+        ? {
+            ...base,
+            enabled: true,
+            action: 'replace_and_block_ip',
+            response_template: cloneResponseTemplate(
+              selectedTemplate.value.response_template,
+            ),
+          }
+        : null
+    default:
+      return null
+  }
+}
+
+async function savePolicy() {
+  if (!editingSite.value || !canSavePolicy.value) return
+  saving.value = true
+  clearFeedback()
+  try {
+    const payload = siteDraftFromItem(editingSite.value)
+    payload.safeline_intercept = buildInterceptOverride()
+    await updateLocalSite(editingSite.value.id, payload)
+    successMessage.value = `站点 ${editingSite.value.name} 的雷池接管策略已更新。`
+    closePolicyEditor()
+    await loadRulesCenter()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '保存站点策略失败'
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(loadRulesCenter)
 </script>
 
 <template>
   <AppLayout>
     <template #header-extra>
-      <button
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        :disabled="loading"
-        @click="loadRules"
-      >
-        <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
-        刷新规则
-      </button>
+      <div class="flex items-center gap-2">
+        <RouterLink
+          to="/admin/actions"
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+        >
+          动作中心
+          <ArrowRight :size="14" />
+        </RouterLink>
+        <button
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
+          :disabled="loading"
+          @click="loadRulesCenter"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
+          刷新规则中心
+        </button>
+      </div>
     </template>
 
     <div class="space-y-6">
@@ -65,52 +469,380 @@ const {
         {{ error }}
       </div>
 
-      <AdminRulesFilterBar
-        :filters="ruleFilters"
-        @create="openCreateRule"
-        @update:filters="Object.assign(ruleFilters, $event)"
-      />
+      <div
+        v-if="successMessage"
+        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
+      >
+        {{ successMessage }}
+      </div>
 
-      <AdminRulesPluginSection
-        :installed-plugins="installedPlugins"
-        :installing-plugin="installingPlugin"
-        :plugin-install-file="pluginInstallFile"
-        :plugin-install-sha256="pluginInstallSha256"
-        :plugin-install-url="pluginInstallUrl"
-        @delete-plugin="handleDeletePlugin"
-        @install="handleInstallPlugin"
-        @update:plugin-install-file="pluginInstallFile = $event"
-        @update:plugin-install-sha256="pluginInstallSha256 = $event"
-        @update:plugin-install-url="pluginInstallUrl = $event"
-        @toggle-plugin="togglePluginStatus"
-      />
+      <div
+        v-if="pendingTemplate"
+        class="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-900"
+      >
+        已从动作中心带入模板
+        <span class="font-semibold">{{ pendingTemplate.name }}</span>
+        。现在选择一个站点，点击“配置动作”即可直接套用。
+      </div>
 
-      <AdminRulesTableSection
-        :display-action-label="(rule) => displayActionLabel(rule, actionLabel)"
-        :filtered-rules="filteredRules"
-        :layer-label="layerLabel"
-        :loading="loading"
-        :severity-label="severityLabel"
-        @delete="handleDeleteRule"
-        @edit="openEditRule"
-        @toggle="toggleRuleStatus"
-      />
+      <section
+        class="rounded-[28px] border border-white/80 bg-white/78 p-5 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
+      >
+        <div
+          class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
+        >
+          <div class="max-w-3xl">
+            <p class="text-sm tracking-wider text-blue-700">规则中心</p>
+            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+              用业务语义配置“雷池拦截后 rust 执行动作”
+            </h3>
+            <p class="mt-2 text-sm leading-7 text-slate-500">
+              这个页面只做一件事：给站点配置雷池命中后的接管动作。动作正文和插件安装统一放在动作中心，不再在这里暴露插件和模板实现细节。
+            </p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div class="rounded-2xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-500">站点数</p>
+              <p class="mt-2 text-2xl font-semibold text-stone-900">
+                {{ summaryCards.total }}
+              </p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-500">覆盖站点</p>
+              <p class="mt-2 text-2xl font-semibold text-stone-900">
+                {{ summaryCards.overridden }}
+              </p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-500">继承全局</p>
+              <p class="mt-2 text-2xl font-semibold text-stone-900">
+                {{ summaryCards.inherited }}
+              </p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-500">停用接管</p>
+              <p class="mt-2 text-2xl font-semibold text-stone-900">
+                {{ summaryCards.disabled }}
+              </p>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-500">可选动作模板</p>
+              <p class="mt-2 text-2xl font-semibold text-stone-900">
+                {{ summaryCards.templates }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div class="flex items-center gap-2 text-stone-900">
+              <Shield :size="16" class="text-blue-700" />
+              <p class="text-sm font-medium">当前编排</p>
+            </div>
+            <p class="mt-2 text-sm leading-7 text-slate-500">
+              用户请求先经过雷池做 7 层检测，rust 识别到雷池拦截标记后，再按本站点的接管策略执行自定义动作。站点没单独配置时，自动继承全局默认接管策略。
+            </p>
+          </div>
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-sm font-medium text-stone-900">高级能力入口</p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <RouterLink
+                to="/admin/actions"
+                class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+              >
+                管理动作模板与插件
+              </RouterLink>
+              <RouterLink
+                to="/admin/l7/rules"
+                class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+              >
+                进入高级 L7 规则
+              </RouterLink>
+              <RouterLink
+                to="/admin/l4/rules"
+                class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+              >
+                进入高级 L4 规则
+              </RouterLink>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div
+        class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"
+      >
+        <label
+          class="flex min-w-[240px] flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500"
+        >
+          <input
+            v-model="siteKeyword"
+            type="text"
+            class="w-full bg-transparent text-stone-800 outline-none"
+            placeholder="搜索站点名 / 域名 / 当前动作"
+          />
+        </label>
+        <RouterLink
+          to="/admin/sites"
+          class="ml-auto inline-flex items-center gap-2 rounded-[18px] bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600/90"
+        >
+          去站点管理
+        </RouterLink>
+      </div>
+
+      <div
+        class="overflow-hidden rounded-xl border border-white/80 bg-white/78 shadow-[0_16px_44px_rgba(90,60,30,0.08)]"
+      >
+        <div class="overflow-x-auto">
+          <table class="min-w-full border-collapse text-left">
+            <thead class="bg-slate-50 text-sm text-slate-500">
+              <tr>
+                <th class="px-4 py-3 font-medium">站点</th>
+                <th class="px-4 py-3 font-medium">检测来源</th>
+                <th class="px-4 py-3 font-medium">当前动作</th>
+                <th class="px-4 py-3 font-medium">动作模板</th>
+                <th class="px-4 py-3 font-medium">覆盖状态</th>
+                <th class="px-4 py-3 font-medium">更新时间</th>
+                <th class="px-4 py-3 text-right font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="site in filteredSites"
+                :key="site.id"
+                class="border-t border-slate-200 text-sm text-stone-800 transition hover:bg-[#fff8ef]"
+              >
+                <td class="px-4 py-3">
+                  <div class="min-w-[240px]">
+                    <p class="font-semibold text-stone-900">{{ site.name }}</p>
+                    <p class="mt-1 font-mono text-xs text-slate-500">
+                      {{ site.primary_hostname }}
+                    </p>
+                  </div>
+                </td>
+                <td class="px-4 py-3">雷池拦截响应</td>
+                <td class="px-4 py-3">
+                  {{ actionLabelForConfig(site.safeline_intercept) }}
+                </td>
+                <td class="px-4 py-3">
+                  <span class="text-slate-600">{{
+                    templateLabelForSite(site)
+                  }}</span>
+                </td>
+                <td class="px-4 py-3">
+                  <StatusBadge
+                    :text="
+                      site.safeline_intercept ? '站点级覆盖' : '继承全局默认'
+                    "
+                    :type="site.safeline_intercept ? 'info' : 'muted'"
+                    compact
+                  />
+                </td>
+                <td class="px-4 py-3">
+                  <span class="font-mono text-xs text-slate-500">
+                    {{ formatTimestamp(site.updated_at) }}
+                  </span>
+                </td>
+                <td class="px-4 py-3">
+                  <div class="flex justify-end gap-2">
+                    <button
+                      class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                      @click="openPolicyEditor(site)"
+                    >
+                      <PencilLine :size="14" />
+                      配置动作
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!filteredSites.length && !loading">
+                <td
+                  colspan="7"
+                  class="px-4 py-6 text-center text-sm text-slate-500"
+                >
+                  当前没有可配置的站点，或者搜索结果为空。
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
-    <AdminRuleEditorDialog
-      :is-plugin-action-value="isPluginActionValue"
-      :open="isRuleModalOpen"
-      :plugin-templates="pluginTemplates"
-      :rule-form="ruleForm"
-      :saving="saving"
-      :selected-plugin-template="selectedPluginTemplate"
-      :to-plugin-action-value="toPluginActionValue"
-      @action-change="onActionChange"
-      @add-header="addResponseHeader"
-      @close="closeRuleModal"
-      @remove-header="removeResponseHeader"
-      @save="handleCreateOrUpdateRule"
-      @update:rule-form="Object.assign(ruleForm, $event)"
-    />
+    <div
+      v-if="isEditorOpen && editingSite"
+      class="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6"
+    >
+      <div
+        class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
+        @click="closePolicyEditor"
+      ></div>
+      <div
+        class="relative max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-slate-200 bg-[#fffaf4] p-5 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:max-h-[calc(100vh-3rem)] md:p-6"
+      >
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm tracking-wide text-blue-700">简化规则配置</p>
+            <h3 class="mt-2 text-3xl font-semibold text-stone-900">
+              {{ editingSite.name }}
+            </h3>
+            <p class="mt-2 text-sm text-slate-500">
+              语义固定为：
+              <span class="font-medium text-stone-900">
+                当 {{ editingSite.primary_hostname }} 被雷池判定拦截后
+              </span>
+              ，rust 执行下面这个动作。
+            </p>
+          </div>
+          <button
+            class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+            @click="closePolicyEditor"
+          >
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div class="mt-6 space-y-5">
+          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-sm font-medium text-stone-900">动作类型</p>
+            <p class="mt-1 text-xs leading-6 text-slate-500">
+              这里不再手工填写拦截页内容。需要页面或 JSON 响应时，请先去动作中心准备模板，再回来绑定到站点。
+            </p>
+
+            <select
+              v-model="policyForm.mode"
+              class="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+            >
+              <option value="inherit">继承全局默认接管策略</option>
+              <option value="disabled">本站点不接管雷池拦截</option>
+              <option value="pass">透传雷池原始响应</option>
+              <option value="drop">直接丢弃响应</option>
+              <option value="global_replace">使用全局默认拦截页</option>
+              <option value="global_block">使用全局默认拦截页并封禁来源 IP</option>
+              <option value="template_replace">使用动作中心模板</option>
+              <option value="template_block">使用动作中心模板并封禁来源 IP</option>
+              <option
+                v-if="policyForm.mode === 'legacy_replace'"
+                value="legacy_replace"
+              >
+                历史自定义动作（需切换为模板）
+              </option>
+              <option
+                v-if="policyForm.mode === 'legacy_block'"
+                value="legacy_block"
+              >
+                历史自定义动作并封禁 IP（需切换为模板）
+              </option>
+            </select>
+          </div>
+
+          <div
+            v-if="
+              policyForm.mode === 'template_replace' ||
+              policyForm.mode === 'template_block' ||
+              policyForm.mode === 'legacy_replace' ||
+              policyForm.mode === 'legacy_block'
+            "
+            class="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+          >
+            <div
+              class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+            >
+              <div>
+                <p class="text-sm font-medium text-stone-900">动作模板</p>
+                <p class="mt-1 text-xs leading-6 text-slate-500">
+                  模板来自动作中心，通常由插件提供，也可以复用已经安装好的响应页动作。
+                </p>
+              </div>
+              <RouterLink
+                to="/admin/actions"
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+              >
+                去动作中心
+                <ArrowRight :size="14" />
+              </RouterLink>
+            </div>
+
+            <div
+              v-if="
+                policyForm.mode === 'legacy_replace' ||
+                policyForm.mode === 'legacy_block'
+              "
+              class="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+            >
+              当前站点使用的是旧的自定义响应内容，已经不在简化规则中心里直接编辑了。请选择“全局默认拦截页”或动作中心里的模板后再保存。
+            </div>
+
+            <select
+              v-model="policyForm.templateId"
+              class="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
+            >
+              <option value="">请选择动作模板</option>
+              <option
+                v-for="template in enabledActionTemplates"
+                :key="template.template_id"
+                :value="template.template_id"
+              >
+                {{ template.name }} · {{ template.response_template.content_type }}
+              </option>
+            </select>
+
+            <div
+              v-if="selectedTemplate"
+              class="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-4"
+            >
+              <div class="flex flex-wrap gap-2">
+                <StatusBadge
+                  :text="selectedTemplate.layer.toUpperCase()"
+                  type="info"
+                  compact
+                />
+                <StatusBadge
+                  :text="`HTTP ${selectedTemplate.response_template.status_code}`"
+                  type="muted"
+                  compact
+                />
+                <StatusBadge
+                  :text="
+                    selectedTemplate.response_template.gzip ? 'gzip 开' : 'gzip 关'
+                  "
+                  type="muted"
+                  compact
+                />
+              </div>
+              <p class="mt-3 text-sm font-medium text-stone-900">
+                {{ selectedTemplate.name }}
+              </p>
+              <p class="mt-1 text-sm leading-6 text-slate-500">
+                {{
+                  selectedTemplate.description ||
+                  '这个动作模板会作为雷池拦截后的替换响应。'
+                }}
+              </p>
+              <p class="mt-2 font-mono text-xs text-slate-500">
+                {{ selectedTemplate.response_template.content_type }}
+              </p>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              :disabled="!canSavePolicy || saving"
+              class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
+              @click="savePolicy"
+            >
+              {{ saving ? '保存中...' : '保存站点动作' }}
+            </button>
+            <button
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+              @click="closePolicyEditor"
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </AppLayout>
 </template>

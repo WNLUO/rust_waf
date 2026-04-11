@@ -183,7 +183,7 @@ const isRedirectIdea = (idea: ActionIdeaPreset | null | undefined) =>
   idea?.id === 'redirect-302'
 
 const wrapRedirectContent = (target: string, title: string) => {
-  const normalizedTarget = target.trim() || 'https://example.com/blocked'
+  const normalizedTarget = target.trim() || 'https://www.war.gov/'
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -931,13 +931,37 @@ onMounted(loadActionCenter)
                   >
                     这里填写的是跳转目标 URL。系统会自动写入 `Location` 头，并返回一个 302 响应。
                   </p>
+                  <div
+                    v-if="currentPreviewIdea && isRedirectIdea(currentPreviewIdea)"
+                    class="rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(248,250,252,0.96),_rgba(239,246,255,0.96))] p-4"
+                  >
+                    <label class="block text-xs tracking-wide text-slate-500">
+                      跳转链接
+                    </label>
+                    <div
+                      class="mt-3 flex items-center gap-3 rounded-2xl border border-blue-200 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(37,99,235,0.08)]"
+                    >
+                      <span
+                        class="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-blue-700"
+                      >
+                        URL
+                      </span>
+                      <input
+                        v-model="previewDraftContent"
+                        type="url"
+                        placeholder="https://www.war.gov/"
+                        class="w-full bg-transparent text-sm text-stone-900 outline-none placeholder:text-slate-400"
+                        spellcheck="false"
+                        autocomplete="off"
+                      />
+                    </div>
+                    <p class="mt-3 text-xs leading-6 text-slate-500">
+                      支持填写完整的 `http://` 或 `https://` 地址。保存后命中规则会直接返回 302 跳转。
+                    </p>
+                  </div>
                   <textarea
+                    v-else
                     v-model="previewDraftContent"
-                    :placeholder="
-                      currentPreviewIdea && isRedirectIdea(currentPreviewIdea)
-                        ? 'https://example.com/blocked'
-                        : ''
-                    "
                     class="min-h-[min(42vh,28rem)] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-blue-500/50"
                   ></textarea>
                 </div>

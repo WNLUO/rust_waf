@@ -401,4 +401,48 @@ mod tests {
 
         let _ = fs::remove_file(stored_path);
     }
+
+    #[test]
+    fn test_l7_respond_rule_preserves_redirect_location_header() {
+        let engine = RuleEngine::new(vec![Rule {
+            id: "respond-redirect".to_string(),
+            name: "Redirect".to_string(),
+            enabled: true,
+            layer: RuleLayer::L7,
+            pattern: "jump".to_string(),
+            action: RuleAction::Respond,
+            severity: Severity::Medium,
+            plugin_template_id: None,
+            response_template: Some(RuleResponseTemplate {
+                status_code: 302,
+                content_type: "text/html; charset=utf-8".to_string(),
+                body_source: RuleResponseBodySource::InlineText,
+                gzip: false,
+                body_text: "<p>redirecting</p>".to_string(),
+                body_file_path: String::new(),
+                headers: vec![RuleResponseHeader {
+                    key: "location".to_string(),
+                    value: "https://example.com/blocked".to_string(),
+                }],
+            }),
+        }])
+        .unwrap();
+
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            source_port: 40000,
+            dest_port: 443,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+
+        let result = engine.inspect(&packet, Some("jump"));
+        let response = result.custom_response.expect("custom response");
+        assert_eq!(response.status_code, 302);
+        assert!(response
+            .headers
+            .iter()
+            .any(|(key, value)| key == "location" && value == "https://example.com/blocked"));
+    }
 }

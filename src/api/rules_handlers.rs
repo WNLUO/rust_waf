@@ -35,13 +35,7 @@ fn is_redirect_action_idea(idea_id: &str) -> bool {
 }
 
 fn default_redirect_target() -> &'static str {
-    "https://example.com/blocked"
-}
-
-fn redirect_response_html(target: &str, title: &str) -> String {
-    format!(
-        "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta http-equiv=\"refresh\" content=\"0;url={target}\">\n  <title>{title}</title>\n</head>\n<body style=\"font-family: sans-serif; padding: 48px;\">\n  <h1>{title}</h1>\n  <p>正在跳转到 <a href=\"{target}\">{target}</a>。</p>\n</body>\n</html>"
-    )
+    "https://www.war.gov/"
 }
 
 fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
@@ -139,7 +133,7 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             status_code: 302,
             gzip: false,
             body_source: "inline_text",
-            response_content: "https://example.com/blocked",
+            response_content: "https://www.war.gov/",
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
@@ -169,7 +163,10 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
     ]
 }
 
-fn action_idea_headers(builtin: &BuiltinActionIdeaPreset, response_content: &str) -> Vec<RuleResponseHeaderPayload> {
+fn action_idea_headers(
+    builtin: &BuiltinActionIdeaPreset,
+    response_content: &str,
+) -> Vec<RuleResponseHeaderPayload> {
     let mut headers = vec![RuleResponseHeaderPayload {
         key: "cache-control".to_string(),
         value: "no-store".to_string(),

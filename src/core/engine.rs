@@ -1,11 +1,6 @@
 use anyhow::Result;
 use ipnet::IpNet;
 use log::{debug, info, warn};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::ServerConfig as RustlsServerConfig;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,7 +9,6 @@ use std::time::Instant;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
-use tokio::time::{Duration, MissedTickBehavior};
 use tokio_rustls::TlsAcceptor;
 
 #[cfg(feature = "http3")]
@@ -102,7 +96,8 @@ impl WafEngine {
             if let Some(upstream_addr) = self.context.config.tcp_upstream_addr.clone() {
                 let context = Arc::clone(&self.context);
                 tokio::spawn(async move {
-                    run_upstream_healthcheck_loop(context, upstream_addr).await;
+                    super::engine_maintenance::run_upstream_healthcheck_loop(context, upstream_addr)
+                        .await;
                 });
             }
         }
@@ -110,7 +105,8 @@ impl WafEngine {
         if let Some(store) = self.context.sqlite_store.as_ref().cloned() {
             let fallback_config = self.context.config.clone();
             tokio::spawn(async move {
-                run_safeline_auto_sync_loop(store, fallback_config).await;
+                super::engine_maintenance::run_safeline_auto_sync_loop(store, fallback_config)
+                    .await;
             });
         }
 
@@ -149,7 +145,7 @@ impl WafEngine {
             }
         }
 
-        if let Some(tls_acceptor) = build_tls_acceptor(self.context.as_ref())? {
+        if let Some(tls_acceptor) = super::engine_tls::build_tls_acceptor(self.context.as_ref())? {
             let tls_addr = &self.context.config.gateway_config.https_listen_addr;
             match TcpListener::bind(tls_addr).await {
                 Ok(listener) => {
@@ -164,7 +160,9 @@ impl WafEngine {
 
         #[cfg(feature = "http3")]
         {
-            if let Some(endpoint) = build_http3_endpoint(&self.context.config.http3_config)? {
+            if let Some(endpoint) =
+                super::engine_tls::build_http3_endpoint(&self.context.config.http3_config)?
+            {
                 let addr = endpoint.local_addr()?;
                 self.context
                     .set_http3_runtime("running", true, Some(addr.to_string()), None);
@@ -506,238 +504,14 @@ impl WafEngine {
     }
 }
 
-#[derive(Clone, Copy)]
-enum SafeLineAutoSyncTask {
-    Events,
-    BlockedIpsPush,
-    BlockedIpsPull,
-}
-
-impl SafeLineAutoSyncTask {
-    const ALL: [Self; 3] = [Self::Events, Self::BlockedIpsPush, Self::BlockedIpsPull];
-
-    fn resource(self) -> &'static str {
-        match self {
-            Self::Events => "events",
-            Self::BlockedIpsPush => "blocked_ips_push",
-            Self::BlockedIpsPull => "blocked_ips_pull",
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Events => "事件同步",
-            Self::BlockedIpsPush => "封禁推送",
-            Self::BlockedIpsPull => "封禁回流",
-        }
-    }
-
-    fn enabled(self, config: &crate::config::SafeLineConfig) -> bool {
-        match self {
-            Self::Events => config.auto_sync_events,
-            Self::BlockedIpsPush => config.auto_sync_blocked_ips_push,
-            Self::BlockedIpsPull => config.auto_sync_blocked_ips_pull,
-        }
-    }
-}
-
-async fn run_safeline_auto_sync_loop(
-    store: Arc<crate::storage::SqliteStore>,
-    fallback_config: Config,
-) {
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let mut last_attempts: HashMap<&'static str, i64> = HashMap::new();
-
-    loop {
-        interval.tick().await;
-
-        let config = match store.load_app_config().await {
-            Ok(Some(config)) => config.normalized(),
-            Ok(None) => fallback_config.clone().normalized(),
-            Err(err) => {
-                warn!(
-                    "Failed to load persisted config for SafeLine auto sync: {}",
-                    err
-                );
-                continue;
-            }
-        };
-        let safeline = &config.integrations.safeline;
-
-        if !safeline.enabled {
-            continue;
-        }
-
-        for task in SafeLineAutoSyncTask::ALL {
-            if !task.enabled(safeline) {
-                continue;
-            }
-
-            let last_persisted_run = match store.load_safeline_sync_state(task.resource()).await {
-                Ok(state) => state.map(|item| item.updated_at).unwrap_or(0),
-                Err(err) => {
-                    warn!(
-                        "Failed to read SafeLine sync state for {}: {}",
-                        task.label(),
-                        err
-                    );
-                    continue;
-                }
-            };
-            let last_attempt = last_attempts.get(task.resource()).copied().unwrap_or(0);
-            let now = unix_timestamp();
-            let last_run_at = last_persisted_run.max(last_attempt);
-
-            if last_run_at > 0
-                && now.saturating_sub(last_run_at) < safeline.auto_sync_interval_secs as i64
-            {
-                continue;
-            }
-
-            last_attempts.insert(task.resource(), now);
-
-            match task {
-                SafeLineAutoSyncTask::Events => {
-                    match crate::integrations::safeline_sync::sync_events(store.as_ref(), safeline)
-                        .await
-                    {
-                        Ok(result) => info!(
-                            "SafeLine 自动{}完成：新增 {} 条，跳过 {} 条。",
-                            task.label(),
-                            result.imported,
-                            result.skipped
-                        ),
-                        Err(err) => warn!("SafeLine 自动{}失败: {}", task.label(), err),
-                    }
-                }
-                SafeLineAutoSyncTask::BlockedIpsPush => {
-                    match crate::integrations::safeline_sync::push_blocked_ips(
-                        store.as_ref(),
-                        safeline,
-                    )
-                    .await
-                    {
-                        Ok(result) => info!(
-                            "SafeLine 自动{}完成：成功 {} 条，跳过 {} 条，失败 {} 条。",
-                            task.label(),
-                            result.synced,
-                            result.skipped,
-                            result.failed
-                        ),
-                        Err(err) => warn!("SafeLine 自动{}失败: {}", task.label(), err),
-                    }
-                }
-                SafeLineAutoSyncTask::BlockedIpsPull => {
-                    match crate::integrations::safeline_sync::pull_blocked_ips(
-                        store.as_ref(),
-                        safeline,
-                    )
-                    .await
-                    {
-                        Ok(result) => info!(
-                            "SafeLine 自动{}完成：新增 {} 条，跳过 {} 条。",
-                            task.label(),
-                            result.imported,
-                            result.skipped
-                        ),
-                        Err(err) => warn!("SafeLine 自动{}失败: {}", task.label(), err),
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAcceptor>> {
-    if context
-        .config
-        .gateway_config
-        .https_listen_addr
-        .trim()
-        .is_empty()
-    {
-        return Ok(None);
-    }
-
-    let Some(cert_resolver) = context.gateway_runtime.tls_resolver() else {
-        return Ok(None);
-    };
-
-    crate::tls::ensure_rustls_crypto_provider();
-
-    let mut server_config = RustlsServerConfig::builder()
-        .with_no_client_auth()
-        .with_cert_resolver(cert_resolver);
-    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-
-    Ok(Some(TlsAcceptor::from(Arc::new(server_config))))
+#[cfg_attr(not(test), allow(dead_code))]
+fn build_tls_acceptor(context: &WafContext) -> Result<Option<tokio_rustls::TlsAcceptor>> {
+    super::engine_tls::build_tls_acceptor(context)
 }
 
 #[cfg(feature = "http3")]
-fn build_http3_endpoint(config: &crate::config::Http3Config) -> Result<Option<QuinnEndpoint>> {
-    if !config.enabled {
-        return Ok(None);
-    }
-
-    if !config.enable_tls13 {
-        warn!("HTTP/3 requires TLS 1.3; skipping QUIC listener because enable_tls13=false");
-        return Ok(None);
-    }
-
-    let (Some(cert_path), Some(key_path)) = (
-        config.certificate_path.as_deref(),
-        config.private_key_path.as_deref(),
-    ) else {
-        warn!(
-            "HTTP/3 is enabled but certificate_path/private_key_path are missing; skipping QUIC listener"
-        );
-        return Ok(None);
-    };
-
-    crate::tls::ensure_rustls_crypto_provider();
-
-    let certs = load_tls_certificates(cert_path)?;
-    let private_key = load_tls_private_key(key_path)?;
-    let mut server_crypto = RustlsServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(certs, private_key)?;
-    server_crypto.alpn_protocols = vec![b"h3".to_vec()];
-
-    let mut server_config =
-        quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(server_crypto)?));
-    let transport = Arc::get_mut(&mut server_config.transport)
-        .ok_or_else(|| anyhow::anyhow!("Failed to configure QUIC transport"))?;
-    transport.max_concurrent_uni_streams(256_u32.into());
-    transport.max_concurrent_bidi_streams((config.max_concurrent_streams as u32).into());
-    transport.keep_alive_interval(Some(std::time::Duration::from_secs(
-        (config.idle_timeout_secs / 3).max(1),
-    )));
-    transport.max_idle_timeout(Some(
-        std::time::Duration::from_secs(config.idle_timeout_secs)
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid HTTP/3 idle timeout"))?,
-    ));
-
-    let listen_addr: SocketAddr = config.listen_addr.parse()?;
-    Ok(Some(QuinnEndpoint::server(server_config, listen_addr)?))
-}
-
-#[cfg_attr(not(feature = "http3"), allow(dead_code))]
-fn load_tls_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
-    let mut reader = BufReader::new(File::open(path)?);
-    let certs = rustls_pemfile::certs(&mut reader).collect::<std::result::Result<Vec<_>, _>>()?;
-    if certs.is_empty() {
-        anyhow::bail!("No TLS certificates found in {}", path);
-    }
-    Ok(certs)
-}
-
-#[cfg_attr(not(feature = "http3"), allow(dead_code))]
-fn load_tls_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
-    let mut reader = BufReader::new(File::open(path)?);
-    rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| anyhow::anyhow!("No TLS private key found in {}", path))
+fn build_http3_endpoint(config: &crate::config::Http3Config) -> Result<Option<quinn::Endpoint>> {
+    super::engine_tls::build_http3_endpoint(config)
 }
 
 async fn handle_connection(
@@ -2172,46 +1946,9 @@ fn enforce_upstream_policy(context: &WafContext) -> Result<()> {
     }
 }
 
-async fn run_upstream_healthcheck_loop(context: Arc<WafContext>, upstream_addr: String) {
-    let interval_secs = context
-        .config
-        .l7_config
-        .upstream_healthcheck_interval_secs
-        .max(1);
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
-
-    loop {
-        interval.tick().await;
-        match probe_upstream_tcp(
-            &upstream_addr,
-            context.config.l7_config.upstream_healthcheck_timeout_ms,
-        )
-        .await
-        {
-            Ok(()) => {
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_upstream_healthcheck(true);
-                }
-                context.set_upstream_health(true, None);
-            }
-            Err(err) => {
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_upstream_healthcheck(false);
-                }
-                context.set_upstream_health(false, Some(err.to_string()));
-            }
-        }
-    }
-}
-
+#[cfg_attr(not(test), allow(dead_code))]
 async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> Result<()> {
-    tokio::time::timeout(
-        std::time::Duration::from_millis(timeout_ms),
-        TcpStream::connect(upstream_addr),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream health check timed out"))??;
-    Ok(())
+    super::engine_maintenance::probe_upstream_tcp(upstream_addr, timeout_ms).await
 }
 
 fn resolve_client_ip(

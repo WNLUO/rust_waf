@@ -645,6 +645,13 @@ const previewRenderedBody = computed(() =>
     : (previewPayload.value?.body_preview ?? ''),
 )
 
+const previewRandomErrorSummary = computed(() => ({
+  statuses: parseRandomStatuses(previewDraftRandomStatuses.value),
+  successRate: Math.min(100, Math.max(0, Math.floor(previewDraftRandomSuccessRate.value || 0))),
+  successBody: previewDraftRandomSuccessBody.value.trim() || defaultRandomSuccessBody,
+  failureBody: previewDraftRandomFailureBody.value.trim() || defaultRandomFailureBody,
+}))
+
 const previewCanPagePreview = computed(() => {
   const idea = currentPreviewIdea.value
   if (idea?.requires_upload) return false
@@ -1518,6 +1525,51 @@ onMounted(loadActionCenter)
                   这个动作不会编辑文本内容，而是直接返回你上传的 gzip 文件。
                   <br />
                   建议配合合适的 `内容类型` 使用，例如 `text/html; charset=utf-8` 或 `application/json`。
+                </div>
+                <div
+                  v-else-if="previewIsActionIdea && currentPreviewIdea && isRandomErrorIdea(currentPreviewIdea)"
+                  class="mt-3 grid gap-4"
+                >
+                  <div class="grid gap-3 md:grid-cols-3">
+                    <div class="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
+                      <p class="text-xs tracking-wide text-amber-700">可能失败状态</p>
+                      <p class="mt-2 font-mono text-lg font-semibold text-stone-900">
+                        {{ previewRandomErrorSummary.statuses.join(', ') || defaultRandomStatuses }}
+                      </p>
+                    </div>
+                    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-4">
+                      <p class="text-xs tracking-wide text-emerald-700">成功概率</p>
+                      <p class="mt-2 text-lg font-semibold text-stone-900">
+                        {{ previewRandomErrorSummary.successRate }}%
+                      </p>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                      <p class="text-xs tracking-wide text-slate-500">运行效果</p>
+                      <p class="mt-2 text-sm leading-6 text-stone-700">
+                        同一路径会呈现时好时坏的故障感，干扰攻击者判断。
+                      </p>
+                    </div>
+                  </div>
+                  <div class="grid gap-4 md:grid-cols-2">
+                    <div class="rounded-2xl border border-rose-200 bg-white px-5 py-4 shadow-sm">
+                      <div class="flex items-center justify-between gap-3">
+                        <p class="text-sm font-medium text-stone-900">失败响应示意</p>
+                        <span class="rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">
+                          {{ previewRandomErrorSummary.statuses[0] ?? 500 }}
+                        </span>
+                      </div>
+                      <pre class="mt-4 whitespace-pre-wrap break-all font-mono text-sm leading-6 text-stone-800">{{ previewRandomErrorSummary.failureBody }}</pre>
+                    </div>
+                    <div class="rounded-2xl border border-emerald-200 bg-white px-5 py-4 shadow-sm">
+                      <div class="flex items-center justify-between gap-3">
+                        <p class="text-sm font-medium text-stone-900">成功响应示意</p>
+                        <span class="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                          200
+                        </span>
+                      </div>
+                      <pre class="mt-4 whitespace-pre-wrap break-all font-mono text-sm leading-6 text-stone-800">{{ previewRandomErrorSummary.successBody }}</pre>
+                    </div>
+                  </div>
                 </div>
                 <pre
                   v-else

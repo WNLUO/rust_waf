@@ -55,6 +55,22 @@ pub struct RuleActionTemplateUpsert {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ActionIdeaOverrideEntry {
+    pub idea_id: String,
+    pub title: Option<String>,
+    pub response_content: Option<String>,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionIdeaOverrideUpsert {
+    pub idea_id: String,
+    pub title: Option<String>,
+    pub response_content: Option<String>,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SecurityEventEntry {
     pub id: i64,
     pub layer: String,

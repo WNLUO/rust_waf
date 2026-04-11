@@ -1,4 +1,6 @@
 import type {
+  ActionIdeaPreset,
+  ActionIdeaPresetsResponse,
   ApiQueryValue,
   BlockedIpsQuery,
   BlockedIpsResponse,
@@ -190,6 +192,20 @@ export function fetchRuleActionTemplatePreview(templateId: string) {
   return apiRequest<RuleActionTemplatePreviewResponse>(
     `/rule-action-templates/${encodeURIComponent(templateId)}/preview`,
   )
+}
+
+export function fetchActionIdeaPresets() {
+  return apiRequest<ActionIdeaPresetsResponse>('/action-idea-presets')
+}
+
+export function updateActionIdeaPreset(
+  ideaId: string,
+  payload: Pick<ActionIdeaPreset, 'title' | 'response_content'>,
+) {
+  return apiRequest<ActionIdeaPreset>(`/action-idea-presets/${encodeURIComponent(ideaId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function installRuleActionPlugin(

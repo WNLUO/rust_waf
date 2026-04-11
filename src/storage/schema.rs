@@ -89,6 +89,13 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_rule_action_templates_plugin_id
             ON rule_action_templates(plugin_id);
 
+        CREATE TABLE IF NOT EXISTS action_idea_overrides (
+            idea_id TEXT PRIMARY KEY,
+            title TEXT,
+            response_content TEXT,
+            updated_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS app_config (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             config_json TEXT NOT NULL,

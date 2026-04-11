@@ -658,6 +658,46 @@ pub struct RuleActionTemplatePreviewResponse {
     pub(crate) truncated: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ActionIdeaPresetsResponse {
+    pub(crate) total: u32,
+    pub(crate) ideas: Vec<ActionIdeaPresetResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ActionIdeaPresetResponse {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) mood: String,
+    pub(crate) summary: String,
+    pub(crate) mechanism: String,
+    pub(crate) performance: String,
+    pub(crate) fallback_path: String,
+    pub(crate) plugin_id: String,
+    pub(crate) file_name: String,
+    pub(crate) response_file_path: String,
+    pub(crate) plugin_name: String,
+    pub(crate) plugin_description: String,
+    pub(crate) template_local_id: String,
+    pub(crate) template_name: String,
+    pub(crate) template_description: String,
+    pub(crate) pattern: String,
+    pub(crate) severity: String,
+    pub(crate) content_type: String,
+    pub(crate) status_code: u16,
+    pub(crate) gzip: bool,
+    pub(crate) headers: Vec<RuleResponseHeaderPayload>,
+    pub(crate) response_content: String,
+    pub(crate) has_overrides: bool,
+    pub(crate) updated_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateActionIdeaPresetRequest {
+    pub(crate) title: String,
+    pub(crate) response_content: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct InstallRuleActionPluginRequest {
     pub(crate) package_url: String,

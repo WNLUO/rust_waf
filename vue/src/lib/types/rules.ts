@@ -81,6 +81,38 @@ export interface RuleActionTemplatePreviewResponse {
   truncated: boolean
 }
 
+export interface ActionIdeaPreset {
+  id: string
+  title: string
+  mood: string
+  summary: string
+  mechanism: string
+  performance: string
+  fallback_path: string
+  plugin_id: string
+  file_name: string
+  response_file_path: string
+  plugin_name: string
+  plugin_description: string
+  template_local_id: string
+  template_name: string
+  template_description: string
+  pattern: string
+  severity: string
+  content_type: string
+  status_code: number
+  gzip: boolean
+  headers: RuleResponseHeader[]
+  response_content: string
+  has_overrides: boolean
+  updated_at: number
+}
+
+export interface ActionIdeaPresetsResponse {
+  total: number
+  ideas: ActionIdeaPreset[]
+}
+
 export interface RulesResponse {
   rules: RuleItem[]
 }

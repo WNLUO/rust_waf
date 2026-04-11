@@ -379,6 +379,46 @@ impl SqliteStore {
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn list_action_idea_overrides(&self) -> Result<Vec<ActionIdeaOverrideEntry>> {
+        sqlx::query_as::<_, ActionIdeaOverrideEntry>(
+            r#"
+            SELECT idea_id, title, response_content, updated_at
+            FROM action_idea_overrides
+            ORDER BY idea_id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn upsert_action_idea_override(
+        &self,
+        override_entry: &ActionIdeaOverrideUpsert,
+    ) -> Result<()> {
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            INSERT INTO action_idea_overrides (idea_id, title, response_content, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(idea_id) DO UPDATE SET
+                title = excluded.title,
+                response_content = excluded.response_content,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&override_entry.idea_id)
+        .bind(&override_entry.title)
+        .bind(&override_entry.response_content)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn set_rule_action_plugin_enabled(
         &self,
         plugin_id: &str,

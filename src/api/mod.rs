@@ -135,6 +135,14 @@ fn build_router(state: ApiState) -> Router {
             get(rules_handlers::preview_rule_action_template_handler),
         )
         .route(
+            "/action-idea-presets",
+            get(rules_handlers::list_action_idea_presets_handler),
+        )
+        .route(
+            "/action-idea-presets/:idea_id",
+            patch(rules_handlers::update_action_idea_preset_handler),
+        )
+        .route(
             "/sites/local",
             get(sites_handlers::list_local_sites_handler)
                 .post(sites_handlers::create_local_site_handler),

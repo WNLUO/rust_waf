@@ -24,16 +24,16 @@
 - `AdminSettingsPage.vue` 已降到 `160` 行
 - `AdminL4Page.vue` 已降到 `127` 行
 - `AdminRulesPage.vue` 已降到 `106` 行
-- 仍存在明显超大页面：`AdminSafeLinePage.vue` `761` 行
+- `AdminSafeLinePage.vue` 已降到 `108` 行
 - 仍存在明显超大脚本：`useAdminSites.ts` `661` 行、`lib/types.ts` `600` 行
 
 ## 体量扫描摘要
 
 页面文件现状：
 
-- 超过 `500` 行：`AdminSafeLinePage.vue`、`AdminL7RulesPage.vue`、`AdminL4RulesPage.vue`
+- 超过 `500` 行：`AdminL7RulesPage.vue`、`AdminL4RulesPage.vue`
 - 超过 `300` 行：另有 `AdminEventsPage.vue`、`AdminL4BlocklistPage.vue`、`AdminPage.vue`、`AdminL4PortsPage.vue`
-- 已完成拆分并回到建议阈值内：`AdminSitesPage.vue`、`AdminL7Page.vue`、`AdminSettingsPage.vue`、`AdminL4Page.vue`、`AdminRulesPage.vue`
+- 已完成拆分并回到建议阈值内：`AdminSitesPage.vue`、`AdminL7Page.vue`、`AdminSettingsPage.vue`、`AdminL4Page.vue`、`AdminRulesPage.vue`、`AdminSafeLinePage.vue`
 
 组件与状态层现状：
 
@@ -44,6 +44,7 @@
 - `useAdminL4.ts` 已控制在 `231` 行，基本贴近当前 composable 体量目标
 - `AdminRuleEditorDialog.vue` `453` 行，已替代页面内联弹窗逻辑，但后续仍建议继续拆出“基础信息表单”和“响应模板编辑区”
 - `useAdminRules.ts` 已控制在 `239` 行，接近当前 composable 体量目标
+- `useAdminSafeLine.ts` 为 `297` 行，说明页面拆分已完成，但后续仍可继续拆成“接入状态 / 同步动作 / 映射管理”三段能力
 
 命名与风格抽样结论：
 
@@ -115,7 +116,7 @@
 - [x] 优先拆分 `vue/src/pages/AdminSettingsPage.vue`
 - [x] 优先拆分 `vue/src/pages/AdminL4Page.vue`
 - [x] 优先拆分 `vue/src/pages/AdminRulesPage.vue`
-- [ ] 继续跟进 `vue/src/pages/AdminSafeLinePage.vue`
+- [x] 继续跟进 `vue/src/pages/AdminSafeLinePage.vue`
 
 ### 7. 管理台页面统一拆分模板
 
@@ -197,10 +198,10 @@
 
 ## 下一步建议执行顺序
 
-1. 优先拆分 `AdminSafeLinePage.vue`，避免继续把副作用留在页面层
-2. 将 `useAdminSites.ts` 再拆为查询、编辑器状态、远端同步三类子能力
-3. 将 `lib/types.ts` 按 `rules / sites / settings / safeline / dashboard` 进行领域拆分
-4. 视后续需求再微调 `AdminL4ConfigFormCard.vue` 与 `AdminRuleEditorDialog.vue`，尽量继续压缩 section / dialog 体量
+1. 将 `useAdminSites.ts` 再拆为查询、编辑器状态、远端同步三类子能力
+2. 将 `lib/types.ts` 按 `rules / sites / settings / safeline / dashboard` 进行领域拆分
+3. 视后续需求再微调 `AdminL4ConfigFormCard.vue` 与 `AdminRuleEditorDialog.vue`，尽量继续压缩 section / dialog 体量
+4. 继续收口 `useAdminSafeLine.ts`，把同步动作和映射管理拆成子 composable
 5. 补充对 `section / composable` 体量阈值的文档约束，后续再考虑是否接入自动化校验
 
 ## 完成标准

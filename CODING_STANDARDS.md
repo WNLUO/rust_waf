@@ -61,6 +61,8 @@
 - Vue 与 TypeScript 代码统一通过 ESLint 校验
 - 代码格式统一通过 Prettier 处理
 - 页面文件过大时优先拆成 `page + section + composable`
+- `vue/attributes-order` 默认开启，模板属性顺序保持一致
+- `vue/multi-word-component-names` 默认开启，仅对入口组件 `App` 保留例外
 
 前端检查闭环状态：
 
@@ -83,6 +85,20 @@
 - 页面状态、过滤器、表单逻辑优先抽到 composable
 - 重复布局、卡片、筛选栏、表格区块优先抽到 `components/<domain>` 子目录
 - 管理台页面优先按 `overview / filters / table / form-dialog / drawer` 拆分
+
+前端目录职责约定：
+
+- `pages/` 只保留页面路由入口、区块装配、少量页面级状态
+- `components/<domain>/` 承接领域区块、筛选栏、表格区、弹窗和表单组件
+- `components/ui/` 承接通用展示组件，避免掺入具体页面业务
+- `composables/` 承接轮询、副作用、过滤器、提交流程与页面状态编排
+- `lib/` 承接 API 请求、纯函数映射、payload 组装与领域 helper
+
+前端增量治理约定：
+
+- 新功能默认不继续叠加到超大页面，优先拆出 section、dialog 或 composable
+- 涉及超大页面的需求，至少顺手下沉一块重复逻辑或一段副作用
+- review 时固定检查是否新增职责堆积、重复映射逻辑或页面级副作用膨胀
 
 当前超大页面优先级：
 

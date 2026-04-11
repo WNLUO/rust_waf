@@ -118,25 +118,25 @@ watch(
   <AppLayout>
     <template #header-extra>
       <button
-        @click="runSafeLinePull"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="pulling"
+        @click="runSafeLinePull"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': pulling }" />
         {{ pulling ? '拉取中...' : '拉取雷池封禁' }}
       </button>
       <button
-        @click="runSafeLinePush"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="pushing"
+        @click="runSafeLinePush"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': pushing }" />
         {{ pushing ? '推送中...' : '推送本地封禁' }}
       </button>
       <button
-        @click="loadBlockedIps()"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="refreshing"
+        @click="loadBlockedIps()"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
         刷新名单
@@ -213,9 +213,9 @@ watch(
             </div>
             <button
               v-if="!ip.provider || ip.provider === 'safeline'"
-              @click="handleUnblock(ip.id)"
               :disabled="mutatingId === ip.id"
               class="rounded-full border border-emerald-500/20 px-3 py-2 text-xs text-emerald-600 transition hover:bg-emerald-500/10"
+              @click="handleUnblock(ip.id)"
             >
               {{
                 mutatingId === ip.id

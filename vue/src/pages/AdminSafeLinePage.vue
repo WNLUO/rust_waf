@@ -338,9 +338,9 @@ onMounted(loadPageData)
   <AppLayout>
     <template #header-extra>
       <button
-        @click="refreshSyncState"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="actions.refreshing || loading"
+        @click="refreshSyncState"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': actions.refreshing }" />
         刷新联动状态
@@ -424,17 +424,17 @@ onMounted(loadPageData)
 
             <div class="mt-4 flex flex-wrap gap-2.5">
               <button
-                @click="runConnectionTest"
                 :disabled="actions.testing || !hasSavedConfig"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-slate-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="runConnectionTest"
               >
                 <PlugZap :size="12" />
                 {{ actions.testing ? '测试中...' : '测试连接' }}
               </button>
               <button
-                @click="loadRemoteSites"
                 :disabled="actions.loadingSites || !hasSavedConfig"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="loadRemoteSites"
               >
                 <ServerCog :size="12" />
                 {{ actions.loadingSites ? '读取中...' : '读取远端站点' }}
@@ -523,9 +523,9 @@ onMounted(loadPageData)
 
             <div class="mt-4 grid gap-3 md:grid-cols-2">
               <button
-                @click="runEventSync"
                 :disabled="actions.syncingEvents"
                 class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="runEventSync"
               >
                 <span>
                   <span class="block text-sm font-medium text-stone-900"
@@ -542,9 +542,9 @@ onMounted(loadPageData)
               </button>
 
               <button
-                @click="runBlockedPull"
                 :disabled="actions.pullingBlocked"
                 class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="runBlockedPull"
               >
                 <span>
                   <span class="block text-sm font-medium text-stone-900"
@@ -558,9 +558,9 @@ onMounted(loadPageData)
               </button>
 
               <button
-                @click="runBlockedPush"
                 :disabled="actions.pushingBlocked"
                 class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="runBlockedPush"
               >
                 <span>
                   <span class="block text-sm font-medium text-stone-900"
@@ -574,9 +574,9 @@ onMounted(loadPageData)
               </button>
 
               <button
-                @click="refreshSyncState"
                 :disabled="actions.refreshing"
                 class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="refreshSyncState"
               >
                 <span>
                   <span class="block text-sm font-medium text-stone-900"
@@ -643,15 +643,15 @@ onMounted(loadPageData)
             </div>
             <div class="flex flex-wrap gap-2">
               <button
-                @click="clearPrimary"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="clearPrimary"
               >
                 清空主站点
               </button>
               <button
-                @click="saveMappings"
                 :disabled="actions.savingMappings || !mappingDrafts.length"
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-slate-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                @click="saveMappings"
               >
                 <Save :size="12" />
                 {{ actions.savingMappings ? '保存中...' : '保存映射' }}

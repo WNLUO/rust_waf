@@ -310,9 +310,9 @@ onMounted(loadRules)
   <AppLayout>
     <template #header-extra>
       <button
-        @click="loadRules"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="loading"
+        @click="loadRules"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
         刷新规则
@@ -378,8 +378,8 @@ onMounted(loadRules)
           <option value="disabled">停用</option>
         </select>
         <button
-          @click="openCreateRule"
           class="inline-flex items-center gap-2 ml-auto rounded-[18px] bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600/90 shrink-0"
+          @click="openCreateRule"
         >
           <Plus :size="16" />
           新建规则
@@ -401,9 +401,9 @@ onMounted(loadRules)
             placeholder="https://example.com/plugins/gzip-block.zip"
           />
           <button
-            @click="handleInstallPlugin"
             class="inline-flex items-center gap-2 rounded-[18px] bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-60"
             :disabled="installingPlugin"
+            @click="handleInstallPlugin"
           >
             {{ installingPlugin ? '安装中...' : '安装插件' }}
           </button>
@@ -461,22 +461,22 @@ onMounted(loadRules)
                 <td class="px-4 py-3">
                   <div class="flex justify-end gap-2">
                     <button
-                      @click="openEditRule(rule)"
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                      @click="openEditRule(rule)"
                     >
                       <Edit3 :size="14" />
                       编辑
                     </button>
                     <button
-                      @click="toggleRuleStatus(rule)"
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                      @click="toggleRuleStatus(rule)"
                     >
                       <Check :size="14" />
                       {{ rule.enabled ? '停用' : '启用' }}
                     </button>
                     <button
-                      @click="handleDeleteRule(rule.id)"
                       class="inline-flex items-center gap-1 rounded-full border border-red-500/20 px-3 py-2 text-xs text-red-600 transition hover:bg-red-500/8"
+                      @click="handleDeleteRule(rule.id)"
                     >
                       <Trash2 :size="14" />
                       删除
@@ -519,14 +519,14 @@ onMounted(loadRules)
             </h3>
           </div>
           <button
-            @click="isRuleModalOpen = false"
             class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+            @click="isRuleModalOpen = false"
           >
             <X :size="18" />
           </button>
         </div>
 
-        <form @submit.prevent="handleCreateOrUpdateRule" class="mt-3 space-y-6">
+        <form class="mt-3 space-y-6" @submit.prevent="handleCreateOrUpdateRule">
           <div class="space-y-2">
             <label class="text-sm text-slate-500">规则名称</label>
             <input
@@ -542,9 +542,9 @@ onMounted(loadRules)
               <label class="text-sm text-slate-500">层级</label>
               <select
                 v-model="ruleForm.layer"
-                @change="onActionChange"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
                 :disabled="!!ruleForm.plugin_template_id"
+                @change="onActionChange"
               >
                 <option value="l4">四层</option>
                 <option value="l7">七层</option>
@@ -569,8 +569,8 @@ onMounted(loadRules)
               <label class="text-sm text-slate-500">动作</label>
               <select
                 v-model="ruleForm.action"
-                @change="onActionChange"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500"
+                @change="onActionChange"
               >
                 <option value="block">拦截</option>
                 <option value="allow">放行</option>
@@ -702,9 +702,9 @@ onMounted(loadRules)
                 <label class="text-sm text-slate-500">附加响应头</label>
                 <button
                   type="button"
-                  @click="addResponseHeader"
                   class="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                   :disabled="!!ruleForm.plugin_template_id"
+                  @click="addResponseHeader"
                 >
                   添加 Header
                 </button>
@@ -731,9 +731,9 @@ onMounted(loadRules)
                 />
                 <button
                   type="button"
-                  @click="removeResponseHeader(index)"
                   class="rounded-full border border-red-500/20 px-3 py-2 text-xs text-red-600 transition hover:bg-red-500/8"
                   :disabled="!!ruleForm.plugin_template_id"
+                  @click="removeResponseHeader(index)"
                 >
                   删除
                 </button>

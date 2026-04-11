@@ -194,17 +194,17 @@ const siteOptions = computed(() => {
   <AppLayout>
     <template #header-extra>
       <button
-        @click="runSafeLineSync"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="syncing"
+        @click="runSafeLineSync"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': syncing }" />
         {{ syncing ? '同步中...' : '同步雷池事件' }}
       </button>
       <button
-        @click="loadEvents()"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="refreshing"
+        @click="loadEvents()"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
         刷新事件
@@ -424,8 +424,8 @@ const siteOptions = computed(() => {
             </h3>
           </div>
           <button
-            @click="closePreview"
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+            @click="closePreview"
           >
             <X :size="18" />
           </button>

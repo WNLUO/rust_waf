@@ -1,0 +1,497 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import StatusBadge from '../ui/StatusBadge.vue'
+import {
+  listFieldClass,
+  numberInputClass,
+  type L7ConfigForm,
+} from '../../lib/adminL7'
+
+const props = defineProps<{
+  form: L7ConfigForm
+  listenAddrsText: string
+  realIpHeadersText: string
+  trustedProxyCidrsText: string
+}>()
+
+const emit = defineEmits<{
+  'update:form': [value: L7ConfigForm]
+  'update:listenAddrsText': [value: string]
+  'update:realIpHeadersText': [value: string]
+  'update:trustedProxyCidrsText': [value: string]
+}>()
+
+function updateForm<K extends keyof L7ConfigForm>(
+  key: K,
+  value: L7ConfigForm[K],
+) {
+  emit('update:form', { ...props.form, [key]: value })
+}
+
+function fieldModel<K extends keyof L7ConfigForm>(key: K) {
+  return computed({
+    get: () => props.form[key],
+    set: (value) => updateForm(key, value),
+  })
+}
+
+const httpInspectionEnabled = fieldModel('http_inspection_enabled')
+const http2Enabled = fieldModel('http2_enabled')
+const bloomEnabled = fieldModel('bloom_enabled')
+const bloomVerifyEnabled = fieldModel('bloom_false_positive_verification')
+const healthcheckEnabled = fieldModel('upstream_healthcheck_enabled')
+const http3Enabled = fieldModel('http3_enabled')
+const runtimeProfile = fieldModel('runtime_profile')
+const failureMode = fieldModel('upstream_failure_mode')
+const upstreamEndpoint = fieldModel('upstream_endpoint')
+const maxRequestSize = fieldModel('max_request_size')
+const firstByteTimeout = fieldModel('first_byte_timeout_ms')
+const readIdleTimeout = fieldModel('read_idle_timeout_ms')
+const tlsHandshakeTimeout = fieldModel('tls_handshake_timeout_ms')
+const proxyConnectTimeout = fieldModel('proxy_connect_timeout_ms')
+const proxyWriteTimeout = fieldModel('proxy_write_timeout_ms')
+const proxyReadTimeout = fieldModel('proxy_read_timeout_ms')
+const bloomFilterScale = fieldModel('bloom_filter_scale')
+const healthcheckInterval = fieldModel('upstream_healthcheck_interval_secs')
+const healthcheckTimeout = fieldModel('upstream_healthcheck_timeout_ms')
+const http2MaxStreams = fieldModel('http2_max_concurrent_streams')
+const http2MaxFrameSize = fieldModel('http2_max_frame_size')
+const http2InitialWindowSize = fieldModel('http2_initial_window_size')
+const http2EnablePriorities = fieldModel('http2_enable_priorities')
+const http3ListenAddr = fieldModel('http3_listen_addr')
+const http3MaxStreams = fieldModel('http3_max_concurrent_streams')
+const http3IdleTimeout = fieldModel('http3_idle_timeout_secs')
+const http3Mtu = fieldModel('http3_mtu')
+const http3MaxFrameSize = fieldModel('http3_max_frame_size')
+const http3QpackTableSize = fieldModel('http3_qpack_table_size')
+const http3CertificatePath = fieldModel('http3_certificate_path')
+const http3PrivateKeyPath = fieldModel('http3_private_key_path')
+const http3ConnectionMigration = fieldModel('http3_enable_connection_migration')
+const http3Tls13Enabled = fieldModel('http3_enable_tls13')
+</script>
+
+<template>
+  <section
+    class="rounded-xl border border-white/80 bg-white/78 p-4 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
+  >
+    <div
+      class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+    >
+      <div>
+        <p class="text-sm tracking-wider text-blue-700">L7 配置</p>
+        <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+          七层检测与代理参数
+        </h3>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <StatusBadge
+          :text="
+            form.http_inspection_enabled ? 'HTTP 检测开启' : 'HTTP 检测关闭'
+          "
+          :type="form.http_inspection_enabled ? 'success' : 'warning'"
+        />
+        <StatusBadge
+          :text="form.http2_enabled ? 'HTTP/2 已启用' : 'HTTP/2 未启用'"
+          :type="form.http2_enabled ? 'info' : 'muted'"
+        />
+      </div>
+    </div>
+
+    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <label
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <span class="flex items-center justify-between gap-3">
+          <span class="font-medium">启用 HTTP 检测</span>
+          <input
+            v-model="httpInspectionEnabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+        </span>
+        <span class="mt-2 block text-xs leading-6 text-slate-500"
+          >关闭后七层检测实例不会介入请求决策。</span
+        >
+      </label>
+      <label
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <span class="flex items-center justify-between gap-3">
+          <span class="font-medium">启用 HTTP/2</span>
+          <input
+            v-model="http2Enabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+        </span>
+        <span class="mt-2 block text-xs leading-6 text-slate-500"
+          >启用后可处理 h2 / TLS ALPN 路由到的请求。</span
+        >
+      </label>
+      <label
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <span class="flex items-center justify-between gap-3">
+          <span class="font-medium">启用 Bloom</span>
+          <input
+            v-model="bloomEnabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+        </span>
+        <span class="mt-2 block text-xs leading-6 text-slate-500"
+          >控制全局 Bloom 过滤能力，关闭后误判校验也会随之失效。</span
+        >
+      </label>
+      <label
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <span class="flex items-center justify-between gap-3">
+          <span class="font-medium">启用上游健康检查</span>
+          <input
+            v-model="healthcheckEnabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+        </span>
+        <span class="mt-2 block text-xs leading-6 text-slate-500"
+          >关闭后故障状态仅来自实时代理结果，不再主动探测。</span
+        >
+      </label>
+      <label
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <span class="flex items-center justify-between gap-3">
+          <span class="font-medium">启用 Bloom 误判校验</span>
+          <input
+            v-model="bloomVerifyEnabled"
+            :disabled="!form.bloom_enabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+        </span>
+        <span class="mt-2 block text-xs leading-6 text-slate-500"
+          >启用后会为命中结果追加精确校验，适合误判敏感场景。</span
+        >
+      </label>
+      <label
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <span class="flex items-center justify-between gap-3">
+          <span class="font-medium">启用 HTTP/3</span>
+          <input
+            v-model="http3Enabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+        </span>
+        <span class="mt-2 block text-xs leading-6 text-slate-500"
+          >启用后会尝试监听 QUIC / HTTP/3 入口。</span
+        >
+      </label>
+      <div
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <p class="font-medium">运行档位</p>
+        <select
+          v-model="runtimeProfile"
+          class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+        >
+          <option value="minimal">minimal</option>
+          <option value="standard">standard</option>
+        </select>
+        <p class="mt-2 text-xs leading-6 text-slate-500">
+          会影响 L7 参数的收敛范围，以及多监听场景下的运行能力。
+        </p>
+      </div>
+      <div
+        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+      >
+        <p class="font-medium">上游失败模式</p>
+        <select
+          v-model="failureMode"
+          class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+        >
+          <option value="fail_open">fail_open</option>
+          <option value="fail_close">fail_close</option>
+        </select>
+        <p class="mt-2 text-xs leading-6 text-slate-500">
+          上游不可用时选择放行还是拒绝请求。
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <label class="text-sm text-stone-700 md:col-span-2">
+        监听地址
+        <textarea
+          :value="listenAddrsText"
+          :class="listFieldClass"
+          placeholder="每行一个，例如 0.0.0.0:8080"
+          @input="
+            emit(
+              'update:listenAddrsText',
+              ($event.target as HTMLTextAreaElement).value,
+            )
+          "
+        />
+      </label>
+      <label class="text-sm text-stone-700 md:col-span-2">
+        TCP 上游地址
+        <input
+          v-model="upstreamEndpoint"
+          type="text"
+          placeholder="例如 127.0.0.1:9000"
+          :class="numberInputClass"
+        />
+      </label>
+      <label class="text-sm text-stone-700"
+        >最大请求体大小<input
+          v-model.number="maxRequestSize"
+          type="number"
+          min="1024"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >首字节超时(ms)<input
+          v-model.number="firstByteTimeout"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >空闲读取超时(ms)<input
+          v-model.number="readIdleTimeout"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >TLS 握手超时(ms)<input
+          v-model.number="tlsHandshakeTimeout"
+          type="number"
+          min="500"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >代理连接超时(ms)<input
+          v-model.number="proxyConnectTimeout"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >代理写超时(ms)<input
+          v-model.number="proxyWriteTimeout"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >代理读超时(ms)<input
+          v-model.number="proxyReadTimeout"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >Bloom 缩放系数<input
+          v-model.number="bloomFilterScale"
+          type="number"
+          min="0.1"
+          step="0.1"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >健康检查间隔(s)<input
+          v-model.number="healthcheckInterval"
+          type="number"
+          min="1"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >健康检查超时(ms)<input
+          v-model.number="healthcheckTimeout"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >HTTP/2 最大并发流<input
+          v-model.number="http2MaxStreams"
+          type="number"
+          min="1"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700"
+        >HTTP/2 最大帧<input
+          v-model.number="http2MaxFrameSize"
+          type="number"
+          min="1024"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700 md:col-span-2"
+        >HTTP/2 初始窗口<input
+          v-model.number="http2InitialWindowSize"
+          type="number"
+          min="1024"
+          :class="numberInputClass"
+      /></label>
+      <label class="text-sm text-stone-700 md:col-span-2">
+        HTTP/2 优先级支持
+        <span
+          class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
+        >
+          <input
+            v-model="http2EnablePriorities"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
+          <span class="text-sm text-stone-800"
+            >允许使用优先级信息处理 HTTP/2 请求</span
+          >
+        </span>
+      </label>
+    </div>
+
+    <div class="mt-4 grid gap-3 xl:grid-cols-2">
+      <label class="text-sm text-stone-700">
+        真实来源 IP 头
+        <textarea
+          :value="realIpHeadersText"
+          :class="listFieldClass"
+          placeholder="每行一个，例如 x-forwarded-for"
+          @input="
+            emit(
+              'update:realIpHeadersText',
+              ($event.target as HTMLTextAreaElement).value,
+            )
+          "
+        />
+      </label>
+      <label class="text-sm text-stone-700">
+        可信代理网段
+        <textarea
+          :value="trustedProxyCidrsText"
+          :class="listFieldClass"
+          placeholder="每行一个，例如 203.0.113.0/24"
+          @input="
+            emit(
+              'update:trustedProxyCidrsText',
+              ($event.target as HTMLTextAreaElement).value,
+            )
+          "
+        />
+      </label>
+    </div>
+
+    <div class="mt-3 border-t border-slate-200 pt-6">
+      <div
+        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+      >
+        <div>
+          <p class="text-sm tracking-wider text-blue-700">HTTP/3 配置</p>
+          <h4 class="mt-2 text-xl font-semibold text-stone-900">
+            QUIC 与 TLS 1.3 入口参数
+          </h4>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <StatusBadge
+            :text="form.http3_enabled ? 'HTTP/3 已启用' : 'HTTP/3 未启用'"
+            :type="form.http3_enabled ? 'success' : 'muted'"
+          />
+          <StatusBadge
+            :text="form.http3_enable_tls13 ? 'TLS1.3 开启' : 'TLS1.3 关闭'"
+            :type="form.http3_enable_tls13 ? 'info' : 'warning'"
+          />
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <label class="text-sm text-stone-700 md:col-span-2"
+          >HTTP/3 监听地址<input
+            v-model="http3ListenAddr"
+            type="text"
+            placeholder="例如 0.0.0.0:8443"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >最大并发流<input
+            v-model.number="http3MaxStreams"
+            type="number"
+            min="1"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >空闲超时(s)<input
+            v-model.number="http3IdleTimeout"
+            type="number"
+            min="1"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >MTU<input
+            v-model.number="http3Mtu"
+            type="number"
+            min="1200"
+            max="1500"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >最大帧大小<input
+            v-model.number="http3MaxFrameSize"
+            type="number"
+            min="65536"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >QPACK 表大小<input
+            v-model.number="http3QpackTableSize"
+            type="number"
+            min="1024"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700 md:col-span-2"
+          >证书路径<input
+            v-model="http3CertificatePath"
+            type="text"
+            placeholder="例如 /path/to/cert.pem"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700 md:col-span-2"
+          >私钥路径<input
+            v-model="http3PrivateKeyPath"
+            type="text"
+            placeholder="例如 /path/to/key.pem"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700">
+          连接迁移支持
+          <span
+            class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
+          >
+            <input
+              v-model="http3ConnectionMigration"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+            />
+            <span class="text-sm text-stone-800">允许连接迁移</span>
+          </span>
+        </label>
+        <label class="text-sm text-stone-700">
+          TLS 1.3
+          <span
+            class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
+          >
+            <input
+              v-model="http3Tls13Enabled"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+            />
+            <span class="text-sm text-stone-800">启用 TLS 1.3</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  </section>
+</template>

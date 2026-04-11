@@ -229,9 +229,9 @@ onMounted(loadRules)
   <AppLayout>
     <template #header-extra>
       <button
-        @click="loadRules"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="loading"
+        @click="loadRules"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': loading }" />
         刷新规则
@@ -258,8 +258,8 @@ onMounted(loadRules)
             </p>
           </div>
           <button
-            @click="openCreateRule"
             class="inline-flex items-center gap-2 self-start rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-600/90"
+            @click="openCreateRule"
           >
             <Plus :size="16" />
             新建 L7 规则
@@ -388,22 +388,22 @@ onMounted(loadRules)
                 <td class="px-4 py-3">
                   <div class="flex justify-end gap-2">
                     <button
-                      @click="openEditRule(rule)"
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                      @click="openEditRule(rule)"
                     >
                       <Edit3 :size="14" />
                       编辑
                     </button>
                     <button
-                      @click="toggleRuleStatus(rule)"
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                      @click="toggleRuleStatus(rule)"
                     >
                       <Check :size="14" />
                       {{ rule.enabled ? '停用' : '启用' }}
                     </button>
                     <button
-                      @click="removeRule(rule.id)"
                       class="inline-flex items-center gap-1 rounded-full border border-red-500/20 px-3 py-2 text-xs text-red-600 transition hover:bg-red-500/8"
+                      @click="removeRule(rule.id)"
                     >
                       <Trash2 :size="14" />
                       删除
@@ -446,14 +446,14 @@ onMounted(loadRules)
             </h3>
           </div>
           <button
-            @click="isRuleModalOpen = false"
             class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+            @click="isRuleModalOpen = false"
           >
             <X :size="18" />
           </button>
         </div>
 
-        <form @submit.prevent="saveRule" class="mt-3 space-y-6">
+        <form class="mt-3 space-y-6" @submit.prevent="saveRule">
           <div
             class="space-y-3 rounded-xl border border-slate-200 bg-white/70 p-4"
           >
@@ -470,8 +470,8 @@ onMounted(loadRules)
                 v-for="template in l7RuleTemplates"
                 :key="template.label"
                 type="button"
-                @click="applyTemplate(template)"
                 class="rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-blue-500/40 hover:bg-[#fff8ef]"
+                @click="applyTemplate(template)"
               >
                 <div class="flex items-center justify-between gap-3">
                   <span class="text-sm font-medium text-stone-900">{{

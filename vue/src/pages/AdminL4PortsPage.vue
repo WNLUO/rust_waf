@@ -129,9 +129,9 @@ onBeforeUnmount(() => {
   <AppLayout>
     <template #header-extra>
       <button
-        @click="loadStats()"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="refreshing"
+        @click="loadStats()"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
         刷新画像

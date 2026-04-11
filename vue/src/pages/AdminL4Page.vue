@@ -254,17 +254,17 @@ onBeforeUnmount(() => {
           lastUpdatedLabel
         }}</span>
         <button
-          @click="refreshAll()"
           class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
           :disabled="refreshing"
+          @click="refreshAll()"
         >
           <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
           刷新
         </button>
         <button
-          @click="saveConfig"
           class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
           :disabled="saving || loading"
+          @click="saveConfig"
         >
           <Save :size="14" />
           {{ saving ? '保存中...' : '保存配置' }}

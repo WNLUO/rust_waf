@@ -34,8 +34,13 @@ export default tseslint.config(
   },
   {
     rules: {
-      'vue/attributes-order': 'off',
-      'vue/multi-word-component-names': 'off',
+      'vue/attributes-order': 'error',
+      'vue/multi-word-component-names': [
+        'error',
+        {
+          ignores: ['App'],
+        },
+      ],
     },
   },
   eslintConfigPrettier,

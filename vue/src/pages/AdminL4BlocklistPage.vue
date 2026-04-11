@@ -199,9 +199,9 @@ watch(
   <AppLayout>
     <template #header-extra>
       <button
-        @click="loadPageData()"
         class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
         :disabled="refreshing"
+        @click="loadPageData()"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
         刷新名单
@@ -382,9 +382,9 @@ watch(
               </p>
             </div>
             <button
-              @click="handleUnblock(item.id)"
               :disabled="mutatingId === item.id"
               class="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 px-3 py-2 text-xs text-emerald-600 transition hover:bg-emerald-500/10 disabled:opacity-60"
+              @click="handleUnblock(item.id)"
             >
               <Shield :size="13" />
               {{ mutatingId === item.id ? '处理中...' : '解除封禁' }}
@@ -406,16 +406,16 @@ watch(
         </div>
         <div class="flex items-center gap-3">
           <button
-            @click="page -= 1"
             :disabled="!canGoPrev || refreshing"
             class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 disabled:opacity-60"
+            @click="page -= 1"
           >
             上一页
           </button>
           <button
-            @click="page += 1"
             :disabled="!canGoNext || refreshing"
             class="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 disabled:opacity-60"
+            @click="page += 1"
           >
             下一页
           </button>

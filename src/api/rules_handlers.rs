@@ -246,7 +246,7 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             title: "浏览器指纹收集 JS",
             mood: "对抗",
             summary: "返回一个正常 HTML 页面，先采集并回传浏览器指纹，再追加永不通过的高数题干扰层，持续消耗探测端时间。",
-            mechanism: "原始内容只保存 JS 代码；系统会自动包装为 HTML 页面，在浏览器端采集 Canvas、WebGL、字体列表和时区等特征，并动态生成微积分题目，无论回答如何都继续套题。",
+            mechanism: "自动包装页面，采集 Canvas、WebGL、字体列表和时区等特征，动态生成微积分题目",
             performance: "中",
             fallback_path: "/admin/rules",
             plugin_id: "browser-fingerprint-js-fun",

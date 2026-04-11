@@ -57,6 +57,12 @@ const ideaTemplateMatchers: Record<
     templates.find((item) =>
       item.response_template.content_type.includes('application/json'),
     ) ?? null,
+  'inline-js': (templates) =>
+    templates.find(
+      (item) =>
+        item.response_template.content_type.includes('text/html') ||
+        item.name.includes('JS'),
+    ) ?? null,
   'gzip-response': () => null,
   'maintenance-page': (templates) =>
     templates.find(

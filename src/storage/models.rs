@@ -58,6 +58,8 @@ pub struct RuleActionTemplateUpsert {
 pub struct ActionIdeaOverrideEntry {
     pub idea_id: String,
     pub title: Option<String>,
+    pub status_code: Option<i64>,
+    pub content_type: Option<String>,
     pub response_content: Option<String>,
     pub updated_at: i64,
 }
@@ -66,6 +68,8 @@ pub struct ActionIdeaOverrideEntry {
 pub struct ActionIdeaOverrideUpsert {
     pub idea_id: String,
     pub title: Option<String>,
+    pub status_code: Option<i64>,
+    pub content_type: Option<String>,
     pub response_content: Option<String>,
 }
 

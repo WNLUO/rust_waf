@@ -114,6 +114,14 @@ pub(super) async fn list_action_idea_presets_handler(
                 .and_then(|entry| entry.response_content.clone())
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| builtin.response_content.to_string());
+            let status_code = override_entry
+                .and_then(|entry| entry.status_code)
+                .and_then(|value| u16::try_from(value).ok())
+                .unwrap_or(builtin.status_code);
+            let content_type = override_entry
+                .and_then(|entry| entry.content_type.clone())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| builtin.content_type.to_string());
             ActionIdeaPresetResponse {
                 id: builtin.id.to_string(),
                 title: title.clone(),
@@ -132,8 +140,8 @@ pub(super) async fn list_action_idea_presets_handler(
                 template_description: builtin.template_description.to_string(),
                 pattern: builtin.pattern.to_string(),
                 severity: builtin.severity.to_string(),
-                content_type: builtin.content_type.to_string(),
-                status_code: builtin.status_code,
+                content_type,
+                status_code,
                 gzip: builtin.gzip,
                 headers: action_idea_headers(builtin.id),
                 response_content,
@@ -165,6 +173,15 @@ pub(super) async fn update_action_idea_preset_handler(
     if title.is_empty() {
         return Err(ApiError::bad_request("动作名称不能为空".to_string()));
     }
+    if !(100..=599).contains(&payload.status_code) {
+        return Err(ApiError::bad_request(
+            "状态码必须在 100 到 599 之间".to_string(),
+        ));
+    }
+    let content_type = payload.content_type.trim().to_string();
+    if content_type.is_empty() {
+        return Err(ApiError::bad_request("内容类型不能为空".to_string()));
+    }
 
     let response_content = payload.response_content.trim().to_string();
     if response_content.is_empty() {
@@ -176,6 +193,8 @@ pub(super) async fn update_action_idea_preset_handler(
         .upsert_action_idea_override(&crate::storage::ActionIdeaOverrideUpsert {
             idea_id: idea_id.clone(),
             title: Some(title.clone()),
+            status_code: Some(i64::from(payload.status_code)),
+            content_type: Some(content_type.clone()),
             response_content: Some(payload.response_content),
         })
         .await
@@ -208,8 +227,8 @@ pub(super) async fn update_action_idea_preset_handler(
         template_description: builtin.template_description.to_string(),
         pattern: builtin.pattern.to_string(),
         severity: builtin.severity.to_string(),
-        content_type: builtin.content_type.to_string(),
-        status_code: builtin.status_code,
+        content_type,
+        status_code: payload.status_code,
         gzip: builtin.gzip,
         headers: action_idea_headers(builtin.id),
         response_content,

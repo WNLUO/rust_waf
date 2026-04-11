@@ -200,7 +200,10 @@ export function fetchActionIdeaPresets() {
 
 export function updateActionIdeaPreset(
   ideaId: string,
-  payload: Pick<ActionIdeaPreset, 'title' | 'response_content'>,
+  payload: Pick<
+    ActionIdeaPreset,
+    'title' | 'status_code' | 'content_type' | 'response_content'
+  >,
 ) {
   return apiRequest<ActionIdeaPreset>(`/action-idea-presets/${encodeURIComponent(ideaId)}`, {
     method: 'PATCH',

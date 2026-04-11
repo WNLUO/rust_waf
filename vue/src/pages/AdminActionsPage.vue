@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Copy, Plus, RefreshCw, X } from 'lucide-vue-next'
+import { Check, Copy, PencilLine, Plus, RefreshCw, X } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
 import AdminRulesPluginSection from '../components/rules/AdminRulesPluginSection.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
@@ -37,8 +37,12 @@ const previewTitle = ref('')
 const previewSourceLabel = ref('')
 const previewPayload = ref<RuleActionTemplatePreviewResponse | null>(null)
 const previewIdeaId = ref('')
+const editingPreviewTitle = ref(false)
 const previewDraftTitle = ref('')
+const previewDraftStatusCode = ref(200)
+const previewDraftContentType = ref('')
 const previewDraftContent = ref('')
+const pagePreviewOpen = ref(false)
 const downloadingIdeaId = ref('')
 
 const ideaTemplateMatchers: Record<
@@ -177,8 +181,12 @@ const openTemplatePreview = async (template: RuleActionTemplateItem) => {
   previewLoading.value = true
   previewOpen.value = true
   previewIdeaId.value = ''
+  editingPreviewTitle.value = false
   previewDraftTitle.value = ''
+  previewDraftStatusCode.value = 200
+  previewDraftContentType.value = ''
   previewDraftContent.value = ''
+  pagePreviewOpen.value = false
   previewTitle.value = template.name
   previewSourceLabel.value = `模板动作 · ${
     pluginsById.value.get(template.plugin_id)?.name || template.plugin_id
@@ -197,7 +205,10 @@ const openGeneratedPreview = (idea: ActionIdeaPreset) => {
   previewOpen.value = true
   previewLoading.value = false
   previewIdeaId.value = idea.id
+  editingPreviewTitle.value = false
   previewDraftTitle.value = idea.title
+  previewDraftStatusCode.value = idea.status_code
+  previewDraftContentType.value = idea.content_type
   previewDraftContent.value = idea.response_content
   previewTitle.value = idea.title
   previewSourceLabel.value = idea.has_overrides
@@ -213,8 +224,12 @@ const closePreview = () => {
   previewSourceLabel.value = ''
   previewPayload.value = null
   previewIdeaId.value = ''
+  editingPreviewTitle.value = false
   previewDraftTitle.value = ''
+  previewDraftStatusCode.value = 200
+  previewDraftContentType.value = ''
   previewDraftContent.value = ''
+  pagePreviewOpen.value = false
 }
 
 const downloadGeneratedPlugin = async (ideaId: string) => {
@@ -290,7 +305,11 @@ const previewRenderedBody = computed(() =>
 )
 
 const previewIsHtml = computed(() =>
-  previewPayload.value?.content_type.includes('text/html') ?? false,
+  (
+    previewIsActionIdea.value
+      ? previewDraftContentType.value
+      : (previewPayload.value?.content_type ?? '')
+  ).includes('text/html'),
 )
 
 const previewDirty = computed(() => {
@@ -298,6 +317,8 @@ const previewDirty = computed(() => {
   if (!idea) return false
   return (
     previewDraftTitle.value !== idea.title ||
+    previewDraftStatusCode.value !== idea.status_code ||
+    previewDraftContentType.value !== idea.content_type ||
     previewDraftContent.value !== idea.response_content
   )
 })
@@ -309,6 +330,18 @@ const saveActionIdeaPreview = async () => {
     error.value = '动作名称不能为空'
     return
   }
+  if (!previewDraftContentType.value.trim()) {
+    error.value = '内容类型不能为空'
+    return
+  }
+  if (
+    !Number.isInteger(previewDraftStatusCode.value) ||
+    previewDraftStatusCode.value < 100 ||
+    previewDraftStatusCode.value > 599
+  ) {
+    error.value = '状态码必须在 100 到 599 之间'
+    return
+  }
   if (!previewDraftContent.value.trim()) {
     error.value = '原始内容不能为空'
     return
@@ -318,6 +351,8 @@ const saveActionIdeaPreview = async () => {
   try {
     const updated = await updateActionIdeaPreset(idea.id, {
       title: previewDraftTitle.value,
+      status_code: previewDraftStatusCode.value,
+      content_type: previewDraftContentType.value,
       response_content: previewDraftContent.value,
     })
     actionIdeas.value = actionIdeas.value.map((item) =>
@@ -327,13 +362,25 @@ const saveActionIdeaPreview = async () => {
     previewSourceLabel.value = '动作方案 · 已保存自定义版本'
     previewPayload.value = createActionIdeaPreviewPayload(updated)
     previewDraftTitle.value = updated.title
+    previewDraftStatusCode.value = updated.status_code
+    previewDraftContentType.value = updated.content_type
     previewDraftContent.value = updated.response_content
+    editingPreviewTitle.value = false
     error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : '保存动作方案失败'
   } finally {
     savingIdea.value = false
   }
+}
+
+const openPagePreview = () => {
+  if (!previewIsHtml.value) return
+  pagePreviewOpen.value = true
+}
+
+const closePagePreview = () => {
+  pagePreviewOpen.value = false
 }
 
 onMounted(loadActionCenter)
@@ -585,9 +632,34 @@ onMounted(loadActionCenter)
         <div class="flex items-start justify-between gap-4">
           <div>
             <p class="text-sm tracking-wide text-blue-700">{{ previewSourceLabel }}</p>
-            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-              {{ previewIsActionIdea ? previewDraftTitle || previewTitle : previewTitle }}
-            </h3>
+            <div class="mt-2 flex items-center gap-3">
+              <template v-if="previewIsActionIdea && editingPreviewTitle">
+                <input
+                  v-model="previewDraftTitle"
+                  type="text"
+                  class="w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 py-2 text-xl font-semibold text-stone-900 outline-none transition focus:border-blue-500/50"
+                />
+                <button
+                  class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
+                  :disabled="savingIdea"
+                  @click="saveActionIdeaPreview"
+                >
+                  <Check :size="18" />
+                </button>
+              </template>
+              <template v-else>
+                <h3 class="text-2xl font-semibold text-stone-900">
+                  {{ previewIsActionIdea ? previewDraftTitle || previewTitle : previewTitle }}
+                </h3>
+                <button
+                  v-if="previewIsActionIdea"
+                  class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+                  @click="editingPreviewTitle = true"
+                >
+                  <PencilLine :size="16" />
+                </button>
+              </template>
+            </div>
           </div>
           <button
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
@@ -603,26 +675,51 @@ onMounted(loadActionCenter)
 
         <template v-else-if="previewPayload">
           <div class="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div class="grid gap-3 md:grid-cols-4">
+            <div
+              class="grid gap-3"
+              :class="previewIsActionIdea ? 'md:grid-cols-2' : 'md:grid-cols-4'"
+            >
               <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
                 <p class="text-xs tracking-wide text-slate-500">状态码</p>
-                <p class="mt-2 text-lg font-semibold text-stone-900">
+                <template v-if="previewIsActionIdea">
+                  <input
+                    v-model.number="previewDraftStatusCode"
+                    type="number"
+                    min="100"
+                    max="599"
+                    class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-lg font-semibold text-stone-900 outline-none transition focus:border-blue-500/50"
+                  />
+                </template>
+                <p v-else class="mt-2 text-lg font-semibold text-stone-900">
                   {{ previewPayload.status_code }}
                 </p>
               </div>
               <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
                 <p class="text-xs tracking-wide text-slate-500">内容类型</p>
-                <p class="mt-2 text-sm font-medium text-stone-900">
+                <template v-if="previewIsActionIdea">
+                  <input
+                    v-model="previewDraftContentType"
+                    type="text"
+                    class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-stone-900 outline-none transition focus:border-blue-500/50"
+                  />
+                </template>
+                <p v-else class="mt-2 text-sm font-medium text-stone-900">
                   {{ previewPayload.content_type }}
                 </p>
               </div>
-              <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <div
+                v-if="!previewIsActionIdea"
+                class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3"
+              >
                 <p class="text-xs tracking-wide text-slate-500">Body 来源</p>
                 <p class="mt-2 text-sm font-medium text-stone-900">
                   {{ previewPayload.body_source }}
                 </p>
               </div>
-              <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <div
+                v-if="!previewIsActionIdea"
+                class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3"
+              >
                 <p class="text-xs tracking-wide text-slate-500">gzip</p>
                 <p class="mt-2 text-sm font-medium text-stone-900">
                   {{ previewPayload.gzip ? '开启' : '关闭' }}
@@ -631,19 +728,6 @@ onMounted(loadActionCenter)
             </div>
 
             <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-              <div
-                v-if="previewIsHtml"
-                class="overflow-hidden rounded-xl border border-slate-200 bg-white"
-              >
-                <div class="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
-                  页面预览
-                </div>
-                <iframe
-                  class="h-[320px] w-full bg-white"
-                  :srcdoc="previewRenderedBody"
-                ></iframe>
-              </div>
-
               <div class="mt-4 rounded-xl border border-slate-200 bg-white/80 p-5">
                 <div class="flex items-center justify-between gap-4">
                   <p class="text-xs tracking-wide text-slate-500">原始内容</p>
@@ -655,21 +739,10 @@ onMounted(loadActionCenter)
                   </span>
                 </div>
                 <div v-if="previewIsActionIdea" class="mt-3 space-y-3">
-                  <label class="block">
-                    <span class="text-xs tracking-wide text-slate-500">动作名称</span>
-                    <input
-                      v-model="previewDraftTitle"
-                      type="text"
-                      class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-blue-500/50"
-                    />
-                  </label>
-                  <label class="block">
-                    <span class="text-xs tracking-wide text-slate-500">原始内容</span>
-                    <textarea
-                      v-model="previewDraftContent"
-                      class="mt-2 min-h-[min(42vh,28rem)] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-blue-500/50"
-                    ></textarea>
-                  </label>
+                  <textarea
+                    v-model="previewDraftContent"
+                    class="min-h-[min(42vh,28rem)] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-blue-500/50"
+                  ></textarea>
                 </div>
                 <pre
                   v-else
@@ -696,6 +769,13 @@ onMounted(loadActionCenter)
                 {{ savingIdea ? '保存中...' : '保存修改' }}
               </button>
               <button
+                v-if="previewIsHtml"
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="openPagePreview"
+              >
+                页面预览
+              </button>
+              <button
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                 @click="closePreview"
               >
@@ -704,6 +784,41 @@ onMounted(loadActionCenter)
             </div>
           </div>
         </template>
+      </div>
+    </div>
+
+    <div
+      v-if="pagePreviewOpen"
+      class="fixed inset-0 z-[110] overflow-y-auto px-4 py-6 md:py-8"
+    >
+      <div
+        class="absolute inset-0 bg-stone-950/45 backdrop-blur-sm"
+        @click="closePagePreview"
+      ></div>
+      <div
+        class="relative mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-6xl flex-col rounded-xl border border-white/85 bg-white p-4 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:min-h-[calc(100vh-4rem)] md:max-h-[calc(100vh-4rem)] md:p-5"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm tracking-wide text-blue-700">页面预览</p>
+            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+              {{ previewIsActionIdea ? previewDraftTitle || previewTitle : previewTitle }}
+            </h3>
+          </div>
+          <button
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+            @click="closePagePreview"
+          >
+            <X :size="18" />
+          </button>
+        </div>
+
+        <div class="mt-4 min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <iframe
+            class="h-full min-h-[70vh] w-full bg-white"
+            :srcdoc="previewRenderedBody"
+          ></iframe>
+        </div>
       </div>
     </div>
   </AppLayout>

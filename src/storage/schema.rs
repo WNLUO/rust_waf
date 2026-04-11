@@ -92,6 +92,8 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE TABLE IF NOT EXISTS action_idea_overrides (
             idea_id TEXT PRIMARY KEY,
             title TEXT,
+            status_code INTEGER,
+            content_type TEXT,
             response_content TEXT,
             updated_at INTEGER NOT NULL
         );
@@ -294,6 +296,8 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         "ALTER TABLE rules ADD COLUMN response_template_json TEXT",
         "ALTER TABLE rule_action_plugins ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE local_sites ADD COLUMN safeline_intercept_json TEXT",
+        "ALTER TABLE action_idea_overrides ADD COLUMN status_code INTEGER",
+        "ALTER TABLE action_idea_overrides ADD COLUMN content_type TEXT",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {

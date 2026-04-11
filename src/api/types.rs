@@ -695,6 +695,8 @@ pub struct ActionIdeaPresetResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpdateActionIdeaPresetRequest {
     pub(crate) title: String,
+    pub(crate) status_code: u16,
+    pub(crate) content_type: String,
     pub(crate) response_content: String,
 }
 

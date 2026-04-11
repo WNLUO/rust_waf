@@ -45,6 +45,9 @@ const previewDraftTitle = ref('')
 const previewDraftStatusCode = ref(200)
 const previewDraftContentType = ref('')
 const previewDraftContent = ref('')
+const previewDraftSqlError = ref('')
+const previewDraftSqlResult = ref('')
+const previewDraftXssPayload = ref('')
 const pagePreviewOpen = ref(false)
 const downloadingIdeaId = ref('')
 const uploadingIdeaId = ref('')
@@ -182,6 +185,12 @@ const isInlineJsIdea = (idea: ActionIdeaPreset | null | undefined) =>
 const isRedirectIdea = (idea: ActionIdeaPreset | null | undefined) =>
   idea?.id === 'redirect-302'
 
+const isFakeSqlIdea = (idea: ActionIdeaPreset | null | undefined) =>
+  idea?.id === 'fake-sql-echo'
+
+const isFakeXssIdea = (idea: ActionIdeaPreset | null | undefined) =>
+  idea?.id === 'fake-xss-echo'
+
 const wrapRedirectContent = (target: string, title: string) => {
   const normalizedTarget = target.trim() || 'https://www.war.gov/'
   return `<!doctype html>
@@ -204,6 +213,86 @@ const wrapRedirectContent = (target: string, title: string) => {
   </main>
 </body>
 </html>`
+}
+
+const defaultFakeSqlError =
+  "SQL syntax error near '\\'' at line 1\nWarning: mysql_fetch_assoc() expects parameter 1 to be resource, boolean given in /var/www/html/search.php on line 42"
+
+const defaultFakeSqlResult =
+  'query result: admin | 5f4dcc3b5aa765d61d8327deb882cf99 | super_admin'
+
+const defaultFakeXssPayload = "<script>alert('xss')<\\/script>"
+
+const wrapFakeSqlContent = (sqlError: string, sqlResult: string) => `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Database Result</title>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f172a; color: #e2e8f0; padding: 32px; }
+    .panel { max-width: 920px; margin: 0 auto; background: #111827; border: 1px solid #334155; border-radius: 16px; padding: 24px; box-shadow: 0 16px 48px rgba(15, 23, 42, 0.35); }
+    .error { color: #fca5a5; white-space: pre-wrap; }
+    .result { margin-top: 18px; padding: 16px; border-radius: 12px; background: #020617; border: 1px solid #1e293b; color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <div class="error">${sqlError || defaultFakeSqlError}</div>
+    <div class="result">${sqlResult || defaultFakeSqlResult}</div>
+  </main>
+</body>
+</html>`
+
+const wrapFakeXssContent = (payload: string) => `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Preview</title>
+  <style>
+    body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #111827; color: #e5e7eb; padding: 32px; }
+    .panel { max-width: 920px; margin: 0 auto; background: #0f172a; border: 1px solid #334155; border-radius: 16px; padding: 24px; }
+    .hint { color: #93c5fd; margin-bottom: 12px; }
+    .echo { border-radius: 12px; padding: 16px; background: #020617; border: 1px solid #1e293b; white-space: pre-wrap; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <div class="hint">payload reflected successfully</div>
+    <div class="echo">${payload || defaultFakeXssPayload}</div>
+  </main>
+</body>
+</html>`
+
+const decodeHtmlEntities = (value: string) =>
+  value
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&amp;', '&')
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+
+const extractFakeSqlFields = (content: string) => {
+  const errorMatch = content.match(/<div class="error">([\s\S]*?)<\/div>/)
+  const resultMatch = content.match(/<div class="result">([\s\S]*?)<\/div>/)
+  return {
+    error: decodeHtmlEntities(errorMatch?.[1] ?? '').trim() || defaultFakeSqlError,
+    result: decodeHtmlEntities(resultMatch?.[1] ?? '').trim() || defaultFakeSqlResult,
+  }
+}
+
+const extractFakeXssPayload = (content: string) => {
+  const payloadMatch = content.match(/<div class="echo">([\s\S]*?)<\/div>/)
+  return decodeHtmlEntities(payloadMatch?.[1] ?? '').trim() || defaultFakeXssPayload
 }
 
 const wrapInlineJsContent = (script: string, title: string) => `<!doctype html>
@@ -280,6 +369,17 @@ const openGeneratedPreview = (idea: ActionIdeaPreset) => {
   previewDraftStatusCode.value = idea.status_code
   previewDraftContentType.value = idea.content_type
   previewDraftContent.value = idea.response_content
+  previewDraftSqlError.value = ''
+  previewDraftSqlResult.value = ''
+  previewDraftXssPayload.value = ''
+  if (isFakeSqlIdea(idea)) {
+    const fields = extractFakeSqlFields(idea.response_content)
+    previewDraftSqlError.value = fields.error
+    previewDraftSqlResult.value = fields.result
+  }
+  if (isFakeXssIdea(idea)) {
+    previewDraftXssPayload.value = extractFakeXssPayload(idea.response_content)
+  }
   previewTitle.value = idea.title
   previewSourceLabel.value = idea.has_overrides
     ? '动作方案 · 已保存自定义版本'
@@ -299,6 +399,9 @@ const closePreview = () => {
   previewDraftStatusCode.value = 200
   previewDraftContentType.value = ''
   previewDraftContent.value = ''
+  previewDraftSqlError.value = ''
+  previewDraftSqlResult.value = ''
+  previewDraftXssPayload.value = ''
   pagePreviewOpen.value = false
 }
 
@@ -351,6 +454,13 @@ const downloadGeneratedPlugin = async (ideaId: string) => {
       `responses/${idea.response_file_path}`,
       isRedirectIdea(idea)
         ? wrapRedirectContent(idea.response_content, idea.title)
+      : isFakeSqlIdea(idea)
+        ? wrapFakeSqlContent(
+            extractFakeSqlFields(idea.response_content).error,
+            extractFakeSqlFields(idea.response_content).result,
+          )
+      : isFakeXssIdea(idea)
+        ? wrapFakeXssContent(extractFakeXssPayload(idea.response_content))
       : idea.id === 'inline-js'
         ? wrapInlineJsContent(idea.response_content, idea.title)
         : idea.response_content,
@@ -385,6 +495,13 @@ const previewRenderedBody = computed(() =>
       ? wrapInlineJsContent(previewDraftContent.value, previewDraftTitle.value || previewTitle.value)
       : currentPreviewIdea.value && isRedirectIdea(currentPreviewIdea.value)
         ? wrapRedirectContent(previewDraftContent.value, previewDraftTitle.value || previewTitle.value)
+      : currentPreviewIdea.value && isFakeSqlIdea(currentPreviewIdea.value)
+        ? wrapFakeSqlContent(
+            escapeHtml(previewDraftSqlError.value.trim() || defaultFakeSqlError),
+            escapeHtml(previewDraftSqlResult.value.trim() || defaultFakeSqlResult),
+          )
+      : currentPreviewIdea.value && isFakeXssIdea(currentPreviewIdea.value)
+        ? wrapFakeXssContent(escapeHtml(previewDraftXssPayload.value.trim() || defaultFakeXssPayload))
       : previewDraftContent.value
     : (previewPayload.value?.body_preview ?? ''),
 )
@@ -408,7 +525,17 @@ const previewDirty = computed(() => {
     previewDraftTitle.value !== idea.title ||
     previewDraftStatusCode.value !== idea.status_code ||
     previewDraftContentType.value !== idea.content_type ||
-    (!idea.requires_upload && previewDraftContent.value !== idea.response_content)
+    (!idea.requires_upload &&
+      (isFakeSqlIdea(idea)
+        ? wrapFakeSqlContent(
+            escapeHtml(previewDraftSqlError.value.trim() || defaultFakeSqlError),
+            escapeHtml(previewDraftSqlResult.value.trim() || defaultFakeSqlResult),
+          ) !== idea.response_content
+        : isFakeXssIdea(idea)
+          ? wrapFakeXssContent(
+              escapeHtml(previewDraftXssPayload.value.trim() || defaultFakeXssPayload),
+            ) !== idea.response_content
+          : previewDraftContent.value !== idea.response_content))
   )
 })
 
@@ -432,17 +559,39 @@ const saveActionIdeaPreview = async () => {
     return
   }
   if (!idea.requires_upload && !previewDraftContent.value.trim()) {
-    error.value = '原始内容不能为空'
+    if (!isFakeSqlIdea(idea) && !isFakeXssIdea(idea)) {
+      error.value = '原始内容不能为空'
+      return
+    }
+  }
+  if (isFakeSqlIdea(idea)) {
+    if (!previewDraftSqlError.value.trim() || !previewDraftSqlResult.value.trim()) {
+      error.value = 'SQL 假回显需要同时填写错误文案和伪结果'
+      return
+    }
+  }
+  if (isFakeXssIdea(idea) && !previewDraftXssPayload.value.trim()) {
+    error.value = 'XSS 假回显需要填写 payload'
     return
   }
 
   savingIdea.value = true
   try {
+    const responseContent = isFakeSqlIdea(idea)
+      ? wrapFakeSqlContent(
+          escapeHtml(previewDraftSqlError.value.trim()),
+          escapeHtml(previewDraftSqlResult.value.trim()),
+        )
+      : isFakeXssIdea(idea)
+        ? wrapFakeXssContent(escapeHtml(previewDraftXssPayload.value.trim()))
+        : idea.requires_upload
+          ? ''
+          : previewDraftContent.value
     const updated = await updateActionIdeaPreset(idea.id, {
       title: previewDraftTitle.value,
       status_code: previewDraftStatusCode.value,
       content_type: previewDraftContentType.value,
-      response_content: idea.requires_upload ? '' : previewDraftContent.value,
+      response_content: responseContent,
     })
     actionIdeas.value = actionIdeas.value.map((item) =>
       item.id === updated.id ? updated : item,
@@ -454,6 +603,14 @@ const saveActionIdeaPreview = async () => {
     previewDraftStatusCode.value = updated.status_code
     previewDraftContentType.value = updated.content_type
     previewDraftContent.value = updated.response_content
+    if (isFakeSqlIdea(updated)) {
+      const fields = extractFakeSqlFields(updated.response_content)
+      previewDraftSqlError.value = fields.error
+      previewDraftSqlResult.value = fields.result
+    }
+    if (isFakeXssIdea(updated)) {
+      previewDraftXssPayload.value = extractFakeXssPayload(updated.response_content)
+    }
     editingPreviewTitle.value = false
     error.value = ''
   } catch (e) {
@@ -931,6 +1088,18 @@ onMounted(loadActionCenter)
                   >
                     这里填写的是跳转目标 URL。系统会自动写入 `Location` 头，并返回一个 302 响应。
                   </p>
+                  <p
+                    v-else-if="currentPreviewIdea && isFakeSqlIdea(currentPreviewIdea)"
+                    class="text-xs leading-6 text-slate-500"
+                  >
+                    这里分别配置伪造的 SQL 错误文案和查询结果，让攻击者误以为注入已经成功。
+                  </p>
+                  <p
+                    v-else-if="currentPreviewIdea && isFakeXssIdea(currentPreviewIdea)"
+                    class="text-xs leading-6 text-slate-500"
+                  >
+                    这里填写一个要被“假装反射”的 payload。系统会把它放进伪造的回显页面里。
+                  </p>
                   <div
                     v-if="currentPreviewIdea && isRedirectIdea(currentPreviewIdea)"
                     class="rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(248,250,252,0.96),_rgba(239,246,255,0.96))] p-4"
@@ -957,6 +1126,55 @@ onMounted(loadActionCenter)
                     </div>
                     <p class="mt-3 text-xs leading-6 text-slate-500">
                       支持填写完整的 `http://` 或 `https://` 地址。保存后命中规则会直接返回 302 跳转。
+                    </p>
+                  </div>
+                  <div
+                    v-else-if="currentPreviewIdea && isFakeSqlIdea(currentPreviewIdea)"
+                    class="grid gap-4 rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(255,250,245,0.96),_rgba(248,250,252,0.96))] p-4"
+                  >
+                    <div>
+                      <label class="block text-xs tracking-wide text-slate-500">
+                        错误文案
+                      </label>
+                      <textarea
+                        v-model="previewDraftSqlError"
+                        class="mt-3 min-h-32 w-full rounded-2xl border border-rose-200 bg-white px-4 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-rose-400/70"
+                        placeholder="SQL syntax error near '...'"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <label class="block text-xs tracking-wide text-slate-500">
+                        伪结果
+                      </label>
+                      <input
+                        v-model="previewDraftSqlResult"
+                        type="text"
+                        class="mt-3 w-full rounded-2xl border border-sky-200 bg-white px-4 py-3 font-mono text-sm text-stone-900 outline-none transition focus:border-sky-400/70"
+                        placeholder="query result: admin | hash | role"
+                      />
+                    </div>
+                  </div>
+                  <div
+                    v-else-if="currentPreviewIdea && isFakeXssIdea(currentPreviewIdea)"
+                    class="rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(248,250,252,0.96),_rgba(255,245,245,0.96))] p-4"
+                  >
+                    <label class="block text-xs tracking-wide text-slate-500">
+                      回显 payload
+                    </label>
+                    <div
+                      class="mt-3 rounded-2xl border border-amber-200 bg-white px-4 py-3 shadow-[0_10px_30px_rgba(245,158,11,0.08)]"
+                    >
+                      <input
+                        v-model="previewDraftXssPayload"
+                        type="text"
+                        class="w-full bg-transparent font-mono text-sm text-stone-900 outline-none placeholder:text-slate-400"
+                        placeholder="<script>alert('xss')</script>"
+                        spellcheck="false"
+                        autocomplete="off"
+                      />
+                    </div>
+                    <p class="mt-3 text-xs leading-6 text-slate-500">
+                      这个 payload 会被编码后嵌进预览页，用来制造“已经被页面反射”的假象。
                     </p>
                   </div>
                   <textarea

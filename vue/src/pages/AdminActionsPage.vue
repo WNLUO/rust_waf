@@ -48,6 +48,9 @@ const previewDraftContent = ref('')
 const previewDraftSqlError = ref('')
 const previewDraftSqlResult = ref('')
 const previewDraftXssPayload = ref('')
+const previewDraftTarpitBytesPerChunk = ref(1)
+const previewDraftTarpitIntervalMs = ref(1000)
+const previewDraftTarpitBody = ref('')
 const pagePreviewOpen = ref(false)
 const downloadingIdeaId = ref('')
 const uploadingIdeaId = ref('')
@@ -191,6 +194,9 @@ const isFakeSqlIdea = (idea: ActionIdeaPreset | null | undefined) =>
 const isFakeXssIdea = (idea: ActionIdeaPreset | null | undefined) =>
   idea?.id === 'fake-xss-echo'
 
+const isTarpitIdea = (idea: ActionIdeaPreset | null | undefined) =>
+  idea?.id === 'smart-tarpit'
+
 const wrapRedirectContent = (target: string, title: string) => {
   const normalizedTarget = target.trim() || 'https://www.war.gov/'
   return `<!doctype html>
@@ -222,6 +228,7 @@ const defaultFakeSqlResult =
   'query result: admin | 5f4dcc3b5aa765d61d8327deb882cf99 | super_admin'
 
 const defaultFakeXssPayload = "<script>alert('xss')<\\/script>"
+const defaultTarpitBody = 'processing request, please wait...'
 
 const wrapFakeSqlContent = (sqlError: string, sqlResult: string) => `<!doctype html>
 <html lang="en">
@@ -280,6 +287,41 @@ const escapeHtml = (value: string) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;')
+
+const extractTarpitConfig = (content: string) => {
+  try {
+    const parsed = JSON.parse(content) as {
+      bytes_per_chunk?: number
+      chunk_interval_ms?: number
+      body_text?: string
+    }
+    return {
+      bytesPerChunk:
+        Number.isFinite(parsed.bytes_per_chunk) && (parsed.bytes_per_chunk ?? 0) > 0
+          ? Math.floor(parsed.bytes_per_chunk as number)
+          : 1,
+      intervalMs:
+        Number.isFinite(parsed.chunk_interval_ms) && (parsed.chunk_interval_ms ?? 0) > 0
+          ? Math.floor(parsed.chunk_interval_ms as number)
+          : 1000,
+      bodyText:
+        parsed.body_text?.trim() || defaultTarpitBody,
+    }
+  } catch {
+    return {
+      bytesPerChunk: 1,
+      intervalMs: 1000,
+      bodyText: content.trim() || defaultTarpitBody,
+    }
+  }
+}
+
+const serializeTarpitConfig = (bytesPerChunk: number, intervalMs: number, bodyText: string) =>
+  JSON.stringify({
+    bytes_per_chunk: bytesPerChunk,
+    chunk_interval_ms: intervalMs,
+    body_text: bodyText,
+  })
 
 const extractFakeSqlFields = (content: string) => {
   const errorMatch = content.match(/<div class="error">([\s\S]*?)<\/div>/)
@@ -372,6 +414,9 @@ const openGeneratedPreview = (idea: ActionIdeaPreset) => {
   previewDraftSqlError.value = ''
   previewDraftSqlResult.value = ''
   previewDraftXssPayload.value = ''
+  previewDraftTarpitBytesPerChunk.value = 1
+  previewDraftTarpitIntervalMs.value = 1000
+  previewDraftTarpitBody.value = ''
   if (isFakeSqlIdea(idea)) {
     const fields = extractFakeSqlFields(idea.response_content)
     previewDraftSqlError.value = fields.error
@@ -379,6 +424,12 @@ const openGeneratedPreview = (idea: ActionIdeaPreset) => {
   }
   if (isFakeXssIdea(idea)) {
     previewDraftXssPayload.value = extractFakeXssPayload(idea.response_content)
+  }
+  if (isTarpitIdea(idea)) {
+    const config = extractTarpitConfig(idea.response_content)
+    previewDraftTarpitBytesPerChunk.value = config.bytesPerChunk
+    previewDraftTarpitIntervalMs.value = config.intervalMs
+    previewDraftTarpitBody.value = config.bodyText
   }
   previewTitle.value = idea.title
   previewSourceLabel.value = idea.has_overrides
@@ -402,6 +453,9 @@ const closePreview = () => {
   previewDraftSqlError.value = ''
   previewDraftSqlResult.value = ''
   previewDraftXssPayload.value = ''
+  previewDraftTarpitBytesPerChunk.value = 1
+  previewDraftTarpitIntervalMs.value = 1000
+  previewDraftTarpitBody.value = ''
   pagePreviewOpen.value = false
 }
 
@@ -454,6 +508,8 @@ const downloadGeneratedPlugin = async (ideaId: string) => {
       `responses/${idea.response_file_path}`,
       isRedirectIdea(idea)
         ? wrapRedirectContent(idea.response_content, idea.title)
+      : isTarpitIdea(idea)
+        ? extractTarpitConfig(idea.response_content).bodyText
       : isFakeSqlIdea(idea)
         ? wrapFakeSqlContent(
             extractFakeSqlFields(idea.response_content).error,
@@ -502,6 +558,8 @@ const previewRenderedBody = computed(() =>
           )
       : currentPreviewIdea.value && isFakeXssIdea(currentPreviewIdea.value)
         ? wrapFakeXssContent(escapeHtml(previewDraftXssPayload.value.trim() || defaultFakeXssPayload))
+      : currentPreviewIdea.value && isTarpitIdea(currentPreviewIdea.value)
+        ? previewDraftTarpitBody.value.trim() || defaultTarpitBody
       : previewDraftContent.value
     : (previewPayload.value?.body_preview ?? ''),
 )
@@ -535,6 +593,12 @@ const previewDirty = computed(() => {
           ? wrapFakeXssContent(
               escapeHtml(previewDraftXssPayload.value.trim() || defaultFakeXssPayload),
             ) !== idea.response_content
+          : isTarpitIdea(idea)
+            ? serializeTarpitConfig(
+                Math.max(1, Math.floor(previewDraftTarpitBytesPerChunk.value || 1)),
+                Math.max(1, Math.floor(previewDraftTarpitIntervalMs.value || 1000)),
+                previewDraftTarpitBody.value.trim() || defaultTarpitBody,
+              ) !== idea.response_content
           : previewDraftContent.value !== idea.response_content))
   )
 })
@@ -574,6 +638,26 @@ const saveActionIdeaPreview = async () => {
     error.value = 'XSS 假回显需要填写 payload'
     return
   }
+  if (isTarpitIdea(idea)) {
+    if (
+      !Number.isInteger(previewDraftTarpitBytesPerChunk.value) ||
+      previewDraftTarpitBytesPerChunk.value <= 0
+    ) {
+      error.value = '每次发送字节数必须大于 0'
+      return
+    }
+    if (
+      !Number.isInteger(previewDraftTarpitIntervalMs.value) ||
+      previewDraftTarpitIntervalMs.value <= 0
+    ) {
+      error.value = '每次间隔毫秒必须大于 0'
+      return
+    }
+    if (!previewDraftTarpitBody.value.trim()) {
+      error.value = '拖延文案不能为空'
+      return
+    }
+  }
 
   savingIdea.value = true
   try {
@@ -584,6 +668,12 @@ const saveActionIdeaPreview = async () => {
         )
       : isFakeXssIdea(idea)
         ? wrapFakeXssContent(escapeHtml(previewDraftXssPayload.value.trim()))
+      : isTarpitIdea(idea)
+        ? serializeTarpitConfig(
+            Math.max(1, Math.floor(previewDraftTarpitBytesPerChunk.value)),
+            Math.max(1, Math.floor(previewDraftTarpitIntervalMs.value)),
+            previewDraftTarpitBody.value.trim(),
+          )
         : idea.requires_upload
           ? ''
           : previewDraftContent.value
@@ -610,6 +700,12 @@ const saveActionIdeaPreview = async () => {
     }
     if (isFakeXssIdea(updated)) {
       previewDraftXssPayload.value = extractFakeXssPayload(updated.response_content)
+    }
+    if (isTarpitIdea(updated)) {
+      const config = extractTarpitConfig(updated.response_content)
+      previewDraftTarpitBytesPerChunk.value = config.bytesPerChunk
+      previewDraftTarpitIntervalMs.value = config.intervalMs
+      previewDraftTarpitBody.value = config.bodyText
     }
     editingPreviewTitle.value = false
     error.value = ''
@@ -1100,6 +1196,12 @@ onMounted(loadActionCenter)
                   >
                     这里填写一个要被“假装反射”的 payload。系统会把它放进伪造的回显页面里。
                   </p>
+                  <p
+                    v-else-if="currentPreviewIdea && isTarpitIdea(currentPreviewIdea)"
+                    class="text-xs leading-6 text-slate-500"
+                  >
+                    这里配置慢速返回的节奏和拖延文案。保存后会按设定的字节数与间隔缓慢响应。
+                  </p>
                   <div
                     v-if="currentPreviewIdea && isRedirectIdea(currentPreviewIdea)"
                     class="rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(248,250,252,0.96),_rgba(239,246,255,0.96))] p-4"
@@ -1175,6 +1277,49 @@ onMounted(loadActionCenter)
                     </div>
                     <p class="mt-3 text-xs leading-6 text-slate-500">
                       这个 payload 会被编码后嵌进预览页，用来制造“已经被页面反射”的假象。
+                    </p>
+                  </div>
+                  <div
+                    v-else-if="currentPreviewIdea && isTarpitIdea(currentPreviewIdea)"
+                    class="grid gap-4 rounded-2xl border border-slate-200 bg-[linear-gradient(140deg,_rgba(240,253,244,0.96),_rgba(248,250,252,0.96))] p-4"
+                  >
+                    <div class="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label class="block text-xs tracking-wide text-slate-500">
+                          每次发送字节数
+                        </label>
+                        <input
+                          v-model.number="previewDraftTarpitBytesPerChunk"
+                          type="number"
+                          min="1"
+                          class="mt-3 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-emerald-400/70"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-xs tracking-wide text-slate-500">
+                          每次间隔毫秒
+                        </label>
+                        <input
+                          v-model.number="previewDraftTarpitIntervalMs"
+                          type="number"
+                          min="1"
+                          step="100"
+                          class="mt-3 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm text-stone-900 outline-none transition focus:border-emerald-400/70"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label class="block text-xs tracking-wide text-slate-500">
+                        拖延文案
+                      </label>
+                      <textarea
+                        v-model="previewDraftTarpitBody"
+                        class="mt-3 min-h-28 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-emerald-400/70"
+                        placeholder="processing request, please wait..."
+                      ></textarea>
+                    </div>
+                    <p class="text-xs leading-6 text-slate-500">
+                      例如 `1` 字节 + `1000ms` 间隔，配合 30 多字节正文，就会把一次请求拖到 30 秒以上。
                     </p>
                   </div>
                   <textarea

@@ -1,5 +1,6 @@
 use super::*;
 use axum::extract::Multipart;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -30,6 +31,13 @@ struct BuiltinActionIdeaPreset {
     requires_upload: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TarpitIdeaConfig {
+    bytes_per_chunk: usize,
+    chunk_interval_ms: u64,
+    body_text: String,
+}
+
 fn is_redirect_action_idea(idea_id: &str) -> bool {
     idea_id == "redirect-302"
 }
@@ -40,6 +48,50 @@ fn is_tarpit_action_idea(idea_id: &str) -> bool {
 
 fn default_redirect_target() -> &'static str {
     "https://www.war.gov/"
+}
+
+fn default_tarpit_idea_config() -> TarpitIdeaConfig {
+    TarpitIdeaConfig {
+        bytes_per_chunk: 1,
+        chunk_interval_ms: 1000,
+        body_text: "processing request, please wait...".to_string(),
+    }
+}
+
+fn parse_tarpit_idea_config(value: &str) -> TarpitIdeaConfig {
+    let parsed = serde_json::from_str::<TarpitIdeaConfig>(value).ok();
+    let default = default_tarpit_idea_config();
+    let Some(parsed) = parsed else {
+        return if value.trim().is_empty() {
+            default
+        } else {
+            TarpitIdeaConfig {
+                body_text: value.trim().to_string(),
+                ..default
+            }
+        };
+    };
+
+    TarpitIdeaConfig {
+        bytes_per_chunk: parsed.bytes_per_chunk.max(1),
+        chunk_interval_ms: parsed.chunk_interval_ms.max(1),
+        body_text: if parsed.body_text.trim().is_empty() {
+            default.body_text
+        } else {
+            parsed.body_text.trim().to_string()
+        },
+    }
+}
+
+fn serialize_tarpit_idea_config(config: &TarpitIdeaConfig) -> String {
+    serde_json::to_string(config).unwrap_or_else(|_| {
+        serde_json::json!({
+            "bytes_per_chunk": config.bytes_per_chunk,
+            "chunk_interval_ms": config.chunk_interval_ms,
+            "body_text": config.body_text,
+        })
+        .to_string()
+    })
 }
 
 fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
@@ -209,7 +261,8 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             status_code: 200,
             gzip: false,
             body_source: "inline_text",
-            response_content: "processing request, please wait...",
+            response_content:
+                "{\"bytes_per_chunk\":1,\"chunk_interval_ms\":1000,\"body_text\":\"processing request, please wait...\"}",
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
@@ -260,13 +313,14 @@ fn action_idea_headers(
         });
     }
     if is_tarpit_action_idea(builtin.id) {
+        let config = parse_tarpit_idea_config(response_content);
         headers.push(RuleResponseHeaderPayload {
             key: "x-rust-waf-tarpit-bytes-per-chunk".to_string(),
-            value: "1".to_string(),
+            value: config.bytes_per_chunk.to_string(),
         });
         headers.push(RuleResponseHeaderPayload {
             key: "x-rust-waf-tarpit-interval-ms".to_string(),
-            value: "1000".to_string(),
+            value: config.chunk_interval_ms.to_string(),
         });
     }
     if is_redirect_action_idea(builtin.id) {
@@ -321,6 +375,8 @@ fn build_action_idea_response(
         } else {
             trimmed.to_string()
         }
+    } else if is_tarpit_action_idea(builtin.id) {
+        serialize_tarpit_idea_config(&parse_tarpit_idea_config(&response_content))
     } else {
         response_content
     };

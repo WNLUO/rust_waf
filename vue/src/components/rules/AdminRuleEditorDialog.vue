@@ -102,7 +102,7 @@ function handleActionChange(event: Event) {
               @change="handleLayerChange"
             >
               <option value="l4">四层</option>
-              <option value="l7">七层</option>
+              <option value="l7">HTTP</option>
             </select>
           </div>
 

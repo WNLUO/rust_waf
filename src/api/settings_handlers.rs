@@ -21,10 +21,7 @@ pub(super) async fn get_l7_config_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<L7ConfigResponse>> {
     let config = persisted_config(&state).await?;
-    Ok(Json(L7ConfigResponse::from_config(
-        &config,
-        state.context.l7_inspector.is_some(),
-    )))
+    Ok(Json(L7ConfigResponse::from_config(&config, true)))
 }
 
 pub(super) async fn update_l4_config_handler(
@@ -39,6 +36,7 @@ pub(super) async fn update_l4_config_handler(
         .upsert_app_config(&next)
         .await
         .map_err(ApiError::internal)?;
+    state.context.apply_runtime_config(next);
 
     Ok(Json(WriteStatusResponse {
         success: true,
@@ -53,6 +51,7 @@ pub(super) async fn update_l7_config_handler(
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
+    let previous = current.clone();
     let next = payload
         .into_config(current)
         .map_err(ApiError::bad_request)?;
@@ -61,10 +60,23 @@ pub(super) async fn update_l7_config_handler(
         .upsert_app_config(&next)
         .await
         .map_err(ApiError::internal)?;
+    state.context.apply_runtime_config(next.clone());
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message: "L7 配置已写入数据库。监听、代理与协议栈相关参数需重启服务后生效。".to_string(),
+        message: if previous.listen_addrs != next.listen_addrs
+            || previous.http3_config.listen_addr != next.http3_config.listen_addr
+        {
+            "HTTP 接入与代理配置已写入数据库。代理超时、真实来源解析、上游策略和站点/证书路由已立即刷新；监听地址与 HTTP/3 监听变更仍需重启服务生效。".to_string()
+        } else {
+            "HTTP 接入与代理配置已写入数据库，并已立即刷新运行时代理参数与站点/证书路由。"
+                .to_string()
+        },
     }))
 }
 
@@ -74,6 +86,7 @@ pub(super) async fn update_settings_handler(
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
+    let previous = current.clone();
     let next = payload
         .into_config(current, Some(store))
         .await
@@ -83,10 +96,24 @@ pub(super) async fn update_settings_handler(
         .upsert_app_config(&next)
         .await
         .map_err(ApiError::internal)?;
+    state.context.apply_runtime_config(next.clone());
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message: "设置已写入数据库。运行时监听与转发类参数需重启服务后生效。".to_string(),
+        message: if previous.gateway_config.https_listen_addr
+            != next.gateway_config.https_listen_addr
+            || previous.api_bind != next.api_bind
+        {
+            "系统设置已写入数据库。默认证书、上游地址与 SafeLine 配置已立即刷新；HTTPS/API 监听地址变更仍需重启服务生效。".to_string()
+        } else {
+            "系统设置已写入数据库，并已立即刷新默认证书、上游地址与 SafeLine 运行时配置。"
+                .to_string()
+        },
     }))
 }
 

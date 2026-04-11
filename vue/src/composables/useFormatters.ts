@@ -14,7 +14,7 @@ const actionMap: Record<string, string> = {
 
 const layerMap: Record<string, string> = {
   l4: '四层',
-  l7: '七层',
+  l7: 'HTTP',
   safeline: '雷池',
 }
 

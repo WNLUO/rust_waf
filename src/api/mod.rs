@@ -14,6 +14,8 @@ use axum::{
     extract::Json as ExtractJson,
     extract::{Path, Query, State},
     http::StatusCode,
+    http::{header, Method, Request},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, patch},
     Json, Router,
@@ -53,169 +55,189 @@ impl ApiServer {
         let state = ApiState {
             context: Arc::clone(&self.context),
         };
-        let app = Router::new()
-            .route("/health", get(system_handlers::health_handler))
-            .route("/metrics", get(system_handlers::metrics_handler))
-            .route(
-                "/l4/config",
-                get(settings_handlers::get_l4_config_handler)
-                    .put(settings_handlers::update_l4_config_handler),
-            )
-            .route("/l4/stats", get(settings_handlers::get_l4_stats_handler))
-            .route(
-                "/l7/config",
-                get(settings_handlers::get_l7_config_handler)
-                    .put(settings_handlers::update_l7_config_handler),
-            )
-            .route("/l7/stats", get(settings_handlers::get_l7_stats_handler))
-            .route(
-                "/settings",
-                get(settings_handlers::get_settings_handler)
-                    .put(settings_handlers::update_settings_handler),
-            )
-            .route(
-                "/events",
-                get(events_handlers::list_security_events_handler),
-            )
-            .route(
-                "/events/:id",
-                patch(events_handlers::update_security_event_handler),
-            )
-            .route(
-                "/blocked-ips",
-                get(events_handlers::list_blocked_ips_handler),
-            )
-            .route(
-                "/blocked-ips/:id",
-                delete(events_handlers::delete_blocked_ip_handler),
-            )
-            .route(
-                "/rules",
-                get(rules_handlers::list_rules_handler).post(rules_handlers::create_rule_handler),
-            )
-            .route(
-                "/rule-action-plugins",
-                get(rules_handlers::list_rule_action_plugins_handler),
-            )
-            .route(
-                "/rule-action-plugins/install",
-                axum::routing::post(rules_handlers::install_rule_action_plugin_handler),
-            )
-            .route(
-                "/rule-action-plugins/:plugin_id",
-                axum::routing::patch(rules_handlers::update_rule_action_plugin_handler)
-                    .delete(rules_handlers::delete_rule_action_plugin_handler),
-            )
-            .route(
-                "/rule-action-plugins/upload",
-                axum::routing::post(rules_handlers::upload_rule_action_plugin_handler),
-            )
-            .route(
-                "/rule-action-templates",
-                get(rules_handlers::list_rule_action_templates_handler),
-            )
-            .route(
-                "/rule-action-templates/:template_id/preview",
-                get(rules_handlers::preview_rule_action_template_handler),
-            )
-            .route(
-                "/sites/local",
-                get(sites_handlers::list_local_sites_handler)
-                    .post(sites_handlers::create_local_site_handler),
-            )
-            .route(
-                "/sites/local/:id",
-                get(sites_handlers::get_local_site_handler)
-                    .put(sites_handlers::update_local_site_handler)
-                    .delete(sites_handlers::delete_local_site_handler),
-            )
-            .route(
-                "/certificates/local",
-                get(sites_handlers::list_local_certificates_handler)
-                    .post(sites_handlers::create_local_certificate_handler),
-            )
-            .route(
-                "/certificates/local/generate",
-                axum::routing::post(sites_handlers::generate_local_certificate_handler),
-            )
-            .route(
-                "/certificates/local/:id",
-                get(sites_handlers::get_local_certificate_handler)
-                    .put(sites_handlers::update_local_certificate_handler)
-                    .delete(sites_handlers::delete_local_certificate_handler),
-            )
-            .route(
-                "/integrations/safeline/test",
-                axum::routing::post(safeline_handlers::test_safeline_handler),
-            )
-            .route(
-                "/integrations/safeline/sites",
-                axum::routing::post(safeline_handlers::list_safeline_sites_handler),
-            )
-            .route(
-                "/integrations/safeline/sites/cached",
-                get(safeline_handlers::list_cached_safeline_sites_handler),
-            )
-            .route(
-                "/integrations/safeline/mappings",
-                get(safeline_handlers::list_safeline_mappings_handler)
-                    .put(safeline_handlers::update_safeline_mappings_handler),
-            )
-            .route(
-                "/integrations/safeline/pull/sites",
-                axum::routing::post(safeline_handlers::pull_safeline_sites_handler),
-            )
-            .route(
-                "/integrations/safeline/pull/sites/:remote_site_id",
-                axum::routing::post(safeline_handlers::pull_safeline_site_handler),
-            )
-            .route(
-                "/integrations/safeline/push/sites",
-                axum::routing::post(safeline_handlers::push_safeline_sites_handler),
-            )
-            .route(
-                "/integrations/safeline/push/sites/:local_site_id",
-                axum::routing::post(safeline_handlers::push_safeline_site_handler),
-            )
-            .route(
-                "/integrations/safeline/site-links",
-                get(safeline_handlers::list_site_sync_links_handler)
-                    .put(safeline_handlers::upsert_site_sync_link_handler),
-            )
-            .route(
-                "/integrations/safeline/site-links/:id",
-                delete(safeline_handlers::delete_site_sync_link_handler),
-            )
-            .route(
-                "/integrations/safeline/sync/events",
-                axum::routing::post(safeline_handlers::sync_safeline_events_handler),
-            )
-            .route(
-                "/integrations/safeline/sync/state",
-                get(safeline_handlers::get_safeline_sync_state_handler),
-            )
-            .route(
-                "/integrations/safeline/sync/blocked-ips",
-                axum::routing::post(safeline_handlers::sync_safeline_blocked_ips_handler),
-            )
-            .route(
-                "/integrations/safeline/pull/blocked-ips",
-                axum::routing::post(safeline_handlers::pull_safeline_blocked_ips_handler),
-            )
-            .route(
-                "/rules/:id",
-                get(rules_handlers::get_rule_handler)
-                    .put(rules_handlers::update_rule_handler)
-                    .delete(rules_handlers::delete_rule_handler),
-            )
-            .with_state(state);
+        let app = build_router(state);
 
         let listener = TcpListener::bind(self.addr).await?;
         log::info!("API server listening on {}", self.addr);
 
-        axum::serve(listener, app).await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
         Ok(())
     }
+}
+
+fn build_router(state: ApiState) -> Router {
+    let protected = Router::new()
+        .route("/metrics", get(system_handlers::metrics_handler))
+        .route(
+            "/l4/config",
+            get(settings_handlers::get_l4_config_handler)
+                .put(settings_handlers::update_l4_config_handler),
+        )
+        .route("/l4/stats", get(settings_handlers::get_l4_stats_handler))
+        .route(
+            "/l7/config",
+            get(settings_handlers::get_l7_config_handler)
+                .put(settings_handlers::update_l7_config_handler),
+        )
+        .route("/l7/stats", get(settings_handlers::get_l7_stats_handler))
+        .route(
+            "/settings",
+            get(settings_handlers::get_settings_handler)
+                .put(settings_handlers::update_settings_handler),
+        )
+        .route(
+            "/events",
+            get(events_handlers::list_security_events_handler),
+        )
+        .route(
+            "/events/:id",
+            patch(events_handlers::update_security_event_handler),
+        )
+        .route(
+            "/blocked-ips",
+            get(events_handlers::list_blocked_ips_handler),
+        )
+        .route(
+            "/blocked-ips/:id",
+            delete(events_handlers::delete_blocked_ip_handler),
+        )
+        .route(
+            "/rules",
+            get(rules_handlers::list_rules_handler).post(rules_handlers::create_rule_handler),
+        )
+        .route(
+            "/rule-action-plugins",
+            get(rules_handlers::list_rule_action_plugins_handler),
+        )
+        .route(
+            "/rule-action-plugins/install",
+            axum::routing::post(rules_handlers::install_rule_action_plugin_handler),
+        )
+        .route(
+            "/rule-action-plugins/:plugin_id",
+            axum::routing::patch(rules_handlers::update_rule_action_plugin_handler)
+                .delete(rules_handlers::delete_rule_action_plugin_handler),
+        )
+        .route(
+            "/rule-action-plugins/upload",
+            axum::routing::post(rules_handlers::upload_rule_action_plugin_handler),
+        )
+        .route(
+            "/rule-action-templates",
+            get(rules_handlers::list_rule_action_templates_handler),
+        )
+        .route(
+            "/rule-action-templates/:template_id/preview",
+            get(rules_handlers::preview_rule_action_template_handler),
+        )
+        .route(
+            "/sites/local",
+            get(sites_handlers::list_local_sites_handler)
+                .post(sites_handlers::create_local_site_handler),
+        )
+        .route(
+            "/sites/local/:id",
+            get(sites_handlers::get_local_site_handler)
+                .put(sites_handlers::update_local_site_handler)
+                .delete(sites_handlers::delete_local_site_handler),
+        )
+        .route(
+            "/certificates/local",
+            get(sites_handlers::list_local_certificates_handler)
+                .post(sites_handlers::create_local_certificate_handler),
+        )
+        .route(
+            "/certificates/local/generate",
+            axum::routing::post(sites_handlers::generate_local_certificate_handler),
+        )
+        .route(
+            "/certificates/local/:id",
+            get(sites_handlers::get_local_certificate_handler)
+                .put(sites_handlers::update_local_certificate_handler)
+                .delete(sites_handlers::delete_local_certificate_handler),
+        )
+        .route(
+            "/integrations/safeline/test",
+            axum::routing::post(safeline_handlers::test_safeline_handler),
+        )
+        .route(
+            "/integrations/safeline/sites",
+            axum::routing::post(safeline_handlers::list_safeline_sites_handler),
+        )
+        .route(
+            "/integrations/safeline/sites/cached",
+            get(safeline_handlers::list_cached_safeline_sites_handler),
+        )
+        .route(
+            "/integrations/safeline/mappings",
+            get(safeline_handlers::list_safeline_mappings_handler)
+                .put(safeline_handlers::update_safeline_mappings_handler),
+        )
+        .route(
+            "/integrations/safeline/pull/sites",
+            axum::routing::post(safeline_handlers::pull_safeline_sites_handler),
+        )
+        .route(
+            "/integrations/safeline/pull/sites/:remote_site_id",
+            axum::routing::post(safeline_handlers::pull_safeline_site_handler),
+        )
+        .route(
+            "/integrations/safeline/push/sites",
+            axum::routing::post(safeline_handlers::push_safeline_sites_handler),
+        )
+        .route(
+            "/integrations/safeline/push/sites/:local_site_id",
+            axum::routing::post(safeline_handlers::push_safeline_site_handler),
+        )
+        .route(
+            "/integrations/safeline/site-links",
+            get(safeline_handlers::list_site_sync_links_handler)
+                .put(safeline_handlers::upsert_site_sync_link_handler),
+        )
+        .route(
+            "/integrations/safeline/site-links/:id",
+            delete(safeline_handlers::delete_site_sync_link_handler),
+        )
+        .route(
+            "/integrations/safeline/sync/events",
+            axum::routing::post(safeline_handlers::sync_safeline_events_handler),
+        )
+        .route(
+            "/integrations/safeline/sync/state",
+            get(safeline_handlers::get_safeline_sync_state_handler),
+        )
+        .route(
+            "/integrations/safeline/sync/blocked-ips",
+            axum::routing::post(safeline_handlers::sync_safeline_blocked_ips_handler),
+        )
+        .route(
+            "/integrations/safeline/pull/blocked-ips",
+            axum::routing::post(safeline_handlers::pull_safeline_blocked_ips_handler),
+        )
+        .route(
+            "/rules/:id",
+            get(rules_handlers::get_rule_handler)
+                .put(rules_handlers::update_rule_handler)
+                .delete(rules_handlers::delete_rule_handler),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            admin_auth_middleware,
+        ));
+
+    Router::new()
+        .route("/health", get(system_handlers::health_handler))
+        .merge(protected)
+        .with_state(state)
+}
+
+#[doc(hidden)]
+pub fn build_test_router(context: Arc<WafContext>) -> Router {
+    build_router(ApiState { context })
 }
 
 fn build_metrics_response(
@@ -615,7 +637,7 @@ pub(super) fn parse_blocked_ip_sort_field(
 }
 
 fn sqlite_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
-    if !state.context.config.sqlite_enabled {
+    if !state.context.config_snapshot().sqlite_enabled {
         return Err(ApiError::conflict(
             "SQLite storage is disabled in configuration".to_string(),
         ));
@@ -630,7 +652,7 @@ fn sqlite_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
 
 fn rules_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {
     let store = sqlite_store(state)?;
-    if !state.context.config.sqlite_rules_enabled {
+    if !state.context.config_snapshot().sqlite_rules_enabled {
         return Err(ApiError::conflict(
             "SQLite-backed rules are disabled in configuration".to_string(),
         ));
@@ -685,6 +707,99 @@ fn map_storage_write_error(error: anyhow::Error) -> ApiError {
     ApiError::internal(error)
 }
 
+async fn admin_auth_middleware(
+    State(state): State<ApiState>,
+    request: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_string();
+    let source_ip = request_source_ip(&request);
+    let runtime_config = state.context.config_snapshot();
+    let auth_config = runtime_config.admin_api_auth.clone();
+
+    let principal = if auth_config.enabled {
+        match extract_bearer_token(request.headers()) {
+            Some(token) if token == auth_config.bearer_token => "bearer-token",
+            _ => {
+                audit_admin_request(
+                    auth_config.audit_enabled,
+                    method.as_str(),
+                    &path,
+                    source_ip.as_deref(),
+                    "anonymous",
+                    false,
+                    StatusCode::UNAUTHORIZED,
+                );
+                return ApiError::unauthorized("管理接口需要 Bearer Token").into_response();
+            }
+        }
+    } else {
+        "anonymous"
+    };
+
+    let response = next.run(request).await;
+    if auth_config.audit_enabled && is_audited_method(&method) {
+        audit_admin_request(
+            true,
+            method.as_str(),
+            &path,
+            source_ip.as_deref(),
+            principal,
+            response.status().is_success(),
+            response.status(),
+        );
+    }
+
+    response
+}
+
+fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
+    value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+}
+
+fn is_audited_method(method: &Method) -> bool {
+    matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    )
+}
+
+fn request_source_ip(request: &Request<axum::body::Body>) -> Option<String> {
+    request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|info| info.0.ip().to_string())
+}
+
+fn audit_admin_request(
+    enabled: bool,
+    method: &str,
+    path: &str,
+    source_ip: Option<&str>,
+    principal: &str,
+    success: bool,
+    status: StatusCode,
+) {
+    if !enabled {
+        return;
+    }
+    log::info!(
+        "admin_audit method={} path={} source_ip={} principal={} success={} status={}",
+        method,
+        path,
+        source_ip.unwrap_or("unknown"),
+        principal,
+        success,
+        status.as_u16()
+    );
+}
+
 type ApiResult<T> = Result<T, ApiError>;
 
 #[derive(Debug)]
@@ -711,6 +826,13 @@ impl ApiError {
     fn conflict(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
+
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
             message: message.into(),
         }
     }

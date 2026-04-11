@@ -33,7 +33,7 @@ defineProps<{
       class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
     >
       <div class="max-w-3xl">
-        <p class="text-sm tracking-wider text-blue-700">L7 管理</p>
+        <p class="text-sm tracking-wider text-blue-700">HTTP 接入管理</p>
       </div>
       <div class="flex flex-wrap gap-3">
         <StatusBadge
@@ -61,9 +61,9 @@ defineProps<{
 
   <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
     <MetricWidget
-      label="七层累计拦截"
+      label="请求侧策略拦截"
       :value="formatNumber(stats?.blocked_requests || 0)"
-      hint="来自 L7 请求路径的累计阻断次数"
+      hint="来自请求规则与响应策略的累计阻断次数"
       :icon="Shield"
       trend="up"
     />
@@ -89,7 +89,7 @@ defineProps<{
   </section>
 
   <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-    <CyberCard title="协议支持" sub-title="L7 协议与监听入口摘要">
+    <CyberCard title="协议支持" sub-title="HTTP 协议与监听入口摘要">
       <div class="space-y-4">
         <div class="flex flex-wrap gap-3">
           <StatusBadge

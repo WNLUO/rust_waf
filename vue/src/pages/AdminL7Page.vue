@@ -82,7 +82,7 @@ const lastUpdatedLabel = computed(() => {
         class="flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-6 shadow-sm"
       >
         <RefreshCw class="animate-spin text-blue-700" :size="30" />
-        <p class="text-sm text-slate-500">正在载入 L7 管理面板</p>
+        <p class="text-sm text-slate-500">正在载入 HTTP 接入管理面板</p>
       </div>
     </div>
 

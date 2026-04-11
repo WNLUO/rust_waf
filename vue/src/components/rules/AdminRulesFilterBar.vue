@@ -58,7 +58,7 @@ defineEmits<{
     >
       <option value="all">全部层级</option>
       <option value="l4">四层</option>
-      <option value="l7">七层</option>
+      <option value="l7">HTTP</option>
     </select>
     <select
       :value="filters.action"

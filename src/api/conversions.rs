@@ -71,7 +71,6 @@ impl L4ConfigResponse {
 impl L7ConfigResponse {
     pub(super) fn from_config(config: &Config, runtime_enabled: bool) -> Self {
         Self {
-            http_inspection_enabled: config.l7_config.http_inspection_enabled,
             max_request_size: config.l7_config.max_request_size,
             real_ip_headers: config.l7_config.real_ip_headers.clone(),
             trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
@@ -213,7 +212,6 @@ impl L7ConfigUpdateRequest {
         };
         http3_config.validate()?;
 
-        current.l7_config.http_inspection_enabled = self.http_inspection_enabled;
         current.l7_config.max_request_size = self.max_request_size;
         current.l7_config.real_ip_headers = self.real_ip_headers;
         current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
@@ -389,7 +387,7 @@ impl L7StatsResponse {
         let http3 = context.http3_runtime_snapshot();
 
         Self {
-            enabled: context.l7_inspector.is_some(),
+            enabled: true,
             blocked_requests: metrics.as_ref().map(|value| value.blocked_l7).unwrap_or(0),
             proxied_requests: metrics
                 .as_ref()

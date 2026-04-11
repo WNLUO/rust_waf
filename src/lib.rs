@@ -24,7 +24,7 @@ pub use config::http3::Http3Config;
 pub use config::l7::Http2Config;
 pub use config::{Config, L7Config, RuntimeProfile};
 pub use core::{InspectionLayer, InspectionResult, PacketInfo, Protocol, WafContext, WafEngine};
-pub use l7::L7Inspector;
+pub use l7::HttpTrafficProcessor;
 pub use protocol::{
     Http1Handler, Http2Handler, Http3Handler, Http3StreamManager, HttpVersion, ProtocolDetector,
     UnifiedHttpRequest,

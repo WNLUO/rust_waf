@@ -35,7 +35,6 @@ function fieldModel<K extends keyof L7ConfigForm>(key: K) {
   })
 }
 
-const httpInspectionEnabled = fieldModel('http_inspection_enabled')
 const http2Enabled = fieldModel('http2_enabled')
 const bloomEnabled = fieldModel('bloom_enabled')
 const bloomVerifyEnabled = fieldModel('bloom_false_positive_verification')
@@ -78,18 +77,12 @@ const http3Tls13Enabled = fieldModel('http3_enable_tls13')
       class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
     >
       <div>
-        <p class="text-sm tracking-wider text-blue-700">L7 配置</p>
+        <p class="text-sm tracking-wider text-blue-700">HTTP 配置</p>
         <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-          七层检测与代理参数
+          HTTP 接入与代理参数
         </h3>
       </div>
       <div class="flex flex-wrap gap-3">
-        <StatusBadge
-          :text="
-            form.http_inspection_enabled ? 'HTTP 检测开启' : 'HTTP 检测关闭'
-          "
-          :type="form.http_inspection_enabled ? 'success' : 'warning'"
-        />
         <StatusBadge
           :text="form.http2_enabled ? 'HTTP/2 已启用' : 'HTTP/2 未启用'"
           :type="form.http2_enabled ? 'info' : 'muted'"
@@ -98,21 +91,6 @@ const http3Tls13Enabled = fieldModel('http3_enable_tls13')
     </div>
 
     <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <span class="flex items-center justify-between gap-3">
-          <span class="font-medium">启用 HTTP 检测</span>
-          <input
-            v-model="httpInspectionEnabled"
-            type="checkbox"
-            class="h-4 w-4 accent-blue-600"
-          />
-        </span>
-        <span class="mt-2 block text-xs leading-6 text-slate-500"
-          >关闭后七层检测实例不会介入请求决策。</span
-        >
-      </label>
       <label
         class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
       >
@@ -201,7 +179,7 @@ const http3Tls13Enabled = fieldModel('http3_enable_tls13')
           <option value="standard">standard</option>
         </select>
         <p class="mt-2 text-xs leading-6 text-slate-500">
-          会影响 L7 参数的收敛范围，以及多监听场景下的运行能力。
+          会影响 HTTP 接入参数的收敛范围，以及多监听场景下的运行能力。
         </p>
       </div>
       <div

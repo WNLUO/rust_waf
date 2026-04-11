@@ -235,7 +235,7 @@ const siteOptions = computed(() => {
         >
           <option value="all">全部层级</option>
           <option value="l4">四层</option>
-          <option value="l7">七层</option>
+          <option value="l7">HTTP</option>
           <option value="safeline">雷池</option>
         </select>
         <select

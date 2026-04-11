@@ -7,7 +7,7 @@ use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Cursor};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone)]
 pub struct GatewaySiteRuntime {
@@ -21,113 +21,78 @@ pub struct GatewaySiteRuntime {
     pub upstream_endpoint: Option<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct GatewayRuntime {
-    sites: Vec<GatewaySiteRuntime>,
-    host_index: HashMap<String, Vec<usize>>,
-    cert_resolver: Option<Arc<dyn ResolvesServerCert>>,
+    inner: Arc<RwLock<GatewayRuntimeState>>,
+    cert_resolver: Arc<GatewayCertResolver>,
 }
 
 #[derive(Debug, Default)]
-struct GatewayCertResolver {
+struct GatewayRuntimeState {
+    sites: Vec<GatewaySiteRuntime>,
+    host_index: HashMap<String, Vec<usize>>,
     by_name: HashMap<String, Arc<CertifiedKey>>,
     default_cert: Option<Arc<CertifiedKey>>,
 }
 
+#[derive(Debug)]
+struct GatewayCertResolver {
+    inner: Arc<RwLock<GatewayRuntimeState>>,
+}
+
 impl ResolvesServerCert for GatewayCertResolver {
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        let state = self.inner.read().expect("gateway_runtime lock poisoned");
         client_hello
             .server_name()
             .and_then(normalize_sni_hostname)
-            .and_then(|name| self.by_name.get(&name).cloned())
-            .or_else(|| self.default_cert.clone())
+            .and_then(|name| state.by_name.get(&name).cloned())
+            .or_else(|| state.default_cert.clone())
+    }
+}
+
+impl Default for GatewayRuntime {
+    fn default() -> Self {
+        let inner = Arc::new(RwLock::new(GatewayRuntimeState::default()));
+        Self {
+            cert_resolver: Arc::new(GatewayCertResolver {
+                inner: Arc::clone(&inner),
+            }),
+            inner,
+        }
     }
 }
 
 impl GatewayRuntime {
     pub async fn load(config: &Config, store: Option<&SqliteStore>) -> Result<Self> {
-        let Some(store) = store else {
-            return Ok(Self::default());
-        };
+        let runtime = Self::default();
+        runtime.reload(config, store).await?;
+        Ok(runtime)
+    }
 
-        let raw_sites = store.list_local_sites().await?;
-        let enabled_sites = raw_sites
-            .into_iter()
-            .filter(|site| site.enabled)
-            .collect::<Vec<_>>();
-
-        let mut certificate_ids = enabled_sites
-            .iter()
-            .filter(|site| site.tls_enabled)
-            .filter_map(|site| site.local_certificate_id)
-            .collect::<HashSet<_>>();
-        if let Some(default_certificate_id) = config.gateway_config.default_certificate_id {
-            certificate_ids.insert(default_certificate_id);
-        }
-
-        let certified_keys = load_certified_keys(store, &certificate_ids).await?;
-        let default_cert = config
-            .gateway_config
-            .default_certificate_id
-            .and_then(|id| certified_keys.get(&id).cloned());
-
-        let mut sites = Vec::with_capacity(enabled_sites.len());
-        let mut host_index: HashMap<String, Vec<usize>> = HashMap::new();
-        let mut certificates_by_name = HashMap::new();
-
-        for site in enabled_sites {
-            let runtime_site = runtime_site_from_entry(&site);
-            let site_index = sites.len();
-
-            for hostname in &runtime_site.hostnames {
-                host_index
-                    .entry(hostname.clone())
-                    .or_default()
-                    .push(site_index);
-            }
-
-            if runtime_site.tls_enabled {
-                if let Some(certificate_id) = runtime_site.certificate_id {
-                    if let Some(certified_key) = certified_keys.get(&certificate_id) {
-                        for hostname in &runtime_site.hostnames {
-                            certificates_by_name
-                                .entry(hostname.clone())
-                                .or_insert_with(|| Arc::clone(certified_key));
-                        }
-                    } else {
-                        warn!(
-                            "Site '{}' references certificate {} but the certificate secret is unavailable",
-                            runtime_site.name, certificate_id
-                        );
-                    }
-                }
-            }
-
-            sites.push(runtime_site);
-        }
-
-        let cert_resolver = if certificates_by_name.is_empty() && default_cert.is_none() {
-            None
-        } else {
-            Some(Arc::new(GatewayCertResolver {
-                by_name: certificates_by_name,
-                default_cert,
-            }) as Arc<dyn ResolvesServerCert>)
-        };
-
-        Ok(Self {
-            sites,
-            host_index,
-            cert_resolver,
-        })
+    pub async fn reload(&self, config: &Config, store: Option<&SqliteStore>) -> Result<()> {
+        let next = build_runtime_state(config, store).await?;
+        let mut guard = self.inner.write().expect("gateway_runtime lock poisoned");
+        *guard = next;
+        Ok(())
     }
 
     pub fn tls_resolver(&self) -> Option<Arc<dyn ResolvesServerCert>> {
-        self.cert_resolver.as_ref().map(Arc::clone)
+        let state = self.inner.read().expect("gateway_runtime lock poisoned");
+        if state.by_name.is_empty() && state.default_cert.is_none() {
+            None
+        } else {
+            Some(self.cert_resolver.clone() as Arc<dyn ResolvesServerCert>)
+        }
     }
 
     pub fn has_sites(&self) -> bool {
-        !self.sites.is_empty()
+        !self
+            .inner
+            .read()
+            .expect("gateway_runtime lock poisoned")
+            .sites
+            .is_empty()
     }
 
     pub fn resolve_site(
@@ -136,14 +101,87 @@ impl GatewayRuntime {
         listener_port: u16,
     ) -> Option<GatewaySiteRuntime> {
         let hostname = hostname.and_then(normalize_hostname)?;
-        let site_indexes = self.host_index.get(&hostname)?;
+        let state = self.inner.read().expect("gateway_runtime lock poisoned");
+        let site_indexes = state.host_index.get(&hostname)?;
 
         site_indexes
             .iter()
-            .filter_map(|index| self.sites.get(*index))
+            .filter_map(|index| state.sites.get(*index))
             .find(|site| site_matches_port(site, listener_port))
             .cloned()
     }
+}
+
+async fn build_runtime_state(
+    config: &Config,
+    store: Option<&SqliteStore>,
+) -> Result<GatewayRuntimeState> {
+    let Some(store) = store else {
+        return Ok(GatewayRuntimeState::default());
+    };
+
+    let raw_sites = store.list_local_sites().await?;
+    let enabled_sites = raw_sites
+        .into_iter()
+        .filter(|site| site.enabled)
+        .collect::<Vec<_>>();
+
+    let mut certificate_ids = enabled_sites
+        .iter()
+        .filter(|site| site.tls_enabled)
+        .filter_map(|site| site.local_certificate_id)
+        .collect::<HashSet<_>>();
+    if let Some(default_certificate_id) = config.gateway_config.default_certificate_id {
+        certificate_ids.insert(default_certificate_id);
+    }
+
+    let certified_keys = load_certified_keys(store, &certificate_ids).await?;
+    let default_cert = config
+        .gateway_config
+        .default_certificate_id
+        .and_then(|id| certified_keys.get(&id).cloned());
+
+    let mut sites = Vec::with_capacity(enabled_sites.len());
+    let mut host_index: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut certificates_by_name = HashMap::new();
+
+    for site in enabled_sites {
+        let runtime_site = runtime_site_from_entry(&site);
+        let site_index = sites.len();
+
+        for hostname in &runtime_site.hostnames {
+            host_index
+                .entry(hostname.clone())
+                .or_default()
+                .push(site_index);
+        }
+
+        if runtime_site.tls_enabled {
+            if let Some(certificate_id) = runtime_site.certificate_id {
+                if let Some(certified_key) = certified_keys.get(&certificate_id) {
+                    for hostname in &runtime_site.hostnames {
+                        certificates_by_name
+                            .entry(hostname.clone())
+                            .or_insert_with(|| Arc::clone(certified_key));
+                    }
+                } else {
+                    warn!(
+                        "Site '{}' references certificate {} but the certificate secret is unavailable",
+                        runtime_site.name, certificate_id
+                    );
+                }
+            }
+        }
+
+        sites.push(runtime_site);
+    }
+
+    Ok(GatewayRuntimeState {
+        sites,
+        host_index,
+        by_name: certificates_by_name,
+        default_cert,
+    })
 }
 
 fn runtime_site_from_entry(site: &LocalSiteEntry) -> GatewaySiteRuntime {

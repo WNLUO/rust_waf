@@ -1,5 +1,4 @@
 export interface L7ConfigPayload {
-  http_inspection_enabled: boolean
   max_request_size: number
   real_ip_headers: string[]
   trusted_proxy_cidrs: string[]

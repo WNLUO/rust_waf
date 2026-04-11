@@ -41,7 +41,6 @@ pub struct L4ConfigResponse {
 
 #[derive(Debug, Serialize)]
 pub struct L7ConfigResponse {
-    pub(crate) http_inspection_enabled: bool,
     pub(crate) max_request_size: usize,
     pub(crate) real_ip_headers: Vec<String>,
     pub(crate) trusted_proxy_cidrs: Vec<String>,
@@ -130,7 +129,6 @@ pub struct L4ConfigUpdateRequest {
 #[derive(Debug, Deserialize)]
 pub struct L7ConfigUpdateRequest {
     pub(crate) runtime_profile: String,
-    pub(crate) http_inspection_enabled: bool,
     pub(crate) max_request_size: usize,
     pub(crate) real_ip_headers: Vec<String>,
     pub(crate) trusted_proxy_cidrs: Vec<String>,

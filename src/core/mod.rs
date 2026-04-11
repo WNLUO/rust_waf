@@ -7,7 +7,7 @@ pub mod packet;
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
-use crate::l7::L7Inspector;
+use crate::l7::HttpTrafficProcessor;
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::SqliteStore;
@@ -44,8 +44,9 @@ pub struct Http3RuntimeSnapshot {
 
 pub struct WafContext {
     pub config: Config,
+    runtime_config: Arc<RwLock<Config>>,
     pub l4_inspector: Option<L4Inspector>,
-    pub l7_inspector: Option<L7Inspector>,
+    pub http_processor: HttpTrafficProcessor,
     pub rule_engine: RwLock<Option<RuleEngine>>,
     pub metrics: Option<MetricsCollector>,
     pub sqlite_store: Option<Arc<SqliteStore>>,
@@ -60,10 +61,8 @@ impl WafContext {
     pub async fn new(config: Config) -> Result<Self> {
         let l4_enabled =
             config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
-        let l7_enabled = config.l7_config.http_inspection_enabled;
         let bloom_enabled = config.bloom_enabled;
         let l4_bloom_verification = config.l4_bloom_false_positive_verification;
-        let l7_bloom_verification = config.l7_bloom_false_positive_verification;
         let metrics = if config.metrics_enabled {
             Some(MetricsCollector::new())
         } else {
@@ -79,8 +78,10 @@ impl WafContext {
         let (rule_engine, rule_count, rule_version) =
             load_rule_engine_state(&config, sqlite_store.as_deref()).await?;
         let gateway_runtime = GatewayRuntime::load(&config, sqlite_store.as_deref()).await?;
+        let http_processor = HttpTrafficProcessor::new(&config.l7_config);
 
         Ok(Self {
+            runtime_config: Arc::new(RwLock::new(config.clone())),
             l4_inspector: l4_enabled.then(|| {
                 L4Inspector::new(
                     config.l4_config.clone(),
@@ -88,13 +89,7 @@ impl WafContext {
                     l4_bloom_verification,
                 )
             }),
-            l7_inspector: l7_enabled.then(|| {
-                L7Inspector::new(
-                    config.l7_config.clone(),
-                    bloom_enabled,
-                    l7_bloom_verification,
-                )
-            }),
+            http_processor,
             rule_engine: RwLock::new(rule_engine),
             metrics,
             sqlite_store,
@@ -123,6 +118,24 @@ impl WafContext {
             rule_version: AtomicI64::new(rule_version),
             config,
         })
+    }
+
+    pub fn config_snapshot(&self) -> Config {
+        self.runtime_config
+            .read()
+            .expect("runtime_config lock poisoned")
+            .clone()
+    }
+
+    pub fn apply_runtime_config(&self, config: Config) {
+        {
+            let mut guard = self
+                .runtime_config
+                .write()
+                .expect("runtime_config lock poisoned");
+            *guard = config;
+        }
+        self.refresh_http3_runtime_metadata();
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
@@ -164,19 +177,40 @@ impl WafContext {
             .http3_runtime
             .write()
             .expect("http3_runtime lock poisoned");
+        let config = self.config_snapshot();
         guard.feature_available = cfg!(feature = "http3");
-        guard.configured_enabled = self.config.http3_config.enabled;
-        guard.tls13_enabled = self.config.http3_config.enable_tls13;
-        guard.certificate_configured = self.config.http3_config.certificate_path.is_some();
-        guard.private_key_configured = self.config.http3_config.private_key_path.is_some();
+        guard.configured_enabled = config.http3_config.enabled;
+        guard.tls13_enabled = config.http3_config.enable_tls13;
+        guard.certificate_configured = config.http3_config.certificate_path.is_some();
+        guard.private_key_configured = config.http3_config.private_key_path.is_some();
         guard.listener_started = listener_started;
         guard.listener_addr = listener_addr;
         guard.status = status.into();
         guard.last_error = last_error;
     }
 
+    pub fn refresh_http3_runtime_metadata(&self) {
+        let config = self.config_snapshot();
+        let mut guard = self
+            .http3_runtime
+            .write()
+            .expect("http3_runtime lock poisoned");
+        guard.feature_available = cfg!(feature = "http3");
+        guard.configured_enabled = config.http3_config.enabled;
+        guard.tls13_enabled = config.http3_config.enable_tls13;
+        guard.certificate_configured = config.http3_config.certificate_path.is_some();
+        guard.private_key_configured = config.http3_config.private_key_path.is_some();
+    }
+
+    pub async fn refresh_gateway_runtime_from_storage(&self) -> Result<()> {
+        let config = self.config_snapshot();
+        self.gateway_runtime
+            .reload(&config, self.sqlite_store.as_deref())
+            .await
+    }
+
     pub async fn refresh_rules_from_storage(&self) -> Result<bool> {
-        if !self.config.sqlite_rules_enabled {
+        if !self.config_snapshot().sqlite_rules_enabled {
             return Ok(false);
         }
 

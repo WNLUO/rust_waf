@@ -20,9 +20,7 @@ use h3::server::RequestStream;
 #[cfg(feature = "http3")]
 use h3_quinn::Connection as H3QuinnConnection;
 #[cfg(feature = "http3")]
-use quinn::crypto::rustls::QuicServerConfig;
-#[cfg(feature = "http3")]
-use quinn::{Endpoint as QuinnEndpoint, Incoming as QuinnIncoming};
+use quinn::Incoming as QuinnIncoming;
 
 use super::WafContext;
 use crate::config::l7::UpstreamFailureMode;
@@ -62,19 +60,21 @@ impl WafEngine {
     }
 
     pub async fn start(&mut self) -> Result<()> {
+        let startup_config = self.context.config_snapshot();
         info!("WAF engine started");
         info!(
             "Concurrency limit set to {} inflight connections",
-            self.context.config.max_concurrent_tasks
+            startup_config.max_concurrent_tasks
         );
 
         if let Some(l4_inspector) = &self.context.l4_inspector {
             l4_inspector.start(self.context.as_ref()).await?;
         }
 
-        if let Some(l7_inspector) = &self.context.l7_inspector {
-            l7_inspector.start(self.context.as_ref()).await?;
-        }
+        self.context
+            .http_processor
+            .start(self.context.as_ref())
+            .await?;
 
         #[cfg(feature = "api")]
         if self.context.config.api_enabled {
@@ -92,28 +92,20 @@ impl WafEngine {
             warn!("API support was requested but the binary was built without the 'api' feature");
         }
 
-        if self.context.config.l7_config.upstream_healthcheck_enabled {
-            if let Some(upstream_addr) = self.context.config.tcp_upstream_addr.clone() {
-                let context = Arc::clone(&self.context);
-                tokio::spawn(async move {
-                    super::engine_maintenance::run_upstream_healthcheck_loop(
-                        context,
-                        upstream_addr,
-                    )
-                    .await;
-                });
-            }
-        }
+        let context = Arc::clone(&self.context);
+        tokio::spawn(async move {
+            super::engine_maintenance::run_upstream_healthcheck_loop(context).await;
+        });
 
         if let Some(store) = self.context.sqlite_store.as_ref().cloned() {
-            let fallback_config = self.context.config.clone();
+            let fallback_config = startup_config.clone();
             tokio::spawn(async move {
                 super::engine_maintenance::run_safeline_auto_sync_loop(store, fallback_config)
                     .await;
             });
         }
 
-        let maintenance_interval = self.context.config.maintenance_interval_secs.max(5);
+        let maintenance_interval = startup_config.maintenance_interval_secs.max(5);
         let mut maintenance =
             tokio::time::interval(tokio::time::Duration::from_secs(maintenance_interval));
 
@@ -126,7 +118,7 @@ impl WafEngine {
         let mut quic_listener = None;
 
         // 先绑定所有TCP/UDP监听器
-        for addr in &self.context.config.listen_addrs {
+        for addr in &startup_config.listen_addrs {
             match TcpListener::bind(addr).await {
                 Ok(listener) => {
                     let addr = listener.local_addr()?;
@@ -149,7 +141,7 @@ impl WafEngine {
         }
 
         if let Some(tls_acceptor) = super::engine_tls::build_tls_acceptor(self.context.as_ref())? {
-            let tls_addr = &self.context.config.gateway_config.https_listen_addr;
+            let tls_addr = &startup_config.gateway_config.https_listen_addr;
             match TcpListener::bind(tls_addr).await {
                 Ok(listener) => {
                     let addr = listener.local_addr()?;
@@ -164,14 +156,14 @@ impl WafEngine {
         #[cfg(feature = "http3")]
         {
             if let Some(endpoint) =
-                super::engine_tls::build_http3_endpoint(&self.context.config.http3_config)?
+                super::engine_tls::build_http3_endpoint(&startup_config.http3_config)?
             {
                 let addr = endpoint.local_addr()?;
                 self.context
                     .set_http3_runtime("running", true, Some(addr.to_string()), None);
                 quic_listener = Some((addr, endpoint));
             } else {
-                let config = &self.context.config.http3_config;
+                let config = &startup_config.http3_config;
                 let (status, last_error) = if !config.enabled {
                     ("disabled".to_string(), None)
                 } else if !config.enable_tls13 {
@@ -196,7 +188,7 @@ impl WafEngine {
         }
 
         #[cfg(not(feature = "http3"))]
-        if self.context.config.http3_config.enabled {
+        if startup_config.http3_config.enabled {
             self.context.set_http3_runtime(
                 "unsupported",
                 false,
@@ -512,6 +504,7 @@ fn build_tls_acceptor(context: &WafContext) -> Result<Option<tokio_rustls::TlsAc
     super::engine_tls::build_tls_acceptor(context)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 #[cfg(feature = "http3")]
 fn build_http3_endpoint(config: &crate::config::Http3Config) -> Result<Option<quinn::Endpoint>> {
     super::engine_tls::build_http3_endpoint(config)
@@ -560,6 +553,7 @@ async fn handle_tls_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+    let config = context.config_snapshot();
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet);
     if l4_result.should_persist_event() {
@@ -577,7 +571,7 @@ async fn handle_tls_connection(
     }
 
     let tls_stream = tokio::time::timeout(
-        std::time::Duration::from_millis(context.config.l7_config.tls_handshake_timeout_ms),
+        std::time::Duration::from_millis(config.l7_config.tls_handshake_timeout_ms),
         tls_acceptor.accept(stream),
     )
     .await
@@ -596,7 +590,7 @@ async fn handle_tls_connection(
     }
 
     match alpn.as_deref() {
-        Some("h2") if context.config.l7_config.http2_config.enabled => {
+        Some("h2") if config.l7_config.http2_config.enabled => {
             handle_http2_connection(context, tls_stream, peer_addr, &packet, metadata).await
         }
         _ => handle_http1_connection(context, tls_stream, peer_addr, &packet, metadata).await,
@@ -639,7 +633,7 @@ async fn handle_http3_quic_connection(
             Ok(Some(resolver)) => {
                 let context = Arc::clone(&context);
                 let packet = packet.clone();
-                let http3_handler = Http3Handler::new(context.config.http3_config.clone());
+                let http3_handler = Http3Handler::new(context.config_snapshot().http3_config);
                 tokio::spawn(async move {
                     if let Err(err) =
                         handle_http3_request(context, packet, http3_handler, resolver).await
@@ -666,11 +660,12 @@ async fn handle_http3_request(
     http3_handler: Http3Handler,
     resolver: h3::server::RequestResolver<H3QuinnConnection, Bytes>,
 ) -> Result<()> {
+    let config = context.config_snapshot();
     let (request, mut stream) = resolver.resolve_request().await?;
     let body = read_http3_request_body(
         &mut stream,
-        context.config.l7_config.max_request_size,
-        context.config.l7_config.read_idle_timeout_ms,
+        config.l7_config.max_request_size,
+        config.l7_config.read_idle_timeout_ms,
     )
     .await?;
 
@@ -746,9 +741,9 @@ async fn handle_http3_request(
             context.as_ref(),
             &unified,
             upstream_addr,
-            context.config.l7_config.proxy_connect_timeout_ms,
-            context.config.l7_config.proxy_write_timeout_ms,
-            context.config.l7_config.proxy_read_timeout_ms,
+            config.l7_config.proxy_connect_timeout_ms,
+            config.l7_config.proxy_write_timeout_ms,
+            config.l7_config.proxy_read_timeout_ms,
         )
         .await
         {
@@ -879,6 +874,7 @@ async fn handle_udp_datagram(
     _permit: OwnedSemaphorePermit,
 ) -> Result<()> {
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
+    let config = context.config_snapshot();
 
     if let Some(metrics) = context.metrics.as_ref() {
         metrics.record_packet(payload.len());
@@ -906,8 +902,8 @@ async fn handle_udp_datagram(
         payload.len()
     );
 
-    if context.config.http3_config.enabled {
-        let http3_handler = Http3Handler::new(context.config.http3_config.clone());
+    if config.http3_config.enabled {
+        let http3_handler = Http3Handler::new(config.http3_config.clone());
         if let Some(request) = http3_handler.inspect_datagram(&payload, peer_addr, local_addr)? {
             debug!("Detected QUIC/HTTP3 datagram from {}", peer_addr);
             let request_dump = request.to_inspection_string();
@@ -936,7 +932,7 @@ async fn handle_udp_datagram(
         }
     }
 
-    if let Some(upstream_addr) = context.config.udp_upstream_addr.as_deref() {
+    if let Some(upstream_addr) = config.udp_upstream_addr.as_deref() {
         forward_udp_payload(listener_socket, peer_addr, &payload, upstream_addr).await?;
     }
 
@@ -1160,13 +1156,14 @@ async fn detect_and_handle_protocol(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
 ) -> Result<()> {
+    let config = context.config_snapshot();
     // 创建协议检测器
     let detector = ProtocolDetector::default();
 
     // 尝试检测协议版本（读取初始字节）
     let mut initial_buffer = vec![0u8; 256];
     let bytes_read = tokio::time::timeout(
-        std::time::Duration::from_millis(context.config.l7_config.first_byte_timeout_ms),
+        std::time::Duration::from_millis(config.l7_config.first_byte_timeout_ms),
         stream.peek(&mut initial_buffer),
     )
     .await??;
@@ -1191,7 +1188,7 @@ async fn detect_and_handle_protocol(
 
     // 根据检测到的协议版本路由到相应处理器
     match detected_version {
-        HttpVersion::Http2_0 if context.config.l7_config.http2_config.enabled => {
+        HttpVersion::Http2_0 if config.l7_config.http2_config.enabled => {
             handle_http2_connection(context, stream, peer_addr, packet, Vec::new()).await
         }
         _ => handle_http1_connection(context, stream, peer_addr, packet, Vec::new()).await,
@@ -1206,15 +1203,16 @@ async fn handle_http1_connection(
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
 ) -> Result<()> {
+    let config = context.config_snapshot();
     let http1_handler = Http1Handler::new();
 
     // 读取HTTP/1.1请求
     let mut request = http1_handler
         .read_request(
             &mut stream,
-            context.config.l7_config.max_request_size,
-            context.config.l7_config.first_byte_timeout_ms,
-            context.config.l7_config.read_idle_timeout_ms,
+            config.l7_config.max_request_size,
+            config.l7_config.first_byte_timeout_ms,
+            config.l7_config.read_idle_timeout_ms,
         )
         .await?;
 
@@ -1300,9 +1298,9 @@ async fn handle_http1_connection(
                 context.as_ref(),
                 &request,
                 upstream_addr,
-                context.config.l7_config.proxy_connect_timeout_ms,
-                context.config.l7_config.proxy_write_timeout_ms,
-                context.config.l7_config.proxy_read_timeout_ms,
+                config.l7_config.proxy_connect_timeout_ms,
+                config.l7_config.proxy_write_timeout_ms,
+                config.l7_config.proxy_read_timeout_ms,
             )
             .await
             {
@@ -1366,7 +1364,8 @@ async fn handle_http2_connection(
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
 ) -> Result<()> {
-    let http2_config = &context.config.l7_config.http2_config;
+    let config = context.config_snapshot();
+    let http2_config = &config.l7_config.http2_config;
     let http2_handler = Http2Handler::new()
         .with_max_concurrent_streams(http2_config.max_concurrent_streams)
         .with_max_frame_size(http2_config.max_frame_size)
@@ -1376,7 +1375,7 @@ async fn handle_http2_connection(
     let packet = packet.clone();
     let context_for_service = Arc::clone(&context);
     let peer_ip = peer_addr.ip().to_string();
-    let max_request_size = context.config.l7_config.max_request_size;
+    let max_request_size = config.l7_config.max_request_size;
     let request_metadata = extra_metadata.clone();
 
     http2_handler
@@ -1391,6 +1390,7 @@ async fn handle_http2_connection(
                 let request_metadata = request_metadata.clone();
 
                 async move {
+                    let config = context.config_snapshot();
                     let mut request = request;
                     apply_client_identity(context.as_ref(), peer_addr, &mut request);
                     for (key, value) in request_metadata {
@@ -1463,9 +1463,9 @@ async fn handle_http2_connection(
                             context.as_ref(),
                             &request,
                             upstream_addr,
-                            context.config.l7_config.proxy_connect_timeout_ms,
-                            context.config.l7_config.proxy_write_timeout_ms,
-                            context.config.l7_config.proxy_read_timeout_ms,
+                            config.l7_config.proxy_connect_timeout_ms,
+                            config.l7_config.proxy_write_timeout_ms,
+                            config.l7_config.proxy_read_timeout_ms,
                         )
                         .await
                         {
@@ -1540,18 +1540,11 @@ async fn handle_http2_connection(
 
 fn inspect_application_layers(
     context: &WafContext,
-    packet: &PacketInfo,
-    request: &UnifiedHttpRequest,
+    _packet: &PacketInfo,
+    _request: &UnifiedHttpRequest,
     serialized_request: &str,
 ) -> InspectionResult {
-    if let Some(l7_inspector) = &context.l7_inspector {
-        let l7_result = l7_inspector.inspect_unified_request(packet, request);
-        if l7_result.blocked {
-            return l7_result;
-        }
-    }
-
-    let rule_result = inspect_l7_rules(context, packet, serialized_request);
+    let rule_result = inspect_l7_rules(context, _packet, serialized_request);
     if rule_result.blocked || !rule_result.reason.is_empty() {
         return rule_result;
     }
@@ -1920,7 +1913,7 @@ fn select_upstream_target(
     site: Option<&GatewaySiteRuntime>,
 ) -> Option<String> {
     site.and_then(|site| site.upstream_endpoint.clone())
-        .or_else(|| context.config.tcp_upstream_addr.clone())
+        .or_else(|| context.config_snapshot().tcp_upstream_addr)
 }
 
 fn should_reject_unmatched_site(context: &WafContext, request: &UnifiedHttpRequest) -> bool {
@@ -1938,7 +1931,7 @@ fn enforce_upstream_policy(context: &WafContext) -> Result<()> {
         return Ok(());
     }
 
-    match context.config.l7_config.upstream_failure_mode {
+    match context.config_snapshot().l7_config.upstream_failure_mode {
         UpstreamFailureMode::FailOpen => Ok(()),
         UpstreamFailureMode::FailClose => Err(anyhow::anyhow!(
             "{}",
@@ -1963,7 +1956,7 @@ fn resolve_client_ip(
         return peer_addr.ip();
     }
 
-    for header in &context.config.l7_config.real_ip_headers {
+    for header in &context.config_snapshot().l7_config.real_ip_headers {
         let Some(value) = request.get_header(header) else {
             continue;
         };
@@ -1977,8 +1970,8 @@ fn resolve_client_ip(
 }
 
 fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> bool {
-    context
-        .config
+    let config = context.config_snapshot();
+    config
         .l7_config
         .trusted_proxy_cidrs
         .iter()

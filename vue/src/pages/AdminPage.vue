@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
         <MetricWidget
           label="累计拦截次数"
           :value="formatNumber(dashboard?.metrics.blocked_packets || 0)"
-          :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / 七层 ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
+          :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
           :icon="Shield"
           trend="up"
           :series="metricsHistory.blockRate"

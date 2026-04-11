@@ -11,7 +11,6 @@ export const listFieldClass =
 export function createDefaultL7ConfigForm(): L7ConfigForm {
   return {
     runtime_profile: 'minimal',
-    http_inspection_enabled: true,
     max_request_size: 8192,
     real_ip_headers: [],
     trusted_proxy_cidrs: [],

@@ -90,7 +90,7 @@ const highlights = [
               <div class="rounded-2xl bg-slate-50 p-5">
                 <p class="text-sm text-slate-500">策略执行</p>
                 <p class="mt-2 text-3xl font-semibold text-blue-700">
-                  四层 + 七层
+                  四层 + HTTP 接入
                 </p>
                 <p class="mt-3 text-sm leading-6 text-stone-700">
                   将连接层封禁与请求层拦截纳入统一视图，方便值班时快速判断攻击类型。

@@ -35,6 +35,11 @@ pub(super) async fn create_rule_handler(
     let inserted = store.insert_rule(&rule).await.map_err(ApiError::internal)?;
 
     if inserted {
+        state
+            .context
+            .refresh_rules_from_storage()
+            .await
+            .map_err(ApiError::internal)?;
         Ok((
             StatusCode::CREATED,
             Json(WriteStatusResponse {
@@ -274,6 +279,11 @@ pub(super) async fn update_rule_handler(
         .map_err(ApiError::bad_request)?;
     crate::rules::validate_rule(&rule).map_err(|err| ApiError::bad_request(err.to_string()))?;
     store.upsert_rule(&rule).await.map_err(ApiError::internal)?;
+    state
+        .context
+        .refresh_rules_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
@@ -289,6 +299,11 @@ pub(super) async fn delete_rule_handler(
     let deleted = store.delete_rule(&id).await.map_err(ApiError::internal)?;
 
     if deleted {
+        state
+            .context
+            .refresh_rules_from_storage()
+            .await
+            .map_err(ApiError::internal)?;
         Ok(Json(WriteStatusResponse {
             success: true,
             message: format!("Rule '{}' deleted", id),

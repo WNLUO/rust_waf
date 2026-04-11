@@ -104,7 +104,7 @@ const l7RuleTemplates = [
   },
   {
     label: '拦截伪造真实来源头',
-    description: '利用 inspection string 中的头部信息匹配伪造来源行为。',
+    description: '利用统一请求串中的头部信息匹配伪造来源行为。',
     id: 'l7-block-forged-real-ip',
     name: '伪造来源头拦截',
     pattern: String.raw`(?:x-forwarded-for|x-real-ip):\s*(?:127\.0\.0\.1|10\.)`,
@@ -145,7 +145,7 @@ const loadRules = async () => {
     rules.value = payload.rules
     error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '读取 L7 规则失败'
+    error.value = e instanceof Error ? e.message : '读取 HTTP 规则失败'
   } finally {
     loading.value = false
   }
@@ -182,16 +182,16 @@ const saveRule = async () => {
 
     if (editingId.value) {
       await updateRule(payload)
-      successMessage.value = `L7 规则 ${payload.id} 已更新。`
+      successMessage.value = `HTTP 规则 ${payload.id} 已更新。`
     } else {
       await createRule(payload)
-      successMessage.value = `L7 规则 ${payload.id} 已创建。`
+      successMessage.value = `HTTP 规则 ${payload.id} 已创建。`
     }
 
     isRuleModalOpen.value = false
     await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '保存 L7 规则失败'
+    error.value = e instanceof Error ? e.message : '保存 HTTP 规则失败'
   } finally {
     saving.value = false
   }
@@ -202,23 +202,23 @@ const toggleRuleStatus = async (rule: RuleItem) => {
   successMessage.value = ''
   try {
     await updateRule({ ...rule, enabled: !rule.enabled, layer: 'l7' })
-    successMessage.value = `L7 规则 ${rule.id} 已${rule.enabled ? '停用' : '启用'}。`
+    successMessage.value = `HTTP 规则 ${rule.id} 已${rule.enabled ? '停用' : '启用'}。`
     await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '更新 L7 规则状态失败'
+    error.value = e instanceof Error ? e.message : '更新 HTTP 规则状态失败'
   }
 }
 
 const removeRule = async (id: string) => {
-  if (!window.confirm(`确认删除 L7 规则 ${id} 吗？`)) return
+  if (!window.confirm(`确认删除 HTTP 规则 ${id} 吗？`)) return
   error.value = ''
   successMessage.value = ''
   try {
     await deleteRule(id)
-    successMessage.value = `L7 规则 ${id} 已删除。`
+    successMessage.value = `HTTP 规则 ${id} 已删除。`
     await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除 L7 规则失败'
+    error.value = e instanceof Error ? e.message : '删除 HTTP 规则失败'
   }
 }
 
@@ -248,13 +248,13 @@ onMounted(loadRules)
           class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
         >
           <div>
-            <p class="text-sm tracking-wider text-blue-700">L7 规则</p>
+            <p class="text-sm tracking-wider text-blue-700">HTTP 规则</p>
             <h2 class="mt-3 font-sans text-4xl font-semibold text-stone-900">
-              七层规则编排与启停控制
+              HTTP 请求规则编排与启停控制
             </h2>
             <p class="mt-4 max-w-2xl text-sm leading-7 text-stone-700">
-              L7 规则匹配的是统一请求字符串，包含方法、URI、Header、元数据和
-              Body。适合做路径访问控制、请求特征拦截和应用层告警。
+              HTTP 规则匹配的是统一请求字符串，包含方法、URI、Header、元数据和
+              Body。适合做路径访问控制、请求特征拦截和应用侧告警。
             </p>
           </div>
           <button
@@ -262,14 +262,14 @@ onMounted(loadRules)
             @click="openCreateRule"
           >
             <Plus :size="16" />
-            新建 L7 规则
+            新建 HTTP 规则
           </button>
         </div>
       </section>
 
       <section class="grid gap-4 md:grid-cols-3">
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-xs tracking-wider text-slate-500">L7 规则总数</p>
+          <p class="text-xs tracking-wider text-slate-500">HTTP 规则总数</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">
             {{ l7Rules.length }}
           </p>
@@ -416,7 +416,7 @@ onMounted(loadRules)
                   colspan="7"
                   class="px-4 py-6 text-center text-sm text-slate-500"
                 >
-                  当前还没有可显示的 L7 规则。
+                  当前还没有可显示的 HTTP 规则。
                 </td>
               </tr>
             </tbody>
@@ -439,10 +439,10 @@ onMounted(loadRules)
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm tracking-wide text-blue-700">
-              {{ editingId ? '编辑 L7 规则' : '新建 L7 规则' }}
+              {{ editingId ? '编辑 HTTP 规则' : '新建 HTTP 规则' }}
             </p>
             <h3 class="mt-2 text-3xl font-semibold text-stone-900">
-              {{ editingId ? '调整七层检测策略' : '创建新的七层检测策略' }}
+              {{ editingId ? '调整 HTTP 请求策略' : '创建新的 HTTP 请求策略' }}
             </h3>
           </div>
           <button
@@ -460,7 +460,7 @@ onMounted(loadRules)
             <div>
               <p class="text-sm font-medium text-stone-900">快速模板</p>
               <p class="mt-1 text-xs leading-5 text-slate-500">
-                L7 规则匹配的是统一 inspection string，常见内容包括 `GET
+                HTTP 规则匹配的是统一请求字符串，常见内容包括 `GET
                 /path`、`header: value`、`@network.client_ip: 1.2.3.4`
                 和请求体。
               </p>
@@ -567,7 +567,7 @@ onMounted(loadRules)
               class="h-4 w-4 accent-blue-600"
             />
             <span class="text-sm text-stone-800"
-              >保存后立即启用这条 L7 规则</span
+              >保存后立即启用这条 HTTP 规则</span
             >
           </label>
 

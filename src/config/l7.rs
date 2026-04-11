@@ -23,7 +23,11 @@ impl Default for Http2Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct L7Config {
-    pub http_inspection_enabled: bool,
+    #[serde(
+        default = "default_http_entry_enabled",
+        alias = "http_inspection_enabled"
+    )]
+    pub http_entry_enabled: bool,
     pub max_request_size: usize,
     pub http2_config: Http2Config,
     #[serde(default = "default_real_ip_headers")]
@@ -70,6 +74,10 @@ pub fn default_real_ip_headers() -> Vec<String> {
     ]
 }
 
+const fn default_http_entry_enabled() -> bool {
+    true
+}
+
 const fn default_first_byte_timeout_ms() -> u64 {
     2_000
 }
@@ -109,7 +117,7 @@ const fn default_bloom_filter_scale() -> f64 {
 impl Default for L7Config {
     fn default() -> Self {
         Self {
-            http_inspection_enabled: true,
+            http_entry_enabled: default_http_entry_enabled(),
             max_request_size: 8192,
             http2_config: Http2Config::default(),
             real_ip_headers: default_real_ip_headers(),

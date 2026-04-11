@@ -151,19 +151,21 @@ pub(super) async fn run_safeline_auto_sync_loop(
     }
 }
 
-pub(super) async fn run_upstream_healthcheck_loop(context: Arc<WafContext>, upstream_addr: String) {
-    let interval_secs = context
-        .config
-        .l7_config
-        .upstream_healthcheck_interval_secs
-        .max(1);
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(interval_secs));
+pub(super) async fn run_upstream_healthcheck_loop(context: Arc<WafContext>) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
 
     loop {
         interval.tick().await;
+        let config = context.config_snapshot();
+        if !config.l7_config.upstream_healthcheck_enabled {
+            continue;
+        }
+        let Some(upstream_addr) = config.tcp_upstream_addr.clone() else {
+            continue;
+        };
         match probe_upstream_tcp(
             &upstream_addr,
-            context.config.l7_config.upstream_healthcheck_timeout_ms,
+            config.l7_config.upstream_healthcheck_timeout_ms,
         )
         .await
         {

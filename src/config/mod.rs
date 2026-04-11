@@ -49,6 +49,8 @@ pub struct Config {
     pub console_settings: ConsoleSettings,
     #[serde(default)]
     pub integrations: IntegrationsConfig,
+    #[serde(default)]
+    pub admin_api_auth: AdminApiAuthConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +73,16 @@ pub struct ConsoleSettings {
 pub struct IntegrationsConfig {
     #[serde(default)]
     pub safeline: SafeLineConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminApiAuthConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub bearer_token: String,
+    #[serde(default = "default_admin_api_audit_enabled")]
+    pub audit_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -284,6 +296,7 @@ impl Default for Config {
             max_concurrent_tasks: 0,
             console_settings: ConsoleSettings::default(),
             integrations: IntegrationsConfig::default(),
+            admin_api_auth: AdminApiAuthConfig::default(),
         }
         .normalized()
     }
@@ -537,6 +550,9 @@ impl Config {
         );
         self.integrations.safeline.blocklist_ip_group_ids =
             normalize_string_list(&self.integrations.safeline.blocklist_ip_group_ids);
+        self.admin_api_auth.bearer_token = self.admin_api_auth.bearer_token.trim().to_string();
+        self.admin_api_auth.enabled =
+            self.admin_api_auth.enabled || !self.admin_api_auth.bearer_token.is_empty();
 
         self
     }
@@ -575,6 +591,16 @@ impl Default for SafeLineConfig {
             blocklist_sync_path: default_blocklist_sync_path(),
             blocklist_delete_path: default_blocklist_delete_path(),
             blocklist_ip_group_ids: Vec::new(),
+        }
+    }
+}
+
+impl Default for AdminApiAuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bearer_token: String::new(),
+            audit_enabled: default_admin_api_audit_enabled(),
         }
     }
 }
@@ -651,6 +677,10 @@ fn default_blocklist_delete_path() -> String {
 
 const fn default_safeline_auto_sync_interval_secs() -> u64 {
     300
+}
+
+const fn default_admin_api_audit_enabled() -> bool {
+    true
 }
 
 fn normalize_notification_level(value: &str) -> String {
@@ -754,6 +784,21 @@ pub fn apply_env_overrides(mut config: Config) -> Config {
                 value
             );
         }
+    }
+
+    if let Ok(value) = env::var("WAF_ADMIN_API_AUTH_ENABLED") {
+        if let Some(parsed) = parse_bool_env(&value) {
+            config.admin_api_auth.enabled = parsed;
+        } else {
+            log::warn!(
+                "Unsupported WAF_ADMIN_API_AUTH_ENABLED '{}', keeping SQLite value",
+                value
+            );
+        }
+    }
+
+    if let Ok(value) = env::var("WAF_ADMIN_API_TOKEN") {
+        config.admin_api_auth.bearer_token = value.trim().to_string();
     }
 
     config

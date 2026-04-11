@@ -96,7 +96,7 @@ export function useAdminL7() {
       lastUpdated.value = Date.now()
       error.value = ''
     } catch (e) {
-      error.value = e instanceof Error ? e.message : '读取 L7 管理信息失败'
+      error.value = e instanceof Error ? e.message : '读取 HTTP 接入管理信息失败'
     } finally {
       if (showLoader) loading.value = false
       refreshing.value = false
@@ -235,7 +235,7 @@ export function useAdminL7() {
       successMessage.value = response.message
       await refreshAll()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : '保存 L7 配置失败'
+      error.value = e instanceof Error ? e.message : '保存 HTTP 接入配置失败'
     } finally {
       saving.value = false
     }

@@ -52,6 +52,11 @@ pub(super) async fn create_local_site_handler(
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::internal("新建站点后未能重新读取记录"))?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -75,9 +80,14 @@ pub(super) async fn update_local_site_handler(
         .map_err(map_storage_write_error)?;
 
     if updated {
+        state
+            .context
+            .refresh_gateway_runtime_from_storage()
+            .await
+            .map_err(ApiError::internal)?;
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地站点 {} 已更新。重启服务后生效。", id),
+            message: format!("本地站点 {} 已更新，并已立即刷新路由匹配。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id)))
@@ -95,9 +105,14 @@ pub(super) async fn delete_local_site_handler(
         .map_err(ApiError::internal)?;
 
     if deleted {
+        state
+            .context
+            .refresh_gateway_runtime_from_storage()
+            .await
+            .map_err(ApiError::internal)?;
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地站点 {} 已删除。重启服务后生效。", id),
+            message: format!("本地站点 {} 已删除，并已立即刷新路由匹配。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地站点 '{}' 不存在", id)))
@@ -164,6 +179,11 @@ pub(super) async fn create_local_certificate_handler(
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::internal("新建证书后未能重新读取记录"))?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -196,6 +216,11 @@ pub(super) async fn generate_local_certificate_handler(
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::internal("新建证书后未能重新读取记录"))?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -235,9 +260,14 @@ pub(super) async fn update_local_certificate_handler(
                     .map_err(map_storage_write_error)?;
             }
         }
+        state
+            .context
+            .refresh_gateway_runtime_from_storage()
+            .await
+            .map_err(ApiError::internal)?;
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地证书 {} 已更新。重启服务后生效。", id),
+            message: format!("本地证书 {} 已更新，并已立即刷新新连接的证书选择。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))
@@ -255,9 +285,14 @@ pub(super) async fn delete_local_certificate_handler(
         .map_err(ApiError::internal)?;
 
     if deleted {
+        state
+            .context
+            .refresh_gateway_runtime_from_storage()
+            .await
+            .map_err(ApiError::internal)?;
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地证书 {} 已删除。重启服务后生效。", id),
+            message: format!("本地证书 {} 已删除，并已立即刷新新连接的证书选择。", id),
         }))
     } else {
         Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))

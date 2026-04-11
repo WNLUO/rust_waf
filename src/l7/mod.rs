@@ -1,109 +1,51 @@
 use crate::config::L7Config;
-use crate::core::{InspectionLayer, InspectionResult, PacketInfo, WafContext};
-use crate::protocol::UnifiedHttpRequest;
+use crate::core::WafContext;
 use log::{debug, info};
 
-pub struct L7Inspector {
-    config: L7Config,
+#[derive(Debug, Clone)]
+pub struct HttpTrafficProcessor {
+    max_request_size: usize,
+    http2_enabled: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{PacketInfo, Protocol};
-    use crate::protocol::{HttpVersion, UnifiedHttpRequest};
-    use std::net::{IpAddr, Ipv4Addr};
-
-    fn test_packet() -> PacketInfo {
-        PacketInfo {
-            source_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            dest_ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            source_port: 12345,
-            dest_port: 8080,
-            protocol: Protocol::TCP,
-            timestamp: 0,
-        }
-    }
 
     #[test]
-    fn unified_request_is_allowed_when_size_is_within_limit() {
-        let inspector = L7Inspector::new(L7Config::default(), false, false);
-        let mut request =
-            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
-        request.add_header("accept".to_string(), "*/*".to_string());
+    fn processor_tracks_request_limits_from_config() {
+        let mut config = L7Config::default();
+        config.max_request_size = 16_384;
+        config.http2_config.enabled = true;
 
-        let result = inspector.inspect_unified_request(&test_packet(), &request);
-        assert!(
-            !result.blocked,
-            "unexpected block reason: {}",
-            result.reason
-        );
-    }
-
-    #[test]
-    fn oversized_request_is_allowed() {
-        let inspector = L7Inspector::new(L7Config::default(), false, false);
-        let mut request =
-            UnifiedHttpRequest::new(HttpVersion::Http1_1, "POST".to_string(), "/".to_string());
-        request.body = vec![b'a'; L7Config::default().max_request_size + 1];
-
-        let result = inspector.inspect_unified_request(&test_packet(), &request);
-        assert!(
-            !result.blocked,
-            "unexpected block reason: {}",
-            result.reason
-        );
+        let processor = HttpTrafficProcessor::new(&config);
+        assert_eq!(processor.max_request_size(), 16_384);
+        assert!(processor.http2_enabled());
     }
 }
 
-impl L7Inspector {
-    pub fn new(
-        config: L7Config,
-        _bloom_enabled: bool,
-        _bloom_false_positive_verification: bool,
-    ) -> Self {
-        info!("Initializing L7 Inspector");
-        Self { config }
+impl HttpTrafficProcessor {
+    pub fn new(config: &L7Config) -> Self {
+        info!("Initializing HTTP gateway processor");
+        Self {
+            max_request_size: config.max_request_size,
+            http2_enabled: config.http2_config.enabled,
+        }
     }
 
     pub async fn start(&self, _context: &WafContext) -> anyhow::Result<()> {
-        debug!("Starting L7 inspector...");
+        debug!(
+            "HTTP gateway processor ready (max_request_size={}, http2_enabled={})",
+            self.max_request_size, self.http2_enabled
+        );
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn inspect_http_request(&self, _packet: &PacketInfo, payload: &[u8]) -> InspectionResult {
-        if !self.config.http_inspection_enabled {
-            return InspectionResult::allow(InspectionLayer::L7);
-        }
-
-        // Convert payload to string for inspection
-        let binding = String::from_utf8_lossy(payload);
-        if binding.is_empty() {
-            return InspectionResult::allow(InspectionLayer::L7);
-        }
-
-        InspectionResult::allow(InspectionLayer::L7)
+    pub fn max_request_size(&self) -> usize {
+        self.max_request_size
     }
 
-    /// 检查统一HTTP请求（支持多协议版本）
-    ///
-    /// 这个方法接受UnifiedHttpRequest结构，可以处理HTTP/1.1、HTTP/2.0等不同协议版本的请求
-    pub fn inspect_unified_request(
-        &self,
-        _packet: &PacketInfo,
-        request: &UnifiedHttpRequest,
-    ) -> InspectionResult {
-        if !self.config.http_inspection_enabled {
-            return InspectionResult::allow(InspectionLayer::L7);
-        }
-
-        debug!(
-            "Inspecting {} request: {} {}",
-            request.version, request.method, request.uri
-        );
-
-        debug!("{} request passed all checks", request.version);
-        InspectionResult::allow(InspectionLayer::L7)
+    pub fn http2_enabled(&self) -> bool {
+        self.http2_enabled
     }
 }

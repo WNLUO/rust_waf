@@ -10,6 +10,7 @@ export interface SecurityEventItem {
   provider_site_domain: string | null
   action: string
   reason: string
+  details_json: string | null
   source_ip: string
   dest_ip: string
   source_port: number

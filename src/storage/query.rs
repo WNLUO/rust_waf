@@ -105,12 +105,14 @@ pub(super) fn append_security_event_filters<'a>(
     query: &'a SecurityEventQuery,
 ) {
     if let Some(layer) = query.layer.as_deref() {
-        builder.push(" AND layer = ");
+        builder.push(" AND LOWER(layer) = LOWER(");
         builder.push_bind(layer);
+        builder.push(")");
     }
     if let Some(provider) = query.provider.as_deref() {
-        builder.push(" AND provider = ");
+        builder.push(" AND LOWER(provider) = LOWER(");
         builder.push_bind(provider);
+        builder.push(")");
     }
     if let Some(provider_site_id) = query.provider_site_id.as_deref() {
         builder.push(" AND provider_site_id = ");
@@ -124,8 +126,9 @@ pub(super) fn append_security_event_filters<'a>(
         builder.push(" AND action = ");
         builder.push_bind("block");
     } else if let Some(action) = query.action.as_deref() {
-        builder.push(" AND action = ");
+        builder.push(" AND LOWER(action) = LOWER(");
         builder.push_bind(action);
+        builder.push(")");
     }
     if let Some(handled_only) = query.handled_only {
         builder.push(" AND handled = ");

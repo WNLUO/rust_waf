@@ -14,6 +14,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             provider_site_domain TEXT,
             action TEXT NOT NULL,
             reason TEXT NOT NULL,
+            details_json TEXT,
             source_ip TEXT NOT NULL,
             dest_ip TEXT NOT NULL,
             source_port INTEGER NOT NULL,
@@ -284,6 +285,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         "ALTER TABLE security_events ADD COLUMN provider_site_id TEXT",
         "ALTER TABLE security_events ADD COLUMN provider_site_name TEXT",
         "ALTER TABLE security_events ADD COLUMN provider_site_domain TEXT",
+        "ALTER TABLE security_events ADD COLUMN details_json TEXT",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {

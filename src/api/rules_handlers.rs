@@ -242,11 +242,255 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
+            id: "browser-fingerprint-js",
+            title: "浏览器指纹收集 JS",
+            mood: "对抗",
+            summary: "返回一个正常 HTML 页面并执行浏览器指纹采集脚本，用于识别攻击者和沉淀设备画像。",
+            mechanism: "原始内容只保存 JS 代码；系统会自动包装为 HTML 页面，在浏览器端采集 Canvas、WebGL、字体列表和时区等特征。",
+            performance: "中",
+            fallback_path: "/admin/rules",
+            plugin_id: "browser-fingerprint-js-fun",
+            file_name: "browser-fingerprint-js-fun.zip",
+            response_file_path: "browser-fingerprint.html",
+            plugin_name: "Browser Fingerprint JS Fun",
+            plugin_description: "在返回页面中注入浏览器指纹采集脚本的示例动作",
+            template_local_id: "browser_fingerprint_js",
+            template_description: "返回包含浏览器指纹采集脚本的正常 HTML 页面",
+            pattern: "(?i)scanner|probe|bot|headless|webdriver|playwright|selenium|puppeteer",
+            severity: "high",
+            content_type: "text/html; charset=utf-8",
+            status_code: 200,
+            gzip: false,
+            body_source: "inline_text",
+            response_content: r#"(() => {
+  const REPORT_ENDPOINT = '/.well-known/waf/browser-fingerprint-report';
+
+  const collectCanvasFingerprint = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 60;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return 'canvas-unavailable';
+      ctx.textBaseline = 'top';
+      ctx.font = "16px 'Arial'";
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(12, 10, 180, 28);
+      ctx.fillStyle = '#1e293b';
+      ctx.fillText('rust-waf-fingerprint', 14, 14);
+      ctx.strokeStyle = '#0ea5e9';
+      ctx.beginPath();
+      ctx.arc(220, 28, 18, 0, Math.PI * 2);
+      ctx.stroke();
+      return canvas.toDataURL();
+    } catch (error) {
+      return `canvas-error:${error instanceof Error ? error.message : String(error)}`;
+    }
+  };
+
+  const collectWebGlFingerprint = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return { vendor: 'unavailable', renderer: 'unavailable' };
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      return {
+        vendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : 'masked',
+        renderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : 'masked',
+      };
+    } catch (error) {
+      return {
+        vendor: 'error',
+        renderer: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  const collectFonts = async () => {
+    const candidates = [
+      'Arial',
+      'Helvetica',
+      'Times New Roman',
+      'Courier New',
+      'Georgia',
+      'Verdana',
+      'Trebuchet MS',
+      'Tahoma',
+      'Consolas',
+      'Monaco',
+      'PingFang SC',
+      'Microsoft YaHei',
+      'SimSun',
+      'Noto Sans',
+      'Roboto',
+    ];
+    if (!('fonts' in document) || typeof document.fonts?.check !== 'function') {
+      return ['font-api-unavailable'];
+    }
+    const detected = [];
+    for (const font of candidates) {
+      if (document.fonts.check(`16px "${font}"`)) {
+        detected.push(font);
+      }
+    }
+    return detected;
+  };
+
+  const sha256Hex = async (value) => {
+    if (!globalThis.crypto?.subtle) {
+      return '';
+    }
+    const buffer = new TextEncoder().encode(value);
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', buffer);
+    return Array.from(new Uint8Array(digest))
+      .map((item) => item.toString(16).padStart(2, '0'))
+      .join('');
+  };
+
+  const appendPanel = (title, payload) => {
+    const main = document.querySelector('main');
+    if (!main) return;
+    const wrapper = document.createElement('section');
+    wrapper.style.marginTop = '16px';
+    wrapper.style.padding = '16px';
+    wrapper.style.borderRadius = '12px';
+    wrapper.style.background = '#0f172a';
+    wrapper.style.color = '#e2e8f0';
+    wrapper.style.boxShadow = '0 12px 28px rgba(15, 23, 42, 0.22)';
+
+    const heading = document.createElement('div');
+    heading.textContent = title;
+    heading.style.fontSize = '12px';
+    heading.style.letterSpacing = '0.08em';
+    heading.style.textTransform = 'uppercase';
+    heading.style.color = '#93c5fd';
+    heading.style.marginBottom = '10px';
+    wrapper.appendChild(heading);
+
+    const panel = document.createElement('pre');
+    panel.style.margin = '0';
+    panel.style.fontSize = '12px';
+    panel.style.lineHeight = '1.6';
+    panel.style.whiteSpace = 'pre-wrap';
+    panel.style.wordBreak = 'break-all';
+    panel.textContent =
+      typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    wrapper.appendChild(panel);
+    main.appendChild(wrapper);
+  };
+
+  const setMessage = (text, color = '#0f172a') => {
+    const message = document.getElementById('message');
+    if (!message) return;
+    message.textContent = text;
+    message.style.color = color;
+  };
+
+  const fingerprint = {
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+    language: navigator.language || 'unknown',
+    languages: Array.isArray(navigator.languages) ? navigator.languages : [],
+    platform: navigator.platform || 'unknown',
+    userAgent: navigator.userAgent,
+    screen: `${window.screen.width}x${window.screen.height}@${window.devicePixelRatio || 1}`,
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    colorDepth: window.screen.colorDepth || 0,
+    cookieEnabled: !!navigator.cookieEnabled,
+    doNotTrack: navigator.doNotTrack || 'unknown',
+    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    deviceMemory:
+      typeof navigator.deviceMemory === 'number' ? navigator.deviceMemory : null,
+    touchPoints: navigator.maxTouchPoints || 0,
+    webdriver: !!navigator.webdriver,
+    url: window.location.href,
+    path: `${window.location.pathname}${window.location.search}`,
+    referrer: document.referrer || '',
+    title: document.title || '',
+    canvas: collectCanvasFingerprint(),
+    webgl: collectWebGlFingerprint(),
+    fonts: [],
+    collectedAt: new Date().toISOString(),
+  };
+
+  const reportFingerprint = async () => {
+    const identitySeed = JSON.stringify({
+      timezone: fingerprint.timezone,
+      language: fingerprint.language,
+      platform: fingerprint.platform,
+      userAgent: fingerprint.userAgent,
+      screen: fingerprint.screen,
+      viewport: fingerprint.viewport,
+      canvas: fingerprint.canvas,
+      webgl: fingerprint.webgl,
+      fonts: fingerprint.fonts,
+      webdriver: fingerprint.webdriver,
+    });
+    const computedFingerprintId = await sha256Hex(identitySeed);
+    if (computedFingerprintId) {
+      fingerprint.fingerprintId = computedFingerprintId.slice(0, 24);
+    }
+
+    const serialized = JSON.stringify(fingerprint);
+    const response = await fetch(REPORT_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      credentials: 'omit',
+      keepalive: serialized.length < 60_000,
+      body: serialized,
+    });
+    const responseText = await response.text();
+    let responsePayload = responseText;
+    try {
+      responsePayload = JSON.parse(responseText);
+    } catch (_) {
+      // keep raw response text
+    }
+    return {
+      ok: response.ok,
+      status: response.status,
+      payload: responsePayload,
+    };
+  };
+
+  collectFonts()
+    .then(async (fonts) => {
+      fingerprint.fonts = fonts;
+      console.log('[rust-waf:fingerprint]', fingerprint);
+
+      const reportResult = await reportFingerprint();
+      appendPanel('浏览器指纹', fingerprint);
+      appendPanel('上报响应', reportResult.payload);
+
+      if (reportResult.ok) {
+        setMessage('浏览器指纹采集并回传成功，事件已写入后端事件库。', '#0369a1');
+      } else {
+        setMessage(
+          `浏览器指纹已采集，但回传失败（HTTP ${reportResult.status}）。请查看下方返回内容。`,
+          '#b91c1c',
+        );
+      }
+    })
+    .catch((error) => {
+      console.error('[rust-waf:fingerprint:error]', error);
+      setMessage(
+        `浏览器指纹采集或回传失败：${error instanceof Error ? error.message : String(error)}`,
+        '#b91c1c',
+      );
+      appendPanel('错误详情', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+})();"#,
+            requires_upload: false,
+        },
+        BuiltinActionIdeaPreset {
             id: "fake-sql-echo",
             title: "SQL 假回显",
             mood: "诱导",
             summary: "对 SQL 注入试探返回看起来像数据库报错或查询结果的页面，让攻击者误以为注入已经生效。",
-            mechanism: "当前先用静态 respond 模拟 SQL 成功回显。雷池日志可记录来源 IP 与攻击类型，但运行时替换响应还不能按命中类型动态切换正文。",
+            mechanism: "当前先用静态 respond 模拟 SQL 成功回显。",
             performance: "中",
             fallback_path: "/admin/rules",
             plugin_id: "fake-sql-echo-fun",
@@ -270,7 +514,7 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             title: "XSS 假回显",
             mood: "诱导",
             summary: "对 XSS payload 返回看起来像成功反射的页面，让攻击者以为脚本已经进入页面并被回显。",
-            mechanism: "当前先用静态 respond 模拟 XSS 反射成功。雷池日志可记录来源 IP 与攻击类型，但运行时替换响应还不能按命中类型动态切换正文。",
+            mechanism: "当前先用静态 respond 模拟 XSS 反射成功。",
             performance: "中",
             fallback_path: "/admin/rules",
             plugin_id: "fake-xss-echo-fun",
@@ -315,7 +559,7 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
         },
         BuiltinActionIdeaPreset {
             id: "smart-tarpit",
-            title: "智能延迟（Tarpit）",
+            title: "智能延迟",
             mood: "消耗",
             summary: "对可疑请求极慢响应，默认每秒只发送 1 字节，把扫描器拖住 30 秒以上。",
             mechanism: "通过内部 tarpit 头触发慢速写出。当前仅对 HTTP/1 与 HTTP/3 生效。",

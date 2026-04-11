@@ -58,9 +58,11 @@ export function useFormatters() {
     return `${days} 天`
   }
 
-  const severityLabel = (severity: string) => severityMap[severity] || severity
-  const actionLabel = (action: string) => actionMap[action] || action
-  const layerLabel = (layer: string) => layerMap[layer] || layer
+  const severityLabel = (severity: string) =>
+    severityMap[severity.toLowerCase()] || severity
+  const actionLabel = (action: string) =>
+    actionMap[action.toLowerCase()] || action
+  const layerLabel = (layer: string) => layerMap[layer.toLowerCase()] || layer
 
   return {
     formatBytes,

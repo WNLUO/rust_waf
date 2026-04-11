@@ -3,6 +3,7 @@ use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
 use rand::Rng;
+use sha2::{Digest, Sha256};
 use std::io::Read;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
@@ -43,6 +44,9 @@ use crate::protocol::{
 use crate::storage::{BlockedIpRecord, SecurityEventRecord};
 
 static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+pub(crate) const BROWSER_FINGERPRINT_REPORT_PATH: &str =
+    "/.well-known/waf/browser-fingerprint-report";
+const MAX_BROWSER_FINGERPRINT_DETAILS_BYTES: usize = 128 * 1024;
 
 pub struct WafEngine {
     context: Arc<WafContext>,
@@ -694,6 +698,23 @@ async fn handle_http3_request(
     let matched_site = resolve_gateway_site(context.as_ref(), &unified);
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);
+    }
+
+    if let Some(response) = try_handle_browser_fingerprint_report(
+        context.as_ref(),
+        &packet,
+        &unified,
+        matched_site.as_ref(),
+    ) {
+        send_http3_response(
+            &mut stream,
+            response.status_code,
+            &response.headers,
+            response.body,
+            None,
+        )
+        .await?;
+        return Ok(());
     }
 
     let request_dump = unified.to_inspection_string();
@@ -1486,6 +1507,24 @@ async fn handle_http1_connection(
         return Ok(());
     }
 
+    if let Some(response) = try_handle_browser_fingerprint_report(
+        context.as_ref(),
+        packet,
+        &request,
+        matched_site.as_ref(),
+    ) {
+        http1_handler
+            .write_response_with_headers(
+                &mut stream,
+                response.status_code,
+                http_status_text(response.status_code),
+                &response.headers,
+                &response.body,
+            )
+            .await?;
+        return Ok(());
+    }
+
     debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
 
     let request_dump = request.to_inspection_string();
@@ -1712,6 +1751,20 @@ async fn handle_http2_connection(
                     if let Some(site) = matched_site.as_ref() {
                         apply_gateway_site_metadata(&mut request, site);
                     }
+
+                    if let Some(response) = try_handle_browser_fingerprint_report(
+                        context.as_ref(),
+                        &packet,
+                        &request,
+                        matched_site.as_ref(),
+                    ) {
+                        return Ok(Http2Response {
+                            status_code: response.status_code,
+                            headers: response.headers,
+                            body: response.body,
+                        });
+                    }
+
                     debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
 
                     let request_dump = request.to_inspection_string();
@@ -1878,6 +1931,250 @@ async fn handle_http2_connection(
     Ok(())
 }
 
+fn try_handle_browser_fingerprint_report(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    matched_site: Option<&GatewaySiteRuntime>,
+) -> Option<CustomHttpResponse> {
+    if request_path(&request.uri) != BROWSER_FINGERPRINT_REPORT_PATH {
+        return None;
+    }
+
+    Some(handle_browser_fingerprint_report(
+        context,
+        packet,
+        request,
+        matched_site,
+    ))
+}
+
+fn handle_browser_fingerprint_report(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    matched_site: Option<&GatewaySiteRuntime>,
+) -> CustomHttpResponse {
+    if !request.method.eq_ignore_ascii_case("POST") {
+        return json_http_response(
+            405,
+            serde_json::json!({
+                "success": false,
+                "message": "浏览器指纹上报只接受 POST 请求",
+            }),
+            &[("allow", "POST")],
+        );
+    }
+
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return json_http_response(
+            503,
+            serde_json::json!({
+                "success": false,
+                "message": "SQLite 事件存储未启用，无法落库浏览器指纹",
+            }),
+            &[],
+        );
+    };
+
+    if request.body.is_empty() {
+        return json_http_response(
+            400,
+            serde_json::json!({
+                "success": false,
+                "message": "浏览器指纹上报体不能为空",
+            }),
+            &[],
+        );
+    }
+
+    let mut payload = match serde_json::from_slice::<serde_json::Value>(&request.body) {
+        Ok(value) => value,
+        Err(err) => {
+            return json_http_response(
+                400,
+                serde_json::json!({
+                    "success": false,
+                    "message": format!("浏览器指纹上报不是合法 JSON: {}", err),
+                }),
+                &[],
+            );
+        }
+    };
+
+    let provided_provider_event_id = payload
+        .get("fingerprintId")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let derived_provider_event_id = derive_browser_fingerprint_id(&payload);
+
+    let Some(payload_object) = payload.as_object_mut() else {
+        return json_http_response(
+            400,
+            serde_json::json!({
+                "success": false,
+                "message": "浏览器指纹上报必须是 JSON 对象",
+            }),
+            &[],
+        );
+    };
+
+    let source_ip = request
+        .client_ip
+        .clone()
+        .unwrap_or_else(|| packet.source_ip.to_string());
+    let provider_event_id = provided_provider_event_id.unwrap_or(derived_provider_event_id);
+
+    payload_object.insert(
+        "fingerprintId".to_string(),
+        serde_json::Value::String(provider_event_id.clone()),
+    );
+    payload_object.insert(
+        "server".to_string(),
+        serde_json::json!({
+            "received_at": unix_timestamp(),
+            "client_ip": source_ip.clone(),
+            "request_id": request.get_header("x-request-id").cloned(),
+            "host": request_hostname(request),
+            "uri": request.uri,
+            "method": request.method,
+            "http_version": request.version.to_string(),
+            "listener_port": request.get_metadata("listener_port").cloned(),
+            "site_id": matched_site.map(|site| site.id),
+            "site_name": matched_site.map(|site| site.name.clone()),
+            "site_primary_hostname": matched_site.map(|site| site.primary_hostname.clone()),
+        }),
+    );
+
+    let details_json = match serde_json::to_string_pretty(&payload) {
+        Ok(serialized) => serialized,
+        Err(err) => {
+            return json_http_response(
+                500,
+                serde_json::json!({
+                    "success": false,
+                    "message": format!("浏览器指纹序列化失败: {}", err),
+                }),
+                &[],
+            );
+        }
+    };
+
+    if details_json.len() > MAX_BROWSER_FINGERPRINT_DETAILS_BYTES {
+        return json_http_response(
+            413,
+            serde_json::json!({
+                "success": false,
+                "message": format!(
+                    "浏览器指纹详情过大，最大允许 {} 字节",
+                    MAX_BROWSER_FINGERPRINT_DETAILS_BYTES
+                ),
+            }),
+            &[],
+        );
+    }
+
+    let mut event = SecurityEventRecord::now(
+        "L7",
+        "respond",
+        build_browser_fingerprint_reason(&provider_event_id, &payload),
+        source_ip,
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    );
+    event.provider = Some("browser_fingerprint".to_string());
+    event.provider_event_id = Some(provider_event_id.clone());
+    event.provider_site_id = matched_site.map(|site| site.id.to_string());
+    event.provider_site_name = matched_site.map(|site| site.name.clone());
+    event.provider_site_domain =
+        request_hostname(request).or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
+    event.http_method = Some(request.method.clone());
+    event.uri = Some(request.uri.clone());
+    event.http_version = Some(request.version.to_string());
+    event.details_json = Some(details_json);
+    store.enqueue_security_event(event);
+
+    json_http_response(
+        202,
+        serde_json::json!({
+            "success": true,
+            "message": "浏览器指纹已接收并写入事件库",
+            "fingerprint_id": provider_event_id,
+        }),
+        &[],
+    )
+}
+
+fn build_browser_fingerprint_reason(
+    provider_event_id: &str,
+    payload: &serde_json::Value,
+) -> String {
+    let timezone = payload
+        .get("timezone")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let platform = payload
+        .get("platform")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let fonts = payload
+        .get("fonts")
+        .and_then(|value| value.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+    format!(
+        "浏览器指纹回传 fp={} tz={} platform={} fonts={}",
+        provider_event_id, timezone, platform, fonts
+    )
+}
+
+fn derive_browser_fingerprint_id(payload: &serde_json::Value) -> String {
+    let serialized = serde_json::to_vec(payload).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(&serialized);
+    format!("{:x}", hasher.finalize())
+        .chars()
+        .take(24)
+        .collect()
+}
+
+fn json_http_response(
+    status_code: u16,
+    body: serde_json::Value,
+    extra_headers: &[(&str, &str)],
+) -> CustomHttpResponse {
+    let mut headers = vec![
+        (
+            "content-type".to_string(),
+            "application/json; charset=utf-8".to_string(),
+        ),
+        ("cache-control".to_string(), "no-store".to_string()),
+    ];
+    headers.extend(
+        extra_headers
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string())),
+    );
+
+    CustomHttpResponse {
+        status_code,
+        headers,
+        body: serde_json::to_vec(&body).unwrap_or_else(|_| {
+            br#"{"success":false,"message":"response serialization failed"}"#.to_vec()
+        }),
+        tarpit: None,
+        random_status: None,
+    }
+}
+
+fn request_path(uri: &str) -> &str {
+    uri.split('?').next().unwrap_or(uri)
+}
+
 fn inspect_application_layers(
     context: &WafContext,
     _packet: &PacketInfo,
@@ -1896,6 +2193,7 @@ fn http_status_text(status_code: u16) -> &'static str {
     match status_code {
         200 => "OK",
         201 => "Created",
+        202 => "Accepted",
         204 => "No Content",
         301 => "Moved Permanently",
         302 => "Found",
@@ -2417,6 +2715,7 @@ mod tests {
         Severity,
     };
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::net::UdpSocket;
 
     fn test_config(rules: Vec<Rule>) -> Config {
@@ -2460,6 +2759,18 @@ mod tests {
             protocol: Protocol::UDP,
             timestamp: 0,
         }
+    }
+
+    fn unique_test_db_path(name: &str) -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let suffix = rand::random::<u64>();
+        std::env::temp_dir()
+            .join(format!("waf_engine_{}_{}_{}.db", name, nanos, suffix))
+            .display()
+            .to_string()
     }
 
     #[test]
@@ -2598,6 +2909,87 @@ mod tests {
         assert_eq!(result.action, InspectionAction::Allow);
         assert!(!result.should_persist_event());
         assert!(result.reason.contains("l7-allow-health"));
+    }
+
+    #[tokio::test]
+    async fn browser_fingerprint_report_is_persisted_to_event_store() {
+        let mut config = test_config(vec![]);
+        config.sqlite_enabled = true;
+        config.sqlite_auto_migrate = true;
+        config.sqlite_path = unique_test_db_path("browser_fingerprint");
+        let context = WafContext::new(config).await.unwrap();
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 77)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20)),
+            source_port: 45_678,
+            dest_port: 443,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "POST".to_string(),
+            BROWSER_FINGERPRINT_REPORT_PATH.to_string(),
+        );
+        request.set_client_ip("203.0.113.77".to_string());
+        request.add_header("host".to_string(), "portal.example.com".to_string());
+        request.add_metadata("listener_port".to_string(), "443".to_string());
+        request.body = br#"{"fingerprintId":"fp-test-123","timezone":"Asia/Shanghai","platform":"MacIntel","fonts":["Arial","Monaco"],"canvas":"data:image/png;base64,abc"}"#.to_vec();
+        prepare_request_for_proxy(&mut request);
+
+        let response =
+            try_handle_browser_fingerprint_report(&context, &packet, &request, None).unwrap();
+        assert_eq!(response.status_code, 202);
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+
+        let events = context
+            .sqlite_store
+            .as_ref()
+            .unwrap()
+            .list_security_events(&crate::storage::SecurityEventQuery::default())
+            .await
+            .unwrap();
+        assert_eq!(events.total, 1);
+        assert_eq!(events.items[0].provider.as_deref(), Some("browser_fingerprint"));
+        assert_eq!(events.items[0].provider_event_id.as_deref(), Some("fp-test-123"));
+        assert_eq!(
+            events.items[0].uri.as_deref(),
+            Some(BROWSER_FINGERPRINT_REPORT_PATH)
+        );
+        assert!(
+            events.items[0]
+                .details_json
+                .as_deref()
+                .unwrap_or_default()
+                .contains("\"server\"")
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_fingerprint_report_rejects_non_post_request() {
+        let context = WafContext::new(test_config(vec![])).await.unwrap();
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 77)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20)),
+            source_port: 45_678,
+            dest_port: 443,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+        let request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            BROWSER_FINGERPRINT_REPORT_PATH.to_string(),
+        );
+
+        let response =
+            try_handle_browser_fingerprint_report(&context, &packet, &request, None).unwrap();
+        assert_eq!(response.status_code, 405);
+        assert!(response.headers.iter().any(|(key, value)| {
+            key.eq_ignore_ascii_case("allow") && value.eq_ignore_ascii_case("POST")
+        }));
     }
 
     #[tokio::test]

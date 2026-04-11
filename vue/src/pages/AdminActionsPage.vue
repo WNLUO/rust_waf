@@ -73,6 +73,12 @@ const ideaTemplateMatchers: Record<
         item.response_template.content_type.includes('text/html') ||
         item.name.includes('JS'),
     ) ?? null,
+  'browser-fingerprint-js': (templates) =>
+    templates.find(
+      (item) =>
+        item.response_template.content_type.includes('text/html') ||
+        item.name.includes('JS'),
+    ) ?? null,
   'gzip-response': () => null,
   'maintenance-page': (templates) =>
     templates.find(
@@ -187,7 +193,7 @@ const copyToClipboard = async (value: string) => {
 }
 
 const isInlineJsIdea = (idea: ActionIdeaPreset | null | undefined) =>
-  idea?.id === 'inline-js'
+  idea?.id === 'inline-js' || idea?.id === 'browser-fingerprint-js'
 
 const isRedirectIdea = (idea: ActionIdeaPreset | null | undefined) =>
   idea?.id === 'redirect-302'

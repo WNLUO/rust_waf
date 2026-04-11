@@ -664,6 +664,7 @@ impl From<SafeLineSecurityEventSummary> for SecurityEventRecord {
             provider_site_domain: value.provider_site_domain,
             action: value.action,
             reason: value.reason,
+            details_json: None,
             source_ip: value.source_ip,
             dest_ip: value.dest_ip,
             source_port: value.source_port,

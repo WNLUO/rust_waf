@@ -1069,6 +1069,7 @@ impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
             provider_site_domain: event.provider_site_domain,
             action: event.action,
             reason: event.reason,
+            details_json: event.details_json,
             source_ip: event.source_ip,
             dest_ip: event.dest_ip,
             source_port: event.source_port,

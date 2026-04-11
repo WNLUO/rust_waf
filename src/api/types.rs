@@ -747,6 +747,7 @@ pub struct SecurityEventResponse {
     pub(crate) provider_site_domain: Option<String>,
     pub(crate) action: String,
     pub(crate) reason: String,
+    pub(crate) details_json: Option<String>,
     pub(crate) source_ip: String,
     pub(crate) dest_ip: String,
     pub(crate) source_port: i64,

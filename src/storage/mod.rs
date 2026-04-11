@@ -119,11 +119,11 @@ impl SqliteStore {
                 r#"
                 INSERT INTO security_events (
                     layer, provider, provider_event_id, provider_site_id, provider_site_name,
-                    provider_site_domain, action, reason, source_ip, dest_ip,
+                    provider_site_domain, action, reason, details_json, source_ip, dest_ip,
                     source_port, dest_port, protocol, http_method, uri,
                     http_version, created_at, handled, handled_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&event.layer)
@@ -134,6 +134,7 @@ impl SqliteStore {
             .bind(&event.provider_site_domain)
             .bind(&event.action)
             .bind(&event.reason)
+            .bind(&event.details_json)
             .bind(&event.source_ip)
             .bind(&event.dest_ip)
             .bind(event.source_port)
@@ -1303,7 +1304,7 @@ impl SqliteStore {
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
             SELECT id, layer, provider, provider_event_id, provider_site_id, provider_site_name,
-                   provider_site_domain, action, reason, source_ip, dest_ip, source_port,
+                   provider_site_domain, action, reason, details_json, source_ip, dest_ip, source_port,
                    dest_port, protocol, http_method, uri, http_version,
                    created_at, handled, handled_at
             FROM security_events
@@ -1612,6 +1613,8 @@ fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
     hasher.update([0]);
     hasher.update(event.reason.as_bytes());
     hasher.update([0]);
+    hasher.update(event.details_json.as_deref().unwrap_or_default().as_bytes());
+    hasher.update([0]);
     hasher.update(event.source_ip.as_bytes());
     hasher.update([0]);
     hasher.update(event.dest_ip.as_bytes());
@@ -1685,11 +1688,11 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
                     r#"
                     INSERT INTO security_events (
                         layer, provider, provider_event_id, provider_site_id, provider_site_name,
-                        provider_site_domain, action, reason, source_ip, dest_ip,
+                        provider_site_domain, action, reason, details_json, source_ip, dest_ip,
                         source_port, dest_port, protocol, http_method, uri,
                         http_version, created_at, handled, handled_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(event.layer)
@@ -1700,6 +1703,7 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
                 .bind(event.provider_site_domain)
                 .bind(event.action)
                 .bind(event.reason)
+                .bind(event.details_json)
                 .bind(event.source_ip)
                 .bind(event.dest_ip)
                 .bind(event.source_port)
@@ -1871,6 +1875,7 @@ mod tests {
             provider_site_domain: None,
             action: "block".to_string(),
             reason: "test event".to_string(),
+            details_json: None,
             source_ip: "127.0.0.1".to_string(),
             dest_ip: "127.0.0.1".to_string(),
             source_port: 12345,
@@ -2088,6 +2093,7 @@ mod tests {
             provider_site_domain: None,
             action: "block".to_string(),
             reason: "sql injection".to_string(),
+            details_json: None,
             source_ip: "10.0.0.1".to_string(),
             dest_ip: "10.0.0.2".to_string(),
             source_port: 50000,
@@ -2109,6 +2115,7 @@ mod tests {
             provider_site_domain: None,
             action: "alert".to_string(),
             reason: "port scan".to_string(),
+            details_json: None,
             source_ip: "10.0.0.3".to_string(),
             dest_ip: "10.0.0.2".to_string(),
             source_port: 40000,
@@ -2638,6 +2645,7 @@ mod tests {
             provider_site_domain: Some("portal.example.com".to_string()),
             action: "block".to_string(),
             reason: "safeline:sqli".to_string(),
+            details_json: None,
             source_ip: "203.0.113.10".to_string(),
             dest_ip: "10.0.0.10".to_string(),
             source_port: 44321,

@@ -243,6 +243,7 @@ const siteOptions = computed(() => {
           class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
         >
           <option value="all">全部来源系统</option>
+          <option value="browser_fingerprint">浏览器指纹</option>
           <option value="safeline">雷池</option>
         </select>
         <select
@@ -335,7 +336,7 @@ const siteOptions = computed(() => {
                     >
                       <StatusBadge
                         :text="layerLabel(event.layer)"
-                        :type="event.layer === 'l7' ? 'info' : 'warning'"
+                        :type="event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'"
                       />
                       <StatusBadge
                         :text="eventActionLabel(event.action)"
@@ -370,19 +371,29 @@ const siteOptions = computed(() => {
                     </div>
                   </td>
                   <td class="px-4 py-3">
-                    <div class="min-w-[300px]">
-                      <p
-                        class="truncate font-medium leading-6 text-stone-900"
-                        :title="eventReasonLabel(event)"
+                    <div class="flex min-w-[300px] items-start gap-2">
+                      <div class="min-w-0 flex-1">
+                        <p
+                          class="truncate font-medium leading-6 text-stone-900"
+                          :title="eventReasonLabel(event)"
+                        >
+                          {{ eventReasonLabel(event) }}
+                        </p>
+                        <p
+                          v-if="event.provider_event_id"
+                          class="mt-1 font-mono text-xs text-slate-500"
+                        >
+                          Event ID: {{ event.provider_event_id }}
+                        </p>
+                      </div>
+                      <button
+                        v-if="event.details_json"
+                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/85 text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                        title="查看事件详情"
+                        @click="openPreview('事件详情', event.details_json)"
                       >
-                        {{ eventReasonLabel(event) }}
-                      </p>
-                      <p
-                        v-if="event.provider_event_id"
-                        class="mt-1 font-mono text-xs text-slate-500"
-                      >
-                        Event ID: {{ event.provider_event_id }}
-                      </p>
+                        <Eye :size="13" />
+                      </button>
                     </div>
                   </td>
                   <td class="px-4 py-3">

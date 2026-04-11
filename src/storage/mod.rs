@@ -118,15 +118,17 @@ impl SqliteStore {
             sqlx::query(
                 r#"
                 INSERT INTO security_events (
-                    layer, provider, provider_site_id, provider_site_name, provider_site_domain,
-                    action, reason, source_ip, dest_ip, source_port, dest_port,
-                    protocol, http_method, uri, http_version, created_at, handled, handled_at
+                    layer, provider, provider_event_id, provider_site_id, provider_site_name,
+                    provider_site_domain, action, reason, source_ip, dest_ip,
+                    source_port, dest_port, protocol, http_method, uri,
+                    http_version, created_at, handled, handled_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 "#,
             )
             .bind(&event.layer)
             .bind(&event.provider)
+            .bind(&event.provider_event_id)
             .bind(&event.provider_site_id)
             .bind(&event.provider_site_name)
             .bind(&event.provider_site_domain)
@@ -1236,9 +1238,10 @@ impl SqliteStore {
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
-            SELECT id, layer, provider, provider_site_id, provider_site_name, provider_site_domain,
-                   action, reason, source_ip, dest_ip, source_port, dest_port,
-                   protocol, http_method, uri, http_version, created_at, handled, handled_at
+            SELECT id, layer, provider, provider_event_id, provider_site_id, provider_site_name,
+                   provider_site_domain, action, reason, source_ip, dest_ip, source_port,
+                   dest_port, protocol, http_method, uri, http_version,
+                   created_at, handled, handled_at
             FROM security_events
             WHERE 1=1
             "#,
@@ -1526,6 +1529,14 @@ fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
     hasher.update([0]);
     hasher.update(
         event
+            .provider_event_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hasher.update([0]);
+    hasher.update(
+        event
             .provider_site_id
             .as_deref()
             .unwrap_or_default()
@@ -1608,15 +1619,17 @@ async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageComman
                 sqlx::query(
                     r#"
                     INSERT INTO security_events (
-                        layer, provider, provider_site_id, provider_site_name, provider_site_domain,
-                        action, reason, source_ip, dest_ip, source_port, dest_port,
-                        protocol, http_method, uri, http_version, created_at, handled, handled_at
+                        layer, provider, provider_event_id, provider_site_id, provider_site_name,
+                        provider_site_domain, action, reason, source_ip, dest_ip,
+                        source_port, dest_port, protocol, http_method, uri,
+                        http_version, created_at, handled, handled_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     "#,
                 )
                 .bind(event.layer)
                 .bind(event.provider)
+                .bind(event.provider_event_id)
                 .bind(event.provider_site_id)
                 .bind(event.provider_site_name)
                 .bind(event.provider_site_domain)
@@ -1787,6 +1800,7 @@ mod tests {
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L7".to_string(),
             provider: None,
+            provider_event_id: Some("evt-query-1".to_string()),
             provider_site_id: None,
             provider_site_name: None,
             provider_site_domain: None,
@@ -2003,6 +2017,7 @@ mod tests {
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L7".to_string(),
             provider: None,
+            provider_event_id: Some("evt-query-1".to_string()),
             provider_site_id: None,
             provider_site_name: None,
             provider_site_domain: None,
@@ -2023,6 +2038,7 @@ mod tests {
         store.enqueue_security_event(SecurityEventRecord {
             layer: "L4".to_string(),
             provider: None,
+            provider_event_id: None,
             provider_site_id: None,
             provider_site_name: None,
             provider_site_domain: None,
@@ -2064,6 +2080,7 @@ mod tests {
             .unwrap();
         assert_eq!(l7_events.total, 1);
         assert_eq!(l7_events.items[0].reason, "sql injection");
+        assert_eq!(l7_events.items[0].provider_event_id.as_deref(), Some("evt-query-1"));
 
         let blocked_only_events = store
             .list_security_events(&SecurityEventQuery {
@@ -2545,6 +2562,7 @@ mod tests {
         let event = SecurityEventRecord {
             layer: "safeline".to_string(),
             provider: Some("safeline".to_string()),
+            provider_event_id: Some("event-1".to_string()),
             provider_site_id: Some("site-1".to_string()),
             provider_site_name: Some("主站".to_string()),
             provider_site_domain: Some("portal.example.com".to_string()),
@@ -2576,6 +2594,13 @@ mod tests {
             .unwrap();
         assert_eq!(second.imported, 0);
         assert_eq!(second.skipped, 1);
+
+        let stored = store
+            .list_security_events(&SecurityEventQuery::default())
+            .await
+            .unwrap();
+        assert_eq!(stored.total, 1);
+        assert_eq!(stored.items[0].provider_event_id.as_deref(), Some("event-1"));
 
         let events = store
             .list_security_events(&SecurityEventQuery::default())

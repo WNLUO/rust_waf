@@ -1,12 +1,14 @@
 use anyhow::Result;
+use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
+use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 use tokio_rustls::TlsAcceptor;
@@ -23,10 +25,15 @@ use h3_quinn::Connection as H3QuinnConnection;
 use quinn::Incoming as QuinnIncoming;
 
 use super::WafContext;
-use crate::config::l7::UpstreamFailureMode;
+use crate::config::l7::{
+    SafeLineInterceptAction, SafeLineInterceptConfig, SafeLineInterceptMatchMode,
+    UpstreamFailureMode,
+};
 use crate::config::{Config, RuntimeProfile};
 use crate::core::gateway::{normalize_hostname, GatewaySiteRuntime};
-use crate::core::{InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol};
+use crate::core::{
+    CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
+};
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{
     Http1Handler, Http2Handler, Http2Response, Http3Handler, HttpVersion, ProtocolDetector,
@@ -966,6 +973,7 @@ async fn forward_udp_payload(
     Ok(())
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 async fn forward_http1_request<W>(
     client_stream: &mut W,
     context: &WafContext,
@@ -978,43 +986,39 @@ async fn forward_http1_request<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    let mut upstream_stream = tokio::time::timeout(
-        std::time::Duration::from_millis(connect_timeout_ms),
-        TcpStream::connect(upstream_addr),
+    let response = proxy_http_request(
+        context,
+        request,
+        upstream_addr,
+        connect_timeout_ms,
+        write_timeout_ms,
+        read_timeout_ms,
     )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-    let request_bytes = request.to_http1_bytes();
-
-    tokio::time::timeout(
-        std::time::Duration::from_millis(write_timeout_ms),
-        upstream_stream.write_all(&request_bytes),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
-    tokio::time::timeout(
-        std::time::Duration::from_millis(write_timeout_ms),
-        upstream_stream.shutdown(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream shutdown timed out"))??;
-
-    let copied = tokio::time::timeout(
-        std::time::Duration::from_millis(read_timeout_ms),
-        io::copy(&mut upstream_stream, client_stream),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream response relay timed out"))??;
-    client_stream.flush().await?;
-    context.set_upstream_health(true, None);
-    Ok(copied)
+    .await?;
+    let approx_bytes = response.body.len() as u64;
+    write_http1_upstream_response(client_stream, &response).await?;
+    Ok(approx_bytes)
 }
 
 #[derive(Debug, Clone)]
 struct UpstreamHttpResponse {
     status_code: u16,
+    status_text: Option<String>,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SafeLineInterceptMatch {
+    event_id: Option<String>,
+    evidence: &'static str,
+}
+
+#[derive(Debug, Clone)]
+enum UpstreamResponseDisposition {
+    Forward(UpstreamHttpResponse),
+    Custom(CustomHttpResponse),
+    Drop,
 }
 
 async fn proxy_http_request(
@@ -1079,6 +1083,11 @@ fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
         .next()
         .ok_or_else(|| anyhow::anyhow!("Invalid upstream HTTP/1 response: missing status code"))?
         .parse::<u16>()?;
+    let status_text = status_parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
 
     let mut headers = Vec::new();
     let mut chunked = false;
@@ -1107,9 +1116,223 @@ fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
 
     Ok(UpstreamHttpResponse {
         status_code,
+        status_text,
         headers,
         body,
     })
+}
+
+async fn write_http1_upstream_response<W>(
+    client_stream: &mut W,
+    response: &UpstreamHttpResponse,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    Http1Handler::new()
+        .write_response_with_headers(
+            client_stream,
+            response.status_code,
+            response
+                .status_text
+                .as_deref()
+                .unwrap_or(http_status_text(response.status_code)),
+            &response.headers,
+            &response.body,
+        )
+        .await?;
+    Ok(())
+}
+
+fn apply_safeline_upstream_action(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    matched_site: Option<&GatewaySiteRuntime>,
+    intercept_config: &SafeLineInterceptConfig,
+    response: UpstreamHttpResponse,
+) -> UpstreamResponseDisposition {
+    if !intercept_config.enabled {
+        return UpstreamResponseDisposition::Forward(response);
+    }
+
+    let Some(matched) =
+        detect_safeline_block_response(
+            &response,
+            intercept_config.max_body_bytes,
+            intercept_config.match_mode,
+        )
+    else {
+        return UpstreamResponseDisposition::Forward(response);
+    };
+    let response_status = response.status_code;
+
+    let (local_action, disposition) = match intercept_config.action {
+        SafeLineInterceptAction::Pass => (
+            "pass",
+            UpstreamResponseDisposition::Forward(response),
+        ),
+        SafeLineInterceptAction::Replace => match crate::rules::build_custom_response(
+            &intercept_config.response_template,
+        ) {
+            Ok(custom) => ("replace", UpstreamResponseDisposition::Custom(custom)),
+            Err(err) => {
+                warn!(
+                    "Failed to build SafeLine replacement response, falling back to upstream response: {}",
+                    err
+                );
+                ("pass", UpstreamResponseDisposition::Forward(response))
+            }
+        },
+        SafeLineInterceptAction::Drop => ("drop", UpstreamResponseDisposition::Drop),
+        SafeLineInterceptAction::ReplaceAndBlockIp => {
+            match crate::rules::build_custom_response(&intercept_config.response_template) {
+                Ok(custom) => {
+                    persist_safeline_intercept_blocked_ip(
+                        context,
+                        packet,
+                        request,
+                        intercept_config.block_duration_secs,
+                        matched.event_id.as_deref(),
+                    );
+                    (
+                        "replace_and_block_ip",
+                        UpstreamResponseDisposition::Custom(custom),
+                    )
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to build SafeLine replacement response for replace_and_block_ip, falling back to upstream response: {}",
+                        err
+                    );
+                    ("pass", UpstreamResponseDisposition::Forward(response))
+                }
+            }
+        }
+    };
+
+    if let Some(metrics) = context.metrics.as_ref() {
+        metrics.record_block(InspectionLayer::L7);
+    }
+    persist_safeline_intercept_event(
+        context,
+        packet,
+        request,
+        matched_site,
+        &matched,
+        response_status,
+        local_action,
+    );
+
+    disposition
+}
+
+fn detect_safeline_block_response(
+    response: &UpstreamHttpResponse,
+    max_body_bytes: usize,
+    match_mode: SafeLineInterceptMatchMode,
+) -> Option<SafeLineInterceptMatch> {
+    let body = decode_response_body_for_matching(response, max_body_bytes)?;
+    let has_signature = body
+        .to_ascii_lowercase()
+        .contains("blocked by chaitin safeline web application firewall");
+
+    if let Some(event_id) = extract_html_comment_event_id(&body) {
+        return Some(SafeLineInterceptMatch {
+            event_id: Some(event_id),
+            evidence: "html_event_comment",
+        });
+    }
+
+    let json_event_id = extract_json_event_id(&body);
+    if has_signature && json_event_id.is_some() {
+        return Some(SafeLineInterceptMatch {
+            event_id: json_event_id,
+            evidence: "json_signature",
+        });
+    }
+
+    if has_signature && matches!(response.status_code, 403 | 405) {
+        return Some(SafeLineInterceptMatch {
+            event_id: None,
+            evidence: "status_and_signature",
+        });
+    }
+
+    if matches!(match_mode, SafeLineInterceptMatchMode::Relaxed)
+        && matches!(response.status_code, 403 | 405)
+    {
+        return Some(SafeLineInterceptMatch {
+            event_id: None,
+            evidence: "status_only_relaxed",
+        });
+    }
+
+    None
+}
+
+fn decode_response_body_for_matching(
+    response: &UpstreamHttpResponse,
+    max_body_bytes: usize,
+) -> Option<String> {
+    let limit = max_body_bytes.max(256);
+    let mut decoded = Vec::new();
+
+    match upstream_header_value(&response.headers, "content-encoding")
+        .map(|value| value.to_ascii_lowercase())
+    {
+        Some(value) if value.contains("gzip") => {
+            let decoder = GzDecoder::new(response.body.as_slice());
+            decoder
+                .take(limit as u64)
+                .read_to_end(&mut decoded)
+                .ok()?;
+        }
+        Some(value) if value.contains("deflate") => {
+            let decoder = ZlibDecoder::new(response.body.as_slice());
+            decoder
+                .take(limit as u64)
+                .read_to_end(&mut decoded)
+                .ok()?;
+        }
+        Some(_) => {
+            return None;
+        }
+        None => {
+            decoded.extend_from_slice(&response.body[..response.body.len().min(limit)]);
+        }
+    }
+
+    Some(String::from_utf8_lossy(&decoded).into_owned())
+}
+
+fn upstream_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn extract_json_event_id(body: &str) -> Option<String> {
+    let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    payload
+        .get("event_id")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+}
+
+fn extract_html_comment_event_id(body: &str) -> Option<String> {
+    let marker = "<!-- event_id:";
+    let start = body.find(marker)? + marker.len();
+    let remainder = body.get(start..)?;
+    let end = remainder.find("-->")?;
+    let candidate = remainder.get(..end)?.trim();
+    let event_id = candidate.split_whitespace().next()?.trim();
+    (!event_id.is_empty()
+        && event_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-'))
+    .then(|| event_id.to_string())
 }
 
 fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>> {
@@ -1293,8 +1516,7 @@ async fn handle_http1_connection(
                 metrics.record_proxy_attempt();
             }
             let proxy_started_at = Instant::now();
-            if let Err(err) = forward_http1_request(
-                &mut stream,
+            match proxy_http_request(
                 context.as_ref(),
                 &request,
                 upstream_addr,
@@ -1304,19 +1526,50 @@ async fn handle_http1_connection(
             )
             .await
             {
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_proxy_failure();
+                Ok(response) => {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        metrics.record_proxy_success(proxy_started_at.elapsed());
+                    }
+                    match apply_safeline_upstream_action(
+                        context.as_ref(),
+                        packet,
+                        &request,
+                        matched_site.as_ref(),
+                        &config.l7_config.safeline_intercept,
+                        response,
+                    ) {
+                        UpstreamResponseDisposition::Forward(response) => {
+                            write_http1_upstream_response(&mut stream, &response).await?;
+                        }
+                        UpstreamResponseDisposition::Custom(response) => {
+                            http1_handler
+                                .write_response_with_headers(
+                                    &mut stream,
+                                    response.status_code,
+                                    http_status_text(response.status_code),
+                                    &response.headers,
+                                    &response.body,
+                                )
+                                .await?;
+                        }
+                        UpstreamResponseDisposition::Drop => {
+                            let _ = stream.shutdown().await;
+                        }
+                    }
                 }
-                context.set_upstream_health(false, Some(err.to_string()));
-                warn!(
-                    "Failed to proxy HTTP/1.1 request from {} to {}: {}",
-                    peer_addr, upstream_addr, err
-                );
-                http1_handler
-                    .write_response(&mut stream, 502, "Bad Gateway", b"upstream proxy failed")
-                    .await?;
-            } else if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_proxy_success(proxy_started_at.elapsed());
+                Err(err) => {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        metrics.record_proxy_failure();
+                    }
+                    context.set_upstream_health(false, Some(err.to_string()));
+                    warn!(
+                        "Failed to proxy HTTP/1.1 request from {} to {}: {}",
+                        peer_addr, upstream_addr, err
+                    );
+                    http1_handler
+                        .write_response(&mut stream, 502, "Bad Gateway", b"upstream proxy failed")
+                        .await?;
+                }
             }
         } else if matched_site.is_some() {
             http1_handler
@@ -1473,11 +1726,35 @@ async fn handle_http2_connection(
                                 if let Some(metrics) = context.metrics.as_ref() {
                                     metrics.record_proxy_success(proxy_started_at.elapsed());
                                 }
-                                return Ok(Http2Response {
-                                    status_code: response.status_code,
-                                    headers: response.headers,
-                                    body: response.body,
-                                });
+                                return match apply_safeline_upstream_action(
+                                    context.as_ref(),
+                                    &packet,
+                                    &request,
+                                    matched_site.as_ref(),
+                                    &config.l7_config.safeline_intercept,
+                                    response,
+                                ) {
+                                    UpstreamResponseDisposition::Forward(response) => {
+                                        Ok(Http2Response {
+                                            status_code: response.status_code,
+                                            headers: response.headers,
+                                            body: response.body,
+                                        })
+                                    }
+                                    UpstreamResponseDisposition::Custom(response) => {
+                                        Ok(Http2Response {
+                                            status_code: response.status_code,
+                                            headers: response.headers,
+                                            body: response.body,
+                                        })
+                                    }
+                                    UpstreamResponseDisposition::Drop => Err(
+                                        crate::protocol::ProtocolError::ParseError(
+                                            "SafeLine blocked upstream response dropped"
+                                                .to_string(),
+                                        ),
+                                    ),
+                                };
                             }
                             Err(err) => {
                                 if let Some(metrics) = context.metrics.as_ref() {
@@ -1727,6 +2004,75 @@ fn persist_http_inspection_event(
     event.http_version = Some(request.version.to_string());
 
     store.enqueue_security_event(event);
+}
+
+fn persist_safeline_intercept_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    matched_site: Option<&GatewaySiteRuntime>,
+    matched: &SafeLineInterceptMatch,
+    upstream_status_code: u16,
+    local_action: &str,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    let mut event = SecurityEventRecord::now(
+        "L7",
+        "block",
+        format!(
+            "safeline upstream intercept detected; evidence={}; upstream_status={}; local_action={}",
+            matched.evidence, upstream_status_code, local_action
+        ),
+        request
+            .client_ip
+            .clone()
+            .unwrap_or_else(|| packet.source_ip.to_string()),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    );
+    event.provider = Some("safeline".to_string());
+    event.provider_event_id = matched.event_id.clone();
+    event.provider_site_name = matched_site.map(|site| site.name.clone());
+    event.provider_site_domain =
+        request_hostname(request).or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
+    event.http_method = Some(request.method.clone());
+    event.uri = Some(request.uri.clone());
+    event.http_version = Some(request.version.to_string());
+
+    store.enqueue_security_event(event);
+}
+
+fn persist_safeline_intercept_blocked_ip(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    block_duration_secs: u64,
+    provider_event_id: Option<&str>,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    let blocked_at = unix_timestamp();
+    let ip = request
+        .client_ip
+        .clone()
+        .unwrap_or_else(|| packet.source_ip.to_string());
+    let reason = provider_event_id
+        .map(|event_id| format!("safeline upstream intercept: event_id={event_id}"))
+        .unwrap_or_else(|| "safeline upstream intercept".to_string());
+
+    store.enqueue_blocked_ip(BlockedIpRecord::new(
+        ip,
+        reason,
+        blocked_at,
+        blocked_at + block_duration_secs as i64,
+    ));
 }
 
 fn apply_client_identity(
@@ -2413,10 +2759,131 @@ mod tests {
 
         let parsed = parse_http1_response(response).unwrap();
         assert_eq!(parsed.status_code, 200);
+        assert_eq!(parsed.status_text.as_deref(), Some("OK"));
         assert_eq!(parsed.body, b"test".to_vec());
         assert!(parsed
             .headers
             .iter()
             .all(|(name, _)| !name.eq_ignore_ascii_case("transfer-encoding")));
+    }
+
+    #[test]
+    fn detect_safeline_block_response_matches_json_signature() {
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![(
+                "content-type".to_string(),
+                "application/json".to_string(),
+            )],
+            body: br#"{"code":403,"success":false,"message":"blocked by Chaitin SafeLine Web Application Firewall","event_id":"evt123"}"#.to_vec(),
+        };
+
+        let matched = detect_safeline_block_response(
+            &response,
+            4096,
+            SafeLineInterceptMatchMode::Strict,
+        )
+        .unwrap();
+        assert_eq!(matched.event_id.as_deref(), Some("evt123"));
+        assert_eq!(matched.evidence, "json_signature");
+    }
+
+    #[test]
+    fn detect_safeline_block_response_matches_html_event_comment() {
+        let response = UpstreamHttpResponse {
+            status_code: 405,
+            status_text: Some("Method Not Allowed".to_string()),
+            headers: vec![("content-type".to_string(), "text/html".to_string())],
+            body: b"<html><!-- event_id: abc123 TYPE: A --><body>blocked</body></html>".to_vec(),
+        };
+
+        let matched = detect_safeline_block_response(
+            &response,
+            4096,
+            SafeLineInterceptMatchMode::Strict,
+        )
+        .unwrap();
+        assert_eq!(matched.event_id.as_deref(), Some("abc123"));
+        assert_eq!(matched.evidence, "html_event_comment");
+    }
+
+    #[test]
+    fn detect_safeline_block_response_rejects_status_only_in_strict_mode() {
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![("content-type".to_string(), "text/html".to_string())],
+            body: b"<html><body>forbidden</body></html>".to_vec(),
+        };
+
+        assert!(
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
+                .is_none()
+        );
+        let relaxed = detect_safeline_block_response(
+            &response,
+            4096,
+            SafeLineInterceptMatchMode::Relaxed,
+        )
+        .unwrap();
+        assert_eq!(relaxed.evidence, "status_only_relaxed");
+    }
+
+    #[tokio::test]
+    async fn apply_safeline_upstream_action_replaces_response_and_records_block_metric() {
+        let mut config = test_config(vec![]);
+        config.l7_config.safeline_intercept.enabled = true;
+        config.l7_config.safeline_intercept.action = SafeLineInterceptAction::Replace;
+        let context = WafContext::new(config).await.unwrap();
+        let packet = PacketInfo {
+            source_ip: "203.0.113.10".parse().unwrap(),
+            dest_ip: "198.51.100.20".parse().unwrap(),
+            source_port: 44321,
+            dest_port: 443,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/login".to_string(),
+        );
+        request.set_client_ip("203.0.113.10".to_string());
+        request.add_header("host".to_string(), "portal.example.com".to_string());
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![(
+                "content-type".to_string(),
+                "application/json".to_string(),
+            )],
+            body: br#"{"code":403,"success":false,"message":"blocked by Chaitin SafeLine Web Application Firewall","event_id":"evt456"}"#.to_vec(),
+        };
+
+        let disposition = apply_safeline_upstream_action(
+            &context,
+            &packet,
+            &request,
+            None,
+            &context.config_snapshot().l7_config.safeline_intercept,
+            response,
+        );
+
+        match disposition {
+            UpstreamResponseDisposition::Custom(response) => {
+                assert_eq!(response.status_code, 403);
+                assert!(response
+                    .headers
+                    .iter()
+                    .any(|(key, value)| key.eq_ignore_ascii_case("cache-control")
+                        && value.eq("no-store")));
+            }
+            other => panic!("expected custom response, got {:?}", other),
+        }
+
+        let metrics = context.metrics_snapshot().unwrap();
+        assert_eq!(metrics.blocked_packets, 1);
+        assert_eq!(metrics.blocked_l7, 1);
     }
 }

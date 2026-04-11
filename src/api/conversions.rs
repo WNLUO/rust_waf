@@ -118,6 +118,38 @@ impl L7ConfigResponse {
                 .clone()
                 .unwrap_or_default(),
             http3_enable_tls13: config.http3_config.enable_tls13,
+            safeline_intercept: SafeLineInterceptConfigResponse::from_config(
+                &config.l7_config.safeline_intercept,
+            ),
+        }
+    }
+}
+
+impl SafeLineInterceptConfigResponse {
+    pub(super) fn from_config(config: &crate::config::l7::SafeLineInterceptConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            action: match config.action {
+                crate::config::l7::SafeLineInterceptAction::Pass => "pass".to_string(),
+                crate::config::l7::SafeLineInterceptAction::Replace => "replace".to_string(),
+                crate::config::l7::SafeLineInterceptAction::Drop => "drop".to_string(),
+                crate::config::l7::SafeLineInterceptAction::ReplaceAndBlockIp => {
+                    "replace_and_block_ip".to_string()
+                }
+            },
+            match_mode: match config.match_mode {
+                crate::config::l7::SafeLineInterceptMatchMode::Strict => {
+                    "strict".to_string()
+                }
+                crate::config::l7::SafeLineInterceptMatchMode::Relaxed => {
+                    "relaxed".to_string()
+                }
+            },
+            max_body_bytes: config.max_body_bytes,
+            block_duration_secs: config.block_duration_secs,
+            response_template: RuleResponseTemplatePayload::from_template(
+                config.response_template.clone(),
+            ),
         }
     }
 }
@@ -241,8 +273,55 @@ impl L7ConfigUpdateRequest {
         current.listen_addrs = listen_addrs;
         current.tcp_upstream_addr = non_empty_string(upstream_endpoint);
         current.http3_config = http3_config;
+        if let Some(safeline_intercept) = self.safeline_intercept {
+            current.l7_config.safeline_intercept = safeline_intercept.into_config()?;
+        }
 
         Ok(current.normalized())
+    }
+}
+
+impl SafeLineInterceptConfigRequest {
+    pub(super) fn into_config(self) -> Result<crate::config::l7::SafeLineInterceptConfig, String> {
+        let action = match self.action.trim().to_ascii_lowercase().as_str() {
+            "pass" => crate::config::l7::SafeLineInterceptAction::Pass,
+            "replace" => crate::config::l7::SafeLineInterceptAction::Replace,
+            "drop" => crate::config::l7::SafeLineInterceptAction::Drop,
+            "replace_and_block_ip" => {
+                crate::config::l7::SafeLineInterceptAction::ReplaceAndBlockIp
+            }
+            other => {
+                return Err(format!(
+                    "SafeLine 响应动作仅支持 pass、replace、drop、replace_and_block_ip，收到 '{}'",
+                    other
+                ))
+            }
+        };
+
+        let match_mode = match self.match_mode.trim().to_ascii_lowercase().as_str() {
+            "strict" => crate::config::l7::SafeLineInterceptMatchMode::Strict,
+            "relaxed" => crate::config::l7::SafeLineInterceptMatchMode::Relaxed,
+            other => {
+                return Err(format!(
+                    "SafeLine 匹配模式仅支持 strict 或 relaxed，收到 '{}'",
+                    other
+                ))
+            }
+        };
+
+        let config = crate::config::l7::SafeLineInterceptConfig {
+            enabled: self.enabled,
+            action,
+            match_mode,
+            max_body_bytes: self.max_body_bytes,
+            block_duration_secs: self.block_duration_secs,
+            response_template: self.response_template.into(),
+        };
+
+        crate::rules::validate_response_template(&config.response_template)
+            .map_err(|err| format!("SafeLine 自定义响应模板无效: {}", err))?;
+
+        Ok(config)
     }
 }
 
@@ -979,6 +1058,7 @@ impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
             id: event.id,
             layer: event.layer,
             provider: event.provider,
+            provider_event_id: event.provider_event_id,
             provider_site_id: event.provider_site_id,
             provider_site_name: event.provider_site_name,
             provider_site_domain: event.provider_site_domain,

@@ -59,6 +59,7 @@ pub struct SecurityEventEntry {
     pub id: i64,
     pub layer: String,
     pub provider: Option<String>,
+    pub provider_event_id: Option<String>,
     pub provider_site_id: Option<String>,
     pub provider_site_name: Option<String>,
     pub provider_site_domain: Option<String>,
@@ -221,6 +222,7 @@ pub struct SafeLineBlocklistPullResult {
 pub struct SecurityEventRecord {
     pub layer: String,
     pub provider: Option<String>,
+    pub provider_event_id: Option<String>,
     pub provider_site_id: Option<String>,
     pub provider_site_name: Option<String>,
     pub provider_site_domain: Option<String>,
@@ -281,6 +283,7 @@ impl SecurityEventRecord {
         Self {
             layer: layer.into(),
             provider: None,
+            provider_event_id: None,
             provider_site_id: None,
             provider_site_name: None,
             provider_site_domain: None,

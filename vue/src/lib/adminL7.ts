@@ -45,5 +45,22 @@ export function createDefaultL7ConfigForm(): L7ConfigForm {
     http3_certificate_path: '',
     http3_private_key_path: '',
     http3_enable_tls13: true,
+    safeline_intercept: {
+      enabled: true,
+      action: 'replace',
+      match_mode: 'strict',
+      max_body_bytes: 32768,
+      block_duration_secs: 600,
+      response_template: {
+        status_code: 403,
+        content_type: 'text/html; charset=utf-8',
+        body_source: 'inline_text',
+        gzip: false,
+        body_text:
+          '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>请求已拦截</title></head><body><h1>请求已拦截</h1><p>当前请求被上游安全策略拦截。</p></body></html>',
+        body_file_path: '',
+        headers: [{ key: 'cache-control', value: 'no-store' }],
+      },
+    },
   }
 }

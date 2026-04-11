@@ -137,7 +137,7 @@ impl RuleEngine {
     }
 }
 
-fn validate_response_template(template: &RuleResponseTemplate) -> Result<()> {
+pub(crate) fn validate_response_template(template: &RuleResponseTemplate) -> Result<()> {
     if !(100..=599).contains(&template.status_code) {
         anyhow::bail!("Response status code must be between 100 and 599");
     }
@@ -172,7 +172,7 @@ fn validate_response_template(template: &RuleResponseTemplate) -> Result<()> {
     Ok(())
 }
 
-fn build_custom_response(template: &RuleResponseTemplate) -> Result<CustomHttpResponse> {
+pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<CustomHttpResponse> {
     let raw_body = match template.body_source {
         RuleResponseBodySource::InlineText => template.body_text.as_bytes().to_vec(),
         RuleResponseBodySource::File => {

@@ -456,6 +456,34 @@ impl Config {
             .map(|cidr| cidr.trim().to_string())
             .filter(|cidr| !cidr.is_empty())
             .collect();
+        self.l7_config.safeline_intercept.max_body_bytes = clamp_or_default(
+            self.l7_config.safeline_intercept.max_body_bytes,
+            32 * 1024,
+        )
+        .min(512 * 1024);
+        self.l7_config.safeline_intercept.block_duration_secs = clamp_u64(
+            self.l7_config.safeline_intercept.block_duration_secs,
+            30,
+            86_400,
+            600,
+        );
+        self.l7_config.safeline_intercept.response_template.content_type = self
+            .l7_config
+            .safeline_intercept
+            .response_template
+            .content_type
+            .trim()
+            .to_string();
+        if self
+            .l7_config
+            .safeline_intercept
+            .response_template
+            .content_type
+            .is_empty()
+        {
+            self.l7_config.safeline_intercept.response_template.content_type =
+                default_rule_response_content_type();
+        }
 
         if !self.bloom_enabled {
             self.l4_bloom_false_positive_verification = false;

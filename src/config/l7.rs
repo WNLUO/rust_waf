@@ -1,3 +1,4 @@
+use super::{RuleResponseBodySource, RuleResponseHeader, RuleResponseTemplate};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +57,42 @@ pub struct L7Config {
     pub upstream_failure_mode: UpstreamFailureMode,
     #[serde(default = "default_bloom_filter_scale")]
     pub bloom_filter_scale: f64,
+    #[serde(default)]
+    pub safeline_intercept: SafeLineInterceptConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SafeLineInterceptConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub action: SafeLineInterceptAction,
+    #[serde(default)]
+    pub match_mode: SafeLineInterceptMatchMode,
+    #[serde(default = "default_safeline_intercept_max_body_bytes")]
+    pub max_body_bytes: usize,
+    #[serde(default = "default_safeline_intercept_block_duration_secs")]
+    pub block_duration_secs: u64,
+    #[serde(default = "default_safeline_intercept_response_template")]
+    pub response_template: RuleResponseTemplate,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SafeLineInterceptAction {
+    #[default]
+    Pass,
+    Replace,
+    Drop,
+    ReplaceAndBlockIp,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SafeLineInterceptMatchMode {
+    #[default]
+    Strict,
+    Relaxed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -114,6 +151,50 @@ const fn default_bloom_filter_scale() -> f64 {
     1.0
 }
 
+const fn default_safeline_intercept_max_body_bytes() -> usize {
+    32 * 1024
+}
+
+const fn default_safeline_intercept_block_duration_secs() -> u64 {
+    600
+}
+
+fn default_safeline_intercept_response_template() -> RuleResponseTemplate {
+    RuleResponseTemplate {
+        status_code: 403,
+        content_type: "text/html; charset=utf-8".to_string(),
+        body_source: RuleResponseBodySource::InlineText,
+        gzip: false,
+        body_text: concat!(
+            "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">",
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+            "<title>Request Blocked</title></head><body>",
+            "<h1>Request Blocked</h1>",
+            "<p>Your request was rejected by the upstream security policy.</p>",
+            "</body></html>"
+        )
+        .to_string(),
+        body_file_path: String::new(),
+        headers: vec![RuleResponseHeader {
+            key: "cache-control".to_string(),
+            value: "no-store".to_string(),
+        }],
+    }
+}
+
+impl Default for SafeLineInterceptConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            action: SafeLineInterceptAction::Replace,
+            match_mode: SafeLineInterceptMatchMode::Strict,
+            max_body_bytes: default_safeline_intercept_max_body_bytes(),
+            block_duration_secs: default_safeline_intercept_block_duration_secs(),
+            response_template: default_safeline_intercept_response_template(),
+        }
+    }
+}
+
 impl Default for L7Config {
     fn default() -> Self {
         Self {
@@ -133,6 +214,7 @@ impl Default for L7Config {
             upstream_healthcheck_timeout_ms: default_upstream_healthcheck_timeout_ms(),
             upstream_failure_mode: UpstreamFailureMode::default(),
             bloom_filter_scale: default_bloom_filter_scale(),
+            safeline_intercept: SafeLineInterceptConfig::default(),
         }
     }
 }

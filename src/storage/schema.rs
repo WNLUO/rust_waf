@@ -8,6 +8,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             layer TEXT NOT NULL,
             provider TEXT,
+            provider_event_id TEXT,
             provider_site_id TEXT,
             provider_site_name TEXT,
             provider_site_domain TEXT,
@@ -267,6 +268,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     }
     for statement in [
         "ALTER TABLE security_events ADD COLUMN provider TEXT",
+        "ALTER TABLE security_events ADD COLUMN provider_event_id TEXT",
         "ALTER TABLE security_events ADD COLUMN provider_site_id TEXT",
         "ALTER TABLE security_events ADD COLUMN provider_site_name TEXT",
         "ALTER TABLE security_events ADD COLUMN provider_site_domain TEXT",

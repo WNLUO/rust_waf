@@ -77,6 +77,7 @@ pub struct L7ConfigResponse {
     pub(crate) http3_certificate_path: String,
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
+    pub(crate) safeline_intercept: SafeLineInterceptConfigResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -163,6 +164,28 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) http3_certificate_path: String,
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
+    #[serde(default)]
+    pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafeLineInterceptConfigResponse {
+    pub(crate) enabled: bool,
+    pub(crate) action: String,
+    pub(crate) match_mode: String,
+    pub(crate) max_body_bytes: usize,
+    pub(crate) block_duration_secs: u64,
+    pub(crate) response_template: RuleResponseTemplatePayload,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SafeLineInterceptConfigRequest {
+    pub(crate) enabled: bool,
+    pub(crate) action: String,
+    pub(crate) match_mode: String,
+    pub(crate) max_body_bytes: usize,
+    pub(crate) block_duration_secs: u64,
+    pub(crate) response_template: RuleResponseTemplatePayload,
 }
 
 #[derive(Debug, Deserialize)]
@@ -663,6 +686,7 @@ pub struct SecurityEventResponse {
     pub(crate) id: i64,
     pub(crate) layer: String,
     pub(crate) provider: Option<String>,
+    pub(crate) provider_event_id: Option<String>,
     pub(crate) provider_site_id: Option<String>,
     pub(crate) provider_site_name: Option<String>,
     pub(crate) provider_site_domain: Option<String>,

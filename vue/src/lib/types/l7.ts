@@ -1,3 +1,27 @@
+export interface RuleResponseHeaderPayload {
+  key: string
+  value: string
+}
+
+export interface RuleResponseTemplatePayload {
+  status_code: number
+  content_type: string
+  body_source: 'inline_text' | 'file' | string
+  gzip: boolean
+  body_text: string
+  body_file_path: string
+  headers: RuleResponseHeaderPayload[]
+}
+
+export interface SafeLineInterceptConfigPayload {
+  enabled: boolean
+  action: 'pass' | 'replace' | 'drop' | 'replace_and_block_ip' | string
+  match_mode: 'strict' | 'relaxed' | string
+  max_body_bytes: number
+  block_duration_secs: number
+  response_template: RuleResponseTemplatePayload
+}
+
 export interface L7ConfigPayload {
   max_request_size: number
   real_ip_headers: string[]
@@ -35,6 +59,7 @@ export interface L7ConfigPayload {
   http3_certificate_path: string
   http3_private_key_path: string
   http3_enable_tls13: boolean
+  safeline_intercept: SafeLineInterceptConfigPayload
 }
 
 export interface L7StatsPayload {

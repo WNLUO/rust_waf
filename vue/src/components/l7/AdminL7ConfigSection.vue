@@ -67,6 +67,108 @@ const http3CertificatePath = fieldModel('http3_certificate_path')
 const http3PrivateKeyPath = fieldModel('http3_private_key_path')
 const http3ConnectionMigration = fieldModel('http3_enable_connection_migration')
 const http3Tls13Enabled = fieldModel('http3_enable_tls13')
+
+function updateSafelineIntercept(
+  patch: Partial<L7ConfigForm['safeline_intercept']>,
+) {
+  updateForm('safeline_intercept', {
+    ...props.form.safeline_intercept,
+    ...patch,
+  })
+}
+
+function updateSafelineResponseTemplate(
+  patch: Partial<L7ConfigForm['safeline_intercept']['response_template']>,
+) {
+  updateSafelineIntercept({
+    response_template: {
+      ...props.form.safeline_intercept.response_template,
+      ...patch,
+    },
+  })
+}
+
+const safelineInterceptEnabled = computed({
+  get: () => props.form.safeline_intercept.enabled,
+  set: (value: boolean) => updateSafelineIntercept({ enabled: value }),
+})
+
+const safelineInterceptAction = computed({
+  get: () => props.form.safeline_intercept.action,
+  set: (value: string) => updateSafelineIntercept({ action: value }),
+})
+
+const safelineInterceptMatchMode = computed({
+  get: () => props.form.safeline_intercept.match_mode,
+  set: (value: string) => updateSafelineIntercept({ match_mode: value }),
+})
+
+const safelineInterceptMaxBodyBytes = computed({
+  get: () => props.form.safeline_intercept.max_body_bytes,
+  set: (value: number) => updateSafelineIntercept({ max_body_bytes: value }),
+})
+
+const safelineInterceptBlockDuration = computed({
+  get: () => props.form.safeline_intercept.block_duration_secs,
+  set: (value: number) =>
+    updateSafelineIntercept({ block_duration_secs: value }),
+})
+
+const safelineResponseStatusCode = computed({
+  get: () => props.form.safeline_intercept.response_template.status_code,
+  set: (value: number) =>
+    updateSafelineResponseTemplate({ status_code: value }),
+})
+
+const safelineResponseContentType = computed({
+  get: () => props.form.safeline_intercept.response_template.content_type,
+  set: (value: string) =>
+    updateSafelineResponseTemplate({ content_type: value }),
+})
+
+const safelineResponseBodySource = computed({
+  get: () => props.form.safeline_intercept.response_template.body_source,
+  set: (value: string) =>
+    updateSafelineResponseTemplate({ body_source: value }),
+})
+
+const safelineResponseGzip = computed({
+  get: () => props.form.safeline_intercept.response_template.gzip,
+  set: (value: boolean) => updateSafelineResponseTemplate({ gzip: value }),
+})
+
+const safelineResponseBodyText = computed({
+  get: () => props.form.safeline_intercept.response_template.body_text,
+  set: (value: string) => updateSafelineResponseTemplate({ body_text: value }),
+})
+
+const safelineResponseBodyFilePath = computed({
+  get: () => props.form.safeline_intercept.response_template.body_file_path,
+  set: (value: string) =>
+    updateSafelineResponseTemplate({ body_file_path: value }),
+})
+
+const safelineResponseHeadersText = computed({
+  get: () =>
+    props.form.safeline_intercept.response_template.headers
+      .map((header) => `${header.key}: ${header.value}`)
+      .join('\n'),
+  set: (value: string) => {
+    const headers = value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [key, ...rest] = line.split(':')
+        return {
+          key: key?.trim() || '',
+          value: rest.join(':').trim(),
+        }
+      })
+      .filter((header) => header.key)
+    updateSafelineResponseTemplate({ headers })
+  },
+})
 </script>
 
 <template>
@@ -361,6 +463,173 @@ const http3Tls13Enabled = fieldModel('http3_enable_tls13')
           "
         />
       </label>
+    </div>
+
+    <div class="mt-3 border-t border-slate-200 pt-6">
+      <div
+        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+      >
+        <div>
+          <p class="text-sm tracking-wider text-blue-700">
+            SafeLine 响应接管
+          </p>
+          <h4 class="mt-2 text-xl font-semibold text-stone-900">
+            默认接管雷池拦截响应
+          </h4>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <StatusBadge
+            :text="
+              form.safeline_intercept.enabled ? '默认接管已启用' : '默认接管已关闭'
+            "
+            :type="form.safeline_intercept.enabled ? 'success' : 'warning'"
+          />
+          <StatusBadge
+            :text="`动作 ${form.safeline_intercept.action}`"
+            type="info"
+          />
+          <StatusBadge
+            :text="`匹配 ${form.safeline_intercept.match_mode}`"
+            :type="
+              form.safeline_intercept.match_mode === 'strict'
+                ? 'success'
+                : 'warning'
+            "
+          />
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <label
+          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+        >
+          <span class="flex items-center justify-between gap-3">
+            <span class="font-medium">启用响应接管</span>
+            <input
+              v-model="safelineInterceptEnabled"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+            />
+          </span>
+          <span class="mt-2 block text-xs leading-6 text-slate-500"
+            >默认开启后，雷池拦截响应会先由 Rust 接管，再决定对外如何返回。</span
+          >
+        </label>
+        <div
+          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+        >
+          <p class="font-medium">默认动作</p>
+          <select
+            v-model="safelineInterceptAction"
+            class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+          >
+            <option value="replace">replace</option>
+            <option value="pass">pass</option>
+            <option value="drop">drop</option>
+            <option value="replace_and_block_ip">replace_and_block_ip</option>
+          </select>
+          <p class="mt-2 text-xs leading-6 text-slate-500">
+            推荐默认使用 replace，把雷池命中统一替换为品牌化拦截页。
+          </p>
+        </div>
+        <div
+          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+        >
+          <p class="font-medium">匹配模式</p>
+          <select
+            v-model="safelineInterceptMatchMode"
+            class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+          >
+            <option value="strict">strict</option>
+            <option value="relaxed">relaxed</option>
+          </select>
+          <p class="mt-2 text-xs leading-6 text-slate-500">
+            strict 只认强指纹；relaxed 才会接受状态码兜底。
+          </p>
+        </div>
+        <label class="text-sm text-stone-700"
+          >识别最大响应体(bytes)<input
+            v-model.number="safelineInterceptMaxBodyBytes"
+            type="number"
+            min="256"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >本地封禁时长(s)<input
+            v-model.number="safelineInterceptBlockDuration"
+            type="number"
+            min="30"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >替换状态码<input
+            v-model.number="safelineResponseStatusCode"
+            type="number"
+            min="100"
+            max="599"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700 md:col-span-2"
+          >替换 Content-Type<input
+            v-model="safelineResponseContentType"
+            type="text"
+            placeholder="text/html; charset=utf-8"
+            :class="numberInputClass"
+        /></label>
+        <div class="text-sm text-stone-700">
+          响应体来源
+          <select
+            v-model="safelineResponseBodySource"
+            class="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500/40"
+          >
+            <option value="inline_text">inline_text</option>
+            <option value="file">file</option>
+          </select>
+        </div>
+        <label class="text-sm text-stone-700">
+          启用 gzip
+          <span
+            class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
+          >
+            <input
+              v-model="safelineResponseGzip"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+            />
+            <span class="text-sm text-stone-800">压缩替换后的响应体</span>
+          </span>
+        </label>
+      </div>
+
+      <div class="mt-4 grid gap-3 xl:grid-cols-2">
+        <label class="text-sm text-stone-700">
+          内联响应体
+          <textarea
+            v-model="safelineResponseBodyText"
+            :class="listFieldClass"
+            placeholder="在 inline_text 模式下使用"
+          />
+        </label>
+        <div class="space-y-3">
+          <label class="text-sm text-stone-700">
+            响应文件路径
+            <input
+              v-model="safelineResponseBodyFilePath"
+              type="text"
+              placeholder="例如 plugins/brand-block/page.html"
+              :class="numberInputClass"
+            />
+          </label>
+          <label class="text-sm text-stone-700">
+            额外响应头
+            <textarea
+              v-model="safelineResponseHeadersText"
+              :class="listFieldClass"
+              placeholder="每行一个，例如 cache-control: no-store"
+            />
+          </label>
+        </div>
+      </div>
     </div>
 
     <div class="mt-3 border-t border-slate-200 pt-6">

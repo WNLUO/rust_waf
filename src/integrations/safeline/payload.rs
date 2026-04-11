@@ -658,6 +658,7 @@ impl From<SafeLineSecurityEventSummary> for SecurityEventRecord {
         Self {
             layer: "safeline".to_string(),
             provider: Some("safeline".to_string()),
+            provider_event_id: None,
             provider_site_id: value.provider_site_id,
             provider_site_name: value.provider_site_name,
             provider_site_domain: value.provider_site_domain,

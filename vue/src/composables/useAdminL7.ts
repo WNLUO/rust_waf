@@ -64,6 +64,13 @@ export function useAdminL7() {
       real_ip_headers: [...payload.real_ip_headers],
       trusted_proxy_cidrs: [...payload.trusted_proxy_cidrs],
       listen_addrs: [...payload.listen_addrs],
+      safeline_intercept: {
+        ...payload.safeline_intercept,
+        response_template: {
+          ...payload.safeline_intercept.response_template,
+          headers: [...payload.safeline_intercept.response_template.headers],
+        },
+      },
     })
 
     meta.value = {
@@ -226,6 +233,31 @@ export function useAdminL7() {
         65536,
         4096,
       )
+      configForm.safeline_intercept.max_body_bytes = clampInteger(
+        configForm.safeline_intercept.max_body_bytes,
+        256,
+        524288,
+        32768,
+      )
+      configForm.safeline_intercept.block_duration_secs = clampInteger(
+        configForm.safeline_intercept.block_duration_secs,
+        30,
+        86400,
+        600,
+      )
+      configForm.safeline_intercept.response_template.status_code = clampInteger(
+        configForm.safeline_intercept.response_template.status_code,
+        100,
+        599,
+        403,
+      )
+      configForm.safeline_intercept.response_template.headers =
+        configForm.safeline_intercept.response_template.headers
+          .map((header) => ({
+            key: header.key.trim(),
+            value: header.value.trim(),
+          }))
+          .filter((header) => header.key)
 
       if (!configForm.bloom_enabled) {
         configForm.bloom_false_positive_verification = false

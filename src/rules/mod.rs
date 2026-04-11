@@ -214,7 +214,7 @@ fn build_custom_response(template: &RuleResponseTemplate) -> Result<CustomHttpRe
     })
 }
 
-fn resolve_response_file_path(value: &str) -> Result<PathBuf> {
+pub(crate) fn resolve_response_file_path(value: &str) -> Result<PathBuf> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         anyhow::bail!("Response body_file_path cannot be empty when body_source=file");

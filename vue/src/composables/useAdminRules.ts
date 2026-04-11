@@ -1,4 +1,5 @@
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   createRule,
   deleteRule,
@@ -29,6 +30,8 @@ import type {
 } from '../lib/types'
 
 export function useAdminRules() {
+  const route = useRoute()
+  const router = useRouter()
   const loading = ref(true)
   const saving = ref(false)
   const installingPlugin = ref(false)
@@ -81,6 +84,39 @@ export function useAdminRules() {
       (item) => item.template_id === ruleForm.plugin_template_id,
     ),
   )
+
+  const consumeCreateRuleQuery = async () => {
+    if (route.query.create !== '1') return
+
+    const nextQuery = { ...route.query }
+    delete nextQuery.create
+    delete nextQuery.template
+    delete nextQuery.action
+
+    Object.assign(ruleForm, createDefaultRuleDraft())
+    const templateId =
+      typeof route.query.template === 'string' ? route.query.template : null
+    const action =
+      typeof route.query.action === 'string' ? route.query.action : null
+
+    if (templateId) {
+      const template = pluginTemplates.value.find(
+        (item) => item.template_id === templateId,
+      )
+      if (!template) return
+      ruleForm.action = toPluginActionValue(template.template_id)
+      Object.assign(ruleForm, applyPluginTemplateToDraft(ruleForm, template))
+    } else if (action) {
+      ruleForm.action = action
+      if (action === 'respond') {
+        ruleForm.layer = 'l7'
+        ruleForm.response_template = createDefaultResponseTemplate()
+      }
+    }
+
+    isRuleModalOpen.value = true
+    await router.replace({ query: nextQuery })
+  }
 
   const displayActionLabel = (
     rule: RuleItem,
@@ -238,6 +274,18 @@ export function useAdminRules() {
   }
 
   onMounted(loadRules)
+
+  watch(
+    [
+      () => route.query.create,
+      () => route.query.template,
+      () => pluginTemplates.value.length,
+    ],
+    () => {
+      void consumeCreateRuleQuery()
+    },
+    { immediate: true },
+  )
 
   return {
     addResponseHeader,

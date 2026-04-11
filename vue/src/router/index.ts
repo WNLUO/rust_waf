@@ -3,6 +3,7 @@ import HomePage from '../pages/HomePage.vue'
 import AdminPage from '../pages/AdminPage.vue'
 import AdminSitesPage from '../pages/AdminSitesPage.vue'
 import AdminRulesPage from '../pages/AdminRulesPage.vue'
+import AdminActionsPage from '../pages/AdminActionsPage.vue'
 import AdminL4Page from '../pages/AdminL4Page.vue'
 import AdminL7Page from '../pages/AdminL7Page.vue'
 import AdminL7RulesPage from '../pages/AdminL7RulesPage.vue'
@@ -36,6 +37,11 @@ const router = createRouter({
       path: '/admin/rules',
       name: 'admin-rules',
       component: AdminRulesPage,
+    },
+    {
+      path: '/admin/actions',
+      name: 'admin-actions',
+      component: AdminActionsPage,
     },
     {
       path: '/admin/l4',

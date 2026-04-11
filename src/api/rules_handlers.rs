@@ -86,6 +86,40 @@ pub(super) async fn list_rule_action_templates_handler(
     }))
 }
 
+pub(super) async fn preview_rule_action_template_handler(
+    State(state): State<ApiState>,
+    Path(template_id): Path<String>,
+) -> ApiResult<Json<RuleActionTemplatePreviewResponse>> {
+    let store = sqlite_store(&state)?;
+    let entry = store
+        .get_rule_action_template(&template_id)
+        .await
+        .map_err(ApiError::internal)?;
+    let entry = entry.ok_or_else(|| {
+        ApiError::not_found(format!("Rule action template '{}' not found", template_id))
+    })?;
+    let response_template =
+        serde_json::from_str::<crate::config::RuleResponseTemplate>(&entry.response_template_json)
+            .map_err(ApiError::internal)?;
+
+    let (body_preview, truncated) =
+        read_rule_action_template_preview(&response_template).map_err(ApiError::internal)?;
+
+    Ok(Json(RuleActionTemplatePreviewResponse {
+        template_id: entry.template_id,
+        name: entry.name,
+        content_type: response_template.content_type,
+        status_code: response_template.status_code,
+        gzip: response_template.gzip,
+        body_source: match response_template.body_source {
+            crate::config::RuleResponseBodySource::InlineText => "inline_text".to_string(),
+            crate::config::RuleResponseBodySource::File => "file".to_string(),
+        },
+        body_preview,
+        truncated,
+    }))
+}
+
 pub(super) async fn install_rule_action_plugin_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<InstallRuleActionPluginRequest>,
@@ -204,6 +238,29 @@ pub(super) async fn delete_rule_action_plugin_handler(
         success: true,
         message: "规则模板插件已卸载，相关规则已停用".to_string(),
     }))
+}
+
+fn read_rule_action_template_preview(
+    template: &crate::config::RuleResponseTemplate,
+) -> anyhow::Result<(String, bool)> {
+    const PREVIEW_LIMIT: usize = 16 * 1024;
+
+    let body = match template.body_source {
+        crate::config::RuleResponseBodySource::InlineText => template.body_text.clone(),
+        crate::config::RuleResponseBodySource::File => {
+            let path = crate::rules::resolve_response_file_path(template.body_file_path.trim())?;
+            String::from_utf8_lossy(&std::fs::read(path)?).into_owned()
+        }
+    };
+
+    let truncated = body.len() > PREVIEW_LIMIT;
+    let preview = if truncated {
+        body.chars().take(PREVIEW_LIMIT).collect::<String>()
+    } else {
+        body
+    };
+
+    Ok((preview, truncated))
 }
 
 pub(super) async fn update_rule_handler(

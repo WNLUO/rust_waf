@@ -17,12 +17,14 @@ import {
   PanelLeftOpen,
   X,
   AppWindow,
+  Sparkles,
 } from 'lucide-vue-next'
 
 const navItems = [
   { name: '总览', path: '/admin', icon: LayoutDashboard },
   { name: '站点管理', path: '/admin/sites', icon: AppWindow },
   { name: '规则中心', path: '/admin/rules', icon: Shield },
+  { name: '动作中心', path: '/admin/actions', icon: Sparkles },
   { name: 'L4管理', path: '/admin/l4', icon: ServerCog },
   { name: 'L7管理', path: '/admin/l7', icon: Globe },
   { name: '事件记录', path: '/admin/events', icon: Activity },

@@ -281,10 +281,29 @@ impl SqliteStore {
             FROM rule_action_templates t
             INNER JOIN rule_action_plugins p ON p.plugin_id = t.plugin_id
             WHERE p.enabled = 1
-            ORDER BY plugin_id ASC, template_id ASC
+            ORDER BY t.plugin_id ASC, t.template_id ASC
             "#,
         )
         .fetch_all(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn get_rule_action_template(
+        &self,
+        template_id: &str,
+    ) -> Result<Option<RuleActionTemplateEntry>> {
+        sqlx::query_as::<_, RuleActionTemplateEntry>(
+            r#"
+            SELECT t.template_id, t.plugin_id, t.name, t.description, t.layer, t.action, t.pattern, t.severity, t.response_template_json, t.updated_at
+            FROM rule_action_templates t
+            INNER JOIN rule_action_plugins p ON p.plugin_id = t.plugin_id
+            WHERE p.enabled = 1 AND t.template_id = ?
+            "#,
+        )
+        .bind(template_id)
+        .fetch_optional(&self.pool)
         .await
         .map_err(Into::into)
     }

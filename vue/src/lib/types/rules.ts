@@ -70,6 +70,17 @@ export interface RuleActionTemplatesResponse {
   templates: RuleActionTemplateItem[]
 }
 
+export interface RuleActionTemplatePreviewResponse {
+  template_id: string
+  name: string
+  content_type: string
+  status_code: number
+  gzip: boolean
+  body_source: string
+  body_preview: string
+  truncated: boolean
+}
+
 export interface RulesResponse {
   rules: RuleItem[]
 }

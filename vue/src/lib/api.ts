@@ -19,6 +19,7 @@ import type {
   LocalSitesResponse,
   MetricsResponse,
   RuleActionPluginsResponse,
+  RuleActionTemplatePreviewResponse,
   RuleActionTemplatesResponse,
   RuleDraft,
   RulesResponse,
@@ -173,6 +174,12 @@ export function fetchRuleActionPlugins() {
 
 export function fetchRuleActionTemplates() {
   return apiRequest<RuleActionTemplatesResponse>('/rule-action-templates')
+}
+
+export function fetchRuleActionTemplatePreview(templateId: string) {
+  return apiRequest<RuleActionTemplatePreviewResponse>(
+    `/rule-action-templates/${encodeURIComponent(templateId)}/preview`,
+  )
 }
 
 export function installRuleActionPlugin(

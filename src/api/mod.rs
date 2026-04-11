@@ -115,6 +115,10 @@ impl ApiServer {
                 get(rules_handlers::list_rule_action_templates_handler),
             )
             .route(
+                "/rule-action-templates/:template_id/preview",
+                get(rules_handlers::preview_rule_action_template_handler),
+            )
+            .route(
                 "/sites/local",
                 get(sites_handlers::list_local_sites_handler)
                     .post(sites_handlers::create_local_site_handler),

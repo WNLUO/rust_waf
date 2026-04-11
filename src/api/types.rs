@@ -622,6 +622,18 @@ pub struct RuleActionTemplateResponse {
     pub(crate) updated_at: i64,
 }
 
+#[derive(Debug, Serialize)]
+pub struct RuleActionTemplatePreviewResponse {
+    pub(crate) template_id: String,
+    pub(crate) name: String,
+    pub(crate) content_type: String,
+    pub(crate) status_code: u16,
+    pub(crate) gzip: bool,
+    pub(crate) body_source: String,
+    pub(crate) body_preview: String,
+    pub(crate) truncated: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct InstallRuleActionPluginRequest {
     pub(crate) package_url: String,

@@ -96,8 +96,11 @@ impl WafEngine {
             if let Some(upstream_addr) = self.context.config.tcp_upstream_addr.clone() {
                 let context = Arc::clone(&self.context);
                 tokio::spawn(async move {
-                    super::engine_maintenance::run_upstream_healthcheck_loop(context, upstream_addr)
-                        .await;
+                    super::engine_maintenance::run_upstream_healthcheck_loop(
+                        context,
+                        upstream_addr,
+                    )
+                    .await;
                 });
             }
         }

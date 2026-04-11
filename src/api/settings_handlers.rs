@@ -53,7 +53,9 @@ pub(super) async fn update_l7_config_handler(
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
-    let next = payload.into_config(current).map_err(ApiError::bad_request)?;
+    let next = payload
+        .into_config(current)
+        .map_err(ApiError::bad_request)?;
 
     store
         .upsert_app_config(&next)

@@ -10,6 +10,10 @@
 - `lib / bin` 边界整理
 - API 第一批拆分：`types`
 - API 第二批拆分：`conversions`
+- API handlers 按领域拆分
+- `storage` 的 query / model / schema 抽离
+- `core::engine` 的 maintenance / tls 初始化抽离
+- P1 规范文档补充
 
 ---
 
@@ -19,29 +23,29 @@
 
 目标：让 `src/api/mod.rs` 主要承担路由入口职责，按领域拆分 handler。
 
-- [ ] 按领域拆分 `src/api/mod.rs` 中的 handlers
-- [ ] 优先按 `settings / safeline / rules / sites / events` 拆分
-- [ ] 让 `src/api/mod.rs` 保持为路由装配入口
-- [ ] 保持现有测试全部通过
+- [x] 按领域拆分 `src/api/mod.rs` 中的 handlers
+- [x] 优先按 `settings / safeline / rules / sites / events` 拆分
+- [x] 让 `src/api/mod.rs` 保持为路由装配入口
+- [x] 保持现有测试全部通过
 
 ### 2. 拆分 `src/storage/mod.rs`
 
 目标：降低存储层单文件复杂度，分离 repository、query、model、migration 职责。
 
-- [ ] 拆分 `src/storage/mod.rs`
-- [ ] 抽离 query 参数与排序定义
-- [ ] 抽离数据模型与 upsert 结构
-- [ ] 抽离 migration / schema 初始化逻辑
-- [ ] 保持现有测试全部通过
+- [x] 拆分 `src/storage/mod.rs`
+- [x] 抽离 query 参数与排序定义
+- [x] 抽离数据模型与 upsert 结构
+- [x] 抽离 migration / schema 初始化逻辑
+- [x] 保持现有测试全部通过
 
 ### 3. 拆分 `src/core/engine.rs`
 
 目标：把运行时调度、监听、代理、健康检查等职责拆开。
 
-- [ ] 拆分 `src/core/engine.rs`
-- [ ] 按监听器、转发、维护任务、健康检查等职责拆分
-- [ ] 保持 `WafEngine` 作为稳定入口
-- [ ] 保持现有测试全部通过
+- [x] 拆分 `src/core/engine.rs`
+- [x] 按监听器、转发、维护任务、健康检查等职责拆分
+- [x] 保持 `WafEngine` 作为稳定入口
+- [x] 保持现有测试全部通过
 
 ### 4. 拆分 `src/integrations/safeline.rs`
 
@@ -57,11 +61,11 @@
 
 目标：在主要大文件拆分后，把结构约束正式沉淀为项目规则。
 
-- [ ] 统一测试入口和公共导出策略
-- [ ] 梳理前端超大页面拆分方案
-- [ ] 制定单文件体量阈值建议
-- [ ] 制定 `mod.rs` 使用规范
-- [ ] 制定目录命名、文件命名、模块导出约定
+- [x] 统一测试入口和公共导出策略
+- [x] 梳理前端超大页面拆分方案
+- [x] 制定单文件体量阈值建议
+- [x] 制定 `mod.rs` 使用规范
+- [x] 制定目录命名、文件命名、模块导出约定
 
 ---
 
@@ -78,5 +82,7 @@
 ## 备注区
 
 - 当前阶段：P1
-- 下一步：拆分 API handlers
+- 下一步：拆分 `src/integrations/safeline.rs`
 - 备注：
+  - `src/integrations/safeline.rs` 仍是当前主剩余大文件
+  - 本轮已完成 API / storage / core engine 主线拆分，并补齐 P1 规则文档

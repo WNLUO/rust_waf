@@ -22,7 +22,10 @@ pub(super) async fn get_local_site_handler(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<LocalSiteResponse>> {
     let store = sqlite_store(&state)?;
-    let site = store.load_local_site(id).await.map_err(ApiError::internal)?;
+    let site = store
+        .load_local_site(id)
+        .await
+        .map_err(ApiError::internal)?;
     match site {
         Some(site) => Ok(Json(
             LocalSiteResponse::try_from(site).map_err(ApiError::internal)?,
@@ -86,7 +89,10 @@ pub(super) async fn delete_local_site_handler(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let deleted = store.delete_local_site(id).await.map_err(ApiError::internal)?;
+    let deleted = store
+        .delete_local_site(id)
+        .await
+        .map_err(ApiError::internal)?;
 
     if deleted {
         Ok(Json(WriteStatusResponse {

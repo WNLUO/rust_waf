@@ -109,7 +109,9 @@ pub(super) async fn update_rule_handler(
     ExtractJson(payload): ExtractJson<RuleUpsertRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = rules_store(&state)?;
-    let rule = payload.into_rule_with_id(id).map_err(ApiError::bad_request)?;
+    let rule = payload
+        .into_rule_with_id(id)
+        .map_err(ApiError::bad_request)?;
     crate::rules::validate_rule(&rule).map_err(|err| ApiError::bad_request(err.to_string()))?;
     store.upsert_rule(&rule).await.map_err(ApiError::internal)?;
 

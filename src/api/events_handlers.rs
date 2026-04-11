@@ -121,7 +121,10 @@ pub(super) async fn delete_blocked_ip_handler(
             .map_err(ApiError::internal)?;
     }
 
-    let deleted = store.delete_blocked_ip(id).await.map_err(ApiError::internal)?;
+    let deleted = store
+        .delete_blocked_ip(id)
+        .await
+        .map_err(ApiError::internal)?;
 
     if deleted {
         let runtime_unblocked = if entry.provider.is_none() {

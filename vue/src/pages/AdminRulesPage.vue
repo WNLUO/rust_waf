@@ -545,7 +545,7 @@ onMounted(loadRulesCenter)
             </p>
           </div>
           <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p class="text-sm font-medium text-stone-900">高级能力入口</p>
+            <p class="text-sm font-medium text-stone-900">动作入口</p>
             <div class="mt-3 flex flex-wrap gap-2">
               <RouterLink
                 to="/admin/actions"
@@ -553,19 +553,10 @@ onMounted(loadRulesCenter)
               >
                 管理动作模板与插件
               </RouterLink>
-              <RouterLink
-                to="/admin/l7/rules"
-                class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              >
-                进入高级 L7 规则
-              </RouterLink>
-              <RouterLink
-                to="/admin/l4/rules"
-                class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              >
-                进入高级 L4 规则
-              </RouterLink>
             </div>
+            <p class="mt-3 text-xs leading-6 text-slate-500">
+              高级编辑器仍保留为内部兜底能力，但不在日常配置路径里展示。
+            </p>
           </div>
         </div>
       </section>

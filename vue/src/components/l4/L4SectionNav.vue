@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router'
-import { Ban, LayoutDashboard, Network, Shield } from 'lucide-vue-next'
+import { Ban, LayoutDashboard, Network } from 'lucide-vue-next'
 
 const route = useRoute()
 
 const items = [
   { name: 'L4 总览', path: '/admin/l4', icon: LayoutDashboard },
-  { name: 'L4 规则', path: '/admin/l4/rules', icon: Shield },
   { name: 'L4 黑名单', path: '/admin/l4/blocklist', icon: Ban },
   { name: '端口画像', path: '/admin/l4/ports', icon: Network },
 ]

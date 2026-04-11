@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { RouterLink } from 'vue-router'
 import CyberCard from '../ui/CyberCard.vue'
 import StatusBadge from '../ui/StatusBadge.vue'
 import type { RuleItem, SecurityEventItem } from '../../lib/types'
@@ -119,15 +118,6 @@ defineProps<{
           当前还没有 HTTP 规则。
         </p>
       </div>
-
-      <template #header-action>
-        <RouterLink
-          to="/admin/l7/rules"
-          class="inline-flex items-center gap-2 text-sm text-blue-700 transition hover:text-blue-600"
-        >
-          前往 HTTP 规则
-        </RouterLink>
-      </template>
     </CyberCard>
   </section>
 </template>

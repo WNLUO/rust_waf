@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { RouterLink, useRoute } from 'vue-router'
-import { LayoutDashboard, Shield } from 'lucide-vue-next'
+import { LayoutDashboard } from 'lucide-vue-next'
 
 const route = useRoute()
 
 const items = [
   { name: 'HTTP 总览', path: '/admin/l7', icon: LayoutDashboard },
-  { name: 'HTTP 规则', path: '/admin/l7/rules', icon: Shield },
 ]
 
 const isActive = (path: string) =>

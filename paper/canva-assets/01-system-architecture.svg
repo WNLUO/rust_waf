@@ -1,0 +1,73 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="900" fill="#F6F1E8"/>
+  <rect x="48" y="48" width="1504" height="804" rx="32" fill="#FFFDFC" stroke="#D7CFC2" stroke-width="2"/>
+  <text x="88" y="110" fill="#2C241D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">Rust WAF 系统总体架构</text>
+  <text x="88" y="148" fill="#7A6D60" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">适合直接导入 Canva 后继续调整配色、字号和答辩说明</text>
+
+  <rect x="88" y="190" width="220" height="520" rx="24" fill="#E8F1FB" stroke="#7FB0E0" stroke-width="2"/>
+  <text x="118" y="246" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">监听接入层</text>
+  <text x="118" y="292" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">TCP 监听</text>
+  <text x="118" y="332" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">UDP / QUIC</text>
+  <text x="118" y="372" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">TLS 终止</text>
+  <text x="118" y="412" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">HTTP/3 入口</text>
+  <text x="118" y="468" fill="#4A6683" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责多协议接入、</text>
+  <text x="118" y="496" fill="#4A6683" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">监听器启动与</text>
+  <text x="118" y="524" fill="#4A6683" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">并发连接限制</text>
+
+  <rect x="352" y="190" width="260" height="520" rx="24" fill="#EEF7EC" stroke="#8ABB8A" stroke-width="2"/>
+  <text x="384" y="246" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">检测决策层</text>
+  <text x="384" y="292" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L4 连接跟踪</text>
+  <text x="384" y="332" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">速率限制 / 黑名单</text>
+  <text x="384" y="372" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">协议识别</text>
+  <text x="384" y="412" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">统一请求抽象</text>
+  <text x="384" y="452" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L7 规则引擎</text>
+  <text x="384" y="492" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">respond / block / alert</text>
+  <text x="384" y="548" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责粗筛与精判协同，</text>
+  <text x="384" y="576" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">把不同协议流量</text>
+  <text x="384" y="604" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">统一送入同一套裁决逻辑</text>
+
+  <rect x="656" y="190" width="240" height="520" rx="24" fill="#FFF4DF" stroke="#E3B765" stroke-width="2"/>
+  <text x="688" y="246" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">代理治理层</text>
+  <text x="688" y="292" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点匹配</text>
+  <text x="688" y="332" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">证书选择</text>
+  <text x="688" y="372" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">上游健康检查</text>
+  <text x="688" y="412" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Fail-open / close</text>
+  <text x="688" y="452" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">请求转发</text>
+  <text x="688" y="520" fill="#8A6B34" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责网关化部署、</text>
+  <text x="688" y="548" fill="#8A6B34" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">多站点证书与</text>
+  <text x="688" y="576" fill="#8A6B34" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">后端可用性治理</text>
+
+  <rect x="940" y="190" width="250" height="520" rx="24" fill="#F6EBFA" stroke="#BB8AD9" stroke-width="2"/>
+  <text x="972" y="246" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">持久化层</text>
+  <text x="972" y="292" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">SQLite 配置</text>
+  <text x="972" y="332" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则与模板</text>
+  <text x="972" y="372" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">security_events</text>
+  <text x="972" y="412" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">blocked_ips</text>
+  <text x="972" y="452" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点 / 证书 / 联动</text>
+  <text x="972" y="520" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责统一审计、</text>
+  <text x="972" y="548" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">配置保存与</text>
+  <text x="972" y="576" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">诱导事件落库</text>
+
+  <rect x="1234" y="190" width="250" height="520" rx="24" fill="#FDECEE" stroke="#E39AA2" stroke-width="2"/>
+  <text x="1266" y="246" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">管理控制层</text>
+  <text x="1266" y="292" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Axum API</text>
+  <text x="1266" y="332" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Vue 控制台</text>
+  <text x="1266" y="372" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">动作中心</text>
+  <text x="1266" y="412" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">事件筛选与看板</text>
+  <text x="1266" y="452" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">SafeLine 联动</text>
+  <text x="1266" y="520" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责配置操作、</text>
+  <text x="1266" y="548" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">指标展示与</text>
+  <text x="1266" y="576" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">外部平台协同</text>
+
+  <path d="M308 450H352" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
+  <path d="M612 450H656" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
+  <path d="M896 450H940" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1190 450H1234" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
+  <path d="M338 450L322 438V462L338 450Z" fill="#8E8173"/>
+  <path d="M642 450L626 438V462L642 450Z" fill="#8E8173"/>
+  <path d="M926 450L910 438V462L926 450Z" fill="#8E8173"/>
+  <path d="M1220 450L1204 438V462L1220 450Z" fill="#8E8173"/>
+
+  <rect x="88" y="748" width="1396" height="72" rx="18" fill="#F1E7DA"/>
+  <text x="120" y="792" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">答辩时可配合一句话说明：系统以 Rust 引擎作为数据面核心，前置 L4 粗筛，后接 L7 统一规则裁决，再通过 SQLite、Axum 和 Vue 完成运维闭环。</text>
+</svg>

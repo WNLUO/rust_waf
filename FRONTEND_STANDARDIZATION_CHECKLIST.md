@@ -22,22 +22,25 @@
 - `AdminSitesPage.vue` 已降到 `166` 行
 - `AdminL7Page.vue` 已降到 `145` 行
 - `AdminSettingsPage.vue` 已降到 `160` 行
-- 仍存在明显超大页面：`AdminL4Page.vue` `803` 行、`AdminRulesPage.vue` `767` 行、`AdminSafeLinePage.vue` `761` 行
+- `AdminL4Page.vue` 已降到 `127` 行
+- 仍存在明显超大页面：`AdminRulesPage.vue` `767` 行、`AdminSafeLinePage.vue` `761` 行
 - 仍存在明显超大脚本：`useAdminSites.ts` `661` 行、`lib/types.ts` `600` 行
 
 ## 体量扫描摘要
 
 页面文件现状：
 
-- 超过 `500` 行：`AdminL4Page.vue`、`AdminRulesPage.vue`、`AdminSafeLinePage.vue`、`AdminL7RulesPage.vue`、`AdminL4RulesPage.vue`
+- 超过 `500` 行：`AdminRulesPage.vue`、`AdminSafeLinePage.vue`、`AdminL7RulesPage.vue`、`AdminL4RulesPage.vue`
 - 超过 `300` 行：另有 `AdminEventsPage.vue`、`AdminL4BlocklistPage.vue`、`AdminPage.vue`、`AdminL4PortsPage.vue`
-- 已完成首轮拆分并回到建议阈值内：`AdminSitesPage.vue`、`AdminL7Page.vue`、`AdminSettingsPage.vue`
+- 已完成拆分并回到建议阈值内：`AdminSitesPage.vue`、`AdminL7Page.vue`、`AdminSettingsPage.vue`、`AdminL4Page.vue`
 
 组件与状态层现状：
 
 - `components/<domain>/`、`composables/`、`lib/` 已形成分层，但体量分布不均
-- `AdminL7ConfigSection.vue` `497` 行、`AdminSitesTableSection.vue` `373` 行、`AdminSettingsSafeLineSection.vue` `334` 行，已接近下一轮拆分阈值
+- `AdminL7ConfigSection.vue` `497` 行、`AdminSitesTableSection.vue` `373` 行、`AdminSettingsSafeLineSection.vue` `334` 行，已进入下一轮 section 拆分范围
+- `AdminL4ConfigSection.vue` 已降到 `50` 行，`AdminL4RuntimeInsightsSection.vue` 为 `160` 行，`AdminL4ConfigFormCard.vue` 为 `202` 行，说明 L4 页面拆分已基本完成，剩余仅是表单卡片边界微调
 - `useAdminSites.ts` `661` 行、`useAdminSettings.ts` `462` 行、`useAdminL7.ts` `369` 行，说明页面拆分后仍需继续收口副作用和流程编排
+- `useAdminL4.ts` 已控制在 `231` 行，基本贴近当前 composable 体量目标
 
 命名与风格抽样结论：
 
@@ -107,7 +110,7 @@
 - [x] 优先拆分 `vue/src/pages/AdminSitesPage.vue`
 - [x] 优先拆分 `vue/src/pages/AdminL7Page.vue`
 - [x] 优先拆分 `vue/src/pages/AdminSettingsPage.vue`
-- [ ] 优先拆分 `vue/src/pages/AdminL4Page.vue`
+- [x] 优先拆分 `vue/src/pages/AdminL4Page.vue`
 - [ ] 优先拆分 `vue/src/pages/AdminRulesPage.vue`
 - [ ] 继续跟进 `vue/src/pages/AdminSafeLinePage.vue`
 
@@ -191,10 +194,10 @@
 
 ## 下一步建议执行顺序
 
-1. 优先拆分 `AdminL4Page.vue`，目标是先把总行数压到 `500` 行以内
-2. 并行规划 `AdminRulesPage.vue` 与 `AdminSafeLinePage.vue` 的区块切分点，避免继续把副作用留在页面层
-3. 将 `useAdminSites.ts` 再拆为查询、编辑器状态、远端同步三类子能力
-4. 将 `lib/types.ts` 按 `rules / sites / settings / safeline / dashboard` 进行领域拆分
+1. 优先拆分 `AdminRulesPage.vue` 与 `AdminSafeLinePage.vue`，避免继续把副作用留在页面层
+2. 将 `useAdminSites.ts` 再拆为查询、编辑器状态、远端同步三类子能力
+3. 将 `lib/types.ts` 按 `rules / sites / settings / safeline / dashboard` 进行领域拆分
+4. 视后续需求再微调 `AdminL4ConfigFormCard.vue`，尽量压到 `200` 行以内
 5. 补充对 `section / composable` 体量阈值的文档约束，后续再考虑是否接入自动化校验
 
 ## 完成标准

@@ -1,7 +1,7 @@
 use crate::config::{Rule, RuleAction, RuleLayer, RuleResponseBodySource, RuleResponseTemplate};
 use crate::core::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo,
-    TarpitConfig,
+    RandomStatusConfig, TarpitConfig,
 };
 use anyhow::Result;
 use flate2::write::GzEncoder;
@@ -14,6 +14,7 @@ use std::path::{Component, Path, PathBuf};
 pub const RULE_RESPONSE_FILES_DIR: &str = "data/rule_responses";
 const INTERNAL_TARPIT_BYTES_PER_CHUNK_HEADER: &str = "x-rust-waf-tarpit-bytes-per-chunk";
 const INTERNAL_TARPIT_INTERVAL_MS_HEADER: &str = "x-rust-waf-tarpit-interval-ms";
+const INTERNAL_RANDOM_STATUSES_HEADER: &str = "x-rust-waf-random-statuses";
 
 pub struct RuleEngine {
     rules: Vec<CompiledRule>,
@@ -195,6 +196,7 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
     };
 
     let tarpit = extract_tarpit_config(&template.headers)?;
+    let random_status = extract_random_status_config(&template.headers)?;
 
     let mut headers = Vec::with_capacity(template.headers.len() + 2);
     headers.push(("content-type".to_string(), template.content_type.clone()));
@@ -208,6 +210,7 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
             || key.eq_ignore_ascii_case("content-encoding")
             || key.eq_ignore_ascii_case(INTERNAL_TARPIT_BYTES_PER_CHUNK_HEADER)
             || key.eq_ignore_ascii_case(INTERNAL_TARPIT_INTERVAL_MS_HEADER)
+            || key.eq_ignore_ascii_case(INTERNAL_RANDOM_STATUSES_HEADER)
         {
             return None;
         }
@@ -219,6 +222,7 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
         headers,
         body,
         tarpit,
+        random_status,
     })
 }
 
@@ -265,6 +269,43 @@ fn extract_tarpit_config(
             "Tarpit response requires both bytes-per-chunk and interval headers"
         )),
     }
+}
+
+fn extract_random_status_config(
+    headers: &[crate::config::RuleResponseHeader],
+) -> Result<Option<RandomStatusConfig>> {
+    let Some(raw) = headers.iter().find_map(|header| {
+        header
+            .key
+            .trim()
+            .eq_ignore_ascii_case(INTERNAL_RANDOM_STATUSES_HEADER)
+            .then(|| header.value.trim())
+    }) else {
+        return Ok(None);
+    };
+
+    let statuses: Result<Vec<_>> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            let parsed = value.parse::<u16>().map_err(|_| {
+                anyhow::anyhow!(
+                    "Invalid random status '{}', expected HTTP status code",
+                    value
+                )
+            })?;
+            if !(100..=599).contains(&parsed) {
+                anyhow::bail!("Random status '{}' must be between 100 and 599", value);
+            }
+            Ok(parsed)
+        })
+        .collect();
+    let statuses = statuses?;
+    if statuses.is_empty() {
+        anyhow::bail!("Random status response requires at least one status code");
+    }
+    Ok(Some(RandomStatusConfig { statuses }))
 }
 
 pub(crate) fn resolve_response_file_path(value: &str) -> Result<PathBuf> {

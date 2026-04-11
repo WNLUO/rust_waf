@@ -2,6 +2,7 @@ use anyhow::Result;
 use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
+use rand::Rng;
 use std::io::Read;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
@@ -712,11 +713,12 @@ async fn handle_http3_request(
             metrics.record_block(inspection_result.layer.clone());
         }
         if let Some(response) = inspection_result.custom_response.as_ref() {
+            let response = resolve_runtime_custom_response(response);
             send_http3_response(
                 &mut stream,
                 response.status_code,
                 &response.headers,
-                response.body.clone(),
+                response.body,
                 response.tarpit.as_ref(),
             )
             .await?;
@@ -1042,6 +1044,18 @@ enum UpstreamResponseDisposition {
     Forward(UpstreamHttpResponse),
     Custom(CustomHttpResponse),
     Drop,
+}
+
+fn resolve_runtime_custom_response(response: &CustomHttpResponse) -> CustomHttpResponse {
+    let mut resolved = response.clone();
+    if let Some(random_status) = response.random_status.as_ref() {
+        let len = random_status.statuses.len();
+        if len > 0 {
+            let index = rand::thread_rng().gen_range(0..len);
+            resolved.status_code = random_status.statuses[index];
+        }
+    }
+    resolved
 }
 
 async fn proxy_http_request(
@@ -1488,6 +1502,7 @@ async fn handle_http1_connection(
             metrics.record_block(inspection_result.layer.clone());
         }
         if let Some(response) = inspection_result.custom_response.as_ref() {
+            let response = resolve_runtime_custom_response(response);
             if let Some(tarpit) = response.tarpit.as_ref() {
                 http1_handler
                     .write_response_with_headers_tarpit(
@@ -1567,6 +1582,7 @@ async fn handle_http1_connection(
                             write_http1_upstream_response(&mut stream, &response).await?;
                         }
                         UpstreamResponseDisposition::Custom(response) => {
+                            let response = resolve_runtime_custom_response(&response);
                             if let Some(tarpit) = response.tarpit.as_ref() {
                                 http1_handler
                                     .write_response_with_headers_tarpit(
@@ -1720,10 +1736,11 @@ async fn handle_http2_connection(
                             metrics.record_block(inspection_result.layer.clone());
                         }
                         if let Some(response) = inspection_result.custom_response.as_ref() {
+                            let response = resolve_runtime_custom_response(response);
                             return Ok(Http2Response {
                                 status_code: response.status_code,
-                                headers: response.headers.clone(),
-                                body: response.body.clone(),
+                                headers: response.headers,
+                                body: response.body,
                             });
                         }
                         return Ok(Http2Response {
@@ -1783,6 +1800,7 @@ async fn handle_http2_connection(
                                         })
                                     }
                                     UpstreamResponseDisposition::Custom(response) => {
+                                        let response = resolve_runtime_custom_response(&response);
                                         Ok(Http2Response {
                                             status_code: response.status_code,
                                             headers: response.headers,

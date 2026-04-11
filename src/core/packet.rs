@@ -50,12 +50,18 @@ pub struct CustomHttpResponse {
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
     pub tarpit: Option<TarpitConfig>,
+    pub random_status: Option<RandomStatusConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TarpitConfig {
     pub bytes_per_chunk: usize,
     pub chunk_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomStatusConfig {
+    pub statuses: Vec<u16>,
 }
 
 impl PacketInfo {

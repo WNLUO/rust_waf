@@ -46,6 +46,10 @@ fn is_tarpit_action_idea(idea_id: &str) -> bool {
     idea_id == "smart-tarpit"
 }
 
+fn is_random_error_action_idea(idea_id: &str) -> bool {
+    idea_id == "random-error-system"
+}
+
 fn default_redirect_target() -> &'static str {
     "https://www.war.gov/"
 }
@@ -245,7 +249,7 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             title: "智能延迟（Tarpit）",
             mood: "消耗",
             summary: "对可疑请求极慢响应，默认每秒只发送 1 字节，把扫描器拖住 30 秒以上。",
-            mechanism: "通过内部 tarpit 头触发慢速写出。当前对 HTTP/1 与 HTTP/3 生效，HTTP/2 仍会按普通响应返回。",
+            mechanism: "通过内部 tarpit 头触发慢速写出。当前仅对 HTTP/1 与 HTTP/3 生效。",
             performance: "低",
             fallback_path: "/admin/rules",
             plugin_id: "smart-tarpit-fun",
@@ -263,6 +267,30 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             body_source: "inline_text",
             response_content:
                 "{\"bytes_per_chunk\":1,\"chunk_interval_ms\":1000,\"body_text\":\"processing request, please wait...\"}",
+            requires_upload: false,
+        },
+        BuiltinActionIdeaPreset {
+            id: "random-error-system",
+            title: "随机错误系统",
+            mood: "迷雾",
+            summary: "随机返回 500 / 502 / 403，偶尔也返回成功状态，干扰攻击者对系统真实状态的判断。",
+            mechanism: "通过内部随机状态头在运行时为每个请求挑选不同状态码，让同一路径的表现时好时坏。",
+            performance: "中",
+            fallback_path: "/admin/rules",
+            plugin_id: "random-error-system-fun",
+            file_name: "random-error-system-fun.zip",
+            response_file_path: "random-error-system.txt",
+            plugin_name: "Random Error System Fun",
+            plugin_description: "随机返回不同成功/失败状态码的示例动作",
+            template_local_id: "random_error_system",
+            template_description: "随机制造系统不稳定假象，增加攻击者判断成本",
+            pattern: "(?i)scanner|probe|health|status|debug|check|sqlmap|nikto|ffuf",
+            severity: "medium",
+            content_type: "text/plain; charset=utf-8",
+            status_code: 500,
+            gzip: false,
+            body_source: "inline_text",
+            response_content: "upstream system unstable, retry later",
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
@@ -321,6 +349,12 @@ fn action_idea_headers(
         headers.push(RuleResponseHeaderPayload {
             key: "x-rust-waf-tarpit-interval-ms".to_string(),
             value: config.chunk_interval_ms.to_string(),
+        });
+    }
+    if is_random_error_action_idea(builtin.id) {
+        headers.push(RuleResponseHeaderPayload {
+            key: "x-rust-waf-random-statuses".to_string(),
+            value: "500,502,403,200".to_string(),
         });
     }
     if is_redirect_action_idea(builtin.id) {

@@ -1,6 +1,7 @@
 use crate::config::{Rule, RuleAction, RuleLayer, RuleResponseBodySource, RuleResponseTemplate};
 use crate::core::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo,
+    TarpitConfig,
 };
 use anyhow::Result;
 use flate2::write::GzEncoder;
@@ -11,6 +12,8 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 pub const RULE_RESPONSE_FILES_DIR: &str = "data/rule_responses";
+const INTERNAL_TARPIT_BYTES_PER_CHUNK_HEADER: &str = "x-rust-waf-tarpit-bytes-per-chunk";
+const INTERNAL_TARPIT_INTERVAL_MS_HEADER: &str = "x-rust-waf-tarpit-interval-ms";
 
 pub struct RuleEngine {
     rules: Vec<CompiledRule>,
@@ -191,6 +194,8 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
         raw_body
     };
 
+    let tarpit = extract_tarpit_config(&template.headers)?;
+
     let mut headers = Vec::with_capacity(template.headers.len() + 2);
     headers.push(("content-type".to_string(), template.content_type.clone()));
     if template.gzip {
@@ -201,6 +206,8 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
         if key.eq_ignore_ascii_case("content-length")
             || key.eq_ignore_ascii_case("content-type")
             || key.eq_ignore_ascii_case("content-encoding")
+            || key.eq_ignore_ascii_case(INTERNAL_TARPIT_BYTES_PER_CHUNK_HEADER)
+            || key.eq_ignore_ascii_case(INTERNAL_TARPIT_INTERVAL_MS_HEADER)
         {
             return None;
         }
@@ -211,7 +218,53 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
         status_code: template.status_code,
         headers,
         body,
+        tarpit,
     })
+}
+
+fn extract_tarpit_config(
+    headers: &[crate::config::RuleResponseHeader],
+) -> Result<Option<TarpitConfig>> {
+    let mut bytes_per_chunk = None;
+    let mut chunk_interval_ms = None;
+
+    for header in headers {
+        let key = header.key.trim();
+        let value = header.value.trim();
+        if key.eq_ignore_ascii_case(INTERNAL_TARPIT_BYTES_PER_CHUNK_HEADER) {
+            bytes_per_chunk = Some(value.parse::<usize>().map_err(|_| {
+                anyhow::anyhow!(
+                    "Invalid tarpit bytes-per-chunk '{}', expected positive integer",
+                    value
+                )
+            })?);
+        } else if key.eq_ignore_ascii_case(INTERNAL_TARPIT_INTERVAL_MS_HEADER) {
+            chunk_interval_ms = Some(value.parse::<u64>().map_err(|_| {
+                anyhow::anyhow!(
+                    "Invalid tarpit interval '{}', expected positive integer milliseconds",
+                    value
+                )
+            })?);
+        }
+    }
+
+    match (bytes_per_chunk, chunk_interval_ms) {
+        (None, None) => Ok(None),
+        (Some(bytes_per_chunk), Some(chunk_interval_ms))
+            if bytes_per_chunk > 0 && chunk_interval_ms > 0 =>
+        {
+            Ok(Some(TarpitConfig {
+                bytes_per_chunk,
+                chunk_interval_ms,
+            }))
+        }
+        (Some(_), Some(_)) => Err(anyhow::anyhow!(
+            "Tarpit bytes-per-chunk and interval must be greater than zero"
+        )),
+        _ => Err(anyhow::anyhow!(
+            "Tarpit response requires both bytes-per-chunk and interval headers"
+        )),
+    }
 }
 
 pub(crate) fn resolve_response_file_path(value: &str) -> Result<PathBuf> {
@@ -349,6 +402,7 @@ mod tests {
             .iter()
             .any(|(key, value)| key == "content-encoding" && value == "gzip"));
         assert!(!response.body.is_empty());
+        assert!(response.tarpit.is_none());
     }
 
     #[test]
@@ -398,6 +452,7 @@ mod tests {
         let result = engine.inspect(&packet, Some("file"));
         let response = result.custom_response.expect("custom response");
         assert_eq!(response.body, b"hello from file".to_vec());
+        assert!(response.tarpit.is_none());
 
         let _ = fs::remove_file(stored_path);
     }
@@ -444,5 +499,41 @@ mod tests {
             .headers
             .iter()
             .any(|(key, value)| key == "location" && value == "https://example.com/blocked"));
+        assert!(response.tarpit.is_none());
+    }
+
+    #[test]
+    fn test_build_custom_response_extracts_tarpit_config() {
+        let response = build_custom_response(&RuleResponseTemplate {
+            status_code: 200,
+            content_type: "text/plain; charset=utf-8".to_string(),
+            body_source: RuleResponseBodySource::InlineText,
+            gzip: false,
+            body_text: "processing request, please wait...".to_string(),
+            body_file_path: String::new(),
+            headers: vec![
+                RuleResponseHeader {
+                    key: "x-rust-waf-tarpit-bytes-per-chunk".to_string(),
+                    value: "1".to_string(),
+                },
+                RuleResponseHeader {
+                    key: "x-rust-waf-tarpit-interval-ms".to_string(),
+                    value: "1000".to_string(),
+                },
+                RuleResponseHeader {
+                    key: "cache-control".to_string(),
+                    value: "no-store".to_string(),
+                },
+            ],
+        })
+        .expect("response should build");
+
+        let tarpit = response.tarpit.expect("tarpit config");
+        assert_eq!(tarpit.bytes_per_chunk, 1);
+        assert_eq!(tarpit.chunk_interval_ms, 1000);
+        assert!(response.headers.iter().all(|(key, _)| {
+            !key.eq_ignore_ascii_case("x-rust-waf-tarpit-bytes-per-chunk")
+                && !key.eq_ignore_ascii_case("x-rust-waf-tarpit-interval-ms")
+        }));
     }
 }

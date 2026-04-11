@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub use engine::WafEngine;
 pub use packet::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
+    TarpitConfig,
 };
 
 #[derive(Debug, Clone)]

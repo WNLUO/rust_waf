@@ -34,6 +34,10 @@ fn is_redirect_action_idea(idea_id: &str) -> bool {
     idea_id == "redirect-302"
 }
 
+fn is_tarpit_action_idea(idea_id: &str) -> bool {
+    idea_id == "smart-tarpit"
+}
+
 fn default_redirect_target() -> &'static str {
     "https://www.war.gov/"
 }
@@ -185,6 +189,30 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
+            id: "smart-tarpit",
+            title: "智能延迟（Tarpit）",
+            mood: "消耗",
+            summary: "对可疑请求极慢响应，默认每秒只发送 1 字节，把扫描器拖住 30 秒以上。",
+            mechanism: "通过内部 tarpit 头触发慢速写出。当前对 HTTP/1 与 HTTP/3 生效，HTTP/2 仍会按普通响应返回。",
+            performance: "低",
+            fallback_path: "/admin/rules",
+            plugin_id: "smart-tarpit-fun",
+            file_name: "smart-tarpit-fun.zip",
+            response_file_path: "smart-tarpit.txt",
+            plugin_name: "Smart Tarpit Fun",
+            plugin_description: "极慢返回响应体、拖住扫描器的示例动作",
+            template_local_id: "smart_tarpit",
+            template_description: "每秒只返回少量字节，显著拉高攻击成本",
+            pattern: "(?i)scanner|sqlmap|nmap|nikto|dirsearch|gobuster|ffuf|masscan",
+            severity: "high",
+            content_type: "text/plain; charset=utf-8",
+            status_code: 200,
+            gzip: false,
+            body_source: "inline_text",
+            response_content: "processing request, please wait...",
+            requires_upload: false,
+        },
+        BuiltinActionIdeaPreset {
             id: "gzip-response",
             title: "响应Gzip",
             mood: "传输",
@@ -229,6 +257,16 @@ fn action_idea_headers(
         headers.push(RuleResponseHeaderPayload {
             key: "content-encoding".to_string(),
             value: "gzip".to_string(),
+        });
+    }
+    if is_tarpit_action_idea(builtin.id) {
+        headers.push(RuleResponseHeaderPayload {
+            key: "x-rust-waf-tarpit-bytes-per-chunk".to_string(),
+            value: "1".to_string(),
+        });
+        headers.push(RuleResponseHeaderPayload {
+            key: "x-rust-waf-tarpit-interval-ms".to_string(),
+            value: "1000".to_string(),
         });
     }
     if is_redirect_action_idea(builtin.id) {

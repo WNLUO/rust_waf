@@ -2,6 +2,7 @@ use super::{HttpVersion, ProtocolError, UnifiedHttpRequest};
 use anyhow::Result;
 use log::debug;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::{sleep, Duration};
 
 /// HTTP/1.1处理器
 ///
@@ -232,6 +233,63 @@ impl Http1Handler {
         writer.flush().await?;
 
         debug!("Wrote HTTP/1.1 response: {} {}", status_code, status_text);
+        Ok(())
+    }
+
+    pub async fn write_response_with_headers_tarpit<W>(
+        &self,
+        writer: &mut W,
+        status_code: u16,
+        status_text: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+        tarpit: &crate::core::TarpitConfig,
+    ) -> Result<(), ProtocolError>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let mut response = format!("HTTP/1.1 {} {}\r\n", status_code, status_text).into_bytes();
+        let mut has_content_type = false;
+        let mut has_connection = false;
+        let mut has_content_length = false;
+
+        for (key, value) in headers {
+            if key.eq_ignore_ascii_case("content-type") {
+                has_content_type = true;
+            } else if key.eq_ignore_ascii_case("connection") {
+                has_connection = true;
+            } else if key.eq_ignore_ascii_case("content-length") {
+                has_content_length = true;
+            }
+            response.extend_from_slice(format!("{}: {}\r\n", key, value).as_bytes());
+        }
+
+        if !has_content_type {
+            response.extend_from_slice(b"Content-Type: text/plain\r\n");
+        }
+        if !has_content_length {
+            response.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+        }
+        if !has_connection {
+            response.extend_from_slice(b"Connection: close\r\n");
+        }
+
+        response.extend_from_slice(b"\r\n");
+        writer.write_all(&response).await?;
+        writer.flush().await?;
+
+        for chunk in body.chunks(tarpit.bytes_per_chunk) {
+            writer.write_all(chunk).await?;
+            writer.flush().await?;
+            if chunk.len() == tarpit.bytes_per_chunk {
+                sleep(Duration::from_millis(tarpit.chunk_interval_ms)).await;
+            }
+        }
+
+        debug!(
+            "Wrote HTTP/1.1 tarpit response: {} {}",
+            status_code, status_text
+        );
         Ok(())
     }
 }

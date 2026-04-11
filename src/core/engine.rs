@@ -717,6 +717,7 @@ async fn handle_http3_request(
                 response.status_code,
                 &response.headers,
                 response.body.clone(),
+                response.tarpit.as_ref(),
             )
             .await?;
             return Ok(());
@@ -726,6 +727,7 @@ async fn handle_http3_request(
             403,
             &[],
             format!("blocked: {}", inspection_result.reason).into_bytes(),
+            None,
         )
         .await?;
         return Ok(());
@@ -737,7 +739,8 @@ async fn handle_http3_request(
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_fail_close_rejection();
             }
-            send_http3_response(&mut stream, 503, &[], reason.to_string().into_bytes()).await?;
+            send_http3_response(&mut stream, 503, &[], reason.to_string().into_bytes(), None)
+                .await?;
             return Ok(());
         }
         if let Some(metrics) = context.metrics.as_ref() {
@@ -763,6 +766,7 @@ async fn handle_http3_request(
                     response.status_code,
                     &response.headers,
                     response.body,
+                    None,
                 )
                 .await?;
                 return Ok(());
@@ -778,8 +782,14 @@ async fn handle_http3_request(
                     upstream_addr,
                     err
                 );
-                send_http3_response(&mut stream, 502, &[], b"upstream proxy failed".to_vec())
-                    .await?;
+                send_http3_response(
+                    &mut stream,
+                    502,
+                    &[],
+                    b"upstream proxy failed".to_vec(),
+                    None,
+                )
+                .await?;
                 return Ok(());
             }
         }
@@ -789,11 +799,12 @@ async fn handle_http3_request(
             502,
             &[],
             b"site upstream not configured".to_vec(),
+            None,
         )
         .await?;
         return Ok(());
     } else if should_reject_unmatched_site(context.as_ref(), &unified) {
-        send_http3_response(&mut stream, 421, &[], b"site not found".to_vec()).await?;
+        send_http3_response(&mut stream, 421, &[], b"site not found".to_vec(), None).await?;
         return Ok(());
     }
 
@@ -816,6 +827,7 @@ async fn handle_http3_request(
         200,
         &[],
         format!("allowed\n{}\n", metrics_line).into_bytes(),
+        None,
     )
     .await?;
     Ok(())
@@ -852,6 +864,7 @@ async fn send_http3_response(
     status_code: u16,
     headers: &[(String, String)],
     body: Vec<u8>,
+    tarpit: Option<&crate::core::TarpitConfig>,
 ) -> Result<()> {
     let mut builder = http::Response::builder().status(status_code);
     for (key, value) in headers {
@@ -866,7 +879,17 @@ async fn send_http3_response(
 
     stream.send_response(builder.body(())?).await?;
     if !body.is_empty() {
-        stream.send_data(Bytes::from(body)).await?;
+        if let Some(tarpit) = tarpit {
+            for chunk in body.chunks(tarpit.bytes_per_chunk) {
+                stream.send_data(Bytes::copy_from_slice(chunk)).await?;
+                if chunk.len() == tarpit.bytes_per_chunk {
+                    tokio::time::sleep(std::time::Duration::from_millis(tarpit.chunk_interval_ms))
+                        .await;
+                }
+            }
+        } else {
+            stream.send_data(Bytes::from(body)).await?;
+        }
     }
     stream.finish().await?;
     Ok(())
@@ -1465,15 +1488,28 @@ async fn handle_http1_connection(
             metrics.record_block(inspection_result.layer.clone());
         }
         if let Some(response) = inspection_result.custom_response.as_ref() {
-            http1_handler
-                .write_response_with_headers(
-                    &mut stream,
-                    response.status_code,
-                    http_status_text(response.status_code),
-                    &response.headers,
-                    &response.body,
-                )
-                .await?;
+            if let Some(tarpit) = response.tarpit.as_ref() {
+                http1_handler
+                    .write_response_with_headers_tarpit(
+                        &mut stream,
+                        response.status_code,
+                        http_status_text(response.status_code),
+                        &response.headers,
+                        &response.body,
+                        tarpit,
+                    )
+                    .await?;
+            } else {
+                http1_handler
+                    .write_response_with_headers(
+                        &mut stream,
+                        response.status_code,
+                        http_status_text(response.status_code),
+                        &response.headers,
+                        &response.body,
+                    )
+                    .await?;
+            }
             return Ok(());
         }
         http1_handler
@@ -1531,15 +1567,28 @@ async fn handle_http1_connection(
                             write_http1_upstream_response(&mut stream, &response).await?;
                         }
                         UpstreamResponseDisposition::Custom(response) => {
-                            http1_handler
-                                .write_response_with_headers(
-                                    &mut stream,
-                                    response.status_code,
-                                    http_status_text(response.status_code),
-                                    &response.headers,
-                                    &response.body,
-                                )
-                                .await?;
+                            if let Some(tarpit) = response.tarpit.as_ref() {
+                                http1_handler
+                                    .write_response_with_headers_tarpit(
+                                        &mut stream,
+                                        response.status_code,
+                                        http_status_text(response.status_code),
+                                        &response.headers,
+                                        &response.body,
+                                        tarpit,
+                                    )
+                                    .await?;
+                            } else {
+                                http1_handler
+                                    .write_response_with_headers(
+                                        &mut stream,
+                                        response.status_code,
+                                        http_status_text(response.status_code),
+                                        &response.headers,
+                                        &response.body,
+                                    )
+                                    .await?;
+                            }
                         }
                         UpstreamResponseDisposition::Drop => {
                             let _ = stream.shutdown().await;

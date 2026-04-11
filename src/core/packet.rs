@@ -49,6 +49,13 @@ pub struct CustomHttpResponse {
     pub status_code: u16,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    pub tarpit: Option<TarpitConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TarpitConfig {
+    pub bytes_per_chunk: usize,
+    pub chunk_interval_ms: u64,
 }
 
 impl PacketInfo {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowRight, PencilLine, RefreshCw, Shield, X } from 'lucide-vue-next'
+import { ArrowRight, PencilLine, RefreshCw, X } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import {
@@ -193,22 +193,6 @@ const pendingTemplate = computed(() => {
     enabledActionTemplates.value.find((item) => item.template_id === templateId) ??
     null
   )
-})
-
-const summaryCards = computed(() => {
-  const overridden = localSites.value.filter(
-    (site) => site.safeline_intercept !== null,
-  ).length
-  const disabled = localSites.value.filter(
-    (site) => site.safeline_intercept && !site.safeline_intercept.enabled,
-  ).length
-  return {
-    total: localSites.value.length,
-    overridden,
-    inherited: localSites.value.length - overridden,
-    disabled,
-    templates: enabledActionTemplates.value.length,
-  }
 })
 
 function actionLabelForConfig(config: SafeLineInterceptConfigPayload | null) {
@@ -544,82 +528,6 @@ onMounted(loadRulesCenter)
         <span class="font-semibold">{{ pendingTemplate.name }}</span>
         。现在选择一个站点，点击“配置动作”即可直接套用。
       </div>
-
-      <section
-        class="rounded-[28px] border border-white/80 bg-white/78 p-5 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
-      >
-        <div
-          class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
-        >
-          <div class="max-w-3xl">
-            <p class="text-sm tracking-wider text-blue-700">规则中心</p>
-            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-              用业务语义配置“雷池拦截后 rust 执行动作”
-            </h3>
-            <p class="mt-2 text-sm leading-7 text-slate-500">
-              这个页面只做一件事：给站点配置雷池命中后的接管动作。动作正文和插件安装统一放在动作中心，不再在这里暴露插件和模板实现细节。
-            </p>
-          </div>
-          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <div class="rounded-2xl bg-slate-50 px-4 py-3">
-              <p class="text-xs text-slate-500">站点数</p>
-              <p class="mt-2 text-2xl font-semibold text-stone-900">
-                {{ summaryCards.total }}
-              </p>
-            </div>
-            <div class="rounded-2xl bg-slate-50 px-4 py-3">
-              <p class="text-xs text-slate-500">覆盖站点</p>
-              <p class="mt-2 text-2xl font-semibold text-stone-900">
-                {{ summaryCards.overridden }}
-              </p>
-            </div>
-            <div class="rounded-2xl bg-slate-50 px-4 py-3">
-              <p class="text-xs text-slate-500">继承全局</p>
-              <p class="mt-2 text-2xl font-semibold text-stone-900">
-                {{ summaryCards.inherited }}
-              </p>
-            </div>
-            <div class="rounded-2xl bg-slate-50 px-4 py-3">
-              <p class="text-xs text-slate-500">停用接管</p>
-              <p class="mt-2 text-2xl font-semibold text-stone-900">
-                {{ summaryCards.disabled }}
-              </p>
-            </div>
-            <div class="rounded-2xl bg-slate-50 px-4 py-3">
-              <p class="text-xs text-slate-500">可选动作模板</p>
-              <p class="mt-2 text-2xl font-semibold text-stone-900">
-                {{ summaryCards.templates }}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-5 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div class="flex items-center gap-2 text-stone-900">
-              <Shield :size="16" class="text-blue-700" />
-              <p class="text-sm font-medium">当前编排</p>
-            </div>
-            <p class="mt-2 text-sm leading-7 text-slate-500">
-              用户请求先经过雷池做 7 层检测，rust 识别到雷池拦截标记后，再按本站点的接管策略执行自定义动作。站点没单独配置时，自动继承全局默认接管策略。
-            </p>
-          </div>
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p class="text-sm font-medium text-stone-900">动作入口</p>
-            <div class="mt-3 flex flex-wrap gap-2">
-              <RouterLink
-                to="/admin/actions"
-                class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              >
-                管理动作模板与插件
-              </RouterLink>
-            </div>
-            <p class="mt-3 text-xs leading-6 text-slate-500">
-              高级编辑器仍保留为内部兜底能力，但不在日常配置路径里展示。
-            </p>
-          </div>
-        </div>
-      </section>
 
       <div
         class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"

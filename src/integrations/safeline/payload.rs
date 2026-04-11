@@ -834,6 +834,7 @@ mod tests {
         assert_eq!(events[0].action, "block");
         assert_eq!(events[0].source_ip, "203.0.113.10");
         assert_eq!(events[0].uri.as_deref(), Some("/login"));
+        assert_eq!(events[0].reason, "safeline:sqli:sqli");
     }
 
     #[test]
@@ -863,6 +864,8 @@ mod tests {
             events[0].provider_site_domain.as_deref(),
             Some("portal.example.com")
         );
+        assert_eq!(events[0].source_ip, "2.2.2.2");
+        assert_eq!(events[0].reason, "safeline:4:sqli");
     }
 
     #[test]

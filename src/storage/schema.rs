@@ -66,6 +66,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             name TEXT NOT NULL,
             version TEXT NOT NULL,
             description TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
             installed_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
@@ -281,6 +282,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         "ALTER TABLE blocked_ips ADD COLUMN provider_remote_id TEXT",
         "ALTER TABLE rules ADD COLUMN plugin_template_id TEXT",
         "ALTER TABLE rules ADD COLUMN response_template_json TEXT",
+        "ALTER TABLE rule_action_plugins ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {

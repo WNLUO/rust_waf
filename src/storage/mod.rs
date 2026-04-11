@@ -263,7 +263,7 @@ impl SqliteStore {
     pub async fn list_rule_action_plugins(&self) -> Result<Vec<RuleActionPluginEntry>> {
         sqlx::query_as::<_, RuleActionPluginEntry>(
             r#"
-            SELECT plugin_id, name, version, description, installed_at, updated_at
+            SELECT plugin_id, name, version, description, enabled, installed_at, updated_at
             FROM rule_action_plugins
             ORDER BY plugin_id ASC
             "#,
@@ -277,8 +277,10 @@ impl SqliteStore {
     pub async fn list_rule_action_templates(&self) -> Result<Vec<RuleActionTemplateEntry>> {
         sqlx::query_as::<_, RuleActionTemplateEntry>(
             r#"
-            SELECT template_id, plugin_id, name, description, layer, action, pattern, severity, response_template_json, updated_at
-            FROM rule_action_templates
+            SELECT t.template_id, t.plugin_id, t.name, t.description, t.layer, t.action, t.pattern, t.severity, t.response_template_json, t.updated_at
+            FROM rule_action_templates t
+            INNER JOIN rule_action_plugins p ON p.plugin_id = t.plugin_id
+            WHERE p.enabled = 1
             ORDER BY plugin_id ASC, template_id ASC
             "#,
         )
@@ -292,12 +294,13 @@ impl SqliteStore {
         let now = unix_timestamp();
         sqlx::query(
             r#"
-            INSERT INTO rule_action_plugins (plugin_id, name, version, description, installed_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO rule_action_plugins (plugin_id, name, version, description, enabled, installed_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(plugin_id) DO UPDATE SET
                 name = excluded.name,
                 version = excluded.version,
                 description = excluded.description,
+                enabled = excluded.enabled,
                 updated_at = excluded.updated_at
             "#,
         )
@@ -305,6 +308,7 @@ impl SqliteStore {
         .bind(&plugin.name)
         .bind(&plugin.version)
         .bind(&plugin.description)
+        .bind(plugin.enabled)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -351,6 +355,75 @@ impl SqliteStore {
 
         tx.commit().await?;
         Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn set_rule_action_plugin_enabled(
+        &self,
+        plugin_id: &str,
+        enabled: bool,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let now = unix_timestamp();
+        let result = sqlx::query(
+            r#"
+            UPDATE rule_action_plugins
+            SET enabled = ?, updated_at = ?
+            WHERE plugin_id = ?
+            "#,
+        )
+        .bind(enabled)
+        .bind(now)
+        .bind(plugin_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+
+        if !enabled {
+            sqlx::query(
+                r#"
+                UPDATE rules
+                SET enabled = 0, updated_at = ?
+                WHERE plugin_template_id LIKE ?
+                "#,
+            )
+            .bind(now)
+            .bind(format!("{}:%", plugin_id))
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn delete_rule_action_plugin(&self, plugin_id: &str) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let now = unix_timestamp();
+        sqlx::query(
+            r#"
+            UPDATE rules
+            SET enabled = 0, plugin_template_id = NULL, updated_at = ?
+            WHERE plugin_template_id LIKE ?
+            "#,
+        )
+        .bind(now)
+        .bind(format!("{}:%", plugin_id))
+        .execute(&mut *tx)
+        .await?;
+
+        let result = sqlx::query("DELETE FROM rule_action_plugins WHERE plugin_id = ?")
+            .bind(plugin_id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn seed_app_config(&self, config: &Config) -> Result<bool> {

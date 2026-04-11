@@ -947,6 +947,7 @@ impl From<crate::storage::RuleActionPluginEntry> for RuleActionPluginResponse {
             name: value.name,
             version: value.version,
             description: value.description,
+            enabled: value.enabled,
             installed_at: value.installed_at,
             updated_at: value.updated_at,
         }

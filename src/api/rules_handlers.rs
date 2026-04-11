@@ -1,4 +1,5 @@
 use super::*;
+use axum::extract::Multipart;
 
 pub(super) async fn list_rules_handler(
     State(state): State<ApiState>,
@@ -90,7 +91,7 @@ pub(super) async fn install_rule_action_plugin_handler(
     ExtractJson(payload): ExtractJson<InstallRuleActionPluginRequest>,
 ) -> ApiResult<(StatusCode, Json<WriteStatusResponse>)> {
     let store = sqlite_store(&state)?;
-    install_rule_action_plugin_from_url(store, &payload.package_url)
+    install_rule_action_plugin_from_url(store, &payload.package_url, payload.sha256.as_deref())
         .await
         .map_err(ApiError::bad_request)?;
 
@@ -101,6 +102,108 @@ pub(super) async fn install_rule_action_plugin_handler(
             message: "规则模板插件已安装".to_string(),
         }),
     ))
+}
+
+pub(super) async fn upload_rule_action_plugin_handler(
+    State(state): State<ApiState>,
+    mut multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<WriteStatusResponse>)> {
+    let store = sqlite_store(&state)?;
+    let mut package_bytes = None;
+    let mut expected_sha256 = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|err| ApiError::bad_request(format!("读取上传字段失败: {}", err)))?
+    {
+        match field.name() {
+            Some("package") => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|err| ApiError::bad_request(format!("读取上传文件失败: {}", err)))?;
+                package_bytes = Some(bytes);
+            }
+            Some("sha256") => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|err| ApiError::bad_request(format!("读取校验字段失败: {}", err)))?;
+                expected_sha256 = Some(value);
+            }
+            _ => {}
+        }
+    }
+
+    let package_bytes =
+        package_bytes.ok_or_else(|| ApiError::bad_request("缺少插件 zip 文件".to_string()))?;
+    install_rule_action_plugin_from_bytes(
+        store,
+        package_bytes.as_ref(),
+        expected_sha256.as_deref(),
+    )
+    .await
+    .map_err(ApiError::bad_request)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(WriteStatusResponse {
+            success: true,
+            message: "规则模板插件已上传并安装".to_string(),
+        }),
+    ))
+}
+
+pub(super) async fn update_rule_action_plugin_handler(
+    State(state): State<ApiState>,
+    Path(plugin_id): Path<String>,
+    ExtractJson(payload): ExtractJson<UpdateRuleActionPluginRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let updated = store
+        .set_rule_action_plugin_enabled(&plugin_id, payload.enabled)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if !updated {
+        return Err(ApiError::not_found(format!(
+            "Plugin '{}' not found",
+            plugin_id
+        )));
+    }
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: if payload.enabled {
+            "规则模板插件已启用".to_string()
+        } else {
+            "规则模板插件已停用，并已停用相关规则".to_string()
+        },
+    }))
+}
+
+pub(super) async fn delete_rule_action_plugin_handler(
+    State(state): State<ApiState>,
+    Path(plugin_id): Path<String>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_rule_action_plugin(&plugin_id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    if !deleted {
+        return Err(ApiError::not_found(format!(
+            "Plugin '{}' not found",
+            plugin_id
+        )));
+    }
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "规则模板插件已卸载，相关规则已停用".to_string(),
+    }))
 }
 
 pub(super) async fn update_rule_handler(

@@ -42,6 +42,7 @@ export interface RuleActionPluginItem {
   name: string
   version: string
   description: string
+  enabled: boolean
   installed_at: number
   updated_at: number
 }

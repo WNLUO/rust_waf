@@ -19,14 +19,20 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpListener;
 use zip::ZipArchive;
+
+const MAX_PLUGIN_PACKAGE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PLUGIN_ARCHIVE_ENTRIES: usize = 64;
+const MAX_PLUGIN_TOTAL_UNCOMPRESSED_BYTES: usize = 8 * 1024 * 1024;
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -94,6 +100,15 @@ impl ApiServer {
             .route(
                 "/rule-action-plugins/install",
                 axum::routing::post(rules_handlers::install_rule_action_plugin_handler),
+            )
+            .route(
+                "/rule-action-plugins/:plugin_id",
+                axum::routing::patch(rules_handlers::update_rule_action_plugin_handler)
+                    .delete(rules_handlers::delete_rule_action_plugin_handler),
+            )
+            .route(
+                "/rule-action-plugins/upload",
+                axum::routing::post(rules_handlers::upload_rule_action_plugin_handler),
             )
             .route(
                 "/rule-action-templates",
@@ -277,12 +292,24 @@ struct RuleActionPluginTemplateManifest {
 async fn install_rule_action_plugin_from_url(
     store: &crate::storage::SqliteStore,
     package_url: &str,
+    expected_sha256: Option<&str>,
 ) -> Result<(), String> {
     let package_url = package_url.trim();
     if package_url.is_empty() {
         return Err("package_url 不能为空".to_string());
     }
-    let response = reqwest::Client::new()
+    let url =
+        reqwest::Url::parse(package_url).map_err(|err| format!("插件包 URL 不合法: {}", err))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("插件包 URL 协议不受支持: {}", other)),
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|err| format!("创建下载客户端失败: {}", err))?;
+    let response = client
         .get(package_url)
         .send()
         .await
@@ -290,19 +317,28 @@ async fn install_rule_action_plugin_from_url(
     if !response.status().is_success() {
         return Err(format!("下载插件包失败: HTTP {}", response.status()));
     }
+    if response.content_length().unwrap_or(0) > MAX_PLUGIN_PACKAGE_BYTES as u64 {
+        return Err(format!(
+            "插件包过大，限制为 {} 字节",
+            MAX_PLUGIN_PACKAGE_BYTES
+        ));
+    }
     let bytes = response
         .bytes()
         .await
         .map_err(|err| format!("读取插件包失败: {}", err))?;
-    install_rule_action_plugin_from_bytes(store, bytes.as_ref()).await
+    install_rule_action_plugin_from_bytes(store, bytes.as_ref(), expected_sha256).await
 }
 
 async fn install_rule_action_plugin_from_bytes(
     store: &crate::storage::SqliteStore,
     bytes: &[u8],
+    expected_sha256: Option<&str>,
 ) -> Result<(), String> {
+    validate_plugin_package_bytes(bytes, expected_sha256)?;
     let mut archive =
         ZipArchive::new(Cursor::new(bytes)).map_err(|err| format!("解析插件 zip 失败: {}", err))?;
+    validate_plugin_archive_shape(&mut archive)?;
     let manifest = read_rule_action_plugin_manifest(&mut archive)?;
     validate_rule_action_plugin_manifest(&manifest)?;
 
@@ -369,6 +405,7 @@ async fn install_rule_action_plugin_from_bytes(
             name: manifest.name.clone(),
             version: manifest.version.clone(),
             description: manifest.description.clone(),
+            enabled: true,
         })
         .await
         .map_err(|err| err.to_string())?;
@@ -395,6 +432,13 @@ fn read_rule_action_plugin_manifest(
 }
 
 fn validate_rule_action_plugin_manifest(manifest: &RuleActionPluginManifest) -> Result<(), String> {
+    if !manifest
+        .plugin_id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err("plugin_id 只能包含字母、数字、-、_".to_string());
+    }
     if manifest.plugin_id.trim().is_empty() {
         return Err("plugin_id 不能为空".to_string());
     }
@@ -415,6 +459,63 @@ fn validate_rule_action_plugin_manifest(manifest: &RuleActionPluginManifest) -> 
             return Err("模板名称不能为空".to_string());
         }
     }
+    Ok(())
+}
+
+fn validate_plugin_package_bytes(
+    bytes: &[u8],
+    expected_sha256: Option<&str>,
+) -> Result<(), String> {
+    if bytes.is_empty() {
+        return Err("插件包不能为空".to_string());
+    }
+    if bytes.len() > MAX_PLUGIN_PACKAGE_BYTES {
+        return Err(format!(
+            "插件包过大，限制为 {} 字节",
+            MAX_PLUGIN_PACKAGE_BYTES
+        ));
+    }
+
+    if let Some(expected) = expected_sha256 {
+        let expected = expected.trim().to_ascii_lowercase();
+        if !expected.is_empty() {
+            if expected.len() != 64 || !expected.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                return Err("sha256 必须是 64 位十六进制字符串".to_string());
+            }
+            let actual = format!("{:x}", Sha256::digest(bytes));
+            if actual != expected {
+                return Err("插件包 SHA-256 校验失败".to_string());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_plugin_archive_shape(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<(), String> {
+    if archive.len() > MAX_PLUGIN_ARCHIVE_ENTRIES {
+        return Err(format!(
+            "插件包文件数量过多，限制为 {} 个",
+            MAX_PLUGIN_ARCHIVE_ENTRIES
+        ));
+    }
+
+    let mut total_uncompressed = 0usize;
+    for index in 0..archive.len() {
+        let file = archive
+            .by_index(index)
+            .map_err(|err| format!("读取插件包文件列表失败: {}", err))?;
+        total_uncompressed = total_uncompressed
+            .checked_add(file.size() as usize)
+            .ok_or_else(|| "插件包解压体积超限".to_string())?;
+        if total_uncompressed > MAX_PLUGIN_TOTAL_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "插件包解压体积过大，限制为 {} 字节",
+                MAX_PLUGIN_TOTAL_UNCOMPRESSED_BYTES
+            ));
+        }
+    }
+
     Ok(())
 }
 

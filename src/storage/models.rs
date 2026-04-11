@@ -11,6 +11,7 @@ pub struct RuleActionPluginEntry {
     pub name: String,
     pub version: String,
     pub description: String,
+    pub enabled: bool,
     pub installed_at: i64,
     pub updated_at: i64,
 }
@@ -36,6 +37,7 @@ pub struct RuleActionPluginUpsert {
     pub name: String,
     pub version: String,
     pub description: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone)]

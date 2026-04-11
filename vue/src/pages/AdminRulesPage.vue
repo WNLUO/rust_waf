@@ -29,6 +29,8 @@ const {
   openCreateRule,
   openEditRule,
   pluginInstallUrl,
+  pluginInstallFile,
+  pluginInstallSha256,
   pluginTemplates,
   removeResponseHeader,
   ruleFilters,
@@ -36,7 +38,9 @@ const {
   saving,
   selectedPluginTemplate,
   toPluginActionValue,
+  togglePluginStatus,
   toggleRuleStatus,
+  handleDeletePlugin,
 } = useAdminRules()
 </script>
 
@@ -70,9 +74,15 @@ const {
       <AdminRulesPluginSection
         :installed-plugins="installedPlugins"
         :installing-plugin="installingPlugin"
+        :plugin-install-file="pluginInstallFile"
+        :plugin-install-sha256="pluginInstallSha256"
         :plugin-install-url="pluginInstallUrl"
+        @delete-plugin="handleDeletePlugin"
         @install="handleInstallPlugin"
+        @update:plugin-install-file="pluginInstallFile = $event"
+        @update:plugin-install-sha256="pluginInstallSha256 = $event"
         @update:plugin-install-url="pluginInstallUrl = $event"
+        @toggle-plugin="togglePluginStatus"
       />
 
       <AdminRulesTableSection

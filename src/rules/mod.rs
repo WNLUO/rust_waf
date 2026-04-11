@@ -13,7 +13,13 @@ use std::path::{Component, Path, PathBuf};
 pub const RULE_RESPONSE_FILES_DIR: &str = "data/rule_responses";
 
 pub struct RuleEngine {
-    rules: Vec<(Rule, Regex)>,
+    rules: Vec<CompiledRule>,
+}
+
+struct CompiledRule {
+    rule: Rule,
+    pattern: Regex,
+    custom_response: Option<CustomHttpResponse>,
 }
 
 pub fn validate_rule(rule: &Rule) -> Result<()> {
@@ -44,7 +50,20 @@ impl RuleEngine {
                 validate_rule(&rule)?;
                 let regex = Regex::new(&rule.pattern)
                     .map_err(|e| anyhow::anyhow!("Invalid regex in rule {}: {}", rule.id, e))?;
-                Ok((rule, regex))
+                let custom_response = if matches!(rule.action, RuleAction::Respond) {
+                    Some(build_custom_response(
+                        rule.response_template
+                            .as_ref()
+                            .expect("respond rule should have response template"),
+                    )?)
+                } else {
+                    None
+                };
+                Ok(CompiledRule {
+                    rule,
+                    pattern: regex,
+                    custom_response,
+                })
             })
             .collect();
 
@@ -58,8 +77,8 @@ impl RuleEngine {
             InspectionLayer::L4
         };
 
-        for (rule, pattern) in &self.rules {
-            if self.matches_layer(rule, payload) {
+        for compiled in &self.rules {
+            if self.matches_layer(&compiled.rule, payload) {
                 let packet_summary;
                 let content = if let Some(payload) = payload {
                     payload
@@ -74,25 +93,26 @@ impl RuleEngine {
                     );
                     &packet_summary
                 };
-                if pattern.is_match(content) {
-                    let layer = match rule.layer {
+                if compiled.pattern.is_match(content) {
+                    let layer = match compiled.rule.layer {
                         RuleLayer::L4 => InspectionLayer::L4,
                         RuleLayer::L7 => InspectionLayer::L7,
                     };
-                    let reason = format!("Rule '{}' triggered: {}", rule.name, rule.id);
-                    return match rule.action {
+                    let reason = format!(
+                        "Rule '{}' triggered: {}",
+                        compiled.rule.name, compiled.rule.id
+                    );
+                    return match compiled.rule.action {
                         RuleAction::Block => InspectionResult::block(layer, reason),
                         RuleAction::Allow => InspectionResult::allow_with_reason(layer, reason),
                         RuleAction::Alert => InspectionResult::alert(layer, reason),
                         RuleAction::Respond => InspectionResult::respond(
                             layer,
                             reason,
-                            build_custom_response(
-                                rule.response_template
-                                    .as_ref()
-                                    .expect("respond rule should have response template"),
-                            )
-                            .expect("validated response template should build"),
+                            compiled
+                                .custom_response
+                                .clone()
+                                .expect("respond rule should have cached response"),
                         ),
                     };
                 }

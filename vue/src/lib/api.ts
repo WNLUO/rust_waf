@@ -175,11 +175,63 @@ export function fetchRuleActionTemplates() {
   return apiRequest<RuleActionTemplatesResponse>('/rule-action-templates')
 }
 
-export function installRuleActionPlugin(packageUrl: string) {
+export function installRuleActionPlugin(
+  packageUrl: string,
+  sha256?: string,
+) {
   return apiRequest<WriteStatusResponse>('/rule-action-plugins/install', {
     method: 'POST',
-    body: JSON.stringify({ package_url: packageUrl }),
+    body: JSON.stringify({ package_url: packageUrl, sha256 }),
   })
+}
+
+export async function uploadRuleActionPlugin(file: File, sha256?: string) {
+  const formData = new FormData()
+  formData.append('package', file)
+  if (sha256?.trim()) {
+    formData.append('sha256', sha256.trim())
+  }
+
+  const response = await fetch(`${API_BASE}/rule-action-plugins/upload`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    let message = `请求失败：${response.status}`
+
+    try {
+      const payload = (await response.json()) as { error?: string }
+      if (payload.error) {
+        message = payload.error
+      }
+    } catch {
+      // Keep fallback message.
+    }
+
+    throw new Error(message)
+  }
+
+  return (await response.json()) as WriteStatusResponse
+}
+
+export function updateRuleActionPlugin(pluginId: string, enabled: boolean) {
+  return apiRequest<WriteStatusResponse>(
+    `/rule-action-plugins/${encodeURIComponent(pluginId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    },
+  )
+}
+
+export function deleteRuleActionPlugin(pluginId: string) {
+  return apiRequest<WriteStatusResponse>(
+    `/rule-action-plugins/${encodeURIComponent(pluginId)}`,
+    {
+      method: 'DELETE',
+    },
+  )
 }
 
 export function fetchHealth() {

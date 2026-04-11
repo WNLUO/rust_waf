@@ -2,10 +2,13 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import {
   createRule,
   deleteRule,
+  deleteRuleActionPlugin,
   fetchRuleActionPlugins,
   fetchRuleActionTemplates,
   fetchRulesList,
   installRuleActionPlugin,
+  updateRuleActionPlugin,
+  uploadRuleActionPlugin,
   updateRule,
 } from '../lib/api'
 import {
@@ -33,6 +36,8 @@ export function useAdminRules() {
   const rulesPayload = ref<RulesResponse>({ rules: [] })
   const isRuleModalOpen = ref(false)
   const pluginInstallUrl = ref('')
+  const pluginInstallFile = ref<File | null>(null)
+  const pluginInstallSha256 = ref('')
   const installedPlugins = ref<RuleActionPluginItem[]>([])
   const pluginTemplates = ref<RuleActionTemplateItem[]>([])
 
@@ -168,15 +173,24 @@ export function useAdminRules() {
 
   const handleInstallPlugin = async () => {
     const packageUrl = pluginInstallUrl.value.trim()
-    if (!packageUrl) {
-      error.value = '请输入插件包 URL'
+    if (!packageUrl && !pluginInstallFile.value) {
+      error.value = '请输入插件包 URL 或选择本地 zip 文件'
       return
     }
 
     installingPlugin.value = true
     try {
-      await installRuleActionPlugin(packageUrl)
+      if (pluginInstallFile.value) {
+        await uploadRuleActionPlugin(
+          pluginInstallFile.value,
+          pluginInstallSha256.value,
+        )
+      } else {
+        await installRuleActionPlugin(packageUrl, pluginInstallSha256.value)
+      }
       pluginInstallUrl.value = ''
+      pluginInstallFile.value = null
+      pluginInstallSha256.value = ''
       await loadRules()
     } catch (e) {
       error.value = e instanceof Error ? e.message : '插件安装失败'
@@ -191,6 +205,25 @@ export function useAdminRules() {
       await loadRules()
     } catch (e) {
       error.value = e instanceof Error ? e.message : '更新规则状态失败'
+    }
+  }
+
+  const togglePluginStatus = async (plugin: RuleActionPluginItem) => {
+    try {
+      await updateRuleActionPlugin(plugin.plugin_id, !plugin.enabled)
+      await loadRules()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '更新插件状态失败'
+    }
+  }
+
+  const handleDeletePlugin = async (pluginId: string) => {
+    if (!window.confirm('确认卸载这个插件吗？相关规则会被停用。')) return
+    try {
+      await deleteRuleActionPlugin(pluginId)
+      await loadRules()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '插件卸载失败'
     }
   }
 
@@ -226,6 +259,8 @@ export function useAdminRules() {
     openCreateRule,
     openEditRule,
     pluginInstallUrl,
+    pluginInstallFile,
+    pluginInstallSha256,
     pluginTemplates,
     removeResponseHeader,
     ruleFilters,
@@ -234,6 +269,8 @@ export function useAdminRules() {
     saving,
     selectedPluginTemplate,
     toPluginActionValue,
+    togglePluginStatus,
     toggleRuleStatus,
+    handleDeletePlugin,
   }
 }

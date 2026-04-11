@@ -597,6 +597,7 @@ pub struct RuleActionPluginResponse {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) description: String,
+    pub(crate) enabled: bool,
     pub(crate) installed_at: i64,
     pub(crate) updated_at: i64,
 }
@@ -624,6 +625,13 @@ pub struct RuleActionTemplateResponse {
 #[derive(Debug, Deserialize)]
 pub struct InstallRuleActionPluginRequest {
     pub(crate) package_url: String,
+    #[serde(default)]
+    pub(crate) sha256: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateRuleActionPluginRequest {
+    pub(crate) enabled: bool,
 }
 
 #[derive(Debug, Serialize)]

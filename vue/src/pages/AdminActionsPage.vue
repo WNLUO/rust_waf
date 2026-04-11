@@ -68,6 +68,7 @@ const ideaTemplateMatchers: Record<
     templates.find(
       (item) => item.name.includes('Block') || item.name.includes('Hello'),
     ) ?? null,
+  'redirect-302': () => null,
 }
 
 const templateCount = computed(() => pluginTemplates.value.length)
@@ -178,6 +179,33 @@ const copyToClipboard = async (value: string) => {
 const isInlineJsIdea = (idea: ActionIdeaPreset | null | undefined) =>
   idea?.id === 'inline-js'
 
+const isRedirectIdea = (idea: ActionIdeaPreset | null | undefined) =>
+  idea?.id === 'redirect-302'
+
+const wrapRedirectContent = (target: string, title: string) => {
+  const normalizedTarget = target.trim() || 'https://example.com/blocked'
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="refresh" content="0;url=${normalizedTarget}" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title || '302跳转'}</title>
+  <style>
+    body { font-family: sans-serif; background: #f8fafc; color: #0f172a; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; border-radius: 20px; padding: 32px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12); max-width: 560px; }
+    a { color: #2563eb; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>${title || '302跳转'}</h1>
+    <p>正在跳转到 <a href="${normalizedTarget}">${normalizedTarget}</a>。</p>
+  </main>
+</body>
+</html>`
+}
+
 const wrapInlineJsContent = (script: string, title: string) => `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -211,6 +239,8 @@ const createActionIdeaPreviewPayload = (
   body_source: idea.body_source,
   body_preview: idea.requires_upload
     ? `已上传文件：${idea.uploaded_file_name || '未上传 gzip 文件'}`
+    : isRedirectIdea(idea)
+      ? wrapRedirectContent(idea.response_content, idea.title)
     : isInlineJsIdea(idea)
       ? wrapInlineJsContent(idea.response_content, idea.title)
       : idea.response_content,
@@ -319,7 +349,9 @@ const downloadGeneratedPlugin = async (ideaId: string) => {
     )
     zip.file(
       `responses/${idea.response_file_path}`,
-      idea.id === 'inline-js'
+      isRedirectIdea(idea)
+        ? wrapRedirectContent(idea.response_content, idea.title)
+      : idea.id === 'inline-js'
         ? wrapInlineJsContent(idea.response_content, idea.title)
         : idea.response_content,
     )
@@ -351,6 +383,8 @@ const previewRenderedBody = computed(() =>
   previewIsActionIdea.value
     ? currentPreviewIdea.value && isInlineJsIdea(currentPreviewIdea.value)
       ? wrapInlineJsContent(previewDraftContent.value, previewDraftTitle.value || previewTitle.value)
+      : currentPreviewIdea.value && isRedirectIdea(currentPreviewIdea.value)
+        ? wrapRedirectContent(previewDraftContent.value, previewDraftTitle.value || previewTitle.value)
       : previewDraftContent.value
     : (previewPayload.value?.body_preview ?? ''),
 )
@@ -640,24 +674,13 @@ onMounted(loadActionCenter)
             :key="idea.id"
             class="relative flex min-h-[238px] h-full flex-col overflow-hidden rounded-[20px] border border-slate-200 bg-[linear-gradient(140deg,_rgba(255,250,245,0.96),_rgba(245,250,255,0.96))] p-4 shadow-sm"
           >
-            <div class="absolute right-3 top-3 opacity-15">
-              <component
-                :is="
-                  idea.id === 'json-honeypot'
-                    ? Copy
-                    : Copy
-                "
-                :size="34"
-              />
-            </div>
-
             <div class="relative flex h-full flex-col">
-              <div class="flex items-start justify-between gap-2 pr-8">
+              <div class="flex items-start justify-between gap-4">
                 <h3 class="text-[17px] font-semibold leading-6 text-slate-900">
                   {{ idea.title }}
                 </h3>
                 <span
-                  class="shrink-0 rounded-full bg-stone-900 px-2.5 py-1 text-[11px] text-white"
+                  class="ml-auto shrink-0 rounded-full bg-stone-900 px-2.5 py-1 text-[11px] text-white"
                 >
                   {{ idea.mood }}
                 </span>
@@ -902,8 +925,19 @@ onMounted(loadActionCenter)
                   >
                     这里填写的是纯 JavaScript 代码。系统会自动把它内嵌进一个正常 HTML 页面后再返回。
                   </p>
+                  <p
+                    v-else-if="currentPreviewIdea && isRedirectIdea(currentPreviewIdea)"
+                    class="text-xs leading-6 text-slate-500"
+                  >
+                    这里填写的是跳转目标 URL。系统会自动写入 `Location` 头，并返回一个 302 响应。
+                  </p>
                   <textarea
                     v-model="previewDraftContent"
+                    :placeholder="
+                      currentPreviewIdea && isRedirectIdea(currentPreviewIdea)
+                        ? 'https://example.com/blocked'
+                        : ''
+                    "
                     class="min-h-[min(42vh,28rem)] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-blue-500/50"
                   ></textarea>
                 </div>

@@ -30,6 +30,20 @@ struct BuiltinActionIdeaPreset {
     requires_upload: bool,
 }
 
+fn is_redirect_action_idea(idea_id: &str) -> bool {
+    idea_id == "redirect-302"
+}
+
+fn default_redirect_target() -> &'static str {
+    "https://example.com/blocked"
+}
+
+fn redirect_response_html(target: &str, title: &str) -> String {
+    format!(
+        "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta http-equiv=\"refresh\" content=\"0;url={target}\">\n  <title>{title}</title>\n</head>\n<body style=\"font-family: sans-serif; padding: 48px;\">\n  <h1>{title}</h1>\n  <p>正在跳转到 <a href=\"{target}\">{target}</a>。</p>\n</body>\n</html>"
+    )
+}
+
 fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
     vec![
         BuiltinActionIdeaPreset {
@@ -105,6 +119,30 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
+            id: "redirect-302",
+            title: "302 跳转",
+            mood: "引流",
+            summary: "命中后立刻返回 302，把请求导向指定落地页或说明页。",
+            mechanism: "把你填写的目标 URL 写进 Location 头，rust 直接返回 302 响应。",
+            performance: "低",
+            fallback_path: "/admin/rules",
+            plugin_id: "redirect-302-fun",
+            file_name: "redirect-302-fun.zip",
+            response_file_path: "redirect.html",
+            plugin_name: "Redirect 302 Fun",
+            plugin_description: "返回 302 跳转到指定目标页的示例动作",
+            template_local_id: "redirect_302",
+            template_description: "命中后使用 302 跳转到指定 URL",
+            pattern: "(?i)redirect|jump|go|302",
+            severity: "medium",
+            content_type: "text/html; charset=utf-8",
+            status_code: 302,
+            gzip: false,
+            body_source: "inline_text",
+            response_content: "https://example.com/blocked",
+            requires_upload: false,
+        },
+        BuiltinActionIdeaPreset {
             id: "gzip-response",
             title: "响应Gzip",
             mood: "传输",
@@ -131,21 +169,35 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
     ]
 }
 
-fn action_idea_headers(idea_id: &str) -> Vec<RuleResponseHeaderPayload> {
+fn action_idea_headers(builtin: &BuiltinActionIdeaPreset, response_content: &str) -> Vec<RuleResponseHeaderPayload> {
     let mut headers = vec![RuleResponseHeaderPayload {
         key: "cache-control".to_string(),
         value: "no-store".to_string(),
     }];
-    if idea_id == "maintenance-page" {
+    if builtin.id == "maintenance-page" {
         headers.push(RuleResponseHeaderPayload {
             key: "retry-after".to_string(),
             value: "120".to_string(),
         });
     }
-    if idea_id == "gzip-response" {
+    if builtin.id == "gzip-response" {
         headers.push(RuleResponseHeaderPayload {
             key: "content-encoding".to_string(),
             value: "gzip".to_string(),
+        });
+    }
+    if is_redirect_action_idea(builtin.id) {
+        let target = {
+            let trimmed = response_content.trim();
+            if trimmed.is_empty() {
+                default_redirect_target()
+            } else {
+                trimmed
+            }
+        };
+        headers.push(RuleResponseHeaderPayload {
+            key: "location".to_string(),
+            value: target.to_string(),
         });
     }
     headers
@@ -153,6 +205,14 @@ fn action_idea_headers(idea_id: &str) -> Vec<RuleResponseHeaderPayload> {
 
 fn action_idea_asset_relative_path(idea_id: &str) -> String {
     format!("action_ideas/{}/payload.gz", idea_id)
+}
+
+fn action_idea_default_file_exists(idea_id: &str) -> bool {
+    crate::rules::resolve_response_file_path(&action_idea_asset_relative_path(idea_id))
+        .ok()
+        .and_then(|path| fs::metadata(path).ok())
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false)
 }
 
 fn build_action_idea_response(
@@ -171,6 +231,16 @@ fn build_action_idea_response(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| builtin.response_content.to_string())
     };
+    let response_content = if is_redirect_action_idea(builtin.id) {
+        let trimmed = response_content.trim();
+        if trimmed.is_empty() {
+            default_redirect_target().to_string()
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        response_content
+    };
     let status_code = override_entry
         .and_then(|entry| entry.status_code)
         .and_then(|value| u16::try_from(value).ok())
@@ -186,8 +256,18 @@ fn build_action_idea_response(
     } else {
         String::new()
     };
-    let uploaded_file_name = override_entry.and_then(|entry| entry.uploaded_file_name.clone());
-    let uploaded_file_ready = builtin.requires_upload && uploaded_file_name.is_some();
+    let default_file_exists =
+        builtin.requires_upload && action_idea_default_file_exists(builtin.id);
+    let uploaded_file_name = override_entry
+        .and_then(|entry| entry.uploaded_file_name.clone())
+        .or_else(|| {
+            if default_file_exists {
+                Some("payload.gz".to_string())
+            } else {
+                None
+            }
+        });
+    let uploaded_file_ready = builtin.requires_upload && default_file_exists;
 
     ActionIdeaPresetResponse {
         id: builtin.id.to_string(),
@@ -212,7 +292,7 @@ fn build_action_idea_response(
         gzip: builtin.gzip,
         body_source: builtin.body_source.to_string(),
         runtime_body_file_path,
-        headers: action_idea_headers(builtin.id),
+        headers: action_idea_headers(builtin, &response_content),
         response_content,
         requires_upload: builtin.requires_upload,
         uploaded_file_name,

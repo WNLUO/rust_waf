@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import {
-  Bot,
-  Copy,
-  Plus,
-  RefreshCw,
-  Shield,
-  Wand2,
-  X,
-} from 'lucide-vue-next'
+import { Copy, Plus, RefreshCw, X } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
 import AdminRulesPluginSection from '../components/rules/AdminRulesPluginSection.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
@@ -53,18 +45,10 @@ const ideaTemplateMatchers: Record<
   string,
   (templates: RuleActionTemplateItem[]) => RuleActionTemplateItem | null
 > = {
-  'brand-block': (templates) =>
-    templates.find(
-      (item) =>
-        item.response_template.content_type.includes('text/html') ||
-        item.name.includes('HTML'),
-    ) ?? null,
   'json-honeypot': (templates) =>
     templates.find((item) =>
       item.response_template.content_type.includes('application/json'),
     ) ?? null,
-  'debug-echo': () => null,
-  'scanner-misdirection': (templates) => templates[0] ?? null,
   'maintenance-page': (templates) =>
     templates.find(
       (item) => item.name.includes('Block') || item.name.includes('Hello'),
@@ -517,13 +501,7 @@ onMounted(loadActionCenter)
                 :is="
                   idea.id === 'json-honeypot'
                     ? Copy
-                    : idea.id === 'brand-block'
-                      ? Shield
-                      : idea.id === 'debug-echo'
-                        ? Wand2
-                        : idea.id === 'scanner-misdirection'
-                          ? Bot
-                      : Copy
+                    : Copy
                 "
                 :size="34"
               />

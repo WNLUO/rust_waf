@@ -29,53 +29,6 @@ struct BuiltinActionIdeaPreset {
 fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
     vec![
         BuiltinActionIdeaPreset {
-            id: "brand-block",
-            title: "品牌化拦截页",
-            mood: "正式",
-            summary: "把默认 403 升级为带品牌、联络入口和操作建议的页面。",
-            mechanism: "优先复用 HTML 模板插件，没有模板时回退到自定义 respond。",
-            performance: "中",
-            fallback_path: "/admin/rules",
-            plugin_id: "brand-block-fun",
-            file_name: "brand-block-fun.zip",
-            response_file_path: "brand-block.html",
-            plugin_name: "Brand Block Fun",
-            plugin_description: "品牌化拦截页示例插件",
-            template_local_id: "brand_block_page",
-            template_description: "返回可品牌化的 HTML 拦截页",
-            pattern: "(?i)forbidden|blocked|intercepted",
-            severity: "high",
-            content_type: "text/html; charset=utf-8",
-            status_code: 403,
-            gzip: true,
-            response_content: r#"<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>访问已受控</title>
-  <style>
-    body { margin: 0; font-family: "Segoe UI", sans-serif; background: linear-gradient(135deg, #f8fafc, #e0f2fe); color: #0f172a; }
-    .shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-    .card { width: min(720px, 100%); background: rgba(255,255,255,0.9); border: 1px solid rgba(148,163,184,0.25); border-radius: 28px; padding: 32px; box-shadow: 0 24px 80px rgba(15,23,42,0.14); }
-    .tag { display: inline-block; padding: 6px 12px; background: #0f172a; color: white; border-radius: 999px; font-size: 12px; letter-spacing: 0.1em; }
-    h1 { margin: 18px 0 12px; font-size: 34px; }
-    p { line-height: 1.8; color: #334155; }
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <section class="card">
-      <span class="tag">SECURITY GATE</span>
-      <h1>当前访问已被安全策略接管</h1>
-      <p>这是一个适合生产场景的品牌化拦截页示例。</p>
-      <p>你可以替换品牌名、工单入口、运维联系方式和恢复建议，让用户知道接下来该做什么。</p>
-    </section>
-  </main>
-</body>
-</html>"#,
-        },
-        BuiltinActionIdeaPreset {
             id: "json-honeypot",
             title: "JSON 蜜罐响应",
             mood: "迷惑",
@@ -96,50 +49,6 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             status_code: 200,
             gzip: true,
             response_content: "{\n  \"status\": \"ok\",\n  \"trace_id\": \"demo-honeypot-001\",\n  \"message\": \"request accepted\",\n  \"note\": \"this is a deceptive sample response for scanners\"\n}",
-        },
-        BuiltinActionIdeaPreset {
-            id: "debug-echo",
-            title: "调试回显页",
-            mood: "调试",
-            summary: "做一个简化回显页，用来验证规则是否按预期命中。",
-            mechanism: "通过自定义 respond 快速搭一个内联文本或 HTML 页面。",
-            performance: "中",
-            fallback_path: "/admin/rules",
-            plugin_id: "debug-echo-fun",
-            file_name: "debug-echo-fun.zip",
-            response_file_path: "debug-echo.txt",
-            plugin_name: "Debug Echo Fun",
-            plugin_description: "调试回显页示例插件",
-            template_local_id: "debug_echo",
-            template_description: "返回简单文本回显页，用于调试规则命中",
-            pattern: "(?i)debug|preview|echo",
-            severity: "medium",
-            content_type: "text/plain; charset=utf-8",
-            status_code: 200,
-            gzip: false,
-            response_content: "Debug Echo Sample\n-----------------\nmethod={{method}}\nuri={{uri}}\nsource_ip={{source_ip}}\nmatched_rule={{rule_id}}\n\nUse this as a friendly placeholder page while you validate matching behavior.",
-        },
-        BuiltinActionIdeaPreset {
-            id: "scanner-misdirection",
-            title: "扫描器误导页",
-            mood: "对抗",
-            summary: "给自动化工具返回静态成功页或伪接口数据，降低即时反馈。",
-            mechanism: "推荐用 HTML 或 JSON 模板动作来做低成本误导。",
-            performance: "中",
-            fallback_path: "/admin/rules",
-            plugin_id: "scanner-misdirection-fun",
-            file_name: "scanner-misdirection-fun.zip",
-            response_file_path: "scanner-ok.html",
-            plugin_name: "Scanner Misdirection Fun",
-            plugin_description: "扫描器误导页示例插件",
-            template_local_id: "scanner_ok",
-            template_description: "对自动化工具返回看似正常的静态页面",
-            pattern: "(?i)scan|crawler|nmap|nikto",
-            severity: "medium",
-            content_type: "text/html; charset=utf-8",
-            status_code: 200,
-            gzip: true,
-            response_content: "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><title>OK</title></head>\n<body><h1>200 OK</h1><p>Resource indexed successfully.</p></body>\n</html>",
         },
         BuiltinActionIdeaPreset {
             id: "maintenance-page",

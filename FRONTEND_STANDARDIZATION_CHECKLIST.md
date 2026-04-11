@@ -25,7 +25,8 @@
 - `AdminL4Page.vue` 已降到 `127` 行
 - `AdminRulesPage.vue` 已降到 `106` 行
 - `AdminSafeLinePage.vue` 已降到 `108` 行
-- 仍存在明显超大脚本：`useAdminSites.ts` `661` 行、`lib/types.ts` `600` 行
+- `useAdminSites.ts` 已降到 `441` 行，并拆出 `useAdminSitesEditor.ts` 与 `useAdminSitesSync.ts`
+- `lib/types.ts` 已降到 `10` 行，并拆为 `types/` 领域子文件
 
 ## 体量扫描摘要
 
@@ -40,11 +41,13 @@
 - `components/<domain>/`、`composables/`、`lib/` 已形成分层，但体量分布不均
 - `AdminL7ConfigSection.vue` `497` 行、`AdminSitesTableSection.vue` `373` 行、`AdminSettingsSafeLineSection.vue` `334` 行，已进入下一轮 section 拆分范围
 - `AdminL4ConfigSection.vue` 已降到 `50` 行，`AdminL4RuntimeInsightsSection.vue` 为 `160` 行，`AdminL4ConfigFormCard.vue` 为 `202` 行，说明 L4 页面拆分已基本完成，剩余仅是表单卡片边界微调
-- `useAdminSites.ts` `661` 行、`useAdminSettings.ts` `462` 行、`useAdminL7.ts` `369` 行，说明页面拆分后仍需继续收口副作用和流程编排
+- `useAdminSites.ts` 已从 `661` 行降到 `441` 行，当前已拆出编辑器状态与单站点同步子能力，但数据加载与统计聚合仍可继续收口
+- `useAdminSettings.ts` `462` 行、`useAdminL7.ts` `369` 行，说明页面拆分后仍需继续收口副作用和流程编排
 - `useAdminL4.ts` 已控制在 `231` 行，基本贴近当前 composable 体量目标
 - `AdminRuleEditorDialog.vue` `453` 行，已替代页面内联弹窗逻辑，但后续仍建议继续拆出“基础信息表单”和“响应模板编辑区”
 - `useAdminRules.ts` 已控制在 `239` 行，接近当前 composable 体量目标
 - `useAdminSafeLine.ts` 为 `297` 行，说明页面拆分已完成，但后续仍可继续拆成“接入状态 / 同步动作 / 映射管理”三段能力
+- `lib/types/` 已按 `rules / events / settings / l4 / l7 / sites / safeline / dashboard / system` 拆域，后续新增类型应优先进入领域文件而不是回堆单文件
 
 命名与风格抽样结论：
 
@@ -177,7 +180,7 @@
 
 ### 12. 控制类型文件和接口边界
 
-- [ ] `lib/types.ts` 过大时按领域拆分，如 `rules.ts`、`sites.ts`、`settings.ts`
+- [x] `lib/types.ts` 过大时按领域拆分，如 `rules.ts`、`sites.ts`、`settings.ts`
 - [x] 页面只引入所需领域类型，避免所有类型都堆在单文件
 - [x] 领域枚举值优先收敛为字面量联合或常量映射，减少散落 magic string
 
@@ -198,10 +201,10 @@
 
 ## 下一步建议执行顺序
 
-1. 将 `useAdminSites.ts` 再拆为查询、编辑器状态、远端同步三类子能力
-2. 将 `lib/types.ts` 按 `rules / sites / settings / safeline / dashboard` 进行领域拆分
-3. 视后续需求再微调 `AdminL4ConfigFormCard.vue` 与 `AdminRuleEditorDialog.vue`，尽量继续压缩 section / dialog 体量
-4. 继续收口 `useAdminSafeLine.ts`，把同步动作和映射管理拆成子 composable
+1. 继续收口 `useAdminSites.ts`，把数据加载与统计聚合再拆成子能力，争取压到 `350` 行以内
+2. 视后续需求再微调 `AdminL4ConfigFormCard.vue` 与 `AdminRuleEditorDialog.vue`，尽量继续压缩 section / dialog 体量
+3. 继续收口 `useAdminSafeLine.ts`，把同步动作和映射管理拆成子 composable
+4. 评估是否继续收口 `useAdminSettings.ts`，避免其超过当前 composable 目标线
 5. 补充对 `section / composable` 体量阈值的文档约束，后续再考虑是否接入自动化校验
 
 ## 完成标准

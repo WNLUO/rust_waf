@@ -20,6 +20,8 @@ import {
   type SiteRowDraft,
   type StateFilter,
 } from '../lib/adminSites'
+import { useAdminSitesEditor } from './useAdminSitesEditor'
+import { useAdminSitesSync } from './useAdminSitesSync'
 import type {
   LocalCertificateItem,
   LocalSiteDraft,
@@ -30,13 +32,6 @@ import type {
   SettingsPayload,
   SiteSyncLinkItem,
 } from '../lib/types'
-
-function splitEditorList(value: string) {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
 
 export function useAdminSites(
   formatTimestamp: (timestamp?: number | null) => string,
@@ -53,8 +48,6 @@ export function useAdminSites(
   const testResult = ref<SafeLineTestResponse | null>(null)
   const siteRows = ref<SiteRowDraft[]>([])
   const sitesLoadedAt = ref<number | null>(null)
-  const editingLocalSiteId = ref<number | null>(null)
-  const isLocalSiteModalOpen = ref(false)
 
   const actions = reactive({
     refreshing: false,
@@ -65,207 +58,32 @@ export function useAdminSites(
     deletingLocalSite: false,
   })
 
-  const rowActions = reactive<Record<string, 'pull' | 'push' | undefined>>({})
-
   const filters = reactive({
     keyword: '',
     scope: 'all' as ScopeFilter,
     state: 'all' as StateFilter,
   })
 
-  const localSiteForm = reactive<LocalSiteDraft>({
-    name: '',
-    primary_hostname: '',
-    hostnames: [],
-    listen_ports: [],
-    upstreams: [],
-    enabled: true,
-    tls_enabled: true,
-    local_certificate_id: null,
-    source: 'manual',
-    sync_mode: 'manual',
-    notes: '',
-    last_synced_at: null,
-  })
-
   function clearFeedback() {
     error.value = ''
     successMessage.value = ''
   }
-
-  const hostnamesText = computed({
-    get: () => localSiteForm.hostnames.join(', '),
-    set: (value: string) => {
-      localSiteForm.hostnames = splitEditorList(value)
-    },
-  })
-
-  const listenPortsText = computed({
-    get: () => localSiteForm.listen_ports.join(', '),
-    set: (value: string) => {
-      localSiteForm.listen_ports = splitEditorList(value)
-    },
-  })
-
-  const upstreamsText = computed({
-    get: () => localSiteForm.upstreams.join(', '),
-    set: (value: string) => {
-      localSiteForm.upstreams = splitEditorList(value)
-    },
-  })
-
-  const currentLocalSite = computed(() =>
-    editingLocalSiteId.value === null
-      ? null
-      : (localSites.value.find(
-          (item) => item.id === editingLocalSiteId.value,
-        ) ?? null),
-  )
-
-  const editorTitle = computed(() =>
-    editingLocalSiteId.value === null
-      ? '新建本地站点'
-      : `编辑本地站点 #${editingLocalSiteId.value}`,
-  )
-
-  function defaultListenPorts() {
-    const httpsListenAddr = settings.value?.https_listen_addr?.trim() ?? ''
-    if (!httpsListenAddr) return []
-    const port = httpsListenAddr.split(':').pop()?.trim()
-    return port ? [port] : []
-  }
-
-  function resetLocalSiteForm() {
-    editingLocalSiteId.value = null
-    localSiteForm.name = ''
-    localSiteForm.primary_hostname = ''
-    localSiteForm.hostnames = []
-    localSiteForm.listen_ports = defaultListenPorts()
-    localSiteForm.upstreams = []
-    localSiteForm.enabled = true
-    localSiteForm.tls_enabled = true
-    localSiteForm.local_certificate_id =
-      settings.value?.default_certificate_id ?? null
-    localSiteForm.source = 'manual'
-    localSiteForm.sync_mode = 'manual'
-    localSiteForm.notes = ''
-    localSiteForm.last_synced_at = null
-  }
-
-  function openCreateLocalSiteModal() {
-    resetLocalSiteForm()
-    isLocalSiteModalOpen.value = true
-  }
-
-  function closeLocalSiteModal() {
-    isLocalSiteModalOpen.value = false
-  }
-
-  function populateLocalSiteForm(
-    site: LocalSiteDraft,
-    localSiteId: number | null,
-  ) {
-    editingLocalSiteId.value = localSiteId
-    localSiteForm.name = site.name
-    localSiteForm.primary_hostname = site.primary_hostname
-    localSiteForm.hostnames = [...site.hostnames]
-    localSiteForm.listen_ports = [...site.listen_ports]
-    localSiteForm.upstreams = [...site.upstreams]
-    localSiteForm.enabled = site.enabled
-    localSiteForm.tls_enabled = site.tls_enabled
-    localSiteForm.local_certificate_id = site.local_certificate_id
-    localSiteForm.source = site.source
-    localSiteForm.sync_mode = site.sync_mode
-    localSiteForm.notes = site.notes
-    localSiteForm.last_synced_at = site.last_synced_at
-  }
-
-  function siteDraftFromItem(site: LocalSiteItem): LocalSiteDraft {
-    return {
-      name: site.name,
-      primary_hostname: site.primary_hostname,
-      hostnames: [...site.hostnames],
-      listen_ports: [...site.listen_ports],
-      upstreams: [...site.upstreams],
-      enabled: site.enabled,
-      tls_enabled: site.tls_enabled,
-      local_certificate_id: site.local_certificate_id,
-      source: site.source,
-      sync_mode: site.sync_mode,
-      notes: site.notes,
-      last_synced_at: site.last_synced_at,
-    }
-  }
-
-  function siteDraftFromRow(row: SiteRowDraft): LocalSiteDraft {
-    const localSite =
-      row.local_present && row.local_site_id
-        ? (localSites.value.find((item) => item.id === row.local_site_id) ??
-          null)
-        : null
-    const primaryHostname =
-      row.local_primary_hostname ||
-      row.safeline_site_domain ||
-      row.server_names[0] ||
-      ''
-    const hostnames = row.local_hostnames.length
-      ? [...row.local_hostnames]
-      : row.server_names.length
-        ? [...row.server_names]
-        : primaryHostname
-          ? [primaryHostname]
-          : []
-    const listenPorts = row.local_listen_ports.length
-      ? [...row.local_listen_ports]
-      : row.remote_ssl_ports.length
-        ? [...row.remote_ssl_ports]
-        : row.remote_ports.length
-          ? [...row.remote_ports]
-          : defaultListenPorts()
-    const upstreams = row.local_upstreams.length
-      ? [...row.local_upstreams]
-      : row.remote_upstreams.length
-        ? [...row.remote_upstreams]
-        : []
-
-    return {
-      name:
-        row.local_site_name ||
-        row.local_alias ||
-        row.safeline_site_name ||
-        primaryHostname,
-      primary_hostname: primaryHostname,
-      hostnames,
-      listen_ports: listenPorts,
-      upstreams,
-      enabled: row.local_present ? row.local_enabled : true,
-      tls_enabled: localSite?.tls_enabled ?? row.remote_ssl_enabled ?? false,
-      local_certificate_id:
-        localSite?.local_certificate_id ??
-        settings.value?.default_certificate_id ??
-        null,
-      source: 'manual',
-      sync_mode: row.local_sync_mode || 'manual',
-      notes: row.local_notes || row.notes || '',
-      last_synced_at: row.link_last_synced_at,
-    }
-  }
-
-  function editLocalSite(row: SiteRowDraft) {
-    if (row.local_present && row.local_site_id) {
-      const site = localSites.value.find(
-        (item) => item.id === row.local_site_id,
-      )
-      if (site) {
-        populateLocalSiteForm(siteDraftFromItem(site), site.id)
-        isLocalSiteModalOpen.value = true
-        return
-      }
-    }
-
-    populateLocalSiteForm(siteDraftFromRow(row), null)
-    isLocalSiteModalOpen.value = true
-  }
+  const {
+    closeLocalSiteModal,
+    currentLocalSite,
+    editLocalSite,
+    editingLocalSiteId,
+    editorTitle,
+    hostnamesText,
+    isLocalSiteModalOpen,
+    listenPortsText,
+    localSiteForm,
+    openCreateLocalSiteModal,
+    populateLocalSiteForm,
+    resetLocalSiteForm,
+    siteDraftFromItem,
+    upstreamsText,
+  } = useAdminSitesEditor(settings, localSites)
 
   const hasSavedConfig = computed(() =>
     Boolean(settings.value?.safeline.base_url.trim()),
@@ -548,66 +366,28 @@ export function useAdminSites(
       actions.loadingSites = false
     }
   }
-
-  async function syncRemoteSite(row: SiteRowDraft) {
-    if (!row.safeline_site_id) return
-    rowActions[row.row_key] = 'pull'
-    clearFeedback()
-    try {
-      const response = await pullSafeLineSite(row.safeline_site_id)
-      await refreshCollections('live')
-      successMessage.value = response.message
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : '单站点回流失败'
-    } finally {
-      delete rowActions[row.row_key]
-    }
-  }
-
-  async function syncLocalSite(row: SiteRowDraft) {
-    if (!row.local_site_id) return
-    rowActions[row.row_key] = 'push'
-    clearFeedback()
-    try {
-      const response = await pushSafeLineSite(row.local_site_id)
-      await refreshCollections('live')
-      successMessage.value = response.message
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : '单站点推送失败'
-    } finally {
-      delete rowActions[row.row_key]
-    }
-  }
-
-  function rowActionPending(row: SiteRowDraft, action: 'pull' | 'push') {
-    return rowActions[row.row_key] === action
-  }
-
-  function rowBusy(row: SiteRowDraft) {
-    return Boolean(rowActions[row.row_key])
-  }
-
-  function remoteActionLabel(row: SiteRowDraft) {
-    return row.local_present ? '从雷池更新' : '导入到本地'
-  }
-
-  function localActionLabel(row: SiteRowDraft) {
-    if (row.row_kind === 'missing_remote') return '重新创建到雷池'
-    return row.remote_present && row.link_id ? '推送到雷池' : '创建到雷池'
-  }
-
-  function rowSyncText(row: SiteRowDraft) {
-    if (row.link_last_error) return row.link_last_error
-    if (row.link_last_synced_at)
-      return `最近同步：${formatTimestamp(row.link_last_synced_at)}`
-    if (row.remote_present && sitesLoadedAt.value) {
-      return `远端读取：${formatTimestamp(sitesLoadedAt.value)}`
-    }
-    if (row.local_updated_at) {
-      return `本地更新：${formatTimestamp(row.local_updated_at)}`
-    }
-    return '尚未执行单站点同步'
-  }
+  const {
+    localActionLabel,
+    remoteActionLabel,
+    rowActionPending,
+    rowBusy,
+    rowSyncText,
+    syncLocalSite,
+    syncRemoteSite,
+  } = useAdminSitesSync(
+    formatTimestamp,
+    sitesLoadedAt,
+    clearFeedback,
+    refreshCollections,
+    pullSafeLineSite,
+    pushSafeLineSite,
+    (value) => {
+      successMessage.value = value
+    },
+    (value) => {
+      error.value = value
+    },
+  )
 
   onMounted(loadPageData)
 

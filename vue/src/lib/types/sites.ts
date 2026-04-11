@@ -1,0 +1,200 @@
+export interface SafeLineTestResponse {
+  status: string
+  message: string
+  openapi_doc_reachable: boolean
+  openapi_doc_status: number | null
+  authenticated: boolean
+  auth_probe_status: number | null
+}
+
+export interface SafeLineSiteItem {
+  id: string
+  name: string
+  domain: string
+  status: string
+  enabled: boolean | null
+  server_names: string[]
+  ports: string[]
+  ssl_ports: string[]
+  upstreams: string[]
+  ssl_enabled: boolean
+  cert_id: number | null
+  cert_type: number | null
+  cert_filename: string | null
+  key_filename: string | null
+  health_check: boolean | null
+  raw: Record<string, unknown>
+}
+
+export interface SafeLineSitesResponse {
+  total: number
+  cached_at: number | null
+  sites: SafeLineSiteItem[]
+}
+
+export interface SafeLineMappingItem {
+  id: number
+  safeline_site_id: string
+  safeline_site_name: string
+  safeline_site_domain: string
+  local_alias: string
+  enabled: boolean
+  is_primary: boolean
+  notes: string
+  updated_at: number
+}
+
+export interface SafeLineMappingsResponse {
+  total: number
+  mappings: SafeLineMappingItem[]
+}
+
+export interface SafeLineMappingsUpdateRequest {
+  mappings: Array<{
+    safeline_site_id: string
+    safeline_site_name: string
+    safeline_site_domain: string
+    local_alias: string
+    enabled: boolean
+    is_primary: boolean
+    notes: string
+  }>
+}
+
+export interface LocalSiteItem {
+  id: number
+  name: string
+  primary_hostname: string
+  hostnames: string[]
+  listen_ports: string[]
+  upstreams: string[]
+  enabled: boolean
+  tls_enabled: boolean
+  local_certificate_id: number | null
+  source: string
+  sync_mode: string
+  notes: string
+  last_synced_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+export interface LocalSitesResponse {
+  total: number
+  sites: LocalSiteItem[]
+}
+
+export interface LocalSiteDraft {
+  name: string
+  primary_hostname: string
+  hostnames: string[]
+  listen_ports: string[]
+  upstreams: string[]
+  enabled: boolean
+  tls_enabled: boolean
+  local_certificate_id: number | null
+  source: string
+  sync_mode: string
+  notes: string
+  last_synced_at: number | null
+}
+
+export interface LocalCertificateItem {
+  id: number
+  name: string
+  domains: string[]
+  issuer: string
+  valid_from: number | null
+  valid_to: number | null
+  source_type: string
+  provider_remote_id: string | null
+  trusted: boolean
+  expired: boolean
+  notes: string
+  last_synced_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+export interface LocalCertificatesResponse {
+  total: number
+  certificates: LocalCertificateItem[]
+}
+
+export interface LocalCertificateDraft {
+  name: string
+  domains: string[]
+  issuer: string
+  valid_from: number | null
+  valid_to: number | null
+  source_type: string
+  provider_remote_id: string | null
+  trusted: boolean
+  expired: boolean
+  notes: string
+  last_synced_at: number | null
+  certificate_pem?: string | null
+  private_key_pem?: string | null
+}
+
+export interface GeneratedLocalCertificateRequest {
+  name?: string | null
+  domains: string[]
+  notes?: string | null
+}
+
+export interface SiteSyncLinkItem {
+  id: number
+  local_site_id: number
+  provider: string
+  remote_site_id: string
+  remote_site_name: string
+  remote_cert_id: string | null
+  sync_mode: string
+  last_local_hash: string | null
+  last_remote_hash: string | null
+  last_error: string | null
+  last_synced_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+export interface SiteSyncLinksResponse {
+  total: number
+  links: SiteSyncLinkItem[]
+}
+
+export interface SiteSyncLinkDraft {
+  local_site_id: number
+  provider: string
+  remote_site_id: string
+  remote_site_name: string
+  remote_cert_id: string | null
+  sync_mode: string
+  last_local_hash: string | null
+  last_remote_hash: string | null
+  last_error: string | null
+  last_synced_at: number | null
+}
+
+export interface SafeLineSitesPullResponse {
+  success: boolean
+  imported_sites: number
+  updated_sites: number
+  imported_certificates: number
+  updated_certificates: number
+  linked_sites: number
+  skipped_sites: number
+  message: string
+}
+
+export interface SafeLineSitesPushResponse {
+  success: boolean
+  created_sites: number
+  updated_sites: number
+  created_certificates: number
+  reused_certificates: number
+  skipped_sites: number
+  failed_sites: number
+  message: string
+}

@@ -1,0 +1,32 @@
+export interface SafeLineSettings {
+  enabled: boolean
+  auto_sync_events: boolean
+  auto_sync_blocked_ips_push: boolean
+  auto_sync_blocked_ips_pull: boolean
+  auto_sync_interval_secs: number
+  base_url: string
+  api_token: string
+  username: string
+  password: string
+  verify_tls: boolean
+  openapi_doc_path: string
+  auth_probe_path: string
+  site_list_path: string
+  event_list_path: string
+  blocklist_sync_path: string
+  blocklist_delete_path: string
+  blocklist_ip_group_ids: string[]
+}
+
+export interface SettingsPayload {
+  gateway_name: string
+  auto_refresh_seconds: number
+  https_listen_addr: string
+  default_certificate_id: number | null
+  upstream_endpoint: string
+  api_endpoint: string
+  notification_level: 'all' | 'critical' | 'blocked_only'
+  retain_days: number
+  notes: string
+  safeline: SafeLineSettings
+}

@@ -1,3 +1,4 @@
+use crate::config::l7::SafeLineInterceptConfig;
 use crate::config::Config;
 use crate::storage::{LocalCertificateSecretEntry, LocalSiteEntry, SqliteStore};
 use anyhow::Result;
@@ -19,6 +20,7 @@ pub struct GatewaySiteRuntime {
     pub tls_enabled: bool,
     pub certificate_id: Option<i64>,
     pub upstream_endpoint: Option<String>,
+    pub safeline_intercept: Option<SafeLineInterceptConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -217,6 +219,18 @@ fn runtime_site_from_entry(site: &LocalSiteEntry) -> GatewaySiteRuntime {
                     None
                 }
             });
+    let safeline_intercept = site.safeline_intercept_json.as_deref().and_then(|raw| {
+        match serde_json::from_str::<SafeLineInterceptConfig>(raw) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                warn!(
+                    "Ignoring invalid SafeLine intercept override for site '{}': {}",
+                    site.name, err
+                );
+                None
+            }
+        }
+    });
 
     GatewaySiteRuntime {
         id: site.id,
@@ -227,6 +241,7 @@ fn runtime_site_from_entry(site: &LocalSiteEntry) -> GatewaySiteRuntime {
         tls_enabled: site.tls_enabled,
         certificate_id: site.local_certificate_id,
         upstream_endpoint,
+        safeline_intercept,
     }
 }
 

@@ -45,6 +45,9 @@ defineProps<{
             <p>目标：{{ event.dest_ip }}:{{ event.dest_port }}</p>
             <p>请求：{{ event.http_method || '-' }} {{ event.uri || '' }}</p>
             <p>版本：{{ event.http_version || '-' }}</p>
+            <p v-if="event.provider_event_id" class="md:col-span-2">
+              事件号：{{ event.provider_event_id }}
+            </p>
           </div>
         </div>
         <p v-if="!events.length" class="text-sm text-slate-500">

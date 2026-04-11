@@ -135,6 +135,7 @@ pub struct LocalSiteEntry {
     pub hostnames_json: String,
     pub listen_ports_json: String,
     pub upstreams_json: String,
+    pub safeline_intercept_json: Option<String>,
     pub enabled: bool,
     pub tls_enabled: bool,
     pub local_certificate_id: Option<i64>,

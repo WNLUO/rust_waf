@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from 'vue'
 import type { SiteRowDraft } from '../lib/adminSites'
 import type {
+  L7ConfigPayload,
   LocalSiteDraft,
   LocalSiteItem,
   SettingsPayload,
@@ -13,9 +14,44 @@ function splitEditorList(value: string) {
     .filter(Boolean)
 }
 
+function cloneSafelineIntercept(
+  value: LocalSiteDraft['safeline_intercept'],
+): LocalSiteDraft['safeline_intercept'] {
+  if (!value) return null
+  return {
+    ...value,
+    response_template: {
+      ...value.response_template,
+      headers: value.response_template.headers.map((header) => ({ ...header })),
+    },
+  }
+}
+
+function defaultSafelineIntercept(
+  globalL7Config: L7ConfigPayload | null,
+): NonNullable<LocalSiteDraft['safeline_intercept']> {
+  return cloneSafelineIntercept(globalL7Config?.safeline_intercept ?? null) ?? {
+    enabled: true,
+    action: 'replace',
+    match_mode: 'strict',
+    max_body_bytes: 32 * 1024,
+    block_duration_secs: 600,
+    response_template: {
+      status_code: 403,
+      content_type: 'text/html; charset=utf-8',
+      body_source: 'inline_text',
+      gzip: false,
+      body_text: '',
+      body_file_path: '',
+      headers: [],
+    },
+  }
+}
+
 export function useAdminSitesEditor(
   settings: { value: SettingsPayload | null },
   localSites: { value: LocalSiteItem[] },
+  globalL7Config: { value: L7ConfigPayload | null },
 ) {
   const editingLocalSiteId = ref<number | null>(null)
   const isLocalSiteModalOpen = ref(false)
@@ -26,6 +62,7 @@ export function useAdminSitesEditor(
     hostnames: [],
     listen_ports: [],
     upstreams: [],
+    safeline_intercept: null,
     enabled: true,
     tls_enabled: true,
     local_certificate_id: null,
@@ -84,6 +121,7 @@ export function useAdminSitesEditor(
     localSiteForm.hostnames = []
     localSiteForm.listen_ports = defaultListenPorts()
     localSiteForm.upstreams = []
+    localSiteForm.safeline_intercept = null
     localSiteForm.enabled = true
     localSiteForm.tls_enabled = true
     localSiteForm.local_certificate_id =
@@ -113,6 +151,9 @@ export function useAdminSitesEditor(
     localSiteForm.hostnames = [...site.hostnames]
     localSiteForm.listen_ports = [...site.listen_ports]
     localSiteForm.upstreams = [...site.upstreams]
+    localSiteForm.safeline_intercept = cloneSafelineIntercept(
+      site.safeline_intercept,
+    )
     localSiteForm.enabled = site.enabled
     localSiteForm.tls_enabled = site.tls_enabled
     localSiteForm.local_certificate_id = site.local_certificate_id
@@ -129,6 +170,7 @@ export function useAdminSitesEditor(
       hostnames: [...site.hostnames],
       listen_ports: [...site.listen_ports],
       upstreams: [...site.upstreams],
+      safeline_intercept: cloneSafelineIntercept(site.safeline_intercept),
       enabled: site.enabled,
       tls_enabled: site.tls_enabled,
       local_certificate_id: site.local_certificate_id,
@@ -183,6 +225,9 @@ export function useAdminSitesEditor(
       hostnames,
       listen_ports: listenPorts,
       upstreams,
+      safeline_intercept: cloneSafelineIntercept(
+        localSite?.safeline_intercept ?? null,
+      ),
       enabled: row.local_present ? row.local_enabled : true,
       tls_enabled: localSite?.tls_enabled ?? row.remote_ssl_enabled ?? false,
       local_certificate_id:
@@ -216,6 +261,9 @@ export function useAdminSitesEditor(
   return {
     closeLocalSiteModal,
     currentLocalSite,
+    defaultSafelineInterceptConfig: computed(() =>
+      defaultSafelineIntercept(globalL7Config.value),
+    ),
     editLocalSite,
     editingLocalSiteId,
     editorTitle,

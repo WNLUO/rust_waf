@@ -41,6 +41,7 @@ async fn refreshing_gateway_runtime_picks_up_new_site_routes() {
             hostnames: vec!["portal.example.com".to_string()],
             listen_ports: vec!["8080".to_string()],
             upstreams: vec!["127.0.0.1:9000".to_string()],
+            safeline_intercept: None,
             enabled: true,
             tls_enabled: false,
             local_certificate_id: None,

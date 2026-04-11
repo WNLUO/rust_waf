@@ -377,6 +377,12 @@ const siteOptions = computed(() => {
                       >
                         {{ eventReasonLabel(event) }}
                       </p>
+                      <p
+                        v-if="event.provider_event_id"
+                        class="mt-1 font-mono text-xs text-slate-500"
+                      >
+                        Event ID: {{ event.provider_event_id }}
+                      </p>
                     </div>
                   </td>
                   <td class="px-4 py-3">

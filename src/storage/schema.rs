@@ -170,6 +170,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             hostnames_json TEXT NOT NULL DEFAULT '[]',
             listen_ports_json TEXT NOT NULL DEFAULT '[]',
             upstreams_json TEXT NOT NULL DEFAULT '[]',
+            safeline_intercept_json TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
             tls_enabled INTEGER NOT NULL DEFAULT 0,
             local_certificate_id INTEGER,
@@ -285,6 +286,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         "ALTER TABLE rules ADD COLUMN plugin_template_id TEXT",
         "ALTER TABLE rules ADD COLUMN response_template_json TEXT",
         "ALTER TABLE rule_action_plugins ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE local_sites ADD COLUMN safeline_intercept_json TEXT",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {

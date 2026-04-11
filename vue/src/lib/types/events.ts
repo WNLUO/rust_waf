@@ -4,6 +4,7 @@ export interface SecurityEventItem {
   id: number
   layer: string
   provider: string | null
+  provider_event_id: string | null
   provider_site_id: string | null
   provider_site_name: string | null
   provider_site_domain: string | null

@@ -138,12 +138,8 @@ impl SafeLineInterceptConfigResponse {
                 }
             },
             match_mode: match config.match_mode {
-                crate::config::l7::SafeLineInterceptMatchMode::Strict => {
-                    "strict".to_string()
-                }
-                crate::config::l7::SafeLineInterceptMatchMode::Relaxed => {
-                    "relaxed".to_string()
-                }
+                crate::config::l7::SafeLineInterceptMatchMode::Strict => "strict".to_string(),
+                crate::config::l7::SafeLineInterceptMatchMode::Relaxed => "relaxed".to_string(),
             },
             max_body_bytes: config.max_body_bytes,
             block_duration_secs: config.block_duration_secs,
@@ -287,9 +283,7 @@ impl SafeLineInterceptConfigRequest {
             "pass" => crate::config::l7::SafeLineInterceptAction::Pass,
             "replace" => crate::config::l7::SafeLineInterceptAction::Replace,
             "drop" => crate::config::l7::SafeLineInterceptAction::Drop,
-            "replace_and_block_ip" => {
-                crate::config::l7::SafeLineInterceptAction::ReplaceAndBlockIp
-            }
+            "replace_and_block_ip" => crate::config::l7::SafeLineInterceptAction::ReplaceAndBlockIp,
             other => {
                 return Err(format!(
                     "SafeLine 响应动作仅支持 pass、replace、drop、replace_and_block_ip，收到 '{}'",
@@ -665,6 +659,12 @@ impl TryFrom<crate::storage::LocalSiteEntry> for LocalSiteResponse {
             hostnames: parse_json_string_vec(&value.hostnames_json)?,
             listen_ports: parse_json_string_vec(&value.listen_ports_json)?,
             upstreams: parse_json_string_vec(&value.upstreams_json)?,
+            safeline_intercept: value
+                .safeline_intercept_json
+                .as_deref()
+                .map(serde_json::from_str::<crate::config::l7::SafeLineInterceptConfig>)
+                .transpose()?
+                .map(|config| SafeLineInterceptConfigResponse::from_config(&config)),
             enabled: value.enabled,
             tls_enabled: value.tls_enabled,
             local_certificate_id: value.local_certificate_id,
@@ -691,6 +691,10 @@ impl LocalSiteUpsertRequest {
         }
         let listen_ports = normalize_string_list(self.listen_ports);
         let upstreams = normalize_string_list(self.upstreams);
+        let safeline_intercept = self
+            .safeline_intercept
+            .map(SafeLineInterceptConfigRequest::into_config)
+            .transpose()?;
         let source = non_empty_string(self.source).unwrap_or_else(|| "manual".to_string());
         let sync_mode = non_empty_string(self.sync_mode).unwrap_or_else(|| "manual".to_string());
         let notes = self.notes.trim().to_string();
@@ -713,6 +717,7 @@ impl LocalSiteUpsertRequest {
             hostnames,
             listen_ports,
             upstreams,
+            safeline_intercept,
             enabled: self.enabled,
             tls_enabled: self.tls_enabled,
             local_certificate_id: self.local_certificate_id,

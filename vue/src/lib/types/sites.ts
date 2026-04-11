@@ -1,3 +1,5 @@
+import type { SafeLineInterceptConfigPayload } from './l7'
+
 export interface SafeLineTestResponse {
   status: string
   message: string
@@ -68,6 +70,7 @@ export interface LocalSiteItem {
   hostnames: string[]
   listen_ports: string[]
   upstreams: string[]
+  safeline_intercept: SafeLineInterceptConfigPayload | null
   enabled: boolean
   tls_enabled: boolean
   local_certificate_id: number | null
@@ -90,6 +93,7 @@ export interface LocalSiteDraft {
   hostnames: string[]
   listen_ports: string[]
   upstreams: string[]
+  safeline_intercept: SafeLineInterceptConfigPayload | null
   enabled: boolean
   tls_enabled: boolean
   local_certificate_id: number | null

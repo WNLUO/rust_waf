@@ -13,6 +13,7 @@ const { formatNumber, formatTimestamp } = useFormatters()
 const {
   actions,
   currentLocalSite,
+  defaultSafelineInterceptConfig,
   editorTitle,
   editingLocalSiteId,
   error,
@@ -146,6 +147,7 @@ const {
       :editor-title="editorTitle"
       :format-number="formatNumber"
       :format-timestamp="formatTimestamp"
+      :default-safeline-intercept-config="defaultSafelineInterceptConfig"
       :hostnames-text="hostnamesText"
       :is-open="isLocalSiteModalOpen"
       :listen-ports-text="listenPortsText"

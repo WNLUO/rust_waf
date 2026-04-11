@@ -303,6 +303,7 @@ pub struct LocalSiteResponse {
     pub(crate) hostnames: Vec<String>,
     pub(crate) listen_ports: Vec<String>,
     pub(crate) upstreams: Vec<String>,
+    pub(crate) safeline_intercept: Option<SafeLineInterceptConfigResponse>,
     pub(crate) enabled: bool,
     pub(crate) tls_enabled: bool,
     pub(crate) local_certificate_id: Option<i64>,
@@ -321,6 +322,8 @@ pub struct LocalSiteUpsertRequest {
     pub(crate) hostnames: Vec<String>,
     pub(crate) listen_ports: Vec<String>,
     pub(crate) upstreams: Vec<String>,
+    #[serde(default)]
+    pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
     pub(crate) enabled: bool,
     pub(crate) tls_enabled: bool,
     pub(crate) local_certificate_id: Option<i64>,

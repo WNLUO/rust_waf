@@ -19,6 +19,7 @@ const props = defineProps<{
   editorTitle: string
   formatNumber: (value?: number) => string
   formatTimestamp: (timestamp?: number | null) => string
+  defaultSafelineInterceptConfig: NonNullable<LocalSiteDraft['safeline_intercept']>
   hostnamesText: string
   isOpen: boolean
   listenPortsText: string
@@ -46,6 +47,57 @@ function updateForm<K extends keyof LocalSiteDraft>(
   emit('update:form', {
     ...props.localSiteForm,
     [key]: value,
+  })
+}
+
+function cloneSafelineIntercept(
+  value: LocalSiteDraft['safeline_intercept'],
+): LocalSiteDraft['safeline_intercept'] {
+  if (!value) return null
+  return {
+    ...value,
+    response_template: {
+      ...value.response_template,
+      headers: value.response_template.headers.map((header) => ({ ...header })),
+    },
+  }
+}
+
+function ensureSafelineInterceptConfig(): NonNullable<
+  LocalSiteDraft['safeline_intercept']
+> {
+  const existing = props.localSiteForm.safeline_intercept
+  if (existing) {
+    return existing
+  }
+  const next = cloneSafelineIntercept(
+    props.defaultSafelineInterceptConfig,
+  ) as NonNullable<LocalSiteDraft['safeline_intercept']>
+  updateForm('safeline_intercept', next)
+  return next
+}
+
+function updateSafelineIntercept(
+  patch: Partial<NonNullable<LocalSiteDraft['safeline_intercept']>>,
+) {
+  const current = ensureSafelineInterceptConfig()
+  updateForm('safeline_intercept', {
+    ...current,
+    ...patch,
+  } as NonNullable<LocalSiteDraft['safeline_intercept']>)
+}
+
+function updateSafelineResponseTemplate(
+  patch: Partial<
+    NonNullable<LocalSiteDraft['safeline_intercept']>['response_template']
+  >,
+) {
+  const current = ensureSafelineInterceptConfig()
+  updateSafelineIntercept({
+    response_template: {
+      ...current.response_template,
+      ...patch,
+    },
   })
 }
 
@@ -82,6 +134,125 @@ const tlsEnabledModel = computed({
 const syncModeModel = computed({
   get: () => props.localSiteForm.sync_mode,
   set: (value: string) => updateForm('sync_mode', value),
+})
+
+const safelineOverrideEnabledModel = computed({
+  get: () => props.localSiteForm.safeline_intercept !== null,
+  set: (value: boolean) =>
+    updateForm(
+      'safeline_intercept',
+      value
+        ? (cloneSafelineIntercept(
+            props.defaultSafelineInterceptConfig,
+          ) as NonNullable<LocalSiteDraft['safeline_intercept']>)
+        : null,
+    ),
+})
+
+const safelineInterceptActionModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.action ??
+    props.defaultSafelineInterceptConfig.action,
+  set: (value: string) => updateSafelineIntercept({ action: value }),
+})
+
+const safelineInterceptMatchModeModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.match_mode ??
+    props.defaultSafelineInterceptConfig.match_mode,
+  set: (value: string) => updateSafelineIntercept({ match_mode: value }),
+})
+
+const safelineInterceptEnabledModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.enabled ??
+    props.defaultSafelineInterceptConfig.enabled,
+  set: (value: boolean) => updateSafelineIntercept({ enabled: value }),
+})
+
+const safelineInterceptMaxBodyBytesModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.max_body_bytes ??
+    props.defaultSafelineInterceptConfig.max_body_bytes,
+  set: (value: number) => updateSafelineIntercept({ max_body_bytes: value }),
+})
+
+const safelineInterceptBlockDurationModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.block_duration_secs ??
+    props.defaultSafelineInterceptConfig.block_duration_secs,
+  set: (value: number) =>
+    updateSafelineIntercept({ block_duration_secs: value }),
+})
+
+const safelineResponseStatusCodeModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.response_template.status_code ??
+    props.defaultSafelineInterceptConfig.response_template.status_code,
+  set: (value: number) =>
+    updateSafelineResponseTemplate({ status_code: value }),
+})
+
+const safelineResponseContentTypeModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.response_template.content_type ??
+    props.defaultSafelineInterceptConfig.response_template.content_type,
+  set: (value: string) =>
+    updateSafelineResponseTemplate({ content_type: value }),
+})
+
+const safelineResponseBodySourceModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.response_template.body_source ??
+    props.defaultSafelineInterceptConfig.response_template.body_source,
+  set: (value: string) =>
+    updateSafelineResponseTemplate({ body_source: value }),
+})
+
+const safelineResponseGzipModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.response_template.gzip ??
+    props.defaultSafelineInterceptConfig.response_template.gzip,
+  set: (value: boolean) => updateSafelineResponseTemplate({ gzip: value }),
+})
+
+const safelineResponseBodyTextModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.response_template.body_text ??
+    props.defaultSafelineInterceptConfig.response_template.body_text,
+  set: (value: string) => updateSafelineResponseTemplate({ body_text: value }),
+})
+
+const safelineResponseBodyFilePathModel = computed({
+  get: () =>
+    props.localSiteForm.safeline_intercept?.response_template.body_file_path ??
+    props.defaultSafelineInterceptConfig.response_template.body_file_path,
+  set: (value: string) =>
+    updateSafelineResponseTemplate({ body_file_path: value }),
+})
+
+const safelineResponseHeadersTextModel = computed({
+  get: () => {
+    const headers =
+      props.localSiteForm.safeline_intercept?.response_template.headers ??
+      props.defaultSafelineInterceptConfig.response_template.headers
+    return headers.map((header) => `${header.key}: ${header.value}`).join('\n')
+  },
+  set: (value: string) => {
+    const headers = value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [key, ...rest] = line.split(':')
+        return {
+          key: key?.trim() || '',
+          value: rest.join(':').trim(),
+        }
+      })
+      .filter((header) => header.key)
+    updateSafelineResponseTemplate({ headers })
+  },
 })
 </script>
 
@@ -280,6 +451,209 @@ const syncModeModel = computed({
             </label>
           </div>
 
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div
+              class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+            >
+              <div>
+                <p class="text-sm font-medium text-stone-900">
+                  SafeLine 响应接管
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  默认继承全局接管策略。只有在这个站点需要不同动作时，才开启覆盖。
+                </p>
+              </div>
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700"
+              >
+                <input
+                  v-model="safelineOverrideEnabledModel"
+                  type="checkbox"
+                  class="accent-blue-600"
+                />
+                启用站点级覆盖
+              </label>
+            </div>
+
+            <div
+              v-if="!localSiteForm.safeline_intercept"
+              class="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500"
+            >
+              <p>
+                当前继承全局策略：
+                <span class="font-medium text-stone-900">
+                  {{
+                    defaultSafelineInterceptConfig.enabled
+                      ? '已启用接管'
+                      : '未启用接管'
+                  }}
+                </span>
+              </p>
+              <p class="mt-1">
+                动作 {{ defaultSafelineInterceptConfig.action }}，匹配
+                {{ defaultSafelineInterceptConfig.match_mode }}。
+              </p>
+            </div>
+
+            <div
+              v-else
+              class="mt-4 space-y-4 rounded-lg border border-slate-200 bg-white p-4"
+            >
+              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">是否启用接管</span>
+                  <select
+                    v-model="safelineInterceptEnabledModel"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  >
+                    <option :value="true">启用</option>
+                    <option :value="false">关闭</option>
+                  </select>
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">接管动作</span>
+                  <select
+                    v-model="safelineInterceptActionModel"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  >
+                    <option value="replace">替换为自定义响应</option>
+                    <option value="drop">直接丢弃响应</option>
+                    <option value="replace_and_block_ip">替换并封禁来源 IP</option>
+                    <option value="pass">透传雷池原始响应</option>
+                  </select>
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">匹配模式</span>
+                  <select
+                    v-model="safelineInterceptMatchModeModel"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  >
+                    <option value="strict">strict</option>
+                    <option value="relaxed">relaxed</option>
+                  </select>
+                </label>
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500">响应体检测上限</span>
+                  <input
+                    v-model.number="safelineInterceptMaxBodyBytesModel"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                    type="number"
+                    min="0"
+                    step="1024"
+                  />
+                </label>
+              </div>
+
+              <label class="space-y-1.5 md:max-w-xs">
+                <span class="text-xs text-slate-500">封禁时长（秒）</span>
+                <input
+                  v-model.number="safelineInterceptBlockDurationModel"
+                  class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                  type="number"
+                  min="0"
+                  step="60"
+                />
+              </label>
+
+              <div
+                v-if="
+                  safelineInterceptActionModel === 'replace' ||
+                  safelineInterceptActionModel === 'replace_and_block_ip'
+                "
+                class="space-y-4 rounded-lg border border-slate-200 bg-slate-50 p-4"
+              >
+                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <label class="space-y-1.5">
+                    <span class="text-xs text-slate-500">响应状态码</span>
+                    <input
+                      v-model.number="safelineResponseStatusCodeModel"
+                      class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                      type="number"
+                      min="200"
+                      max="599"
+                    />
+                  </label>
+                  <label class="space-y-1.5 md:col-span-2">
+                    <span class="text-xs text-slate-500">Content-Type</span>
+                    <input
+                      v-model="safelineResponseContentTypeModel"
+                      class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                      type="text"
+                      placeholder="text/html; charset=utf-8"
+                    />
+                  </label>
+                  <label
+                    class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white p-3"
+                  >
+                    <input
+                      v-model="safelineResponseGzipModel"
+                      type="checkbox"
+                      class="mt-0.5 accent-blue-600"
+                    />
+                    <span>
+                      <span class="block text-sm font-medium text-stone-900"
+                        >启用 gzip</span
+                      >
+                      <span class="mt-0.5 block text-xs text-slate-500"
+                        >对替换后的回包执行压缩。</span
+                      >
+                    </span>
+                  </label>
+                </div>
+
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="space-y-1.5">
+                    <span class="text-xs text-slate-500">响应体来源</span>
+                    <select
+                      v-model="safelineResponseBodySourceModel"
+                      class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                    >
+                      <option value="inline_text">内联文本</option>
+                      <option value="file">文件</option>
+                    </select>
+                  </label>
+                  <label
+                    v-if="safelineResponseBodySourceModel === 'file'"
+                    class="space-y-1.5"
+                  >
+                    <span class="text-xs text-slate-500">响应文件路径</span>
+                    <input
+                      v-model="safelineResponseBodyFilePathModel"
+                      class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                      type="text"
+                      placeholder="/path/to/block.html"
+                    />
+                  </label>
+                </div>
+
+                <label
+                  v-if="safelineResponseBodySourceModel === 'inline_text'"
+                  class="space-y-1.5"
+                >
+                  <span class="text-xs text-slate-500">响应正文</span>
+                  <textarea
+                    v-model="safelineResponseBodyTextModel"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm outline-none transition focus:border-blue-500"
+                    rows="6"
+                    placeholder="输入这个站点专属的拦截页面 HTML 或文本"
+                  />
+                </label>
+
+                <label class="space-y-1.5">
+                  <span class="text-xs text-slate-500"
+                    >附加响应头（每行 `Key: Value`）</span
+                  >
+                  <textarea
+                    v-model="safelineResponseHeadersTextModel"
+                    class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-sm outline-none transition focus:border-blue-500"
+                    rows="4"
+                    placeholder="X-Block-Source: rust-waf"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div class="flex flex-wrap items-center gap-2">
             <button
               :disabled="actions.savingLocalSite"
@@ -331,6 +705,9 @@ const syncModeModel = computed({
               回包用系统设置里的默认证书。
             </p>
             <p>上游地址：支持 `127.0.0.1:880` 或 `http://127.0.0.1:880`。</p>
+            <p>
+              SafeLine 接管：默认继承全局策略，只有特殊站点再做单站覆盖。
+            </p>
             <p>
               保存后写入数据库，当前服务需要重启才会加载新的监听与站点路由。
             </p>

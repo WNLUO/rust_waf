@@ -156,6 +156,11 @@ pub async fn pull_sites(
                 hostnames_json: serde_json::to_string(&site_upsert.hostnames)?,
                 listen_ports_json: serde_json::to_string(&site_upsert.listen_ports)?,
                 upstreams_json: serde_json::to_string(&site_upsert.upstreams)?,
+                safeline_intercept_json: site_upsert
+                    .safeline_intercept
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
                 enabled: site_upsert.enabled,
                 tls_enabled: site_upsert.tls_enabled,
                 local_certificate_id: site_upsert.local_certificate_id,
@@ -461,6 +466,11 @@ pub async fn pull_site(
             hostnames_json: serde_json::to_string(&site_upsert.hostnames)?,
             listen_ports_json: serde_json::to_string(&site_upsert.listen_ports)?,
             upstreams_json: serde_json::to_string(&site_upsert.upstreams)?,
+            safeline_intercept_json: site_upsert
+                .safeline_intercept
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
             enabled: site_upsert.enabled,
             tls_enabled: site_upsert.tls_enabled,
             local_certificate_id: site_upsert.local_certificate_id,
@@ -835,6 +845,7 @@ fn local_site_upsert_from_remote(
         hostnames,
         listen_ports: remote_site.ports.clone(),
         upstreams: remote_site.upstreams.clone(),
+        safeline_intercept: None,
         enabled: remote_site
             .enabled
             .unwrap_or_else(|| !remote_site.status.contains("disabled")),
@@ -885,6 +896,12 @@ fn replace_local_site(
             serde_json::to_string(&upsert.listen_ports).unwrap_or_else(|_| "[]".to_string());
         item.upstreams_json =
             serde_json::to_string(&upsert.upstreams).unwrap_or_else(|_| "[]".to_string());
+        item.safeline_intercept_json = upsert
+            .safeline_intercept
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .unwrap_or(None);
         item.enabled = upsert.enabled;
         item.tls_enabled = upsert.tls_enabled;
         item.local_certificate_id = upsert.local_certificate_id;
@@ -1184,6 +1201,11 @@ async fn update_local_site_sync_metadata(
         hostnames: parse_json_vec(&local_site.hostnames_json)?,
         listen_ports: parse_json_vec(&local_site.listen_ports_json)?,
         upstreams: parse_json_vec(&local_site.upstreams_json)?,
+        safeline_intercept: local_site
+            .safeline_intercept_json
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?,
         enabled: local_site.enabled,
         tls_enabled: local_site.tls_enabled,
         local_certificate_id: local_site.local_certificate_id,
@@ -1239,6 +1261,14 @@ fn hash_local_site_upsert(site: &LocalSiteUpsert, remote_cert_id: Option<&str>) 
         hasher.update(item.as_bytes());
         hasher.update([0]);
     }
+    if let Some(intercept) = site.safeline_intercept.as_ref() {
+        hasher.update(
+            serde_json::to_string(intercept)
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+    }
+    hasher.update([0]);
     hasher.update([site.enabled as u8]);
     hasher.update([site.tls_enabled as u8]);
     hasher.update(remote_cert_id.unwrap_or_default().as_bytes());
@@ -1253,6 +1283,11 @@ fn hash_local_site_entry(site: &LocalSiteEntry, remote_cert_id: Option<&str>) ->
             hostnames: parse_json_vec(&site.hostnames_json)?,
             listen_ports: parse_json_vec(&site.listen_ports_json)?,
             upstreams: parse_json_vec(&site.upstreams_json)?,
+            safeline_intercept: site
+                .safeline_intercept_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?,
             enabled: site.enabled,
             tls_enabled: site.tls_enabled,
             local_certificate_id: site.local_certificate_id,

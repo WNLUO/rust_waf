@@ -508,6 +508,7 @@ impl SqliteStore {
         let rows = sqlx::query_as::<_, LocalSiteEntry>(
             r#"
             SELECT id, name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
+                   safeline_intercept_json,
                    enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
                    last_synced_at, created_at, updated_at
             FROM local_sites
@@ -525,6 +526,7 @@ impl SqliteStore {
         let row = sqlx::query_as::<_, LocalSiteEntry>(
             r#"
             SELECT id, name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
+                   safeline_intercept_json,
                    enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
                    last_synced_at, created_at, updated_at
             FROM local_sites
@@ -545,10 +547,11 @@ impl SqliteStore {
             r#"
             INSERT INTO local_sites (
                 name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
+                safeline_intercept_json,
                 enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
                 last_synced_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&site.name)
@@ -556,6 +559,12 @@ impl SqliteStore {
         .bind(serialize_string_vec(&site.hostnames)?)
         .bind(serialize_string_vec(&site.listen_ports)?)
         .bind(serialize_string_vec(&site.upstreams)?)
+        .bind(
+            site.safeline_intercept
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+        )
         .bind(site.enabled)
         .bind(site.tls_enabled)
         .bind(site.local_certificate_id)
@@ -581,6 +590,7 @@ impl SqliteStore {
                 hostnames_json = ?,
                 listen_ports_json = ?,
                 upstreams_json = ?,
+                safeline_intercept_json = ?,
                 enabled = ?,
                 tls_enabled = ?,
                 local_certificate_id = ?,
@@ -597,6 +607,12 @@ impl SqliteStore {
         .bind(serialize_string_vec(&site.hostnames)?)
         .bind(serialize_string_vec(&site.listen_ports)?)
         .bind(serialize_string_vec(&site.upstreams)?)
+        .bind(
+            site.safeline_intercept
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+        )
         .bind(site.enabled)
         .bind(site.tls_enabled)
         .bind(site.local_certificate_id)
@@ -1476,6 +1492,7 @@ pub struct LocalSiteUpsert {
     pub hostnames: Vec<String>,
     pub listen_ports: Vec<String>,
     pub upstreams: Vec<String>,
+    pub safeline_intercept: Option<crate::config::l7::SafeLineInterceptConfig>,
     pub enabled: bool,
     pub tls_enabled: bool,
     pub local_certificate_id: Option<i64>,
@@ -2080,7 +2097,10 @@ mod tests {
             .unwrap();
         assert_eq!(l7_events.total, 1);
         assert_eq!(l7_events.items[0].reason, "sql injection");
-        assert_eq!(l7_events.items[0].provider_event_id.as_deref(), Some("evt-query-1"));
+        assert_eq!(
+            l7_events.items[0].provider_event_id.as_deref(),
+            Some("evt-query-1")
+        );
 
         let blocked_only_events = store
             .list_security_events(&SecurityEventQuery {
@@ -2456,6 +2476,7 @@ mod tests {
                 ],
                 listen_ports: vec!["80".to_string(), "443".to_string()],
                 upstreams: vec!["http://127.0.0.1:8080".to_string()],
+                safeline_intercept: None,
                 enabled: true,
                 tls_enabled: true,
                 local_certificate_id: Some(certificate_id),
@@ -2488,6 +2509,7 @@ mod tests {
                         "http://127.0.0.1:8080".to_string(),
                         "http://127.0.0.1:8081".to_string(),
                     ],
+                    safeline_intercept: None,
                     enabled: true,
                     tls_enabled: true,
                     local_certificate_id: Some(certificate_id),
@@ -2600,7 +2622,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stored.total, 1);
-        assert_eq!(stored.items[0].provider_event_id.as_deref(), Some("event-1"));
+        assert_eq!(
+            stored.items[0].provider_event_id.as_deref(),
+            Some("event-1")
+        );
 
         let events = store
             .list_security_events(&SecurityEventQuery::default())

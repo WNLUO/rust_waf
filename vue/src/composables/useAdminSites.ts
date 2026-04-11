@@ -3,6 +3,7 @@ import {
   createLocalSite,
   deleteLocalSite,
   fetchCachedSafeLineSites,
+  fetchL7Config,
   fetchLocalCertificates,
   fetchLocalSites,
   fetchSafeLineMappings,
@@ -33,6 +34,19 @@ import type {
   SiteSyncLinkItem,
 } from '../lib/types'
 
+function cloneSafelineIntercept(
+  value: LocalSiteDraft['safeline_intercept'],
+): LocalSiteDraft['safeline_intercept'] {
+  if (!value) return null
+  return {
+    ...value,
+    response_template: {
+      ...value.response_template,
+      headers: value.response_template.headers.map((header) => ({ ...header })),
+    },
+  }
+}
+
 export function useAdminSites(
   formatTimestamp: (timestamp?: number | null) => string,
 ) {
@@ -40,6 +54,7 @@ export function useAdminSites(
   const error = ref('')
   const successMessage = ref('')
   const settings = ref<SettingsPayload | null>(null)
+  const globalL7Config = ref<Awaited<ReturnType<typeof fetchL7Config>> | null>(null)
   const mappings = ref<SafeLineMappingItem[]>([])
   const sites = ref<SafeLineSiteItem[]>([])
   const localSites = ref<LocalSiteItem[]>([])
@@ -71,6 +86,7 @@ export function useAdminSites(
   const {
     closeLocalSiteModal,
     currentLocalSite,
+    defaultSafelineInterceptConfig,
     editLocalSite,
     editingLocalSiteId,
     editorTitle,
@@ -83,7 +99,7 @@ export function useAdminSites(
     resetLocalSiteForm,
     siteDraftFromItem,
     upstreamsText,
-  } = useAdminSitesEditor(settings, localSites)
+  } = useAdminSitesEditor(settings, localSites, globalL7Config)
 
   const hasSavedConfig = computed(() =>
     Boolean(settings.value?.safeline.base_url.trim()),
@@ -232,7 +248,12 @@ export function useAdminSites(
     loading.value = true
     clearFeedback()
     try {
-      settings.value = await fetchSettings()
+      const [settingsResponse, l7ConfigResponse] = await Promise.all([
+        fetchSettings(),
+        fetchL7Config(),
+      ])
+      settings.value = settingsResponse
+      globalL7Config.value = l7ConfigResponse
       resetLocalSiteForm()
       await loadLocalCertificates()
       await refreshCollections('cached')
@@ -259,6 +280,7 @@ export function useAdminSites(
         upstreams: localSiteForm.upstreams
           .map((item) => item.trim())
           .filter(Boolean),
+        safeline_intercept: cloneSafelineIntercept(localSiteForm.safeline_intercept),
         enabled: localSiteForm.enabled,
         tls_enabled: localSiteForm.tls_enabled,
         local_certificate_id: localSiteForm.local_certificate_id,
@@ -394,6 +416,7 @@ export function useAdminSites(
   return {
     actions,
     currentLocalSite,
+    defaultSafelineInterceptConfig,
     editorTitle,
     editingLocalSiteId,
     error,

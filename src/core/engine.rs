@@ -2,9 +2,9 @@ use anyhow::Result;
 use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
+use std::io::Read;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
-use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -1156,34 +1156,29 @@ fn apply_safeline_upstream_action(
         return UpstreamResponseDisposition::Forward(response);
     }
 
-    let Some(matched) =
-        detect_safeline_block_response(
-            &response,
-            intercept_config.max_body_bytes,
-            intercept_config.match_mode,
-        )
-    else {
+    let Some(matched) = detect_safeline_block_response(
+        &response,
+        intercept_config.max_body_bytes,
+        intercept_config.match_mode,
+    ) else {
         return UpstreamResponseDisposition::Forward(response);
     };
     let response_status = response.status_code;
 
     let (local_action, disposition) = match intercept_config.action {
-        SafeLineInterceptAction::Pass => (
-            "pass",
-            UpstreamResponseDisposition::Forward(response),
-        ),
-        SafeLineInterceptAction::Replace => match crate::rules::build_custom_response(
-            &intercept_config.response_template,
-        ) {
-            Ok(custom) => ("replace", UpstreamResponseDisposition::Custom(custom)),
-            Err(err) => {
-                warn!(
+        SafeLineInterceptAction::Pass => ("pass", UpstreamResponseDisposition::Forward(response)),
+        SafeLineInterceptAction::Replace => {
+            match crate::rules::build_custom_response(&intercept_config.response_template) {
+                Ok(custom) => ("replace", UpstreamResponseDisposition::Custom(custom)),
+                Err(err) => {
+                    warn!(
                     "Failed to build SafeLine replacement response, falling back to upstream response: {}",
                     err
                 );
-                ("pass", UpstreamResponseDisposition::Forward(response))
+                    ("pass", UpstreamResponseDisposition::Forward(response))
+                }
             }
-        },
+        }
         SafeLineInterceptAction::Drop => ("drop", UpstreamResponseDisposition::Drop),
         SafeLineInterceptAction::ReplaceAndBlockIp => {
             match crate::rules::build_custom_response(&intercept_config.response_template) {
@@ -1283,17 +1278,11 @@ fn decode_response_body_for_matching(
     {
         Some(value) if value.contains("gzip") => {
             let decoder = GzDecoder::new(response.body.as_slice());
-            decoder
-                .take(limit as u64)
-                .read_to_end(&mut decoded)
-                .ok()?;
+            decoder.take(limit as u64).read_to_end(&mut decoded).ok()?;
         }
         Some(value) if value.contains("deflate") => {
             let decoder = ZlibDecoder::new(response.body.as_slice());
-            decoder
-                .take(limit as u64)
-                .read_to_end(&mut decoded)
-                .ok()?;
+            decoder.take(limit as u64).read_to_end(&mut decoded).ok()?;
         }
         Some(_) => {
             return None;
@@ -1535,7 +1524,7 @@ async fn handle_http1_connection(
                         packet,
                         &request,
                         matched_site.as_ref(),
-                        &config.l7_config.safeline_intercept,
+                        resolve_safeline_intercept_config(&config, matched_site.as_ref()),
                         response,
                     ) {
                         UpstreamResponseDisposition::Forward(response) => {
@@ -1731,7 +1720,10 @@ async fn handle_http2_connection(
                                     &packet,
                                     &request,
                                     matched_site.as_ref(),
-                                    &config.l7_config.safeline_intercept,
+                                    resolve_safeline_intercept_config(
+                                        &config,
+                                        matched_site.as_ref(),
+                                    ),
                                     response,
                                 ) {
                                     UpstreamResponseDisposition::Forward(response) => {
@@ -1748,12 +1740,12 @@ async fn handle_http2_connection(
                                             body: response.body,
                                         })
                                     }
-                                    UpstreamResponseDisposition::Drop => Err(
-                                        crate::protocol::ProtocolError::ParseError(
+                                    UpstreamResponseDisposition::Drop => {
+                                        Err(crate::protocol::ProtocolError::ParseError(
                                             "SafeLine blocked upstream response dropped"
                                                 .to_string(),
-                                        ),
-                                    ),
+                                        ))
+                                    }
                                 };
                             }
                             Err(err) => {
@@ -2038,8 +2030,8 @@ fn persist_safeline_intercept_event(
     event.provider = Some("safeline".to_string());
     event.provider_event_id = matched.event_id.clone();
     event.provider_site_name = matched_site.map(|site| site.name.clone());
-    event.provider_site_domain =
-        request_hostname(request).or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
+    event.provider_site_domain = request_hostname(request)
+        .or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
@@ -2260,6 +2252,14 @@ fn select_upstream_target(
 ) -> Option<String> {
     site.and_then(|site| site.upstream_endpoint.clone())
         .or_else(|| context.config_snapshot().tcp_upstream_addr)
+}
+
+fn resolve_safeline_intercept_config<'a>(
+    config: &'a crate::config::Config,
+    site: Option<&'a GatewaySiteRuntime>,
+) -> &'a crate::config::l7::SafeLineInterceptConfig {
+    site.and_then(|item| item.safeline_intercept.as_ref())
+        .unwrap_or(&config.l7_config.safeline_intercept)
 }
 
 fn should_reject_unmatched_site(context: &WafContext, request: &UnifiedHttpRequest) -> bool {
@@ -2779,12 +2779,9 @@ mod tests {
             body: br#"{"code":403,"success":false,"message":"blocked by Chaitin SafeLine Web Application Firewall","event_id":"evt123"}"#.to_vec(),
         };
 
-        let matched = detect_safeline_block_response(
-            &response,
-            4096,
-            SafeLineInterceptMatchMode::Strict,
-        )
-        .unwrap();
+        let matched =
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
+                .unwrap();
         assert_eq!(matched.event_id.as_deref(), Some("evt123"));
         assert_eq!(matched.evidence, "json_signature");
     }
@@ -2798,12 +2795,9 @@ mod tests {
             body: b"<html><!-- event_id: abc123 TYPE: A --><body>blocked</body></html>".to_vec(),
         };
 
-        let matched = detect_safeline_block_response(
-            &response,
-            4096,
-            SafeLineInterceptMatchMode::Strict,
-        )
-        .unwrap();
+        let matched =
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
+                .unwrap();
         assert_eq!(matched.event_id.as_deref(), Some("abc123"));
         assert_eq!(matched.evidence, "html_event_comment");
     }
@@ -2817,16 +2811,15 @@ mod tests {
             body: b"<html><body>forbidden</body></html>".to_vec(),
         };
 
-        assert!(
-            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
-                .is_none()
-        );
-        let relaxed = detect_safeline_block_response(
+        assert!(detect_safeline_block_response(
             &response,
             4096,
-            SafeLineInterceptMatchMode::Relaxed,
+            SafeLineInterceptMatchMode::Strict
         )
-        .unwrap();
+        .is_none());
+        let relaxed =
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Relaxed)
+                .unwrap();
         assert_eq!(relaxed.evidence, "status_only_relaxed");
     }
 

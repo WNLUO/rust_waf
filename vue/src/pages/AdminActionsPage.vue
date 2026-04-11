@@ -6,6 +6,7 @@ import {
   Copy,
   FileJson,
   FileText,
+  Plus,
   RefreshCw,
   Shield,
   Wand2,
@@ -19,7 +20,6 @@ import {
   fetchRuleActionTemplatePreview,
   fetchRuleActionPlugins,
   fetchRuleActionTemplates,
-  installRuleActionPlugin,
   updateRuleActionPlugin,
   uploadRuleActionPlugin,
 } from '../lib/api'
@@ -55,9 +55,7 @@ const installingPlugin = ref(false)
 const error = ref('')
 const installedPlugins = ref<RuleActionPluginItem[]>([])
 const pluginTemplates = ref<RuleActionTemplateItem[]>([])
-const pluginInstallUrl = ref('')
-const pluginInstallFile = ref<File | null>(null)
-const pluginInstallSha256 = ref('')
+const pluginFileInput = ref<HTMLInputElement | null>(null)
 const previewOpen = ref(false)
 const previewLoading = ref(false)
 const previewTitle = ref('')
@@ -129,9 +127,6 @@ const funActionIdeas: FunActionIdea[] = [
   },
 ]
 
-const installedPluginCount = computed(
-  () => installedPlugins.value.filter((item) => item.enabled).length,
-)
 const templateCount = computed(() => pluginTemplates.value.length)
 const pluginsById = computed(() =>
   new Map(installedPlugins.value.map((item) => [item.plugin_id, item])),
@@ -437,32 +432,29 @@ const loadActionCenter = async () => {
   }
 }
 
-const handleInstallPlugin = async () => {
-  const packageUrl = pluginInstallUrl.value.trim()
-  if (!packageUrl && !pluginInstallFile.value) {
-    error.value = '请输入插件包 URL 或选择本地 zip 文件'
-    return
-  }
-
+const handleInstallPlugin = async (file: File) => {
   installingPlugin.value = true
   try {
-    if (pluginInstallFile.value) {
-      await uploadRuleActionPlugin(
-        pluginInstallFile.value,
-        pluginInstallSha256.value,
-      )
-    } else {
-      await installRuleActionPlugin(packageUrl, pluginInstallSha256.value)
-    }
-    pluginInstallUrl.value = ''
-    pluginInstallFile.value = null
-    pluginInstallSha256.value = ''
+    await uploadRuleActionPlugin(file)
     await loadActionCenter()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '插件安装失败'
   } finally {
     installingPlugin.value = false
   }
+}
+
+const openPluginPicker = () => {
+  if (installingPlugin.value) return
+  pluginFileInput.value?.click()
+}
+
+const handlePluginFilePicked = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  if (!file) return
+  await handleInstallPlugin(file)
 }
 
 const togglePluginStatus = async (plugin: RuleActionPluginItem) => {
@@ -525,7 +517,7 @@ const openGeneratedPreview = (ideaId: string, title: string) => {
   previewOpen.value = true
   previewLoading.value = false
   previewTitle.value = title
-  previewSourceLabel.value = '好玩的动作 · 本地生成示例插件'
+  previewSourceLabel.value = '动作方案 · 本地生成插件样例'
   previewPayload.value = {
     ...generated.preview,
     body_preview: generated.responseContent,
@@ -589,52 +581,6 @@ onMounted(loadActionCenter)
     </template>
 
     <div class="space-y-6">
-      <section
-        class="overflow-hidden rounded-[28px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.16),_transparent_35%),linear-gradient(135deg,_#fffdf8,_#f7fbff_50%,_#eef6ff)] p-6 shadow-[0_24px_60px_rgba(46,86,160,0.08)]"
-      >
-        <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div class="max-w-2xl">
-            <p class="text-sm font-medium tracking-[0.18em] text-blue-700">
-              ACTION HUB
-            </p>
-            <h1 class="mt-3 text-3xl font-semibold tracking-tight text-slate-900">
-              把“规则命中后做什么”集中管理
-            </h1>
-            <p class="mt-3 text-sm leading-7 text-slate-600">
-              这里集中展示可复用的动作模板、插件能力，以及一些适合演示或运营场景的动作方案。
-              插件的安装、启停和卸载也都统一收在这里，规则中心只负责把动作绑定到站点。
-            </p>
-          </div>
-
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
-              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                已启用插件
-              </p>
-              <p class="mt-2 text-2xl font-semibold text-slate-900">
-                {{ installedPluginCount }}
-              </p>
-            </div>
-            <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
-              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                模板动作
-              </p>
-              <p class="mt-2 text-2xl font-semibold text-slate-900">
-                {{ templateCount }}
-              </p>
-            </div>
-            <div class="rounded-2xl border border-white/70 bg-white/80 px-4 py-3">
-              <p class="text-xs uppercase tracking-[0.18em] text-slate-500">
-                动作方案
-              </p>
-              <p class="mt-2 text-2xl font-semibold text-slate-900">
-                {{ funIdeaCards.length }}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <div
         v-if="error"
         class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
@@ -644,22 +590,31 @@ onMounted(loadActionCenter)
 
       <AdminRulesPluginSection
         :installed-plugins="installedPlugins"
-        :installing-plugin="installingPlugin"
-        :plugin-install-file="pluginInstallFile"
-        :plugin-install-sha256="pluginInstallSha256"
-        :plugin-install-url="pluginInstallUrl"
         @delete-plugin="handleDeletePlugin"
-        @install="handleInstallPlugin"
         @toggle-plugin="togglePluginStatus"
-        @update:plugin-install-file="pluginInstallFile = $event"
-        @update:plugin-install-sha256="pluginInstallSha256 = $event"
-        @update:plugin-install-url="pluginInstallUrl = $event"
       />
 
       <CyberCard
         title="模板动作"
         sub-title="当前已安装插件提供的现成动作模板，适合快速落地 respond 场景。"
       >
+        <template #header-action>
+          <input
+            ref="pluginFileInput"
+            type="file"
+            accept=".zip,application/zip"
+            class="hidden"
+            @change="handlePluginFilePicked"
+          />
+          <button
+            class="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-60"
+            :disabled="installingPlugin"
+            @click="openPluginPicker"
+          >
+            <Plus :size="14" />
+            {{ installingPlugin ? '上传中...' : '上传动作插件' }}
+          </button>
+        </template>
         <div v-if="loading" class="flex h-32 items-center justify-center">
           <RefreshCw class="animate-spin text-blue-700" :size="24" />
         </div>
@@ -760,16 +715,16 @@ onMounted(loadActionCenter)
       </CyberCard>
 
       <CyberCard
-        title="好玩的动作"
-        sub-title="偏演示、对抗或运营场景的动作灵感。能直接复用现有模板时，会优先给出最快路径。"
+        title="动作方案"
+        sub-title="围绕品牌呈现、通知提示、调试验证和对抗策略整理的可复用方案。能直接复用现有模板时，会优先给出最快路径。"
       >
-        <div class="grid gap-4 xl:grid-cols-2">
+        <div class="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))] 2xl:[grid-template-columns:repeat(5,minmax(0,1fr))]">
           <article
             v-for="idea in funIdeaCards"
             :key="idea.id"
-            class="relative overflow-hidden rounded-[24px] border border-slate-200 bg-[linear-gradient(140deg,_rgba(255,250,245,0.96),_rgba(245,250,255,0.96))] p-5 shadow-sm"
+            class="relative flex min-h-[238px] h-full flex-col overflow-hidden rounded-[20px] border border-slate-200 bg-[linear-gradient(140deg,_rgba(255,250,245,0.96),_rgba(245,250,255,0.96))] p-4 shadow-sm"
           >
-            <div class="absolute right-4 top-4 opacity-15">
+            <div class="absolute right-3 top-3 opacity-15">
               <component
                 :is="
                   idea.id === 'json-honeypot'
@@ -780,140 +735,80 @@ onMounted(loadActionCenter)
                         ? Wand2
                         : idea.id === 'scanner-misdirection'
                           ? Bot
-                          : FileText
+                      : FileText
                 "
-                :size="44"
+                :size="34"
               />
             </div>
 
-            <div class="relative">
-              <div class="flex flex-wrap items-center gap-2 text-xs">
-                <span class="rounded-full bg-stone-900 px-2.5 py-1 text-white">
+            <div class="relative flex h-full flex-col">
+              <div class="flex items-start justify-between gap-2 pr-8">
+                <h3 class="text-[17px] font-semibold leading-6 text-slate-900">
+                  {{ idea.title }}
+                </h3>
+                <span
+                  class="shrink-0 rounded-full bg-stone-900 px-2.5 py-1 text-[11px] text-white"
+                >
                   {{ idea.mood }}
                 </span>
-                <span
-                  class="rounded-full px-2.5 py-1"
-                  :class="performanceClass(idea.performance)"
-                >
-                  性能 {{ idea.performance }}
-                </span>
-                <span
-                  class="rounded-full px-2.5 py-1"
-                  :class="
-                    idea.template
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-slate-100 text-slate-600'
-                  "
-                >
-                  {{ idea.template ? '现成模板可用' : '通过 respond 即可实现' }}
+              </div>
+
+              <div v-if="idea.template" class="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                <span class="rounded-full bg-blue-100 px-2.5 py-1 text-blue-700">
+                  可直接复用模板
                 </span>
               </div>
 
-              <h3 class="mt-4 text-xl font-semibold text-slate-900">
-                {{ idea.title }}
-              </h3>
-              <p class="mt-3 text-sm leading-6 text-slate-600">
-                {{ idea.summary }}
-              </p>
-
-              <div class="mt-4 rounded-2xl border border-white/80 bg-white/80 px-4 py-3">
-                <p class="text-xs uppercase tracking-[0.14em] text-slate-400">
+              <div class="mt-3 flex-1 rounded-2xl border border-white/80 bg-white/85 px-3 py-3">
+                <p class="text-[11px] uppercase tracking-[0.14em] text-slate-400">
                   实现方式
                 </p>
-                <p class="mt-2 text-sm text-slate-700">
+                <p class="mt-2 text-sm leading-6 text-slate-700">
                   {{ idea.mechanism }}
                 </p>
-                <p v-if="idea.template" class="mt-2 text-xs text-blue-700">
-                  推荐模板：{{ idea.template.name }}
-                </p>
+                <div
+                  v-if="idea.template"
+                  class="mt-3 flex items-center gap-2 rounded-xl bg-blue-50 px-2.5 py-2"
+                >
+                  <span class="text-[11px] uppercase tracking-[0.12em] text-blue-500">
+                    推荐模板
+                  </span>
+                  <span class="truncate text-xs font-medium text-blue-800">
+                    {{ idea.template.name }}
+                  </span>
+                </div>
               </div>
 
-              <div class="mt-4 flex flex-wrap gap-3">
-                <RouterLink
-                  :to="idea.ctaPath"
-                  class="inline-flex items-center gap-2 rounded-full bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800"
-                >
-                  立即试试
-                </RouterLink>
-                <RouterLink
-                  to="/admin/rules"
-                  class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"
-                >
-                  管理规则
-                </RouterLink>
+              <div class="mt-3 grid grid-cols-2 gap-2">
                 <button
-                  class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                  class="inline-flex items-center justify-center gap-2 rounded-full bg-stone-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-stone-800"
                   @click="openGeneratedPreview(idea.id, idea.title)"
                 >
                   预览动作
                 </button>
                 <button
-                  class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                  class="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 transition hover:border-blue-500/40 hover:text-blue-700"
                   @click="downloadGeneratedPlugin(idea.id)"
                 >
-                  {{ downloadingIdeaId === idea.id ? '打包中...' : '下载示例插件' }}
+                  {{ downloadingIdeaId === idea.id ? '打包中...' : '下载插件样例' }}
                 </button>
               </div>
             </div>
           </article>
         </div>
       </CyberCard>
-
-      <section class="grid gap-4 lg:grid-cols-3">
-        <CyberCard title="当前能力边界" sub-title="动作中心帮助快速判断什么适合上生产。">
-          <div class="space-y-3 text-sm leading-6 text-slate-600">
-            <p>内置动作是最稳的基础能力，适合高频生产路径。</p>
-            <p>模板动作更适合快速复用品牌页、JSON 响应和演示页。</p>
-            <p>需要动态逻辑、条件分支或外部联动时，后续更适合做独立原生能力，而不是继续堆模板。</p>
-          </div>
-        </CyberCard>
-
-        <CyberCard title="适合生产" sub-title="优先考虑这些动作组合。">
-          <div class="flex flex-wrap gap-2">
-            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">
-              block + alert
-            </span>
-            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">
-              品牌化 HTML 拦截页
-            </span>
-            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">
-              维护公告页
-            </span>
-            <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs text-emerald-700">
-              JSON 受控返回
-            </span>
-          </div>
-        </CyberCard>
-
-        <CyberCard title="更偏演示" sub-title="好玩，但更适合测试、灰度或对抗实验。">
-          <div class="flex flex-wrap gap-2">
-            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-700">
-              扫描器误导页
-            </span>
-            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-700">
-              调试回显页
-            </span>
-            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-700">
-              蜜罐 JSON
-            </span>
-            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs text-amber-700">
-              彩蛋页
-            </span>
-          </div>
-        </CyberCard>
-      </section>
     </div>
 
     <div
       v-if="previewOpen"
-      class="fixed inset-0 z-[100] flex items-center justify-center px-4 py-8"
+      class="fixed inset-0 z-[100] overflow-y-auto px-4 py-6 md:py-8"
     >
       <div
         class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
         @click="closePreview"
       ></div>
       <div
-        class="relative w-full max-w-5xl rounded-xl border border-white/85 bg-[linear-gradient(160deg,rgba(255,250,244,0.98),rgba(244,239,231,0.98))] p-4 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:p-5"
+        class="relative mx-auto flex min-h-[calc(100vh-3rem)] w-full max-w-5xl flex-col rounded-xl border border-white/85 bg-[linear-gradient(160deg,rgba(255,250,244,0.98),rgba(244,239,231,0.98))] p-4 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:min-h-[calc(100vh-4rem)] md:max-h-[calc(100vh-4rem)] md:p-5"
       >
         <div class="flex items-start justify-between gap-4">
           <div>
@@ -930,80 +825,84 @@ onMounted(loadActionCenter)
           </button>
         </div>
 
-        <div v-if="previewLoading" class="flex h-56 items-center justify-center">
+        <div v-if="previewLoading" class="flex flex-1 items-center justify-center">
           <RefreshCw class="animate-spin text-blue-700" :size="24" />
         </div>
 
         <template v-else-if="previewPayload">
-          <div class="mt-4 grid gap-3 md:grid-cols-4">
-            <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
-              <p class="text-xs tracking-wide text-slate-500">状态码</p>
-              <p class="mt-2 text-lg font-semibold text-stone-900">
-                {{ previewPayload.status_code }}
-              </p>
+          <div class="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div class="grid gap-3 md:grid-cols-4">
+              <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+                <p class="text-xs tracking-wide text-slate-500">状态码</p>
+                <p class="mt-2 text-lg font-semibold text-stone-900">
+                  {{ previewPayload.status_code }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+                <p class="text-xs tracking-wide text-slate-500">内容类型</p>
+                <p class="mt-2 text-sm font-medium text-stone-900">
+                  {{ previewPayload.content_type }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+                <p class="text-xs tracking-wide text-slate-500">Body 来源</p>
+                <p class="mt-2 text-sm font-medium text-stone-900">
+                  {{ previewPayload.body_source }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+                <p class="text-xs tracking-wide text-slate-500">gzip</p>
+                <p class="mt-2 text-sm font-medium text-stone-900">
+                  {{ previewPayload.gzip ? '开启' : '关闭' }}
+                </p>
+              </div>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
-              <p class="text-xs tracking-wide text-slate-500">内容类型</p>
-              <p class="mt-2 text-sm font-medium text-stone-900">
-                {{ previewPayload.content_type }}
-              </p>
-            </div>
-            <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
-              <p class="text-xs tracking-wide text-slate-500">Body 来源</p>
-              <p class="mt-2 text-sm font-medium text-stone-900">
-                {{ previewPayload.body_source }}
-              </p>
-            </div>
-            <div class="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
-              <p class="text-xs tracking-wide text-slate-500">gzip</p>
-              <p class="mt-2 text-sm font-medium text-stone-900">
-                {{ previewPayload.gzip ? '开启' : '关闭' }}
-              </p>
-            </div>
-          </div>
 
-          <div
-            v-if="previewIsHtml"
-            class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
-          >
-            <div class="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
-              页面预览
-            </div>
-            <iframe
-              class="h-[320px] w-full bg-white"
-              :srcdoc="previewPayload.body_preview"
-            ></iframe>
-          </div>
-
-          <div class="mt-4 rounded-xl border border-slate-200 bg-white/80 p-5">
-            <div class="flex items-center justify-between gap-4">
-              <p class="text-xs tracking-wide text-slate-500">原始内容</p>
-              <span
-                v-if="previewPayload.truncated"
-                class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] text-amber-700"
+            <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+              <div
+                v-if="previewIsHtml"
+                class="overflow-hidden rounded-xl border border-slate-200 bg-white"
               >
-                已截断
-              </span>
-            </div>
-            <pre
-              class="mt-3 max-h-[320px] overflow-auto whitespace-pre-wrap break-all font-mono text-sm leading-7 text-stone-800"
-            >{{ previewPayload.body_preview }}</pre>
-          </div>
+                <div class="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
+                  页面预览
+                </div>
+                <iframe
+                  class="h-[320px] w-full bg-white"
+                  :srcdoc="previewPayload.body_preview"
+                ></iframe>
+              </div>
 
-          <div class="mt-4 flex flex-wrap gap-3">
-            <button
-              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              @click="copyToClipboard(previewPayload.body_preview)"
-            >
-              <Copy :size="14" />
-              复制内容
-            </button>
-            <button
-              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              @click="closePreview"
-            >
-              关闭
-            </button>
+              <div class="mt-4 rounded-xl border border-slate-200 bg-white/80 p-5">
+                <div class="flex items-center justify-between gap-4">
+                  <p class="text-xs tracking-wide text-slate-500">原始内容</p>
+                  <span
+                    v-if="previewPayload.truncated"
+                    class="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] text-amber-700"
+                  >
+                    已截断
+                  </span>
+                </div>
+                <pre
+                  class="mt-3 max-h-[min(48vh,32rem)] overflow-auto whitespace-pre-wrap break-all font-mono text-sm leading-7 text-stone-800"
+                >{{ previewPayload.body_preview }}</pre>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-3">
+              <button
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="copyToClipboard(previewPayload.body_preview)"
+              >
+                <Copy :size="14" />
+                复制内容
+              </button>
+              <button
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="closePreview"
+              >
+                关闭
+              </button>
+            </div>
           </div>
         </template>
       </div>

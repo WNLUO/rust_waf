@@ -23,7 +23,7 @@ import type {
 } from "../lib/types";
 import { PlugZap, RefreshCw, Save, ServerCog, Settings, X } from "lucide-vue-next";
 
-interface SystemSettingsForm extends SettingsPayload {}
+type SystemSettingsForm = SettingsPayload;
 
 const loading = ref(true);
 const saving = ref(false);
@@ -57,7 +57,7 @@ const systemSettings = reactive<SystemSettingsForm>({
   retain_days: 30,
   notes: "",
   safeline: {
-    enabled: false,
+    enabled: true,
     auto_sync_events: false,
     auto_sync_blocked_ips_push: false,
     auto_sync_blocked_ips_pull: false,

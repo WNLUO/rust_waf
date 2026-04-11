@@ -1,0 +1,5 @@
+# 当前阶段先把 Clippy 作为本地治理工具使用，避免阈值过低导致噪音过大。
+# 业务代码中应逐步减少 unwrap/expect，后续再考虑把更多 lint 提升为 CI 阻断项。
+too-many-arguments-threshold = 8
+cognitive-complexity-threshold = 25
+enum-variant-size-threshold = 256

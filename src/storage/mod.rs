@@ -2770,7 +2770,7 @@ mod tests {
         .unwrap();
 
         let loaded = store.load_app_config().await.unwrap().unwrap();
-        assert!(!loaded.integrations.safeline.enabled);
+        assert!(loaded.integrations.safeline.enabled);
         assert_eq!(
             loaded.integrations.safeline.auth_probe_path,
             "/api/open/system/key"

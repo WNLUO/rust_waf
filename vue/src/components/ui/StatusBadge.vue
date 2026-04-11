@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { AlertCircle, CheckCircle2, XCircle, Info } from "lucide-vue-next";
 
-const props = defineProps<{
+defineProps<{
   type?: "success" | "error" | "warning" | "info" | "muted";
   text: string;
   compact?: boolean;

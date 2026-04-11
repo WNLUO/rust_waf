@@ -497,7 +497,6 @@ impl Config {
             self.gateway_config.default_certificate_id = None;
         }
 
-        self.integrations.safeline.enabled = true;
         self.integrations.safeline.base_url =
             normalize_base_url(&self.integrations.safeline.base_url);
         self.integrations.safeline.auto_sync_interval_secs = clamp_u64(

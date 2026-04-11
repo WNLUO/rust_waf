@@ -53,6 +53,7 @@
 - Lint 命令：`npm run lint`
 - 类型检查命令：`npm run typecheck`
 - 构建命令：`npm run build`
+- 格式校验命令：`npm run format:check`
 - 格式化命令：`npm run format`
 
 当前约定：
@@ -60,6 +61,21 @@
 - Vue 与 TypeScript 代码统一通过 ESLint 校验
 - 代码格式统一通过 Prettier 处理
 - 页面文件过大时优先拆成 `page + section + composable`
+
+前端检查闭环状态：
+
+- `npm run lint`：已启用
+- `npm run typecheck`：已启用
+- `npm run build`：已启用
+- `npm run format:check`：已启用
+
+前端建议执行顺序：
+
+1. `npm run format`
+2. `npm run lint`
+3. `npm run typecheck`
+4. `npm run build`
+5. `npm run format:check`
 
 前端页面拆分建议：
 

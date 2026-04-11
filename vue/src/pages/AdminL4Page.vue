@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
-import L4SectionNav from "../components/l4/L4SectionNav.vue";
-import CyberCard from "../components/ui/CyberCard.vue";
-import MetricWidget from "../components/ui/MetricWidget.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
-import { fetchL4Config, fetchL4Stats, updateL4Config } from "../lib/api";
-import type { L4ConfigPayload, L4StatsPayload } from "../lib/types";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
+import L4SectionNav from '../components/l4/L4SectionNav.vue'
+import CyberCard from '../components/ui/CyberCard.vue'
+import MetricWidget from '../components/ui/MetricWidget.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
+import { fetchL4Config, fetchL4Stats, updateL4Config } from '../lib/api'
+import type { L4ConfigPayload, L4StatsPayload } from '../lib/types'
 import {
   Activity,
   Ban,
@@ -16,32 +16,32 @@ import {
   Save,
   ServerCog,
   Shield,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
 type L4ConfigForm = Omit<
   L4ConfigPayload,
-  | "runtime_enabled"
-  | "bloom_enabled"
-  | "bloom_false_positive_verification"
-  | "runtime_profile"
->;
+  | 'runtime_enabled'
+  | 'bloom_enabled'
+  | 'bloom_false_positive_verification'
+  | 'runtime_profile'
+>
 
-const { formatBytes, formatNumber } = useFormatters();
+const { formatBytes, formatNumber } = useFormatters()
 
-const loading = ref(true);
-const refreshing = ref(false);
-const saving = ref(false);
-const error = ref("");
-const successMessage = ref("");
-const stats = ref<L4StatsPayload | null>(null);
-const statsTimer = ref<number | null>(null);
-const lastUpdated = ref<number | null>(null);
+const loading = ref(true)
+const refreshing = ref(false)
+const saving = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const stats = ref<L4StatsPayload | null>(null)
+const statsTimer = ref<number | null>(null)
+const lastUpdated = ref<number | null>(null)
 const meta = ref({
   runtime_enabled: false,
   bloom_enabled: false,
   bloom_false_positive_verification: false,
-  runtime_profile: "minimal",
-});
+  runtime_profile: 'minimal',
+})
 
 const configForm = reactive<L4ConfigForm>({
   ddos_protection_enabled: true,
@@ -52,10 +52,10 @@ const configForm = reactive<L4ConfigForm>({
   max_blocked_ips: 1024,
   state_ttl_secs: 300,
   bloom_filter_scale: 1,
-});
+})
 
 const numberInputClass =
-  "mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40";
+  'mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40'
 
 const clampInteger = (
   value: number,
@@ -63,9 +63,9 @@ const clampInteger = (
   max: number,
   fallback: number,
 ) => {
-  const normalized = Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.min(Math.max(normalized, min), max);
-};
+  const normalized = Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(Math.max(normalized, min), max)
+}
 
 const clampFloat = (
   value: number,
@@ -73,19 +73,19 @@ const clampFloat = (
   max: number,
   fallback: number,
 ) => {
-  const normalized = Number.isFinite(value) ? value : fallback;
-  return Math.min(Math.max(Number(normalized.toFixed(2)), min), max);
-};
+  const normalized = Number.isFinite(value) ? value : fallback
+  return Math.min(Math.max(Number(normalized.toFixed(2)), min), max)
+}
 
 const applyConfig = (payload: L4ConfigPayload) => {
-  configForm.ddos_protection_enabled = payload.ddos_protection_enabled;
-  configForm.advanced_ddos_enabled = payload.advanced_ddos_enabled;
-  configForm.connection_rate_limit = payload.connection_rate_limit;
-  configForm.syn_flood_threshold = payload.syn_flood_threshold;
-  configForm.max_tracked_ips = payload.max_tracked_ips;
-  configForm.max_blocked_ips = payload.max_blocked_ips;
-  configForm.state_ttl_secs = payload.state_ttl_secs;
-  configForm.bloom_filter_scale = payload.bloom_filter_scale;
+  configForm.ddos_protection_enabled = payload.ddos_protection_enabled
+  configForm.advanced_ddos_enabled = payload.advanced_ddos_enabled
+  configForm.connection_rate_limit = payload.connection_rate_limit
+  configForm.syn_flood_threshold = payload.syn_flood_threshold
+  configForm.max_tracked_ips = payload.max_tracked_ips
+  configForm.max_blocked_ips = payload.max_blocked_ips
+  configForm.state_ttl_secs = payload.state_ttl_secs
+  configForm.bloom_filter_scale = payload.bloom_filter_scale
 
   meta.value = {
     runtime_enabled: payload.runtime_enabled,
@@ -93,43 +93,43 @@ const applyConfig = (payload: L4ConfigPayload) => {
     bloom_false_positive_verification:
       payload.bloom_false_positive_verification,
     runtime_profile: payload.runtime_profile,
-  };
-};
+  }
+}
 
 const refreshAll = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
 
   try {
     const [configPayload, statsPayload] = await Promise.all([
       fetchL4Config(),
       fetchL4Stats(),
-    ]);
-    applyConfig(configPayload);
-    stats.value = statsPayload;
-    lastUpdated.value = Date.now();
-    error.value = "";
+    ])
+    applyConfig(configPayload)
+    stats.value = statsPayload
+    lastUpdated.value = Date.now()
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取 L4 管理信息失败";
+    error.value = e instanceof Error ? e.message : '读取 L4 管理信息失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 const refreshStats = async () => {
   try {
-    stats.value = await fetchL4Stats();
-    lastUpdated.value = Date.now();
+    stats.value = await fetchL4Stats()
+    lastUpdated.value = Date.now()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "刷新 L4 统计失败";
+    error.value = e instanceof Error ? e.message : '刷新 L4 统计失败'
   }
-};
+}
 
 const saveConfig = async () => {
-  saving.value = true;
-  error.value = "";
-  successMessage.value = "";
+  saving.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     configForm.connection_rate_limit = clampInteger(
@@ -137,113 +137,113 @@ const saveConfig = async () => {
       1,
       1_000_000,
       100,
-    );
+    )
     configForm.syn_flood_threshold = clampInteger(
       configForm.syn_flood_threshold,
       1,
       1_000_000,
       50,
-    );
+    )
     configForm.max_tracked_ips = clampInteger(
       configForm.max_tracked_ips,
       1,
       1_000_000,
       4096,
-    );
+    )
     configForm.max_blocked_ips = clampInteger(
       configForm.max_blocked_ips,
       1,
       1_000_000,
       1024,
-    );
+    )
     configForm.state_ttl_secs = clampInteger(
       configForm.state_ttl_secs,
       60,
       86_400,
       300,
-    );
+    )
     configForm.bloom_filter_scale = clampFloat(
       configForm.bloom_filter_scale,
       0.1,
       4,
       1,
-    );
+    )
 
-    const response = await updateL4Config({ ...configForm });
-    successMessage.value = response.message;
-    await refreshAll();
+    const response = await updateL4Config({ ...configForm })
+    successMessage.value = response.message
+    await refreshAll()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存 L4 配置失败";
+    error.value = e instanceof Error ? e.message : '保存 L4 配置失败'
   } finally {
-    saving.value = false;
+    saving.value = false
   }
-};
+}
 
 const runtimeStatus = computed(
   () => stats.value?.enabled ?? meta.value.runtime_enabled,
-);
+)
 const runtimeProfileLabel = computed(() =>
-  meta.value.runtime_profile === "standard" ? "standard" : "minimal",
-);
+  meta.value.runtime_profile === 'standard' ? 'standard' : 'minimal',
+)
 const lastUpdatedLabel = computed(() => {
-  if (!lastUpdated.value) return "等待首次拉取";
-  return `上次刷新：${new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(lastUpdated.value))}`;
-});
-const topPorts = computed(() => stats.value?.per_port_stats ?? []);
+  if (!lastUpdated.value) return '等待首次拉取'
+  return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(lastUpdated.value))}`
+})
+const topPorts = computed(() => stats.value?.per_port_stats ?? [])
 const bloomPanels = computed(() => {
-  const bloomStats = stats.value?.bloom_stats;
-  if (!bloomStats) return [];
+  const bloomStats = stats.value?.bloom_stats
+  if (!bloomStats) return []
 
   return [
-    { label: "IPv4 命中", value: bloomStats.ipv4_filter },
-    { label: "IPv6 命中", value: bloomStats.ipv6_filter },
-    { label: "IP:Port 命中", value: bloomStats.ip_port_filter },
-  ];
-});
+    { label: 'IPv4 命中', value: bloomStats.ipv4_filter },
+    { label: 'IPv6 命中', value: bloomStats.ipv6_filter },
+    { label: 'IP:Port 命中', value: bloomStats.ip_port_filter },
+  ]
+})
 const falsePositivePanels = computed(() => {
-  const falsePositiveStats = stats.value?.false_positive_stats;
-  if (!falsePositiveStats) return [];
+  const falsePositiveStats = stats.value?.false_positive_stats
+  if (!falsePositiveStats) return []
 
   return [
-    { label: "IPv4 精确校验集", value: falsePositiveStats.ipv4_exact_size },
-    { label: "IPv6 精确校验集", value: falsePositiveStats.ipv6_exact_size },
+    { label: 'IPv4 精确校验集', value: falsePositiveStats.ipv4_exact_size },
+    { label: 'IPv6 精确校验集', value: falsePositiveStats.ipv6_exact_size },
     {
-      label: "IP:Port 精确校验集",
+      label: 'IP:Port 精确校验集',
       value: falsePositiveStats.ip_port_exact_size,
     },
-  ];
-});
+  ]
+})
 const blockedCapacityRatio = computed(() => {
-  const maxBlocked = configForm.max_blocked_ips;
-  if (!maxBlocked) return 0;
-  return (stats.value?.connections.blocked_connections ?? 0) / maxBlocked;
-});
+  const maxBlocked = configForm.max_blocked_ips
+  if (!maxBlocked) return 0
+  return (stats.value?.connections.blocked_connections ?? 0) / maxBlocked
+})
 const blockedCapacityLabel = computed(() => {
-  if (!configForm.max_blocked_ips) return "未配置上限";
-  return `${Math.min(blockedCapacityRatio.value * 100, 999).toFixed(1)}%`;
-});
+  if (!configForm.max_blocked_ips) return '未配置上限'
+  return `${Math.min(blockedCapacityRatio.value * 100, 999).toFixed(1)}%`
+})
 const blockedCapacityTone = computed(() => {
-  if (blockedCapacityRatio.value >= 0.85) return "error";
-  if (blockedCapacityRatio.value >= 0.6) return "warning";
-  return "success";
-});
+  if (blockedCapacityRatio.value >= 0.85) return 'error'
+  if (blockedCapacityRatio.value >= 0.6) return 'warning'
+  return 'success'
+})
 
 onMounted(async () => {
-  await refreshAll(true);
+  await refreshAll(true)
   statsTimer.value = window.setInterval(() => {
-    refreshStats();
-  }, 5000);
-});
+    refreshStats()
+  }, 5000)
+})
 
 onBeforeUnmount(() => {
   if (statsTimer.value) {
-    clearInterval(statsTimer.value);
+    clearInterval(statsTimer.value)
   }
-});
+})
 </script>
 
 <template>
@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
           :disabled="saving || loading"
         >
           <Save :size="14" />
-          {{ saving ? "保存中..." : "保存配置" }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
       </div>
     </template>
@@ -506,8 +506,8 @@ onBeforeUnmount(() => {
                     <p class="mt-2 text-lg font-semibold text-stone-900">
                       {{
                         runtimeStatus
-                          ? "L4 检测实例已加载"
-                          : "L4 检测实例未加载"
+                          ? 'L4 检测实例已加载'
+                          : 'L4 检测实例未加载'
                       }}
                     </p>
                   </div>
@@ -529,14 +529,14 @@ onBeforeUnmount(() => {
                 <div class="rounded-xl border border-slate-200 p-4">
                   <p class="text-xs tracking-wide text-slate-500">Bloom 状态</p>
                   <p class="mt-2 text-lg font-semibold text-stone-900">
-                    {{ meta.bloom_enabled ? "已启用" : "未启用" }}
+                    {{ meta.bloom_enabled ? '已启用' : '未启用' }}
                   </p>
                 </div>
                 <div class="rounded-xl border border-slate-200 p-4">
                   <p class="text-xs tracking-wide text-slate-500">误判校验</p>
                   <p class="mt-2 text-lg font-semibold text-stone-900">
                     {{
-                      meta.bloom_false_positive_verification ? "开启" : "关闭"
+                      meta.bloom_false_positive_verification ? '开启' : '关闭'
                     }}
                   </p>
                 </div>
@@ -691,8 +691,6 @@ onBeforeUnmount(() => {
           当前还没有端口级统计数据，通常意味着运行中的 L4 检测尚未接收到流量。
         </div>
       </CyberCard>
-
-
 
       <section class="grid gap-4 lg:grid-cols-3">
         <CyberCard

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { RouterLink } from "vue-router";
-import { ArrowRight, Waves, Sparkles } from "lucide-vue-next";
+import { RouterLink } from 'vue-router'
+import { ArrowRight, Waves, Sparkles } from 'lucide-vue-next'
 
 const highlights = [
-  "流量在进入业务前完成识别与分流",
-  "统一展示封禁、规则、延迟与持久化指标",
-  "适合网关、防护代理与边界入口的日常运营",
-];
+  '流量在进入业务前完成识别与分流',
+  '统一展示封禁、规则、延迟与持久化指标',
+  '适合网关、防护代理与边界入口的日常运营',
+]
 </script>
 
 <template>

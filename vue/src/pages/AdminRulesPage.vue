@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, onMounted } from "vue";
+import { computed, reactive, ref, onMounted } from 'vue'
 import {
   createRule,
   deleteRule,
@@ -8,17 +8,17 @@ import {
   fetchRulesList,
   installRuleActionPlugin,
   updateRule,
-} from "../lib/api";
+} from '../lib/api'
 import type {
   RuleActionPluginItem,
   RuleActionTemplateItem,
   RuleDraft,
   RuleItem,
   RulesResponse,
-} from "../lib/types";
-import AppLayout from "../components/layout/AppLayout.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
+} from '../lib/types'
+import AppLayout from '../components/layout/AppLayout.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
 import {
   Plus,
   Edit3,
@@ -28,123 +28,125 @@ import {
   Search,
   RefreshCw,
   X,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
-const { severityLabel, actionLabel, layerLabel } = useFormatters();
+const { severityLabel, actionLabel, layerLabel } = useFormatters()
 
-const loading = ref(true);
-const saving = ref(false);
-const installingPlugin = ref(false);
-const error = ref("");
-const rulesPayload = ref<RulesResponse>({ rules: [] });
-const isRuleModalOpen = ref(false);
-const pluginInstallUrl = ref("");
-const installedPlugins = ref<RuleActionPluginItem[]>([]);
-const pluginTemplates = ref<RuleActionTemplateItem[]>([]);
+const loading = ref(true)
+const saving = ref(false)
+const installingPlugin = ref(false)
+const error = ref('')
+const rulesPayload = ref<RulesResponse>({ rules: [] })
+const isRuleModalOpen = ref(false)
+const pluginInstallUrl = ref('')
+const installedPlugins = ref<RuleActionPluginItem[]>([])
+const pluginTemplates = ref<RuleActionTemplateItem[]>([])
 
-const isPluginActionValue = (value: string) => value.startsWith("plugin:");
-const toPluginActionValue = (templateId: string) => `plugin:${templateId}`;
+const isPluginActionValue = (value: string) => value.startsWith('plugin:')
+const toPluginActionValue = (templateId: string) => `plugin:${templateId}`
 const selectedPluginTemplate = computed(() =>
-  pluginTemplates.value.find((item) => item.template_id === ruleForm.plugin_template_id),
-);
+  pluginTemplates.value.find(
+    (item) => item.template_id === ruleForm.plugin_template_id,
+  ),
+)
 const displayActionLabel = (rule: RuleItem) => {
   if (rule.plugin_template_id) {
     const template = pluginTemplates.value.find(
       (item) => item.template_id === rule.plugin_template_id,
-    );
-    if (template) return `插件 · ${template.name}`;
+    )
+    if (template) return `插件 · ${template.name}`
   }
-  return actionLabel(rule.action);
-};
+  return actionLabel(rule.action)
+}
 
 const defaultResponseTemplate = () => ({
   status_code: 403,
-  content_type: "text/html; charset=utf-8",
-  body_source: "inline_text",
+  content_type: 'text/html; charset=utf-8',
+  body_source: 'inline_text',
   gzip: true,
-  body_text: "",
-  body_file_path: "",
+  body_text: '',
+  body_file_path: '',
   headers: [],
-});
+})
 
 const ruleForm = reactive<RuleDraft>({
-  id: "",
-  name: "",
+  id: '',
+  name: '',
   enabled: true,
-  layer: "l7",
-  pattern: "",
-  action: "block",
-  severity: "high",
+  layer: 'l7',
+  pattern: '',
+  action: 'block',
+  severity: 'high',
   response_template: defaultResponseTemplate(),
-});
+})
 
 const ruleFilters = reactive({
-  search: "",
-  layer: "all",
-  action: "all",
-  severity: "all",
-  status: "all",
-});
+  search: '',
+  layer: 'all',
+  action: 'all',
+  severity: 'all',
+  status: 'all',
+})
 
 const filteredRules = computed(() =>
   rulesPayload.value.rules.filter((rule) => {
-    if (ruleFilters.layer !== "all" && rule.layer !== ruleFilters.layer)
-      return false;
-    if (ruleFilters.action !== "all" && rule.action !== ruleFilters.action)
-      return false;
+    if (ruleFilters.layer !== 'all' && rule.layer !== ruleFilters.layer)
+      return false
+    if (ruleFilters.action !== 'all' && rule.action !== ruleFilters.action)
+      return false
     if (
-      ruleFilters.severity !== "all" &&
+      ruleFilters.severity !== 'all' &&
       rule.severity !== ruleFilters.severity
     )
-      return false;
+      return false
     if (
-      ruleFilters.status !== "all" &&
-      rule.enabled !== (ruleFilters.status === "enabled")
+      ruleFilters.status !== 'all' &&
+      rule.enabled !== (ruleFilters.status === 'enabled')
     )
-      return false;
-    if (!ruleFilters.search.trim()) return true;
-    const keyword = ruleFilters.search.trim().toLowerCase();
+      return false
+    if (!ruleFilters.search.trim()) return true
+    const keyword = ruleFilters.search.trim().toLowerCase()
     return (
       rule.name.toLowerCase().includes(keyword) ||
       rule.id.toLowerCase().includes(keyword) ||
       rule.pattern.toLowerCase().includes(keyword)
-    );
+    )
   }),
-);
+)
 
 const loadRules = async () => {
-  loading.value = true;
+  loading.value = true
   try {
     const [rules, plugins, templates] = await Promise.all([
       fetchRulesList(),
       fetchRuleActionPlugins(),
       fetchRuleActionTemplates(),
-    ]);
-    rulesPayload.value = rules;
-    installedPlugins.value = plugins.plugins;
-    pluginTemplates.value = templates.templates;
-    error.value = "";
+    ])
+    rulesPayload.value = rules
+    installedPlugins.value = plugins.plugins
+    pluginTemplates.value = templates.templates
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取规则失败";
+    error.value = e instanceof Error ? e.message : '读取规则失败'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const openCreateRule = () => {
   Object.assign(ruleForm, {
-    id: "",
-    name: "",
+    id: '',
+    name: '',
     enabled: true,
-    layer: "l7",
-    pattern: "",
-    action: "block",
-    severity: "high",
+    layer: 'l7',
+    pattern: '',
+    action: 'block',
+    severity: 'high',
     plugin_template_id: null,
     response_template: defaultResponseTemplate(),
-  });
-  isRuleModalOpen.value = true;
-};
+  })
+  isRuleModalOpen.value = true
+}
 
 const openEditRule = (rule: RuleItem) => {
   Object.assign(ruleForm, {
@@ -158,29 +160,29 @@ const openEditRule = (rule: RuleItem) => {
           headers: [...rule.response_template.headers],
         }
       : defaultResponseTemplate(),
-  });
-  isRuleModalOpen.value = true;
-};
+  })
+  isRuleModalOpen.value = true
+}
 
 const handleCreateOrUpdateRule = async () => {
-  saving.value = true;
+  saving.value = true
   try {
     const pluginTemplate = ruleForm.plugin_template_id
       ? pluginTemplates.value.find(
           (item) => item.template_id === ruleForm.plugin_template_id,
         )
-      : null;
-    const isPluginAction = isPluginActionValue(ruleForm.action);
+      : null
+    const isPluginAction = isPluginActionValue(ruleForm.action)
     const payload: RuleDraft = {
       ...ruleForm,
-      action: isPluginAction ? "respond" : ruleForm.action,
+      action: isPluginAction ? 'respond' : ruleForm.action,
       layer: pluginTemplate?.layer || ruleForm.layer,
       severity: pluginTemplate?.severity || ruleForm.severity,
       pattern: pluginTemplate?.pattern || ruleForm.pattern,
       plugin_template_id: pluginTemplate?.template_id || null,
       response_template:
-        (pluginTemplate?.layer || ruleForm.layer) === "l7" &&
-        ((isPluginAction && pluginTemplate) || ruleForm.action === "respond")
+        (pluginTemplate?.layer || ruleForm.layer) === 'l7' &&
+        ((isPluginAction && pluginTemplate) || ruleForm.action === 'respond')
           ? {
               status_code: Number(
                 pluginTemplate?.response_template.status_code ||
@@ -190,53 +192,53 @@ const handleCreateOrUpdateRule = async () => {
               content_type:
                 pluginTemplate?.response_template.content_type ||
                 ruleForm.response_template?.content_type ||
-                "text/html; charset=utf-8",
+                'text/html; charset=utf-8',
               body_source:
                 pluginTemplate?.response_template.body_source ||
                 ruleForm.response_template?.body_source ||
-                "inline_text",
+                'inline_text',
               gzip: Boolean(
                 pluginTemplate?.response_template.gzip ??
-                  ruleForm.response_template?.gzip,
+                ruleForm.response_template?.gzip,
               ),
               body_text:
                 pluginTemplate?.response_template.body_text ||
                 ruleForm.response_template?.body_text ||
-                "",
+                '',
               body_file_path:
                 pluginTemplate?.response_template.body_file_path ||
                 ruleForm.response_template?.body_file_path?.trim() ||
-                "",
+                '',
               headers: (
                 pluginTemplate?.response_template.headers ||
                 ruleForm.response_template?.headers ||
                 []
-              ).filter(
-                (item) => item.key.trim(),
-              ),
+              ).filter((item) => item.key.trim()),
             }
           : null,
-    };
-    if (ruleForm.id) {
-      await updateRule(payload);
-    } else {
-      await createRule(payload);
     }
-    isRuleModalOpen.value = false;
-    await loadRules();
+    if (ruleForm.id) {
+      await updateRule(payload)
+    } else {
+      await createRule(payload)
+    }
+    isRuleModalOpen.value = false
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "规则保存失败";
+    error.value = e instanceof Error ? e.message : '规则保存失败'
   } finally {
-    saving.value = false;
+    saving.value = false
   }
-};
+}
 
 const onActionChange = () => {
   if (isPluginActionValue(ruleForm.action)) {
-    const templateId = ruleForm.action.slice("plugin:".length);
-    const template = pluginTemplates.value.find((item) => item.template_id === templateId);
-    if (!template) return;
-    ruleForm.plugin_template_id = template.template_id;
+    const templateId = ruleForm.action.slice('plugin:'.length)
+    const template = pluginTemplates.value.find(
+      (item) => item.template_id === templateId,
+    )
+    if (!template) return
+    ruleForm.plugin_template_id = template.template_id
     Object.assign(ruleForm, {
       layer: template.layer,
       pattern: template.pattern,
@@ -245,63 +247,63 @@ const onActionChange = () => {
         ...template.response_template,
         headers: [...template.response_template.headers],
       },
-    });
-    return;
+    })
+    return
   }
 
-  ruleForm.plugin_template_id = null;
-  if (ruleForm.layer !== "l7" && ruleForm.action === "respond") {
-    ruleForm.action = "block";
+  ruleForm.plugin_template_id = null
+  if (ruleForm.layer !== 'l7' && ruleForm.action === 'respond') {
+    ruleForm.action = 'block'
   }
-};
+}
 
 const addResponseHeader = () => {
-  ruleForm.response_template?.headers.push({ key: "", value: "" });
-};
+  ruleForm.response_template?.headers.push({ key: '', value: '' })
+}
 
 const removeResponseHeader = (index: number) => {
-  ruleForm.response_template?.headers.splice(index, 1);
-};
+  ruleForm.response_template?.headers.splice(index, 1)
+}
 
 const handleInstallPlugin = async () => {
-  const packageUrl = pluginInstallUrl.value.trim();
+  const packageUrl = pluginInstallUrl.value.trim()
   if (!packageUrl) {
-    error.value = "请输入插件包 URL";
-    return;
+    error.value = '请输入插件包 URL'
+    return
   }
 
-  installingPlugin.value = true;
+  installingPlugin.value = true
   try {
-    await installRuleActionPlugin(packageUrl);
-    pluginInstallUrl.value = "";
-    await loadRules();
+    await installRuleActionPlugin(packageUrl)
+    pluginInstallUrl.value = ''
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "插件安装失败";
+    error.value = e instanceof Error ? e.message : '插件安装失败'
   } finally {
-    installingPlugin.value = false;
+    installingPlugin.value = false
   }
-};
+}
 
 const toggleRuleStatus = async (rule: RuleItem) => {
   try {
-    await updateRule({ ...rule, enabled: !rule.enabled });
-    await loadRules();
+    await updateRule({ ...rule, enabled: !rule.enabled })
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "更新规则状态失败";
+    error.value = e instanceof Error ? e.message : '更新规则状态失败'
   }
-};
+}
 
 const handleDeleteRule = async (id: string) => {
-  if (!window.confirm("确认删除这条规则吗？")) return;
+  if (!window.confirm('确认删除这条规则吗？')) return
   try {
-    await deleteRule(id);
-    await loadRules();
+    await deleteRule(id)
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "规则删除失败";
+    error.value = e instanceof Error ? e.message : '规则删除失败'
   }
-};
+}
 
-onMounted(loadRules);
+onMounted(loadRules)
 </script>
 
 <template>
@@ -403,7 +405,7 @@ onMounted(loadRules);
             class="inline-flex items-center gap-2 rounded-[18px] bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:opacity-60"
             :disabled="installingPlugin"
           >
-            {{ installingPlugin ? "安装中..." : "安装插件" }}
+            {{ installingPlugin ? '安装中...' : '安装插件' }}
           </button>
         </div>
 
@@ -470,7 +472,7 @@ onMounted(loadRules);
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                     >
                       <Check :size="14" />
-                      {{ rule.enabled ? "停用" : "启用" }}
+                      {{ rule.enabled ? '停用' : '启用' }}
                     </button>
                     <button
                       @click="handleDeleteRule(rule.id)"
@@ -510,10 +512,10 @@ onMounted(loadRules);
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm tracking-wide text-blue-700">
-              {{ ruleForm.id ? "编辑规则" : "新建规则" }}
+              {{ ruleForm.id ? '编辑规则' : '新建规则' }}
             </p>
             <h3 class="mt-2 text-3xl font-semibold text-stone-900">
-              {{ ruleForm.id ? "调整现有策略" : "创建新的防护策略" }}
+              {{ ruleForm.id ? '调整现有策略' : '创建新的防护策略' }}
             </h3>
           </div>
           <button
@@ -609,7 +611,9 @@ onMounted(loadRules);
               <p class="text-sm font-medium text-stone-900">命中后直接回包</p>
               <p class="text-xs text-slate-500">
                 <template v-if="selectedPluginTemplate">
-                  当前使用插件动作 `{{ selectedPluginTemplate.name }}`，配置已由插件预设。
+                  当前使用插件动作 `{{
+                    selectedPluginTemplate.name
+                  }}`，配置已由插件预设。
                 </template>
                 <template v-else>
                   这里写原始文本内容，服务端会按需压缩并自动补齐
@@ -656,9 +660,9 @@ onMounted(loadRules);
             <div class="space-y-2">
               <label class="text-sm text-slate-500">
                 {{
-                  ruleForm.response_template!.body_source === "file"
-                    ? "文件路径"
-                    : "响应内容"
+                  ruleForm.response_template!.body_source === 'file'
+                    ? '文件路径'
+                    : '响应内容'
                 }}
               </label>
               <input

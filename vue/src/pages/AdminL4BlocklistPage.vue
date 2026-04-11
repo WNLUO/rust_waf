@@ -1,111 +1,103 @@
 <script setup lang="ts">
-import {
-  computed,
-  onBeforeUnmount,
-  onMounted,
-  reactive,
-  ref,
-  watch,
-} from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
-import L4SectionNav from "../components/l4/L4SectionNav.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
+import L4SectionNav from '../components/l4/L4SectionNav.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
 import {
   fetchBlockedIps,
   fetchL4Config,
   fetchL4Stats,
   unblockIp,
-} from "../lib/api";
+} from '../lib/api'
 import type {
   BlockedIpItem,
   BlockedIpsResponse,
   L4ConfigPayload,
   L4StatsPayload,
-} from "../lib/types";
-import { Ban, RefreshCw, Search, Shield } from "lucide-vue-next";
+} from '../lib/types'
+import { Ban, RefreshCw, Search, Shield } from 'lucide-vue-next'
 
-const { formatTimestamp, timeRemaining } = useFormatters();
-const PAGE_SIZE = 24;
+const { formatTimestamp, timeRemaining } = useFormatters()
+const PAGE_SIZE = 24
 
-const loading = ref(true);
-const refreshing = ref(false);
-const mutatingId = ref<number | null>(null);
-const error = ref("");
-const successMessage = ref("");
-const filtersReady = ref(false);
-const page = ref(1);
-const searchTimer = ref<number | null>(null);
+const loading = ref(true)
+const refreshing = ref(false)
+const mutatingId = ref<number | null>(null)
+const error = ref('')
+const successMessage = ref('')
+const filtersReady = ref(false)
+const page = ref(1)
+const searchTimer = ref<number | null>(null)
 const blockedPayload = ref<BlockedIpsResponse>({
   total: 0,
   limit: PAGE_SIZE,
   offset: 0,
   blocked_ips: [],
-});
-const l4Config = ref<L4ConfigPayload | null>(null);
-const l4Stats = ref<L4StatsPayload | null>(null);
+})
+const l4Config = ref<L4ConfigPayload | null>(null)
+const l4Stats = ref<L4StatsPayload | null>(null)
 
 const filters = reactive({
-  search: "",
-  scope: "local" as "local" | "all" | "safeline",
+  search: '',
+  scope: 'local' as 'local' | 'all' | 'safeline',
   active_only: true,
-  sort_by: "blocked_at",
-  sort_direction: "desc" as "asc" | "desc",
-});
+  sort_by: 'blocked_at',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
 
 const isLocalBlockedIp = (item: BlockedIpItem) =>
-  !item.provider || item.provider === "local";
+  !item.provider || item.provider === 'local'
 
-const filteredBlockedIps = computed(() => blockedPayload.value.blocked_ips);
-const matchedTotal = computed(() => blockedPayload.value.total);
+const filteredBlockedIps = computed(() => blockedPayload.value.blocked_ips)
+const matchedTotal = computed(() => blockedPayload.value.total)
 const localBlockedCount = computed(
   () => filteredBlockedIps.value.filter(isLocalBlockedIp).length,
-);
+)
 const remoteBlockedCount = computed(
   () =>
     filteredBlockedIps.value.filter((item) => !isLocalBlockedIp(item)).length,
-);
+)
 const totalPages = computed(() => {
-  const limit = blockedPayload.value.limit || PAGE_SIZE;
-  return Math.max(1, Math.ceil((blockedPayload.value.total || 0) / limit));
-});
+  const limit = blockedPayload.value.limit || PAGE_SIZE
+  return Math.max(1, Math.ceil((blockedPayload.value.total || 0) / limit))
+})
 const rangeStart = computed(() =>
   matchedTotal.value ? blockedPayload.value.offset + 1 : 0,
-);
+)
 const rangeEnd = computed(
   () => blockedPayload.value.offset + filteredBlockedIps.value.length,
-);
-const canGoPrev = computed(() => page.value > 1);
-const canGoNext = computed(() => page.value < totalPages.value);
+)
+const canGoPrev = computed(() => page.value > 1)
+const canGoNext = computed(() => page.value < totalPages.value)
 const capacityUsage = computed(() => {
-  const maxBlocked = l4Config.value?.max_blocked_ips ?? 0;
-  if (!maxBlocked) return "暂无";
-  const current = l4Stats.value?.connections.blocked_connections ?? 0;
-  return `${current} / ${maxBlocked}`;
-});
+  const maxBlocked = l4Config.value?.max_blocked_ips ?? 0
+  if (!maxBlocked) return '暂无'
+  const current = l4Stats.value?.connections.blocked_connections ?? 0
+  return `${current} / ${maxBlocked}`
+})
 const scopeSummary = computed(() => {
-  if (filters.scope === "local")
-    return "当前只看本地 L4 限流与 DDoS 封禁记录。";
-  if (filters.scope === "safeline")
-    return "当前只看雷池回流或远端来源封禁记录。";
-  return "当前同时查看本地封禁与远端回流封禁。";
-});
+  if (filters.scope === 'local') return '当前只看本地 L4 限流与 DDoS 封禁记录。'
+  if (filters.scope === 'safeline')
+    return '当前只看雷池回流或远端来源封禁记录。'
+  return '当前同时查看本地封禁与远端回流封禁。'
+})
 
 const loadPageData = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
   try {
     const [blocked, config, stats] = await Promise.all([
       fetchBlockedIps({
         limit: PAGE_SIZE,
         offset: (page.value - 1) * PAGE_SIZE,
         source_scope:
-          filters.scope === "local"
-            ? "local"
-            : filters.scope === "all"
-              ? "all"
-              : "remote",
-        provider: filters.scope === "safeline" ? "safeline" : undefined,
+          filters.scope === 'local'
+            ? 'local'
+            : filters.scope === 'all'
+              ? 'all'
+              : 'remote',
+        provider: filters.scope === 'safeline' ? 'safeline' : undefined,
         keyword: filters.search.trim() || undefined,
         active_only: filters.active_only,
         sort_by: filters.sort_by,
@@ -113,52 +105,52 @@ const loadPageData = async (showLoader = false) => {
       }),
       fetchL4Config(),
       fetchL4Stats(),
-    ]);
-    blockedPayload.value = blocked;
+    ])
+    blockedPayload.value = blocked
     const nextTotalPages = Math.max(
       1,
       Math.ceil((blocked.total || 0) / (blocked.limit || PAGE_SIZE)),
-    );
+    )
     if (page.value > nextTotalPages) {
-      page.value = nextTotalPages;
-      return;
+      page.value = nextTotalPages
+      return
     }
-    l4Config.value = config;
-    l4Stats.value = stats;
-    error.value = "";
+    l4Config.value = config
+    l4Stats.value = stats
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取 L4 黑名单失败";
+    error.value = e instanceof Error ? e.message : '读取 L4 黑名单失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 const handleUnblock = async (id: number) => {
-  mutatingId.value = id;
-  error.value = "";
-  successMessage.value = "";
+  mutatingId.value = id
+  error.value = ''
+  successMessage.value = ''
   try {
-    await unblockIp(id);
-    successMessage.value = `封禁记录 ${id} 已解除。`;
-    await loadPageData();
+    await unblockIp(id)
+    successMessage.value = `封禁记录 ${id} 已解除。`
+    await loadPageData()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "解除封禁失败";
+    error.value = e instanceof Error ? e.message : '解除封禁失败'
   } finally {
-    mutatingId.value = null;
+    mutatingId.value = null
   }
-};
+}
 
 onMounted(async () => {
-  await loadPageData(true);
-  filtersReady.value = true;
-});
+  await loadPageData(true)
+  filtersReady.value = true
+})
 
 onBeforeUnmount(() => {
   if (searchTimer.value) {
-    window.clearTimeout(searchTimer.value);
+    window.clearTimeout(searchTimer.value)
   }
-});
+})
 
 watch(
   () => [
@@ -168,39 +160,39 @@ watch(
     filters.sort_direction,
   ],
   () => {
-    if (!filtersReady.value) return;
+    if (!filtersReady.value) return
     if (page.value !== 1) {
-      page.value = 1;
-      return;
+      page.value = 1
+      return
     }
-    loadPageData();
+    loadPageData()
   },
-);
+)
 
 watch(
   () => page.value,
   () => {
-    if (!filtersReady.value) return;
-    loadPageData();
+    if (!filtersReady.value) return
+    loadPageData()
   },
-);
+)
 
 watch(
   () => filters.search,
   () => {
     if (searchTimer.value) {
-      window.clearTimeout(searchTimer.value);
+      window.clearTimeout(searchTimer.value)
     }
     searchTimer.value = window.setTimeout(() => {
-      if (!filtersReady.value) return;
+      if (!filtersReady.value) return
       if (page.value !== 1) {
-        page.value = 1;
-        return;
+        page.value = 1
+        return
       }
-      loadPageData();
-    }, 250);
+      loadPageData()
+    }, 250)
   },
-);
+)
 </script>
 
 <template>
@@ -395,7 +387,7 @@ watch(
               class="inline-flex items-center gap-2 rounded-full border border-emerald-500/20 px-3 py-2 text-xs text-emerald-600 transition hover:bg-emerald-500/10 disabled:opacity-60"
             >
               <Shield :size="13" />
-              {{ mutatingId === item.id ? "处理中..." : "解除封禁" }}
+              {{ mutatingId === item.id ? '处理中...' : '解除封禁' }}
             </button>
           </div>
         </article>

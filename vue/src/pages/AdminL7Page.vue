@@ -1,25 +1,25 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { RouterLink } from "vue-router";
-import AppLayout from "../components/layout/AppLayout.vue";
-import L7SectionNav from "../components/l7/L7SectionNav.vue";
-import CyberCard from "../components/ui/CyberCard.vue";
-import MetricWidget from "../components/ui/MetricWidget.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
+import AppLayout from '../components/layout/AppLayout.vue'
+import L7SectionNav from '../components/l7/L7SectionNav.vue'
+import CyberCard from '../components/ui/CyberCard.vue'
+import MetricWidget from '../components/ui/MetricWidget.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
 import {
   fetchL7Config,
   fetchL7Stats,
   fetchRulesList,
   fetchSecurityEvents,
   updateL7Config,
-} from "../lib/api";
+} from '../lib/api'
 import type {
   L7ConfigPayload,
   L7StatsPayload,
   RuleItem,
   SecurityEventItem,
-} from "../lib/types";
+} from '../lib/types'
 import {
   Activity,
   ArrowUpRight,
@@ -27,29 +27,29 @@ import {
   Save,
   Shield,
   TimerReset,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
-type L7ConfigForm = Omit<L7ConfigPayload, "runtime_enabled">;
+type L7ConfigForm = Omit<L7ConfigPayload, 'runtime_enabled'>
 
 const { actionLabel, formatLatency, formatNumber, formatTimestamp } =
-  useFormatters();
+  useFormatters()
 
-const loading = ref(true);
-const refreshing = ref(false);
-const saving = ref(false);
-const error = ref("");
-const successMessage = ref("");
-const stats = ref<L7StatsPayload | null>(null);
-const rules = ref<RuleItem[]>([]);
-const events = ref<SecurityEventItem[]>([]);
-const statsTimer = ref<number | null>(null);
-const lastUpdated = ref<number | null>(null);
+const loading = ref(true)
+const refreshing = ref(false)
+const saving = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const stats = ref<L7StatsPayload | null>(null)
+const rules = ref<RuleItem[]>([])
+const events = ref<SecurityEventItem[]>([])
+const statsTimer = ref<number | null>(null)
+const lastUpdated = ref<number | null>(null)
 const meta = ref({
   runtime_enabled: false,
-});
+})
 
 const configForm = reactive<L7ConfigForm>({
-  runtime_profile: "minimal",
+  runtime_profile: 'minimal',
   http_inspection_enabled: true,
   max_request_size: 8192,
   real_ip_headers: [],
@@ -63,7 +63,7 @@ const configForm = reactive<L7ConfigForm>({
   upstream_healthcheck_enabled: true,
   upstream_healthcheck_interval_secs: 5,
   upstream_healthcheck_timeout_ms: 1000,
-  upstream_failure_mode: "fail_open",
+  upstream_failure_mode: 'fail_open',
   bloom_filter_scale: 1,
   http2_enabled: false,
   http2_max_concurrent_streams: 100,
@@ -72,26 +72,26 @@ const configForm = reactive<L7ConfigForm>({
   http2_initial_window_size: 65535,
   bloom_enabled: false,
   bloom_false_positive_verification: false,
-  listen_addrs: ["0.0.0.0:8080"],
-  upstream_endpoint: "",
+  listen_addrs: ['0.0.0.0:8080'],
+  upstream_endpoint: '',
   http3_enabled: false,
-  http3_listen_addr: "0.0.0.0:8443",
+  http3_listen_addr: '0.0.0.0:8443',
   http3_max_concurrent_streams: 100,
   http3_idle_timeout_secs: 300,
   http3_mtu: 1350,
   http3_max_frame_size: 65536,
   http3_enable_connection_migration: true,
   http3_qpack_table_size: 4096,
-  http3_certificate_path: "",
-  http3_private_key_path: "",
+  http3_certificate_path: '',
+  http3_private_key_path: '',
   http3_enable_tls13: true,
-});
+})
 
 const numberInputClass =
-  "mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40";
+  'mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40'
 
 const listFieldClass =
-  "mt-2 min-h-[120px] w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40";
+  'mt-2 min-h-[120px] w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40'
 
 const clampInteger = (
   value: number,
@@ -99,9 +99,9 @@ const clampInteger = (
   max: number,
   fallback: number,
 ) => {
-  const normalized = Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.min(Math.max(normalized, min), max);
-};
+  const normalized = Number.isFinite(value) ? Math.round(value) : fallback
+  return Math.min(Math.max(normalized, min), max)
+}
 
 const clampFloat = (
   value: number,
@@ -109,63 +109,60 @@ const clampFloat = (
   max: number,
   fallback: number,
 ) => {
-  const normalized = Number.isFinite(value) ? value : fallback;
-  return Math.min(Math.max(Number(normalized.toFixed(2)), min), max);
-};
+  const normalized = Number.isFinite(value) ? value : fallback
+  return Math.min(Math.max(Number(normalized.toFixed(2)), min), max)
+}
 
 const applyConfig = (payload: L7ConfigPayload) => {
-  configForm.http_inspection_enabled = payload.http_inspection_enabled;
-  configForm.runtime_profile = payload.runtime_profile;
-  configForm.max_request_size = payload.max_request_size;
-  configForm.real_ip_headers = [...payload.real_ip_headers];
-  configForm.trusted_proxy_cidrs = [...payload.trusted_proxy_cidrs];
-  configForm.first_byte_timeout_ms = payload.first_byte_timeout_ms;
-  configForm.read_idle_timeout_ms = payload.read_idle_timeout_ms;
-  configForm.tls_handshake_timeout_ms = payload.tls_handshake_timeout_ms;
-  configForm.proxy_connect_timeout_ms = payload.proxy_connect_timeout_ms;
-  configForm.proxy_write_timeout_ms = payload.proxy_write_timeout_ms;
-  configForm.proxy_read_timeout_ms = payload.proxy_read_timeout_ms;
-  configForm.upstream_healthcheck_enabled =
-    payload.upstream_healthcheck_enabled;
+  configForm.http_inspection_enabled = payload.http_inspection_enabled
+  configForm.runtime_profile = payload.runtime_profile
+  configForm.max_request_size = payload.max_request_size
+  configForm.real_ip_headers = [...payload.real_ip_headers]
+  configForm.trusted_proxy_cidrs = [...payload.trusted_proxy_cidrs]
+  configForm.first_byte_timeout_ms = payload.first_byte_timeout_ms
+  configForm.read_idle_timeout_ms = payload.read_idle_timeout_ms
+  configForm.tls_handshake_timeout_ms = payload.tls_handshake_timeout_ms
+  configForm.proxy_connect_timeout_ms = payload.proxy_connect_timeout_ms
+  configForm.proxy_write_timeout_ms = payload.proxy_write_timeout_ms
+  configForm.proxy_read_timeout_ms = payload.proxy_read_timeout_ms
+  configForm.upstream_healthcheck_enabled = payload.upstream_healthcheck_enabled
   configForm.upstream_healthcheck_interval_secs =
-    payload.upstream_healthcheck_interval_secs;
+    payload.upstream_healthcheck_interval_secs
   configForm.upstream_healthcheck_timeout_ms =
-    payload.upstream_healthcheck_timeout_ms;
-  configForm.upstream_failure_mode = payload.upstream_failure_mode;
-  configForm.bloom_filter_scale = payload.bloom_filter_scale;
-  configForm.http2_enabled = payload.http2_enabled;
-  configForm.http2_max_concurrent_streams =
-    payload.http2_max_concurrent_streams;
-  configForm.http2_max_frame_size = payload.http2_max_frame_size;
-  configForm.http2_enable_priorities = payload.http2_enable_priorities;
-  configForm.http2_initial_window_size = payload.http2_initial_window_size;
-  configForm.bloom_enabled = payload.bloom_enabled;
+    payload.upstream_healthcheck_timeout_ms
+  configForm.upstream_failure_mode = payload.upstream_failure_mode
+  configForm.bloom_filter_scale = payload.bloom_filter_scale
+  configForm.http2_enabled = payload.http2_enabled
+  configForm.http2_max_concurrent_streams = payload.http2_max_concurrent_streams
+  configForm.http2_max_frame_size = payload.http2_max_frame_size
+  configForm.http2_enable_priorities = payload.http2_enable_priorities
+  configForm.http2_initial_window_size = payload.http2_initial_window_size
+  configForm.bloom_enabled = payload.bloom_enabled
   configForm.bloom_false_positive_verification =
-    payload.bloom_false_positive_verification;
-  configForm.listen_addrs = [...payload.listen_addrs];
-  configForm.upstream_endpoint = payload.upstream_endpoint;
-  configForm.http3_enabled = payload.http3_enabled;
-  configForm.http3_listen_addr = payload.http3_listen_addr;
-  configForm.http3_max_concurrent_streams =
-    payload.http3_max_concurrent_streams;
-  configForm.http3_idle_timeout_secs = payload.http3_idle_timeout_secs;
-  configForm.http3_mtu = payload.http3_mtu;
-  configForm.http3_max_frame_size = payload.http3_max_frame_size;
+    payload.bloom_false_positive_verification
+  configForm.listen_addrs = [...payload.listen_addrs]
+  configForm.upstream_endpoint = payload.upstream_endpoint
+  configForm.http3_enabled = payload.http3_enabled
+  configForm.http3_listen_addr = payload.http3_listen_addr
+  configForm.http3_max_concurrent_streams = payload.http3_max_concurrent_streams
+  configForm.http3_idle_timeout_secs = payload.http3_idle_timeout_secs
+  configForm.http3_mtu = payload.http3_mtu
+  configForm.http3_max_frame_size = payload.http3_max_frame_size
   configForm.http3_enable_connection_migration =
-    payload.http3_enable_connection_migration;
-  configForm.http3_qpack_table_size = payload.http3_qpack_table_size;
-  configForm.http3_certificate_path = payload.http3_certificate_path;
-  configForm.http3_private_key_path = payload.http3_private_key_path;
-  configForm.http3_enable_tls13 = payload.http3_enable_tls13;
+    payload.http3_enable_connection_migration
+  configForm.http3_qpack_table_size = payload.http3_qpack_table_size
+  configForm.http3_certificate_path = payload.http3_certificate_path
+  configForm.http3_private_key_path = payload.http3_private_key_path
+  configForm.http3_enable_tls13 = payload.http3_enable_tls13
 
   meta.value = {
     runtime_enabled: payload.runtime_enabled,
-  };
-};
+  }
+}
 
 const refreshAll = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
 
   try {
     const [configPayload, statsPayload, rulesPayload, eventsPayload] =
@@ -174,40 +171,40 @@ const refreshAll = async (showLoader = false) => {
         fetchL7Stats(),
         fetchRulesList(),
         fetchSecurityEvents({
-          layer: "l7",
+          layer: 'l7',
           limit: 6,
-          sort_by: "created_at",
-          sort_direction: "desc",
+          sort_by: 'created_at',
+          sort_direction: 'desc',
         }),
-      ]);
+      ])
 
-    applyConfig(configPayload);
-    stats.value = statsPayload;
-    rules.value = rulesPayload.rules;
-    events.value = eventsPayload.events;
-    lastUpdated.value = Date.now();
-    error.value = "";
+    applyConfig(configPayload)
+    stats.value = statsPayload
+    rules.value = rulesPayload.rules
+    events.value = eventsPayload.events
+    lastUpdated.value = Date.now()
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取 L7 管理信息失败";
+    error.value = e instanceof Error ? e.message : '读取 L7 管理信息失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 const refreshStats = async () => {
   try {
-    stats.value = await fetchL7Stats();
-    lastUpdated.value = Date.now();
+    stats.value = await fetchL7Stats()
+    lastUpdated.value = Date.now()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "刷新 L7 统计失败";
+    error.value = e instanceof Error ? e.message : '刷新 L7 统计失败'
   }
-};
+}
 
 const saveConfig = async () => {
-  saving.value = true;
-  error.value = "";
-  successMessage.value = "";
+  saving.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     configForm.max_request_size = clampInteger(
@@ -215,225 +212,225 @@ const saveConfig = async () => {
       1024,
       16_777_216,
       8192,
-    );
+    )
     configForm.first_byte_timeout_ms = clampInteger(
       configForm.first_byte_timeout_ms,
       100,
       60_000,
       2000,
-    );
+    )
     configForm.read_idle_timeout_ms = clampInteger(
       configForm.read_idle_timeout_ms,
       100,
       300_000,
       5000,
-    );
+    )
     configForm.tls_handshake_timeout_ms = clampInteger(
       configForm.tls_handshake_timeout_ms,
       500,
       60_000,
       3000,
-    );
+    )
     configForm.proxy_connect_timeout_ms = clampInteger(
       configForm.proxy_connect_timeout_ms,
       100,
       60_000,
       1500,
-    );
+    )
     configForm.proxy_write_timeout_ms = clampInteger(
       configForm.proxy_write_timeout_ms,
       100,
       300_000,
       3000,
-    );
+    )
     configForm.proxy_read_timeout_ms = clampInteger(
       configForm.proxy_read_timeout_ms,
       100,
       300_000,
       10000,
-    );
+    )
     configForm.upstream_healthcheck_interval_secs = clampInteger(
       configForm.upstream_healthcheck_interval_secs,
       1,
       86_400,
       5,
-    );
+    )
     configForm.upstream_healthcheck_timeout_ms = clampInteger(
       configForm.upstream_healthcheck_timeout_ms,
       100,
       60_000,
       1000,
-    );
+    )
     configForm.bloom_filter_scale = clampFloat(
       configForm.bloom_filter_scale,
       0.1,
       4,
       1,
-    );
+    )
     configForm.http2_max_concurrent_streams = clampInteger(
       configForm.http2_max_concurrent_streams,
       1,
       10_000,
       100,
-    );
+    )
     configForm.http2_max_frame_size = clampInteger(
       configForm.http2_max_frame_size,
       1024,
       16_777_216,
       16384,
-    );
+    )
     configForm.http2_initial_window_size = clampInteger(
       configForm.http2_initial_window_size,
       1024,
       16_777_216,
       65535,
-    );
+    )
     configForm.http3_max_concurrent_streams = clampInteger(
       configForm.http3_max_concurrent_streams,
       1,
       1000,
       100,
-    );
+    )
     configForm.http3_idle_timeout_secs = clampInteger(
       configForm.http3_idle_timeout_secs,
       1,
       86_400,
       300,
-    );
-    configForm.http3_mtu = clampInteger(configForm.http3_mtu, 1200, 1500, 1350);
+    )
+    configForm.http3_mtu = clampInteger(configForm.http3_mtu, 1200, 1500, 1350)
     configForm.http3_max_frame_size = clampInteger(
       configForm.http3_max_frame_size,
       65536,
       16_777_215,
       65536,
-    );
+    )
     configForm.http3_qpack_table_size = clampInteger(
       configForm.http3_qpack_table_size,
       1024,
       65536,
       4096,
-    );
+    )
     if (!configForm.bloom_enabled) {
-      configForm.bloom_false_positive_verification = false;
+      configForm.bloom_false_positive_verification = false
     }
 
-    const response = await updateL7Config({ ...configForm });
-    successMessage.value = response.message;
-    await refreshAll();
+    const response = await updateL7Config({ ...configForm })
+    successMessage.value = response.message
+    await refreshAll()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存 L7 配置失败";
+    error.value = e instanceof Error ? e.message : '保存 L7 配置失败'
   } finally {
-    saving.value = false;
+    saving.value = false
   }
-};
+}
 
 const realIpHeadersText = computed({
-  get: () => configForm.real_ip_headers.join("\n"),
+  get: () => configForm.real_ip_headers.join('\n'),
   set: (value: string) => {
     configForm.real_ip_headers = value
       .split(/[\n,]/)
       .map((item) => item.trim())
-      .filter(Boolean);
+      .filter(Boolean)
   },
-});
+})
 
 const trustedProxyCidrsText = computed({
-  get: () => configForm.trusted_proxy_cidrs.join("\n"),
+  get: () => configForm.trusted_proxy_cidrs.join('\n'),
   set: (value: string) => {
     configForm.trusted_proxy_cidrs = value
       .split(/[\n,]/)
       .map((item) => item.trim())
-      .filter(Boolean);
+      .filter(Boolean)
   },
-});
+})
 
 const listenAddrsText = computed({
-  get: () => configForm.listen_addrs.join("\n"),
+  get: () => configForm.listen_addrs.join('\n'),
   set: (value: string) => {
     configForm.listen_addrs = value
       .split(/[\n,]/)
       .map((item) => item.trim())
-      .filter(Boolean);
+      .filter(Boolean)
   },
-});
+})
 
 const l7Rules = computed(() =>
-  rules.value.filter((rule) => rule.layer === "l7"),
-);
+  rules.value.filter((rule) => rule.layer === 'l7'),
+)
 const enabledL7Rules = computed(
   () => l7Rules.value.filter((rule) => rule.enabled).length,
-);
+)
 const blockL7Rules = computed(
-  () => l7Rules.value.filter((rule) => rule.action === "block").length,
-);
+  () => l7Rules.value.filter((rule) => rule.action === 'block').length,
+)
 const proxySuccessRate = computed(() => {
   const total =
-    (stats.value?.proxy_successes ?? 0) + (stats.value?.proxy_failures ?? 0);
-  if (!total) return "暂无";
-  return `${(((stats.value?.proxy_successes ?? 0) / total) * 100).toFixed(1)}%`;
-});
+    (stats.value?.proxy_successes ?? 0) + (stats.value?.proxy_failures ?? 0)
+  if (!total) return '暂无'
+  return `${(((stats.value?.proxy_successes ?? 0) / total) * 100).toFixed(1)}%`
+})
 const lastUpdatedLabel = computed(() => {
-  if (!lastUpdated.value) return "等待首次拉取";
-  return `上次刷新：${new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(lastUpdated.value))}`;
-});
+  if (!lastUpdated.value) return '等待首次拉取'
+  return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(lastUpdated.value))}`
+})
 const runtimeStatus = computed(
   () => stats.value?.enabled ?? meta.value.runtime_enabled,
-);
+)
 const runtimeProfileLabel = computed(() =>
-  configForm.runtime_profile === "standard" ? "standard" : "minimal",
-);
+  configForm.runtime_profile === 'standard' ? 'standard' : 'minimal',
+)
 const upstreamStatusText = computed(() =>
-  stats.value?.upstream_healthy ? "健康" : "异常",
-);
+  stats.value?.upstream_healthy ? '健康' : '异常',
+)
 const upstreamStatusType = computed(() =>
-  stats.value?.upstream_healthy ? "success" : "error",
-);
+  stats.value?.upstream_healthy ? 'success' : 'error',
+)
 const failureModeLabel = computed(() =>
-  configForm.upstream_failure_mode === "fail_close" ? "故障关闭" : "故障放行",
-);
+  configForm.upstream_failure_mode === 'fail_close' ? '故障关闭' : '故障放行',
+)
 const http3StatusLabel = computed(() => {
-  const status = stats.value?.http3_status || "unknown";
-  if (status === "running") return "运行中";
-  if (status === "degraded") return "未就绪";
-  if (status === "unsupported") return "未编译支持";
-  if (status === "disabled") return "已关闭";
-  return "待初始化";
-});
+  const status = stats.value?.http3_status || 'unknown'
+  if (status === 'running') return '运行中'
+  if (status === 'degraded') return '未就绪'
+  if (status === 'unsupported') return '未编译支持'
+  if (status === 'disabled') return '已关闭'
+  return '待初始化'
+})
 const http3StatusType = computed(() => {
-  const status = stats.value?.http3_status || "unknown";
-  if (status === "running") return "success";
-  if (status === "disabled") return "muted";
-  if (status === "unsupported") return "warning";
-  return "error";
-});
+  const status = stats.value?.http3_status || 'unknown'
+  if (status === 'running') return 'success'
+  if (status === 'disabled') return 'muted'
+  if (status === 'unsupported') return 'warning'
+  return 'error'
+})
 const protocolTags = computed(() => [
-  { text: "HTTP/1.1 常驻", type: "info" as const },
+  { text: 'HTTP/1.1 常驻', type: 'info' as const },
   {
-    text: configForm.http2_enabled ? "HTTP/2 已启用" : "HTTP/2 未启用",
-    type: configForm.http2_enabled ? ("success" as const) : ("muted" as const),
+    text: configForm.http2_enabled ? 'HTTP/2 已启用' : 'HTTP/2 未启用',
+    type: configForm.http2_enabled ? ('success' as const) : ('muted' as const),
   },
   {
-    text: configForm.http3_enabled ? "HTTP/3 已启用" : "HTTP/3 未启用",
-    type: configForm.http3_enabled ? ("success" as const) : ("muted" as const),
+    text: configForm.http3_enabled ? 'HTTP/3 已启用' : 'HTTP/3 未启用',
+    type: configForm.http3_enabled ? ('success' as const) : ('muted' as const),
   },
-]);
+])
 
 onMounted(async () => {
-  await refreshAll(true);
+  await refreshAll(true)
   statsTimer.value = window.setInterval(() => {
-    refreshStats();
-  }, 5000);
-});
+    refreshStats()
+  }, 5000)
+})
 
 onBeforeUnmount(() => {
   if (statsTimer.value) {
-    clearInterval(statsTimer.value);
+    clearInterval(statsTimer.value)
   }
-});
+})
 </script>
 
 <template>
@@ -457,7 +454,7 @@ onBeforeUnmount(() => {
           :disabled="saving || loading"
         >
           <Save :size="14" />
-          {{ saving ? "保存中..." : "保存配置" }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
       </div>
     </template>
@@ -586,8 +583,8 @@ onBeforeUnmount(() => {
                 <p class="mt-3 text-sm text-stone-800">
                   {{
                     configForm.http3_enabled
-                      ? configForm.http3_listen_addr || "已启用"
-                      : "未启用 HTTP/3"
+                      ? configForm.http3_listen_addr || '已启用'
+                      : '未启用 HTTP/3'
                   }}
                 </p>
               </div>
@@ -647,7 +644,7 @@ onBeforeUnmount(() => {
             <div class="rounded-xl bg-slate-50 p-4">
               <p class="text-xs tracking-wide text-slate-500">TCP 上游</p>
               <p class="mt-3 text-sm text-stone-800">
-                {{ configForm.upstream_endpoint || "未配置上游转发地址" }}
+                {{ configForm.upstream_endpoint || '未配置上游转发地址' }}
               </p>
             </div>
             <div class="grid gap-3 md:grid-cols-2">
@@ -658,8 +655,8 @@ onBeforeUnmount(() => {
                 <p class="mt-3 text-sm leading-7 text-stone-800">
                   {{
                     configForm.real_ip_headers.length
-                      ? configForm.real_ip_headers.join(" -> ")
-                      : "未配置"
+                      ? configForm.real_ip_headers.join(' -> ')
+                      : '未配置'
                   }}
                 </p>
               </div>
@@ -668,8 +665,8 @@ onBeforeUnmount(() => {
                 <p class="mt-3 text-sm leading-7 text-stone-800">
                   {{
                     configForm.trusted_proxy_cidrs.length
-                      ? configForm.trusted_proxy_cidrs.join("，")
-                      : "未配置，默认仅信任直连对端"
+                      ? configForm.trusted_proxy_cidrs.join('，')
+                      : '未配置，默认仅信任直连对端'
                   }}
                 </p>
               </div>
@@ -680,7 +677,7 @@ onBeforeUnmount(() => {
                 {{
                   stats?.upstream_last_check_at
                     ? formatTimestamp(stats.upstream_last_check_at)
-                    : "暂无检查记录"
+                    : '暂无检查记录'
                 }}
               </p>
               <p
@@ -725,25 +722,25 @@ onBeforeUnmount(() => {
               <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
                 <p class="text-xs tracking-wide text-slate-500">配置启用</p>
                 <p class="mt-3 text-2xl font-semibold text-stone-900">
-                  {{ stats?.http3_configured_enabled ? "是" : "否" }}
+                  {{ stats?.http3_configured_enabled ? '是' : '否' }}
                 </p>
               </div>
               <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
                 <p class="text-xs tracking-wide text-slate-500">TLS 1.3</p>
                 <p class="mt-3 text-2xl font-semibold text-stone-900">
-                  {{ stats?.http3_tls13_enabled ? "开启" : "关闭" }}
+                  {{ stats?.http3_tls13_enabled ? '开启' : '关闭' }}
                 </p>
               </div>
               <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
                 <p class="text-xs tracking-wide text-slate-500">证书路径</p>
                 <p class="mt-3 text-2xl font-semibold text-stone-900">
-                  {{ stats?.http3_certificate_configured ? "已配置" : "缺失" }}
+                  {{ stats?.http3_certificate_configured ? '已配置' : '缺失' }}
                 </p>
               </div>
               <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
                 <p class="text-xs tracking-wide text-slate-500">私钥路径</p>
                 <p class="mt-3 text-2xl font-semibold text-stone-900">
-                  {{ stats?.http3_private_key_configured ? "已配置" : "缺失" }}
+                  {{ stats?.http3_private_key_configured ? '已配置' : '缺失' }}
                 </p>
               </div>
             </div>
@@ -754,8 +751,8 @@ onBeforeUnmount(() => {
                 <p class="mt-3 text-sm text-stone-800">
                   {{
                     stats?.http3_listener_started
-                      ? stats?.http3_listener_addr || "监听已启动"
-                      : "当前未启动 HTTP/3 监听器"
+                      ? stats?.http3_listener_addr || '监听已启动'
+                      : '当前未启动 HTTP/3 监听器'
                   }}
                 </p>
               </div>
@@ -764,7 +761,7 @@ onBeforeUnmount(() => {
                 <p class="mt-3 text-sm leading-7 text-stone-800">
                   {{
                     stats?.http3_last_error ||
-                    "没有诊断错误，当前状态允许启动 HTTP/3。"
+                    '没有诊断错误，当前状态允许启动 HTTP/3。'
                   }}
                 </p>
               </div>
@@ -1292,9 +1289,9 @@ onBeforeUnmount(() => {
                 <p>来源：{{ event.source_ip }}:{{ event.source_port }}</p>
                 <p>目标：{{ event.dest_ip }}:{{ event.dest_port }}</p>
                 <p>
-                  请求：{{ event.http_method || "-" }} {{ event.uri || "" }}
+                  请求：{{ event.http_method || '-' }} {{ event.uri || '' }}
                 </p>
-                <p>版本：{{ event.http_version || "-" }}</p>
+                <p>版本：{{ event.http_version || '-' }}</p>
               </div>
             </div>
             <p v-if="!events.length" class="text-sm text-slate-500">

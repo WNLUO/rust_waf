@@ -1,117 +1,117 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { onMounted, reactive, ref, watch } from 'vue'
 import {
   fetchBlockedIps,
   pullSafeLineBlockedIps,
   syncSafeLineBlockedIps,
   unblockIp,
-} from "../lib/api";
-import type { BlockedIpsResponse } from "../lib/types";
-import AppLayout from "../components/layout/AppLayout.vue";
-import { useFormatters } from "../composables/useFormatters";
-import { Ban, RefreshCw } from "lucide-vue-next";
+} from '../lib/api'
+import type { BlockedIpsResponse } from '../lib/types'
+import AppLayout from '../components/layout/AppLayout.vue'
+import { useFormatters } from '../composables/useFormatters'
+import { Ban, RefreshCw } from 'lucide-vue-next'
 
-const { formatTimestamp, timeRemaining } = useFormatters();
-const loading = ref(true);
-const refreshing = ref(false);
-const pulling = ref(false);
-const pushing = ref(false);
-const mutatingId = ref<number | null>(null);
-const filtersReady = ref(false);
-const error = ref("");
-const successMessage = ref("");
+const { formatTimestamp, timeRemaining } = useFormatters()
+const loading = ref(true)
+const refreshing = ref(false)
+const pulling = ref(false)
+const pushing = ref(false)
+const mutatingId = ref<number | null>(null)
+const filtersReady = ref(false)
+const error = ref('')
+const successMessage = ref('')
 const blockedPayload = ref<BlockedIpsResponse>({
   total: 0,
   limit: 0,
   offset: 0,
   blocked_ips: [],
-});
+})
 
 const blockedFilters = reactive({
-  provider: "all",
+  provider: 'all',
   active_only: true,
-  sort_by: "blocked_at",
-  sort_direction: "desc" as "asc" | "desc",
-});
+  sort_by: 'blocked_at',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
 
 const loadBlockedIps = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
   try {
     blockedPayload.value = await fetchBlockedIps({
       limit: 30,
       provider:
-        blockedFilters.provider === "all" ? undefined : blockedFilters.provider,
+        blockedFilters.provider === 'all' ? undefined : blockedFilters.provider,
       active_only: blockedFilters.active_only,
       sort_by: blockedFilters.sort_by,
       sort_direction: blockedFilters.sort_direction,
-    });
-    error.value = "";
+    })
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取封禁名单失败";
+    error.value = e instanceof Error ? e.message : '读取封禁名单失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 const runSafeLinePull = async () => {
-  pulling.value = true;
-  error.value = "";
-  successMessage.value = "";
+  pulling.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
-    const response = await pullSafeLineBlockedIps();
-    successMessage.value = response.message;
-    await loadBlockedIps();
+    const response = await pullSafeLineBlockedIps()
+    successMessage.value = response.message
+    await loadBlockedIps()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "拉取雷池封禁失败";
+    error.value = e instanceof Error ? e.message : '拉取雷池封禁失败'
   } finally {
-    pulling.value = false;
+    pulling.value = false
   }
-};
+}
 
 const runSafeLinePush = async () => {
-  pushing.value = true;
-  error.value = "";
-  successMessage.value = "";
+  pushing.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
-    const response = await syncSafeLineBlockedIps();
-    successMessage.value = response.message;
-    await loadBlockedIps();
+    const response = await syncSafeLineBlockedIps()
+    successMessage.value = response.message
+    await loadBlockedIps()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "推送本地封禁失败";
+    error.value = e instanceof Error ? e.message : '推送本地封禁失败'
   } finally {
-    pushing.value = false;
+    pushing.value = false
   }
-};
+}
 
 const handleUnblock = async (id: number) => {
-  mutatingId.value = id;
+  mutatingId.value = id
   try {
-    await unblockIp(id);
-    await loadBlockedIps();
+    await unblockIp(id)
+    await loadBlockedIps()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "解除封禁失败";
+    error.value = e instanceof Error ? e.message : '解除封禁失败'
   } finally {
-    mutatingId.value = null;
+    mutatingId.value = null
   }
-};
+}
 
 onMounted(async () => {
-  await loadBlockedIps(true);
-  filtersReady.value = true;
-});
+  await loadBlockedIps(true)
+  filtersReady.value = true
+})
 
 watch(
   () => ({ ...blockedFilters }),
   () => {
-    if (!filtersReady.value) return;
-    loadBlockedIps();
+    if (!filtersReady.value) return
+    loadBlockedIps()
   },
   { deep: true },
-);
+)
 </script>
 
 <template>
@@ -123,7 +123,7 @@ watch(
         :disabled="pulling"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': pulling }" />
-        {{ pulling ? "拉取中..." : "拉取雷池封禁" }}
+        {{ pulling ? '拉取中...' : '拉取雷池封禁' }}
       </button>
       <button
         @click="runSafeLinePush"
@@ -131,7 +131,7 @@ watch(
         :disabled="pushing"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': pushing }" />
-        {{ pushing ? "推送中..." : "推送本地封禁" }}
+        {{ pushing ? '推送中...' : '推送本地封禁' }}
       </button>
       <button
         @click="loadBlockedIps()"
@@ -219,10 +219,10 @@ watch(
             >
               {{
                 mutatingId === ip.id
-                  ? "处理中..."
-                  : ip.provider === "safeline"
-                    ? "雷池解封"
-                    : "解除封禁"
+                  ? '处理中...'
+                  : ip.provider === 'safeline'
+                    ? '雷池解封'
+                    : '解除封禁'
               }}
             </button>
             <span

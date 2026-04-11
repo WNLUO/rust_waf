@@ -1,193 +1,193 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { fetchSecurityEvents, syncSafeLineEvents } from "../lib/api";
-import type { SecurityEventItem, SecurityEventsResponse } from "../lib/types";
-import AppLayout from "../components/layout/AppLayout.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
-import { Copy, Eye, RefreshCw, X } from "lucide-vue-next";
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { fetchSecurityEvents, syncSafeLineEvents } from '../lib/api'
+import type { SecurityEventItem, SecurityEventsResponse } from '../lib/types'
+import AppLayout from '../components/layout/AppLayout.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
+import { Copy, Eye, RefreshCw, X } from 'lucide-vue-next'
 
-const { formatTimestamp, actionLabel, layerLabel } = useFormatters();
-const loading = ref(true);
-const refreshing = ref(false);
-const syncing = ref(false);
-const error = ref("");
-const successMessage = ref("");
-const filtersReady = ref(false);
-const previewTitle = ref("");
-const previewContent = ref("");
+const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
+const loading = ref(true)
+const refreshing = ref(false)
+const syncing = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const filtersReady = ref(false)
+const previewTitle = ref('')
+const previewContent = ref('')
 const eventsPayload = ref<SecurityEventsResponse>({
   total: 0,
   limit: 0,
   offset: 0,
   events: [],
-});
+})
 
 const eventsFilters = reactive({
-  layer: "all",
-  provider: "all",
-  provider_site_id: "all",
-  action: "all",
+  layer: 'all',
+  provider: 'all',
+  provider_site_id: 'all',
+  action: 'all',
   blocked_only: false,
-  handled: "all" as "all" | "handled" | "unhandled",
-  sort_by: "created_at",
-  sort_direction: "desc" as "asc" | "desc",
-});
+  handled: 'all' as 'all' | 'handled' | 'unhandled',
+  sort_by: 'created_at',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
 
 const loadEvents = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
   try {
     eventsPayload.value = await fetchSecurityEvents({
       limit: 30,
       sort_by: eventsFilters.sort_by,
       sort_direction: eventsFilters.sort_direction,
       blocked_only: eventsFilters.blocked_only,
-      layer: eventsFilters.layer === "all" ? undefined : eventsFilters.layer,
+      layer: eventsFilters.layer === 'all' ? undefined : eventsFilters.layer,
       provider:
-        eventsFilters.provider === "all" ? undefined : eventsFilters.provider,
+        eventsFilters.provider === 'all' ? undefined : eventsFilters.provider,
       provider_site_id:
-        eventsFilters.provider_site_id === "all"
+        eventsFilters.provider_site_id === 'all'
           ? undefined
           : eventsFilters.provider_site_id,
-      action: eventsFilters.action === "all" ? undefined : eventsFilters.action,
+      action: eventsFilters.action === 'all' ? undefined : eventsFilters.action,
       handled_only:
-        eventsFilters.handled === "all"
+        eventsFilters.handled === 'all'
           ? undefined
-          : eventsFilters.handled === "handled"
+          : eventsFilters.handled === 'handled'
             ? true
             : false,
-    });
-    error.value = "";
+    })
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取事件失败";
+    error.value = e instanceof Error ? e.message : '读取事件失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 const runSafeLineSync = async () => {
-  syncing.value = true;
-  error.value = "";
-  successMessage.value = "";
+  syncing.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
-    const response = await syncSafeLineEvents();
-    successMessage.value = response.message;
-    await loadEvents();
+    const response = await syncSafeLineEvents()
+    successMessage.value = response.message
+    await loadEvents()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "同步雷池事件失败";
+    error.value = e instanceof Error ? e.message : '同步雷池事件失败'
   } finally {
-    syncing.value = false;
+    syncing.value = false
   }
-};
+}
 
 const copyToClipboard = async (text: string) => {
   try {
-    await navigator.clipboard?.writeText(text);
+    await navigator.clipboard?.writeText(text)
   } catch {
     // ignore clipboard failure
   }
-};
+}
 
 const openPreview = (title: string, content: string | null | undefined) => {
-  if (!content) return;
-  previewTitle.value = title;
-  previewContent.value = content;
-};
+  if (!content) return
+  previewTitle.value = title
+  previewContent.value = content
+}
 
 const closePreview = () => {
-  previewTitle.value = "";
-  previewContent.value = "";
-};
+  previewTitle.value = ''
+  previewContent.value = ''
+}
 
 const safeLineActionMap: Record<string, string> = {
-  "0": "检测",
-  "1": "拦截",
-};
+  '0': '检测',
+  '1': '拦截',
+}
 
 const safeLineAttackTypeMap: Record<string, string> = {
-  "7": "漏洞利用",
-  "8": "代码注入",
-  "10": "文件上传",
-};
+  '7': '漏洞利用',
+  '8': '代码注入',
+  '10': '文件上传',
+}
 
 const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
-  if (event.layer !== "safeline") return null;
-  const matched = event.reason.match(/^safeline:([^:]+):/);
-  return matched?.[1] ?? null;
-};
+  if (event.layer !== 'safeline') return null
+  const matched = event.reason.match(/^safeline:([^:]+):/)
+  return matched?.[1] ?? null
+}
 
 const eventActionLabel = (action: string) => {
-  const normalized = action.trim().toLowerCase();
+  const normalized = action.trim().toLowerCase()
   if (normalized in safeLineActionMap) {
-    return safeLineActionMap[normalized];
+    return safeLineActionMap[normalized]
   }
-  if (["block", "allow", "alert", "log"].includes(normalized)) {
-    return actionLabel(normalized);
+  if (['block', 'allow', 'alert', 'log'].includes(normalized)) {
+    return actionLabel(normalized)
   }
-  return `未知动作(${action})`;
-};
+  return `未知动作(${action})`
+}
 
 const eventActionBadgeType = (action: string) => {
-  const normalized = action.trim().toLowerCase();
-  if (normalized === "1" || normalized === "block") return "error";
-  if (normalized === "allow") return "success";
-  if (normalized === "0" || normalized === "alert" || normalized === "log")
-    return "warning";
-  return "warning";
-};
+  const normalized = action.trim().toLowerCase()
+  if (normalized === '1' || normalized === 'block') return 'error'
+  if (normalized === 'allow') return 'success'
+  if (normalized === '0' || normalized === 'alert' || normalized === 'log')
+    return 'warning'
+  return 'warning'
+}
 
 const eventAttackTypeLabel = (event: SecurityEventItem) => {
-  const code = getSafeLineAttackTypeCode(event);
-  if (!code) return "";
-  return safeLineAttackTypeMap[code] || `未知类型(${code})`;
-};
+  const code = getSafeLineAttackTypeCode(event)
+  if (!code) return ''
+  return safeLineAttackTypeMap[code] || `未知类型(${code})`
+}
 
 const eventReasonLabel = (event: SecurityEventItem) => {
-  if (event.layer !== "safeline") return event.reason;
+  if (event.layer !== 'safeline') return event.reason
 
-  const attackTypeCode = getSafeLineAttackTypeCode(event);
+  const attackTypeCode = getSafeLineAttackTypeCode(event)
   const attackTypeLabel = attackTypeCode
     ? safeLineAttackTypeMap[attackTypeCode]
-    : "";
-  const normalized = event.reason.replace(/^safeline:[^:]+:/, "").trim();
+    : ''
+  const normalized = event.reason.replace(/^safeline:[^:]+:/, '').trim()
 
   if (attackTypeCode && normalized === `检测到 ${attackTypeCode} 攻击`) {
-    return attackTypeLabel || normalized;
+    return attackTypeLabel || normalized
   }
 
-  return normalized || event.reason;
-};
+  return normalized || event.reason
+}
 
 onMounted(async () => {
-  await loadEvents(true);
-  filtersReady.value = true;
-});
+  await loadEvents(true)
+  filtersReady.value = true
+})
 
 watch(
   () => ({ ...eventsFilters }),
   () => {
-    if (!filtersReady.value) return;
-    loadEvents();
+    if (!filtersReady.value) return
+    loadEvents()
   },
   { deep: true },
-);
+)
 
 const siteOptions = computed(() => {
-  const seen = new Map<string, string>();
+  const seen = new Map<string, string>()
   for (const event of eventsPayload.value.events) {
-    if (!event.provider_site_id) continue;
+    if (!event.provider_site_id) continue
     seen.set(
       event.provider_site_id,
       event.provider_site_name ||
         event.provider_site_domain ||
         event.provider_site_id,
-    );
+    )
   }
-  return Array.from(seen.entries()).map(([id, label]) => ({ id, label }));
-});
+  return Array.from(seen.entries()).map(([id, label]) => ({ id, label }))
+})
 </script>
 
 <template>
@@ -199,7 +199,7 @@ const siteOptions = computed(() => {
         :disabled="syncing"
       >
         <RefreshCw :size="14" :class="{ 'animate-spin': syncing }" />
-        {{ syncing ? "同步中..." : "同步雷池事件" }}
+        {{ syncing ? '同步中...' : '同步雷池事件' }}
       </button>
       <button
         @click="loadEvents()"

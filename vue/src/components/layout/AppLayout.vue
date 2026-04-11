@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import {
   LayoutDashboard,
   Shield,
@@ -17,98 +17,96 @@ import {
   PanelLeftOpen,
   X,
   AppWindow,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
 const navItems = [
-  { name: "总览", path: "/admin", icon: LayoutDashboard },
-  { name: "站点管理", path: "/admin/sites", icon: AppWindow },
-  { name: "规则中心", path: "/admin/rules", icon: Shield },
-  { name: "L4管理", path: "/admin/l4", icon: ServerCog },
-  { name: "L7管理", path: "/admin/l7", icon: Globe },
-  { name: "事件记录", path: "/admin/events", icon: Activity },
-  { name: "封禁名单", path: "/admin/blocked", icon: Ban },
-  { name: "雷池联动", path: "/admin/safeline", icon: Link2 },
-  { name: "系统设置", path: "/admin/settings", icon: Settings },
-];
+  { name: '总览', path: '/admin', icon: LayoutDashboard },
+  { name: '站点管理', path: '/admin/sites', icon: AppWindow },
+  { name: '规则中心', path: '/admin/rules', icon: Shield },
+  { name: 'L4管理', path: '/admin/l4', icon: ServerCog },
+  { name: 'L7管理', path: '/admin/l7', icon: Globe },
+  { name: '事件记录', path: '/admin/events', icon: Activity },
+  { name: '封禁名单', path: '/admin/blocked', icon: Ban },
+  { name: '雷池联动', path: '/admin/safeline', icon: Link2 },
+  { name: '系统设置', path: '/admin/settings', icon: Settings },
+]
 
-const route = useRoute();
-const DESKTOP_BREAKPOINT = 1024;
-const SIDEBAR_STORAGE_KEY = "waf-admin-sidebar-collapsed";
+const route = useRoute()
+const DESKTOP_BREAKPOINT = 1024
+const SIDEBAR_STORAGE_KEY = 'waf-admin-sidebar-collapsed'
 
-const isDesktop = ref(false);
-const desktopCollapsed = ref(false);
-const mobileMenuOpen = ref(false);
+const isDesktop = ref(false)
+const desktopCollapsed = ref(false)
+const mobileMenuOpen = ref(false)
 
 const isRouteActive = (path: string) => {
-  if (path === "/admin") return route.path === "/admin";
-  return route.path === path || route.path.startsWith(`${path}/`);
-};
+  if (path === '/admin') return route.path === '/admin'
+  return route.path === path || route.path.startsWith(`${path}/`)
+}
 
 const syncViewport = () => {
-  const nextIsDesktop = window.innerWidth >= DESKTOP_BREAKPOINT;
-  isDesktop.value = nextIsDesktop;
+  const nextIsDesktop = window.innerWidth >= DESKTOP_BREAKPOINT
+  isDesktop.value = nextIsDesktop
 
   if (nextIsDesktop) {
-    mobileMenuOpen.value = false;
+    mobileMenuOpen.value = false
   }
-};
+}
 
 const toggleSidebar = () => {
   if (isDesktop.value) {
-    desktopCollapsed.value = !desktopCollapsed.value;
-    return;
+    desktopCollapsed.value = !desktopCollapsed.value
+    return
   }
-  mobileMenuOpen.value = !mobileMenuOpen.value;
-};
+  mobileMenuOpen.value = !mobileMenuOpen.value
+}
 
-const shouldShowNav = computed(() => isDesktop.value || mobileMenuOpen.value);
+const shouldShowNav = computed(() => isDesktop.value || mobileMenuOpen.value)
 const sidebarExpanded = computed(
   () => !isDesktop.value || !desktopCollapsed.value,
-);
+)
 const currentPageName = computed(
-  () => navItems.find((item) => isRouteActive(item.path))?.name ?? "控制台",
-);
-const sidebarWidth = computed(() =>
-  desktopCollapsed.value ? "4rem" : "16rem",
-);
+  () => navItems.find((item) => isRouteActive(item.path))?.name ?? '控制台',
+)
+const sidebarWidth = computed(() => (desktopCollapsed.value ? '4rem' : '16rem'))
 const layoutStyle = computed(() => ({
-  "--sidebar-width": isDesktop.value ? sidebarWidth.value : "100%",
-}));
+  '--sidebar-width': isDesktop.value ? sidebarWidth.value : '100%',
+}))
 const toggleLabel = computed(() => {
   if (isDesktop.value) {
-    return desktopCollapsed.value ? "展开侧边栏" : "收起侧边栏";
+    return desktopCollapsed.value ? '展开侧边栏' : '收起侧边栏'
   }
-  return mobileMenuOpen.value ? "收起导航" : "展开导航";
-});
+  return mobileMenuOpen.value ? '收起导航' : '展开导航'
+})
 const toggleIcon = computed(() => {
   if (isDesktop.value) {
-    return desktopCollapsed.value ? PanelLeftOpen : PanelLeftClose;
+    return desktopCollapsed.value ? PanelLeftOpen : PanelLeftClose
   }
-  return mobileMenuOpen.value ? X : Menu;
-});
+  return mobileMenuOpen.value ? X : Menu
+})
 
 onMounted(() => {
   desktopCollapsed.value =
-    window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
-  syncViewport();
-  window.addEventListener("resize", syncViewport);
-});
+    window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
+  syncViewport()
+  window.addEventListener('resize', syncViewport)
+})
 
 onBeforeUnmount(() => {
-  window.removeEventListener("resize", syncViewport);
-});
+  window.removeEventListener('resize', syncViewport)
+})
 
 watch(desktopCollapsed, (collapsed) => {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
-});
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed))
+})
 
 watch(
   () => route.fullPath,
   () => {
-    mobileMenuOpen.value = false;
+    mobileMenuOpen.value = false
   },
-);
+)
 </script>
 
 <template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
+import { computed, onMounted, reactive, ref } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
 import {
   createLocalCertificate,
   deleteLocalCertificate,
@@ -12,7 +12,7 @@ import {
   testSafeLineConnection,
   updateSafeLineMappings,
   updateSettings,
-} from "../lib/api";
+} from '../lib/api'
 import type {
   LocalCertificateDraft,
   LocalCertificateItem,
@@ -20,93 +20,100 @@ import type {
   SafeLineSiteItem,
   SafeLineTestResponse,
   SettingsPayload,
-} from "../lib/types";
-import { PlugZap, RefreshCw, Save, ServerCog, Settings, X } from "lucide-vue-next";
+} from '../lib/types'
+import {
+  PlugZap,
+  RefreshCw,
+  Save,
+  ServerCog,
+  Settings,
+  X,
+} from 'lucide-vue-next'
 
-type SystemSettingsForm = SettingsPayload;
+type SystemSettingsForm = SettingsPayload
 
-const loading = ref(true);
-const saving = ref(false);
-const testing = ref(false);
-const loadingSites = ref(false);
-const savingMappings = ref(false);
-const loadingCertificates = ref(false);
-const savingCertificate = ref(false);
-const generatingCertificate = ref(false);
-const savingDefaultCertificate = ref(false);
-const readingClipboard = ref(false);
-const deletingCertificateId = ref<number | null>(null);
-const showGenerateModal = ref(false);
-const showUploadModal = ref(false);
-const error = ref("");
-const successMessage = ref("");
-const testResult = ref<SafeLineTestResponse | null>(null);
-const sites = ref<SafeLineSiteItem[]>([]);
-const mappings = ref<SafeLineMappingItem[]>([]);
-const localCertificates = ref<LocalCertificateItem[]>([]);
-const sitesLoadedAt = ref<number | null>(null);
+const loading = ref(true)
+const saving = ref(false)
+const testing = ref(false)
+const loadingSites = ref(false)
+const savingMappings = ref(false)
+const loadingCertificates = ref(false)
+const savingCertificate = ref(false)
+const generatingCertificate = ref(false)
+const savingDefaultCertificate = ref(false)
+const readingClipboard = ref(false)
+const deletingCertificateId = ref<number | null>(null)
+const showGenerateModal = ref(false)
+const showUploadModal = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const testResult = ref<SafeLineTestResponse | null>(null)
+const sites = ref<SafeLineSiteItem[]>([])
+const mappings = ref<SafeLineMappingItem[]>([])
+const localCertificates = ref<LocalCertificateItem[]>([])
+const sitesLoadedAt = ref<number | null>(null)
 
 const systemSettings = reactive<SystemSettingsForm>({
-  gateway_name: "玄枢防护网关",
+  gateway_name: '玄枢防护网关',
   auto_refresh_seconds: 5,
-  https_listen_addr: "",
+  https_listen_addr: '',
   default_certificate_id: null,
-  upstream_endpoint: "",
-  api_endpoint: "127.0.0.1:3000",
-  notification_level: "critical",
+  upstream_endpoint: '',
+  api_endpoint: '127.0.0.1:3000',
+  notification_level: 'critical',
   retain_days: 30,
-  notes: "",
+  notes: '',
   safeline: {
     enabled: true,
     auto_sync_events: false,
     auto_sync_blocked_ips_push: false,
     auto_sync_blocked_ips_pull: false,
     auto_sync_interval_secs: 300,
-    base_url: "",
-    api_token: "",
-    username: "",
-    password: "",
+    base_url: '',
+    api_token: '',
+    username: '',
+    password: '',
     verify_tls: false,
-    openapi_doc_path: "/openapi_doc/",
-    auth_probe_path: "/api/open/system/key",
-    site_list_path: "/api/open/site",
-    event_list_path: "/api/open/records",
-    blocklist_sync_path: "/api/open/ipgroup",
-    blocklist_delete_path: "/api/open/ipgroup",
+    openapi_doc_path: '/openapi_doc/',
+    auth_probe_path: '/api/open/system/key',
+    site_list_path: '/api/open/site',
+    event_list_path: '/api/open/records',
+    blocklist_sync_path: '/api/open/ipgroup',
+    blocklist_delete_path: '/api/open/ipgroup',
     blocklist_ip_group_ids: [],
   },
-});
+})
 
 const generateCertificateForm = reactive({
-  name: "",
-  domainsText: "",
-});
+  name: '',
+  domainsText: '',
+})
 
 const uploadCertificateForm = reactive<LocalCertificateDraft>({
-  name: "",
+  name: '',
   domains: [],
-  issuer: "",
+  issuer: '',
   valid_from: null,
   valid_to: null,
-  source_type: "manual",
+  source_type: 'manual',
   provider_remote_id: null,
   trusted: false,
   expired: false,
-  notes: "",
+  notes: '',
   last_synced_at: null,
-  certificate_pem: "",
-  private_key_pem: "",
-});
+  certificate_pem: '',
+  private_key_pem: '',
+})
 
 const uploadCertificateDomainsText = computed({
-  get: () => uploadCertificateForm.domains.join(", "),
+  get: () => uploadCertificateForm.domains.join(', '),
   set: (value: string) => {
     uploadCertificateForm.domains = value
       .split(/[\n,]/)
       .map((item) => item.trim())
-      .filter(Boolean);
+      .filter(Boolean)
   },
-});
+})
 
 function toPlainSafeLineSettings() {
   return {
@@ -129,7 +136,7 @@ function toPlainSafeLineSettings() {
     blocklist_sync_path: systemSettings.safeline.blocklist_sync_path,
     blocklist_delete_path: systemSettings.safeline.blocklist_delete_path,
     blocklist_ip_group_ids: [...systemSettings.safeline.blocklist_ip_group_ids],
-  };
+  }
 }
 
 function toPlainSettingsPayload(): SettingsPayload {
@@ -144,59 +151,59 @@ function toPlainSettingsPayload(): SettingsPayload {
     retain_days: systemSettings.retain_days,
     notes: systemSettings.notes,
     safeline: toPlainSafeLineSettings(),
-  };
+  }
 }
 
 async function loadCertificates() {
-  loadingCertificates.value = true;
+  loadingCertificates.value = true
 
   try {
-    const response = await fetchLocalCertificates();
-    localCertificates.value = response.certificates;
+    const response = await fetchLocalCertificates()
+    localCertificates.value = response.certificates
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取本地证书失败";
+    error.value = e instanceof Error ? e.message : '读取本地证书失败'
   } finally {
-    loadingCertificates.value = false;
+    loadingCertificates.value = false
   }
 }
 
 async function loadSettings() {
-  loading.value = true;
-  error.value = "";
+  loading.value = true
+  error.value = ''
 
   try {
-    const payload = await fetchSettings();
-    Object.assign(systemSettings, payload);
+    const payload = await fetchSettings()
+    Object.assign(systemSettings, payload)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "系统设置加载失败";
+    error.value = e instanceof Error ? e.message : '系统设置加载失败'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
 async function loadMappings() {
   try {
-    const response = await fetchSafeLineMappings();
-    mappings.value = response.mappings;
+    const response = await fetchSafeLineMappings()
+    mappings.value = response.mappings
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取雷池站点映射失败";
+    error.value = e instanceof Error ? e.message : '读取雷池站点映射失败'
   }
 }
 
 async function saveSettings() {
-  saving.value = true;
-  error.value = "";
-  successMessage.value = "";
+  saving.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     systemSettings.auto_refresh_seconds = Number.isFinite(
       systemSettings.auto_refresh_seconds,
     )
       ? Math.min(Math.max(systemSettings.auto_refresh_seconds, 3), 60)
-      : 5;
+      : 5
     systemSettings.retain_days = Number.isFinite(systemSettings.retain_days)
       ? Math.min(Math.max(systemSettings.retain_days, 1), 365)
-      : 30;
+      : 30
     systemSettings.safeline.auto_sync_interval_secs = Number.isFinite(
       systemSettings.safeline.auto_sync_interval_secs,
     )
@@ -204,74 +211,74 @@ async function saveSettings() {
           Math.max(systemSettings.safeline.auto_sync_interval_secs, 15),
           86400,
         )
-      : 300;
+      : 300
 
-    const response = await updateSettings(toPlainSettingsPayload());
-    successMessage.value = response.message;
+    const response = await updateSettings(toPlainSettingsPayload())
+    successMessage.value = response.message
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "系统设置保存失败";
+    error.value = e instanceof Error ? e.message : '系统设置保存失败'
   } finally {
-    saving.value = false;
+    saving.value = false
   }
 }
 
 async function runSafeLineTest() {
-  testing.value = true;
-  error.value = "";
+  testing.value = true
+  error.value = ''
 
   try {
-    testResult.value = await testSafeLineConnection(toPlainSafeLineSettings());
+    testResult.value = await testSafeLineConnection(toPlainSafeLineSettings())
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "雷池连通性测试失败";
-    testResult.value = null;
+    error.value = e instanceof Error ? e.message : '雷池连通性测试失败'
+    testResult.value = null
   } finally {
-    testing.value = false;
+    testing.value = false
   }
 }
 
 async function loadSafeLineSites() {
-  loadingSites.value = true;
-  error.value = "";
+  loadingSites.value = true
+  error.value = ''
 
   try {
-    const response = await fetchSafeLineSites(toPlainSafeLineSettings());
-    sites.value = response.sites;
-    sitesLoadedAt.value = Math.floor(Date.now() / 1000);
+    const response = await fetchSafeLineSites(toPlainSafeLineSettings())
+    sites.value = response.sites
+    sitesLoadedAt.value = Math.floor(Date.now() / 1000)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取雷池站点列表失败";
-    sites.value = [];
+    error.value = e instanceof Error ? e.message : '读取雷池站点列表失败'
+    sites.value = []
   } finally {
-    loadingSites.value = false;
+    loadingSites.value = false
   }
 }
 
 function siteMappingDraft(site: SafeLineSiteItem) {
   const existing = mappings.value.find(
     (item) => item.safeline_site_id === site.id,
-  );
+  )
   return {
     safeline_site_id: site.id,
     safeline_site_name: site.name,
     safeline_site_domain: site.domain,
-    local_alias: existing?.local_alias ?? site.name ?? site.domain ?? "",
+    local_alias: existing?.local_alias ?? site.name ?? site.domain ?? '',
     enabled: existing?.enabled ?? true,
     is_primary: existing?.is_primary ?? false,
-    notes: existing?.notes ?? "",
+    notes: existing?.notes ?? '',
     updated_at: existing?.updated_at ?? null,
-  };
+  }
 }
 
-const mappingDrafts = computed(() => sites.value.map(siteMappingDraft));
+const mappingDrafts = computed(() => sites.value.map(siteMappingDraft))
 
 function formatTimestamp(timestamp: number | null) {
-  if (!timestamp) return "暂无";
-  return new Date(timestamp * 1000).toLocaleString("zh-CN", { hour12: false });
+  if (!timestamp) return '暂无'
+  return new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false })
 }
 
 async function saveMappings() {
-  savingMappings.value = true;
-  error.value = "";
-  successMessage.value = "";
+  savingMappings.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     const payload = {
@@ -284,14 +291,14 @@ async function saveMappings() {
         is_primary: item.is_primary,
         notes: item.notes,
       })),
-    };
-    const response = await updateSafeLineMappings(payload);
-    successMessage.value = response.message;
-    await loadMappings();
+    }
+    const response = await updateSafeLineMappings(payload)
+    successMessage.value = response.message
+    await loadMappings()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存雷池站点映射失败";
+    error.value = e instanceof Error ? e.message : '保存雷池站点映射失败'
   } finally {
-    savingMappings.value = false;
+    savingMappings.value = false
   }
 }
 
@@ -299,47 +306,47 @@ function normalizeDomainList(value: string) {
   return value
     .split(/[\n,]/)
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter(Boolean)
 }
 
 function defaultGeneratedDomain() {
-  return `fake-${Date.now().toString(36)}.local`;
+  return `fake-${Date.now().toString(36)}.local`
 }
 
 function defaultCertificateName(primaryDomain?: string) {
   if (primaryDomain?.trim()) {
-    return `cert-${primaryDomain.trim()}`;
+    return `cert-${primaryDomain.trim()}`
   }
-  return `cert-${Date.now().toString(36)}`;
+  return `cert-${Date.now().toString(36)}`
 }
 
 function resetGenerateModal() {
-  generateCertificateForm.name = "";
-  generateCertificateForm.domainsText = "";
+  generateCertificateForm.name = ''
+  generateCertificateForm.domainsText = ''
 }
 
 function resetUploadModal() {
-  uploadCertificateForm.name = "";
-  uploadCertificateForm.domains = [];
-  uploadCertificateForm.issuer = "";
-  uploadCertificateForm.notes = "";
-  uploadCertificateForm.certificate_pem = "";
-  uploadCertificateForm.private_key_pem = "";
+  uploadCertificateForm.name = ''
+  uploadCertificateForm.domains = []
+  uploadCertificateForm.issuer = ''
+  uploadCertificateForm.notes = ''
+  uploadCertificateForm.certificate_pem = ''
+  uploadCertificateForm.private_key_pem = ''
 }
 
 function openGenerateModal() {
-  error.value = "";
-  successMessage.value = "";
-  resetGenerateModal();
-  showGenerateModal.value = true;
+  error.value = ''
+  successMessage.value = ''
+  resetGenerateModal()
+  showGenerateModal.value = true
 }
 
 function closeGenerateModal() {
-  showGenerateModal.value = false;
+  showGenerateModal.value = false
 }
 
 function closeUploadModal() {
-  showUploadModal.value = false;
+  showUploadModal.value = false
 }
 
 function extractPemBlocks(source: string) {
@@ -347,83 +354,91 @@ function extractPemBlocks(source: string) {
     ...source.matchAll(
       /-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g,
     ),
-  ].map((match) => match[0].trim());
+  ].map((match) => match[0].trim())
   const privateKeyMatch = source.match(
     /-----BEGIN (?:RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]+?-----END (?:RSA |EC |DSA |ENCRYPTED )?PRIVATE KEY-----/,
-  );
+  )
 
   return {
-    certificate_pem: certificateMatches.join("\n"),
-    private_key_pem: privateKeyMatch?.[0].trim() ?? "",
-  };
+    certificate_pem: certificateMatches.join('\n'),
+    private_key_pem: privateKeyMatch?.[0].trim() ?? '',
+  }
 }
 
 async function tryFillCertificateFromClipboard() {
-  if (!navigator.clipboard?.readText) return;
+  if (!navigator.clipboard?.readText) return
 
-  readingClipboard.value = true;
+  readingClipboard.value = true
   try {
-    const text = await navigator.clipboard.readText();
-    const detected = extractPemBlocks(text);
-    if (detected.certificate_pem && !uploadCertificateForm.certificate_pem?.trim()) {
-      uploadCertificateForm.certificate_pem = detected.certificate_pem;
+    const text = await navigator.clipboard.readText()
+    const detected = extractPemBlocks(text)
+    if (
+      detected.certificate_pem &&
+      !uploadCertificateForm.certificate_pem?.trim()
+    ) {
+      uploadCertificateForm.certificate_pem = detected.certificate_pem
     }
-    if (detected.private_key_pem && !uploadCertificateForm.private_key_pem?.trim()) {
-      uploadCertificateForm.private_key_pem = detected.private_key_pem;
+    if (
+      detected.private_key_pem &&
+      !uploadCertificateForm.private_key_pem?.trim()
+    ) {
+      uploadCertificateForm.private_key_pem = detected.private_key_pem
     }
   } catch {
     // 浏览器权限或非安全上下文下读取失败时静默降级。
   } finally {
-    readingClipboard.value = false;
+    readingClipboard.value = false
   }
 }
 
 async function openUploadModal() {
-  error.value = "";
-  successMessage.value = "";
-  resetUploadModal();
-  showUploadModal.value = true;
-  await tryFillCertificateFromClipboard();
+  error.value = ''
+  successMessage.value = ''
+  resetUploadModal()
+  showUploadModal.value = true
+  await tryFillCertificateFromClipboard()
 }
 
 async function persistDefaultCertificate(
   id: number | null,
-  successText = "默认证书已保存。",
+  successText = '默认证书已保存。',
 ) {
-  savingDefaultCertificate.value = true;
-  error.value = "";
-  successMessage.value = "";
+  savingDefaultCertificate.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
-    const latest = await fetchSettings();
+    const latest = await fetchSettings()
     const nextId =
-      typeof id === "number" && Number.isFinite(id) && id > 0 ? id : null;
-    latest.default_certificate_id = nextId;
-    const response = await updateSettings(latest);
-    systemSettings.default_certificate_id = nextId;
-    successMessage.value = successText || response.message;
+      typeof id === 'number' && Number.isFinite(id) && id > 0 ? id : null
+    latest.default_certificate_id = nextId
+    const response = await updateSettings(latest)
+    systemSettings.default_certificate_id = nextId
+    successMessage.value = successText || response.message
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "默认证书保存失败";
-    await loadSettings();
+    error.value = e instanceof Error ? e.message : '默认证书保存失败'
+    await loadSettings()
   } finally {
-    savingDefaultCertificate.value = false;
+    savingDefaultCertificate.value = false
   }
 }
 
 async function handleDefaultCertificateChange(event: Event) {
-  const target = event.target as HTMLSelectElement | null;
-  const rawValue = target?.value ?? "";
+  const target = event.target as HTMLSelectElement | null
+  const rawValue = target?.value ?? ''
   const nextId =
-    rawValue === "" || rawValue === "null" ? null : Number.parseInt(rawValue, 10);
+    rawValue === '' || rawValue === 'null'
+      ? null
+      : Number.parseInt(rawValue, 10)
   await persistDefaultCertificate(
     Number.isFinite(nextId as number) ? (nextId as number) : null,
-  );
+  )
 }
 
 async function uploadCertificate() {
-  savingCertificate.value = true;
-  error.value = "";
-  successMessage.value = "";
+  savingCertificate.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     const payload: LocalCertificateDraft = {
@@ -436,73 +451,75 @@ async function uploadCertificate() {
         .filter(Boolean),
       issuer: uploadCertificateForm.issuer.trim(),
       notes: uploadCertificateForm.notes.trim(),
-      certificate_pem: uploadCertificateForm.certificate_pem?.trim() ?? "",
-      private_key_pem: uploadCertificateForm.private_key_pem?.trim() ?? "",
-    };
+      certificate_pem: uploadCertificateForm.certificate_pem?.trim() ?? '',
+      private_key_pem: uploadCertificateForm.private_key_pem?.trim() ?? '',
+    }
 
-    await createLocalCertificate(payload);
-    closeUploadModal();
-    resetUploadModal();
-    await loadCertificates();
-    successMessage.value = "证书已上传。";
+    await createLocalCertificate(payload)
+    closeUploadModal()
+    resetUploadModal()
+    await loadCertificates()
+    successMessage.value = '证书已上传。'
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "上传本地证书失败";
+    error.value = e instanceof Error ? e.message : '上传本地证书失败'
   } finally {
-    savingCertificate.value = false;
+    savingCertificate.value = false
   }
 }
 
 async function generateCertificate() {
-  generatingCertificate.value = true;
-  error.value = "";
-  successMessage.value = "";
+  generatingCertificate.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
-    const domains = normalizeDomainList(generateCertificateForm.domainsText);
-    const normalizedDomains = domains.length ? domains : [defaultGeneratedDomain()];
+    const domains = normalizeDomainList(generateCertificateForm.domainsText)
+    const normalizedDomains = domains.length
+      ? domains
+      : [defaultGeneratedDomain()]
     const created = await generateLocalCertificate({
       name: generateCertificateForm.name.trim() || null,
       domains: normalizedDomains,
-      notes: "系统设置中生成的随机假证书",
-    });
-    await loadCertificates();
+      notes: '系统设置中生成的随机假证书',
+    })
+    await loadCertificates()
     await persistDefaultCertificate(
       created.id,
       `已生成随机证书「${created.name}」并设为默认证书。`,
-    );
-    closeGenerateModal();
-    resetGenerateModal();
+    )
+    closeGenerateModal()
+    resetGenerateModal()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "生成随机证书失败";
+    error.value = e instanceof Error ? e.message : '生成随机证书失败'
   } finally {
-    generatingCertificate.value = false;
+    generatingCertificate.value = false
   }
 }
 
 async function removeCertificate(id: number) {
-  deletingCertificateId.value = id;
-  error.value = "";
-  successMessage.value = "";
+  deletingCertificateId.value = id
+  error.value = ''
+  successMessage.value = ''
 
   try {
-    const response = await deleteLocalCertificate(id);
+    const response = await deleteLocalCertificate(id)
     if (systemSettings.default_certificate_id === id) {
-      await persistDefaultCertificate(null, "已删除证书并清空默认证书。");
+      await persistDefaultCertificate(null, '已删除证书并清空默认证书。')
     }
-    await loadCertificates();
-    successMessage.value = response.message;
+    await loadCertificates()
+    successMessage.value = response.message
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "删除本地证书失败";
+    error.value = e instanceof Error ? e.message : '删除本地证书失败'
   } finally {
-    deletingCertificateId.value = null;
+    deletingCertificateId.value = null
   }
 }
 
 onMounted(async () => {
-  await loadSettings();
-  await loadCertificates();
-  await loadMappings();
-});
+  await loadSettings()
+  await loadCertificates()
+  await loadMappings()
+})
 </script>
 
 <template>
@@ -514,7 +531,7 @@ onMounted(async () => {
         class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Save :size="12" />
-        {{ saving ? "保存中..." : "保存设置" }}
+        {{ saving ? '保存中...' : '保存设置' }}
       </button>
     </template>
 
@@ -643,7 +660,6 @@ onMounted(async () => {
               />
             </label>
           </div>
-
         </div>
 
         <div
@@ -667,7 +683,11 @@ onMounted(async () => {
             <div class="flex flex-wrap items-center justify-end gap-2.5">
               <button
                 @click="openGenerateModal"
-                :disabled="generatingCertificate || savingCertificate || savingDefaultCertificate"
+                :disabled="
+                  generatingCertificate ||
+                  savingCertificate ||
+                  savingDefaultCertificate
+                "
                 class="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <RefreshCw :size="12" />
@@ -690,7 +710,7 @@ onMounted(async () => {
                   <p class="mt-1 text-xs leading-5 text-slate-500">
                     {{
                       loadingCertificates
-                        ? "正在读取本地证书..."
+                        ? '正在读取本地证书...'
                         : `共 ${localCertificates.length} 张，可用于站点证书和默认证书。`
                     }}
                   </p>
@@ -703,7 +723,9 @@ onMounted(async () => {
                   :key="certificate.id"
                   class="rounded-[16px] border border-slate-200 bg-white px-4 py-3"
                 >
-                  <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div
+                    class="flex flex-wrap items-center justify-between gap-3"
+                  >
                     <div>
                       <p class="text-sm font-medium text-stone-900">
                         #{{ certificate.id }} · {{ certificate.name }}
@@ -711,20 +733,26 @@ onMounted(async () => {
                       <p class="mt-1 text-xs text-slate-500">
                         {{
                           certificate.domains.length
-                            ? certificate.domains.join(" / ")
-                            : "未填写域名"
+                            ? certificate.domains.join(' / ')
+                            : '未填写域名'
                         }}
                       </p>
                     </div>
                     <div class="flex flex-wrap gap-2">
                       <span
-                        v-if="systemSettings.default_certificate_id === certificate.id"
+                        v-if="
+                          systemSettings.default_certificate_id ===
+                          certificate.id
+                        "
                         class="inline-flex items-center rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700"
                       >
                         当前默认
                       </span>
                       <button
-                        v-if="systemSettings.default_certificate_id !== certificate.id"
+                        v-if="
+                          systemSettings.default_certificate_id !==
+                          certificate.id
+                        "
                         @click="persistDefaultCertificate(certificate.id)"
                         :disabled="savingDefaultCertificate"
                         class="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -738,8 +766,8 @@ onMounted(async () => {
                       >
                         {{
                           deletingCertificateId === certificate.id
-                            ? "删除中..."
-                            : "删除"
+                            ? '删除中...'
+                            : '删除'
                         }}
                       </button>
                     </div>
@@ -864,7 +892,9 @@ onMounted(async () => {
               >
                 <span>自动</span>
                 <input
-                  v-model.number="systemSettings.safeline.auto_sync_interval_secs"
+                  v-model.number="
+                    systemSettings.safeline.auto_sync_interval_secs
+                  "
                   type="number"
                   min="15"
                   max="86400"
@@ -882,7 +912,7 @@ onMounted(async () => {
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-slate-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <PlugZap :size="12" />
-                {{ testing ? "测试中..." : "测试雷池连接" }}
+                {{ testing ? '测试中...' : '测试雷池连接' }}
               </button>
               <button
                 @click="loadSafeLineSites"
@@ -890,7 +920,7 @@ onMounted(async () => {
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <ServerCog :size="12" />
-                {{ loadingSites ? "读取中..." : "读取站点列表" }}
+                {{ loadingSites ? '读取中...' : '读取站点列表' }}
               </button>
               <button
                 @click="saveMappings"
@@ -898,7 +928,7 @@ onMounted(async () => {
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save :size="12" />
-                {{ savingMappings ? "保存中..." : "保存站点映射" }}
+                {{ savingMappings ? '保存中...' : '保存站点映射' }}
               </button>
             </div>
 
@@ -926,11 +956,11 @@ onMounted(async () => {
                   "
                 >
                   {{
-                    testResult.status === "ok"
-                      ? "通过"
-                      : testResult.status === "warning"
-                        ? "需确认"
-                        : "失败"
+                    testResult.status === 'ok'
+                      ? '通过'
+                      : testResult.status === 'warning'
+                        ? '需确认'
+                        : '失败'
                   }}
                 </span>
               </div>
@@ -942,7 +972,7 @@ onMounted(async () => {
                   <p class="text-xs text-slate-500">OpenAPI 文档</p>
                   <p class="mt-1 text-sm font-medium text-stone-900">
                     {{
-                      testResult.openapi_doc_reachable ? "可访问" : "不可访问"
+                      testResult.openapi_doc_reachable ? '可访问' : '不可访问'
                     }}
                     <span
                       v-if="testResult.openapi_doc_status !== null"
@@ -957,7 +987,7 @@ onMounted(async () => {
                 >
                   <p class="text-xs text-slate-500">鉴权探测</p>
                   <p class="mt-1 text-sm font-medium text-stone-900">
-                    {{ testResult.authenticated ? "已通过" : "未通过" }}
+                    {{ testResult.authenticated ? '已通过' : '未通过' }}
                     <span
                       v-if="testResult.auth_probe_status !== null"
                       class="text-slate-500"
@@ -996,15 +1026,15 @@ onMounted(async () => {
                   >
                     <div>
                       <p class="text-sm font-medium text-stone-900">
-                        {{ site.name || "未命名站点" }}
+                        {{ site.name || '未命名站点' }}
                       </p>
                       <p class="mt-1 font-mono text-xs text-slate-500">
-                        {{ site.domain || "未提供域名" }}
+                        {{ site.domain || '未提供域名' }}
                       </p>
                     </div>
                     <div class="text-right text-xs text-slate-500">
-                      <p>ID：{{ site.id || "未提供" }}</p>
-                      <p class="mt-1">状态：{{ site.status || "unknown" }}</p>
+                      <p>ID：{{ site.id || '未提供' }}</p>
+                      <p class="mt-1">状态：{{ site.status || 'unknown' }}</p>
                     </div>
                   </div>
                 </div>
@@ -1040,7 +1070,8 @@ onMounted(async () => {
               生成随机假证书
             </h3>
             <p class="mt-2 text-sm leading-6 text-slate-500">
-              名称和域名都可留空。留空域名时系统会自动补一个 `.local` 域名，并在生成后自动设为默认证书。
+              名称和域名都可留空。留空域名时系统会自动补一个 `.local`
+              域名，并在生成后自动设为默认证书。
             </p>
           </div>
           <button
@@ -1078,8 +1109,11 @@ onMounted(async () => {
             :disabled="generatingCertificate || savingDefaultCertificate"
             class="inline-flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <RefreshCw :size="14" :class="{ 'animate-spin': generatingCertificate }" />
-            {{ generatingCertificate ? "生成中..." : "生成并设为默认" }}
+            <RefreshCw
+              :size="14"
+              :class="{ 'animate-spin': generatingCertificate }"
+            />
+            {{ generatingCertificate ? '生成中...' : '生成并设为默认' }}
           </button>
           <button
             @click="closeGenerateModal"
@@ -1109,7 +1143,8 @@ onMounted(async () => {
               上传本地证书
             </h3>
             <p class="mt-2 text-sm leading-6 text-slate-500">
-              名称和域名可以留空。弹窗打开后会优先尝试从剪切板识别证书 PEM 和私钥 PEM，你也可以手动修改。
+              名称和域名可以留空。弹窗打开后会优先尝试从剪切板识别证书 PEM
+              和私钥 PEM，你也可以手动修改。
             </p>
           </div>
           <button
@@ -1156,7 +1191,7 @@ onMounted(async () => {
                 type="button"
                 class="text-xs font-medium text-blue-700 transition hover:text-blue-900"
               >
-                {{ readingClipboard ? "识别中..." : "重新识别剪切板" }}
+                {{ readingClipboard ? '识别中...' : '重新识别剪切板' }}
               </button>
             </div>
             <textarea
@@ -1182,7 +1217,7 @@ onMounted(async () => {
             class="inline-flex items-center gap-2 rounded-lg border border-blue-500/25 bg-white px-4 py-2 text-sm font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Save :size="14" />
-            {{ savingCertificate ? "上传中..." : "确认上传" }}
+            {{ savingCertificate ? '上传中...' : '确认上传' }}
           </button>
           <button
             @click="closeUploadModal"

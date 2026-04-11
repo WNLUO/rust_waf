@@ -1,23 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   fetchBlockedIps,
   fetchHealth,
   fetchMetrics,
   fetchRulesList,
   fetchSecurityEvents,
-} from "../lib/api";
+} from '../lib/api'
 import type {
   DashboardPayload,
   SecurityEventsResponse,
   BlockedIpsResponse,
   SecurityEventItem,
-} from "../lib/types";
-import AppLayout from "../components/layout/AppLayout.vue";
-import MetricWidget from "../components/ui/MetricWidget.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import CyberCard from "../components/ui/CyberCard.vue";
-import { useFormatters } from "../composables/useFormatters";
+} from '../lib/types'
+import AppLayout from '../components/layout/AppLayout.vue'
+import MetricWidget from '../components/ui/MetricWidget.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import CyberCard from '../components/ui/CyberCard.vue'
+import { useFormatters } from '../composables/useFormatters'
 import {
   Activity,
   Database,
@@ -25,96 +25,96 @@ import {
   RefreshCw,
   Shield,
   ArrowUpRight,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
-const dashboard = ref<DashboardPayload | null>(null);
-const loading = ref(true);
-const refreshing = ref(false);
-const error = ref("");
-const lastUpdated = ref<number | null>(null);
-const refreshTimer = ref<number | null>(null);
+const dashboard = ref<DashboardPayload | null>(null)
+const loading = ref(true)
+const refreshing = ref(false)
+const error = ref('')
+const lastUpdated = ref<number | null>(null)
+const refreshTimer = ref<number | null>(null)
 
 const metricsHistory = reactive({
   totalPackets: [] as number[],
   blockRate: [] as number[],
   latency: [] as number[],
-});
+})
 
 const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
-  const series = metricsHistory[key];
-  series.push(Number.isFinite(value) ? value : 0);
+  const series = metricsHistory[key]
+  series.push(Number.isFinite(value) ? value : 0)
   if (series.length > 12) {
-    series.shift();
+    series.shift()
   }
-};
+}
 
 const { formatBytes, formatNumber, formatLatency, formatTimestamp } =
-  useFormatters();
+  useFormatters()
 
 const urlLikePattern =
-  /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/i;
+  /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/i
 
 const formatSiteLabel = (value: string | null | undefined): string => {
-  const raw = value?.trim();
-  if (!raw) return "";
+  const raw = value?.trim()
+  if (!raw) return ''
 
-  const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw);
-  const looksLikeUrl = hasProtocol || urlLikePattern.test(raw);
-  if (!looksLikeUrl) return raw;
+  const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
+  const looksLikeUrl = hasProtocol || urlLikePattern.test(raw)
+  if (!looksLikeUrl) return raw
 
   try {
-    const parsed = new URL(hasProtocol ? raw : `https://${raw}`);
+    const parsed = new URL(hasProtocol ? raw : `https://${raw}`)
     return hasProtocol
       ? `${parsed.protocol}//${parsed.hostname}`
-      : parsed.hostname;
+      : parsed.hostname
   } catch {
     return raw
-      .replace(/^([a-z][a-z\d+.-]*:\/\/[^/:?#]+).*/i, "$1")
-      .replace(/^([^/:?#]+).*/i, "$1");
+      .replace(/^([a-z][a-z\d+.-]*:\/\/[^/:?#]+).*/i, '$1')
+      .replace(/^([^/:?#]+).*/i, '$1')
   }
-};
+}
 
 const eventSiteLabel = (event: SecurityEventItem): string =>
   formatSiteLabel(event.provider_site_name) ||
-  formatSiteLabel(event.provider_site_domain);
+  formatSiteLabel(event.provider_site_domain)
 
 const emptyEventsResponse = (): SecurityEventsResponse => ({
   total: 0,
   limit: 0,
   offset: 0,
   events: [],
-});
+})
 
 const emptyBlockedResponse = (): BlockedIpsResponse => ({
   total: 0,
   limit: 0,
   offset: 0,
   blocked_ips: [],
-});
+})
 
 const successRate = computed(() => {
-  const metrics = dashboard.value?.metrics;
-  if (!metrics) return "暂无";
-  const total = metrics.proxy_successes + metrics.proxy_failures;
-  if (total === 0) return "暂无";
-  return `${((metrics.proxy_successes / total) * 100).toFixed(1)}%`;
-});
+  const metrics = dashboard.value?.metrics
+  if (!metrics) return '暂无'
+  const total = metrics.proxy_successes + metrics.proxy_failures
+  if (total === 0) return '暂无'
+  return `${((metrics.proxy_successes / total) * 100).toFixed(1)}%`
+})
 
 const requestStatus = computed(() => {
-  if (refreshing.value) return "实时同步中...";
+  if (refreshing.value) return '实时同步中...'
   if (lastUpdated.value) {
-    return `上次刷新：${new Intl.DateTimeFormat("zh-CN", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    }).format(new Date(lastUpdated.value))}`;
+    return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(lastUpdated.value))}`
   }
-  return "等待首次同步";
-});
+  return '等待首次同步'
+})
 
 const fetchData = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
   try {
     const [health, metrics, rules, events, blockedIps] = await Promise.all([
       fetchHealth(),
@@ -122,16 +122,16 @@ const fetchData = async (showLoader = false) => {
       fetchRulesList(),
       fetchSecurityEvents({
         limit: 8,
-        sort_direction: "desc",
-        sort_by: "created_at",
+        sort_direction: 'desc',
+        sort_by: 'created_at',
       }),
       fetchBlockedIps({
         limit: 8,
         active_only: true,
-        sort_direction: "desc",
-        sort_by: "blocked_at",
+        sort_direction: 'desc',
+        sort_by: 'blocked_at',
       }),
-    ]);
+    ])
 
     dashboard.value = {
       health,
@@ -139,11 +139,11 @@ const fetchData = async (showLoader = false) => {
       rules,
       events: events || emptyEventsResponse(),
       blockedIps: blockedIps || emptyBlockedResponse(),
-    };
+    }
 
-    pushHistory("totalPackets", metrics.total_packets);
+    pushHistory('totalPackets', metrics.total_packets)
     pushHistory(
-      "blockRate",
+      'blockRate',
       metrics.total_packets
         ? Number(
             ((metrics.blocked_packets / metrics.total_packets) * 100).toFixed(
@@ -151,28 +151,28 @@ const fetchData = async (showLoader = false) => {
             ),
           )
         : 0,
-    );
-    pushHistory("latency", metrics.average_proxy_latency_micros);
-    lastUpdated.value = Date.now();
-    error.value = "";
+    )
+    pushHistory('latency', metrics.average_proxy_latency_micros)
+    lastUpdated.value = Date.now()
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取控制台数据失败";
+    error.value = e instanceof Error ? e.message : '读取控制台数据失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 onMounted(() => {
-  fetchData(true);
-  refreshTimer.value = window.setInterval(() => fetchData(), 5000);
-});
+  fetchData(true)
+  refreshTimer.value = window.setInterval(() => fetchData(), 5000)
+})
 
 onBeforeUnmount(() => {
   if (refreshTimer.value) {
-    clearInterval(refreshTimer.value);
+    clearInterval(refreshTimer.value)
   }
-});
+})
 </script>
 
 <template>
@@ -280,7 +280,7 @@ onBeforeUnmount(() => {
                   <template v-if="event.http_method || event.uri">
                     <span class="text-stone-300 shrink-0">|</span>
                     <span class="truncate text-stone-500">
-                      {{ event.http_method || "无" }} {{ event.uri || "" }}
+                      {{ event.http_method || '无' }} {{ event.uri || '' }}
                     </span>
                   </template>
                 </div>
@@ -348,7 +348,7 @@ onBeforeUnmount(() => {
               <p class="text-xs text-slate-500">本地数据库状态</p>
               <div class="mt-3 flex items-center justify-between">
                 <p class="text-lg font-semibold text-stone-900">
-                  {{ dashboard?.metrics.sqlite_enabled ? "已启用" : "未启用" }}
+                  {{ dashboard?.metrics.sqlite_enabled ? '已启用' : '未启用' }}
                 </p>
                 <StatusBadge
                   :text="

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
+import { computed, onMounted, reactive, ref } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
 import {
   fetchSafeLineMappings,
   fetchSafeLineSites,
@@ -12,7 +12,7 @@ import {
   syncSafeLineEvents,
   testSafeLineConnection,
   updateSafeLineMappings,
-} from "../lib/api";
+} from '../lib/api'
 import type {
   SafeLineMappingItem,
   SafeLineSiteItem,
@@ -20,8 +20,8 @@ import type {
   SafeLineSyncStateResponse,
   SafeLineTestResponse,
   SettingsPayload,
-} from "../lib/types";
-import { useFormatters } from "../composables/useFormatters";
+} from '../lib/types'
+import { useFormatters } from '../composables/useFormatters'
 import {
   Download,
   PlugZap,
@@ -30,31 +30,31 @@ import {
   ServerCog,
   ShieldCheck,
   Upload,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
 interface SafeLineMappingDraft {
-  safeline_site_id: string;
-  safeline_site_name: string;
-  safeline_site_domain: string;
-  local_alias: string;
-  enabled: boolean;
-  is_primary: boolean;
-  notes: string;
-  updated_at: number | null;
-  orphaned: boolean;
+  safeline_site_id: string
+  safeline_site_name: string
+  safeline_site_domain: string
+  local_alias: string
+  enabled: boolean
+  is_primary: boolean
+  notes: string
+  updated_at: number | null
+  orphaned: boolean
 }
 
-const { formatTimestamp } = useFormatters();
+const { formatTimestamp } = useFormatters()
 
-const loading = ref(true);
-const error = ref("");
-const successMessage = ref("");
-const settings = ref<SettingsPayload | null>(null);
-const mappings = ref<SafeLineMappingItem[]>([]);
-const sites = ref<SafeLineSiteItem[]>([]);
-const syncState = ref<SafeLineSyncOverviewResponse | null>(null);
-const testResult = ref<SafeLineTestResponse | null>(null);
-const mappingDrafts = ref<SafeLineMappingDraft[]>([]);
+const loading = ref(true)
+const error = ref('')
+const successMessage = ref('')
+const settings = ref<SettingsPayload | null>(null)
+const mappings = ref<SafeLineMappingItem[]>([])
+const sites = ref<SafeLineSiteItem[]>([])
+const syncState = ref<SafeLineSyncOverviewResponse | null>(null)
+const testResult = ref<SafeLineTestResponse | null>(null)
+const mappingDrafts = ref<SafeLineMappingDraft[]>([])
 
 const actions = reactive({
   refreshing: false,
@@ -64,7 +64,7 @@ const actions = reactive({
   pushingBlocked: false,
   pullingBlocked: false,
   savingMappings: false,
-});
+})
 
 function mergeMappingDrafts(
   siteList: SafeLineSiteItem[],
@@ -73,23 +73,23 @@ function mergeMappingDrafts(
   const nextDrafts: SafeLineMappingDraft[] = siteList.map((site) => {
     const existing = mappingList.find(
       (item) => item.safeline_site_id === site.id,
-    );
+    )
     return {
       safeline_site_id: site.id,
       safeline_site_name: site.name,
       safeline_site_domain: site.domain,
-      local_alias: existing?.local_alias ?? site.name ?? site.domain ?? "",
+      local_alias: existing?.local_alias ?? site.name ?? site.domain ?? '',
       enabled: existing?.enabled ?? true,
       is_primary: existing?.is_primary ?? false,
-      notes: existing?.notes ?? "",
+      notes: existing?.notes ?? '',
       updated_at: existing?.updated_at ?? null,
       orphaned: false,
-    };
-  });
+    }
+  })
 
-  const existingIds = new Set(nextDrafts.map((item) => item.safeline_site_id));
+  const existingIds = new Set(nextDrafts.map((item) => item.safeline_site_id))
   for (const item of mappingList) {
-    if (existingIds.has(item.safeline_site_id)) continue;
+    if (existingIds.has(item.safeline_site_id)) continue
     nextDrafts.push({
       safeline_site_id: item.safeline_site_id,
       safeline_site_name: item.safeline_site_name,
@@ -100,95 +100,95 @@ function mergeMappingDrafts(
       notes: item.notes,
       updated_at: item.updated_at ?? null,
       orphaned: true,
-    });
+    })
   }
 
-  mappingDrafts.value = nextDrafts;
+  mappingDrafts.value = nextDrafts
 }
 
 const syncCards = computed(() => [
   {
-    key: "events",
-    title: "事件同步",
-    description: "把雷池攻击日志落到本地事件库，供事件页统一检索。",
+    key: 'events',
+    title: '事件同步',
+    description: '把雷池攻击日志落到本地事件库，供事件页统一检索。',
     data: syncState.value?.events ?? null,
   },
   {
-    key: "blocked_ips_pull",
-    title: "封禁回流",
-    description: "把雷池远端封禁拉回本地名单，便于统一查看与解封。",
+    key: 'blocked_ips_pull',
+    title: '封禁回流',
+    description: '把雷池远端封禁拉回本地名单，便于统一查看与解封。',
     data: syncState.value?.blocked_ips_pull ?? null,
   },
   {
-    key: "blocked_ips_push",
-    title: "本地推送",
-    description: "把本地封禁推到雷池，联动边界拦截策略。",
+    key: 'blocked_ips_push',
+    title: '本地推送',
+    description: '把本地封禁推到雷池，联动边界拦截策略。',
     data: syncState.value?.blocked_ips_push ?? null,
   },
   {
-    key: "blocked_ips_delete",
-    title: "远端解封",
-    description: "记录从本地触发雷池解封时的最近执行结果。",
+    key: 'blocked_ips_delete',
+    title: '远端解封',
+    description: '记录从本地触发雷池解封时的最近执行结果。',
     data: syncState.value?.blocked_ips_delete ?? null,
   },
-]);
+])
 
 const hasSavedConfig = computed(() =>
   Boolean(settings.value?.safeline.base_url.trim()),
-);
+)
 
 const authMode = computed(() => {
-  if (settings.value?.safeline.api_token.trim()) return "API Token";
+  if (settings.value?.safeline.api_token.trim()) return 'API Token'
   if (
     settings.value?.safeline.username.trim() &&
     settings.value?.safeline.password.trim()
   ) {
-    return "账号密码";
+    return '账号密码'
   }
-  return "未配置鉴权";
-});
+  return '未配置鉴权'
+})
 
 const sortedDrafts = computed(() =>
   [...mappingDrafts.value].sort((left, right) => {
-    if (left.is_primary !== right.is_primary) return left.is_primary ? -1 : 1;
-    if (left.enabled !== right.enabled) return left.enabled ? -1 : 1;
-    if (left.orphaned !== right.orphaned) return left.orphaned ? 1 : -1;
-    return left.local_alias.localeCompare(right.local_alias, "zh-CN");
+    if (left.is_primary !== right.is_primary) return left.is_primary ? -1 : 1
+    if (left.enabled !== right.enabled) return left.enabled ? -1 : 1
+    if (left.orphaned !== right.orphaned) return left.orphaned ? 1 : -1
+    return left.local_alias.localeCompare(right.local_alias, 'zh-CN')
   }),
-);
+)
 
 function clearFeedback() {
-  error.value = "";
-  successMessage.value = "";
+  error.value = ''
+  successMessage.value = ''
 }
 
 function syncStatusType(item: SafeLineSyncStateResponse | null) {
-  if (!item) return "muted";
-  if (item.last_success_at) return "success";
-  return "warning";
+  if (!item) return 'muted'
+  if (item.last_success_at) return 'success'
+  return 'warning'
 }
 
 function syncStatusText(item: SafeLineSyncStateResponse | null) {
-  if (!item) return "未执行";
-  if (item.last_success_at) return "最近成功";
-  return "已记录";
+  if (!item) return '未执行'
+  if (item.last_success_at) return '最近成功'
+  return '已记录'
 }
 
 function selectPrimary(siteId: string) {
   for (const item of mappingDrafts.value) {
-    item.is_primary = item.safeline_site_id === siteId;
+    item.is_primary = item.safeline_site_id === siteId
   }
 }
 
 function clearPrimary() {
   for (const item of mappingDrafts.value) {
-    item.is_primary = false;
+    item.is_primary = false
   }
 }
 
 async function loadPageData() {
-  loading.value = true;
-  clearFeedback();
+  loading.value = true
+  clearFeedback()
 
   try {
     const [settingsResponse, mappingsResponse, syncResponse] =
@@ -196,71 +196,71 @@ async function loadPageData() {
         fetchSettings(),
         fetchSafeLineMappings(),
         fetchSafeLineSyncState(),
-      ]);
+      ])
 
-    settings.value = settingsResponse;
-    mappings.value = mappingsResponse.mappings;
-    syncState.value = syncResponse;
-    mergeMappingDrafts(sites.value, mappings.value);
+    settings.value = settingsResponse
+    mappings.value = mappingsResponse.mappings
+    syncState.value = syncResponse
+    mergeMappingDrafts(sites.value, mappings.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取雷池联动信息失败";
+    error.value = e instanceof Error ? e.message : '读取雷池联动信息失败'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
 async function refreshSyncState() {
-  actions.refreshing = true;
-  clearFeedback();
+  actions.refreshing = true
+  clearFeedback()
 
   try {
-    syncState.value = await fetchSafeLineSyncState();
-    successMessage.value = "联动状态已刷新。";
+    syncState.value = await fetchSafeLineSyncState()
+    successMessage.value = '联动状态已刷新。'
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "刷新联动状态失败";
+    error.value = e instanceof Error ? e.message : '刷新联动状态失败'
   } finally {
-    actions.refreshing = false;
+    actions.refreshing = false
   }
 }
 
 async function runConnectionTest() {
-  if (!settings.value) return;
+  if (!settings.value) return
 
-  actions.testing = true;
-  clearFeedback();
+  actions.testing = true
+  clearFeedback()
 
   try {
-    testResult.value = await testSafeLineConnection(settings.value.safeline);
-    successMessage.value = "连通性测试已完成。";
+    testResult.value = await testSafeLineConnection(settings.value.safeline)
+    successMessage.value = '连通性测试已完成。'
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "雷池连通性测试失败";
-    testResult.value = null;
+    error.value = e instanceof Error ? e.message : '雷池连通性测试失败'
+    testResult.value = null
   } finally {
-    actions.testing = false;
+    actions.testing = false
   }
 }
 
 async function loadRemoteSites() {
-  if (!settings.value) return;
+  if (!settings.value) return
 
-  actions.loadingSites = true;
-  clearFeedback();
+  actions.loadingSites = true
+  clearFeedback()
 
   try {
-    const response = await fetchSafeLineSites(settings.value.safeline);
-    sites.value = response.sites;
-    mergeMappingDrafts(sites.value, mappings.value);
-    successMessage.value = `已读取 ${response.total} 个雷池站点。`;
+    const response = await fetchSafeLineSites(settings.value.safeline)
+    sites.value = response.sites
+    mergeMappingDrafts(sites.value, mappings.value)
+    successMessage.value = `已读取 ${response.total} 个雷池站点。`
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取雷池站点失败";
+    error.value = e instanceof Error ? e.message : '读取雷池站点失败'
   } finally {
-    actions.loadingSites = false;
+    actions.loadingSites = false
   }
 }
 
 async function saveMappings() {
-  actions.savingMappings = true;
-  clearFeedback();
+  actions.savingMappings = true
+  clearFeedback()
 
   try {
     await updateSafeLineMappings({
@@ -273,65 +273,65 @@ async function saveMappings() {
         is_primary: item.is_primary,
         notes: item.notes.trim(),
       })),
-    });
+    })
 
-    const mappingsResponse = await fetchSafeLineMappings();
-    mappings.value = mappingsResponse.mappings;
-    mergeMappingDrafts(sites.value, mappings.value);
-    successMessage.value = "站点映射已保存。";
+    const mappingsResponse = await fetchSafeLineMappings()
+    mappings.value = mappingsResponse.mappings
+    mergeMappingDrafts(sites.value, mappings.value)
+    successMessage.value = '站点映射已保存。'
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存站点映射失败";
+    error.value = e instanceof Error ? e.message : '保存站点映射失败'
   } finally {
-    actions.savingMappings = false;
+    actions.savingMappings = false
   }
 }
 
 async function runEventSync() {
-  actions.syncingEvents = true;
-  clearFeedback();
+  actions.syncingEvents = true
+  clearFeedback()
 
   try {
-    const response = await syncSafeLineEvents();
-    successMessage.value = response.message;
-    syncState.value = await fetchSafeLineSyncState();
+    const response = await syncSafeLineEvents()
+    successMessage.value = response.message
+    syncState.value = await fetchSafeLineSyncState()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "同步雷池事件失败";
+    error.value = e instanceof Error ? e.message : '同步雷池事件失败'
   } finally {
-    actions.syncingEvents = false;
+    actions.syncingEvents = false
   }
 }
 
 async function runBlockedPush() {
-  actions.pushingBlocked = true;
-  clearFeedback();
+  actions.pushingBlocked = true
+  clearFeedback()
 
   try {
-    const response = await syncSafeLineBlockedIps();
-    successMessage.value = response.message;
-    syncState.value = await fetchSafeLineSyncState();
+    const response = await syncSafeLineBlockedIps()
+    successMessage.value = response.message
+    syncState.value = await fetchSafeLineSyncState()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "推送本地封禁失败";
+    error.value = e instanceof Error ? e.message : '推送本地封禁失败'
   } finally {
-    actions.pushingBlocked = false;
+    actions.pushingBlocked = false
   }
 }
 
 async function runBlockedPull() {
-  actions.pullingBlocked = true;
-  clearFeedback();
+  actions.pullingBlocked = true
+  clearFeedback()
 
   try {
-    const response = await pullSafeLineBlockedIps();
-    successMessage.value = response.message;
-    syncState.value = await fetchSafeLineSyncState();
+    const response = await pullSafeLineBlockedIps()
+    successMessage.value = response.message
+    syncState.value = await fetchSafeLineSyncState()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "拉取雷池封禁失败";
+    error.value = e instanceof Error ? e.message : '拉取雷池封禁失败'
   } finally {
-    actions.pullingBlocked = false;
+    actions.pullingBlocked = false
   }
 }
 
-onMounted(loadPageData);
+onMounted(loadPageData)
 </script>
 
 <template>
@@ -392,7 +392,7 @@ onMounted(loadPageData);
               <div class="rounded-lg bg-slate-50 p-4">
                 <p class="text-xs text-slate-500">雷池地址</p>
                 <p class="mt-2 break-all text-sm font-medium text-stone-900">
-                  {{ settings?.safeline.base_url || "未配置" }}
+                  {{ settings?.safeline.base_url || '未配置' }}
                 </p>
               </div>
               <div class="rounded-lg bg-slate-50 p-4">
@@ -404,13 +404,13 @@ onMounted(loadPageData);
               <div class="rounded-lg bg-slate-50 p-4">
                 <p class="text-xs text-slate-500">站点列表路径</p>
                 <p class="mt-2 break-all font-mono text-xs text-stone-900">
-                  {{ settings?.safeline.site_list_path || "未配置" }}
+                  {{ settings?.safeline.site_list_path || '未配置' }}
                 </p>
               </div>
               <div class="rounded-lg bg-slate-50 p-4">
                 <p class="text-xs text-slate-500">事件列表路径</p>
                 <p class="mt-2 break-all font-mono text-xs text-stone-900">
-                  {{ settings?.safeline.event_list_path || "未配置" }}
+                  {{ settings?.safeline.event_list_path || '未配置' }}
                 </p>
               </div>
             </div>
@@ -429,7 +429,7 @@ onMounted(loadPageData);
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-slate-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <PlugZap :size="12" />
-                {{ actions.testing ? "测试中..." : "测试连接" }}
+                {{ actions.testing ? '测试中...' : '测试连接' }}
               </button>
               <button
                 @click="loadRemoteSites"
@@ -437,7 +437,7 @@ onMounted(loadPageData);
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <ServerCog :size="12" />
-                {{ actions.loadingSites ? "读取中..." : "读取远端站点" }}
+                {{ actions.loadingSites ? '读取中...' : '读取远端站点' }}
               </button>
             </div>
 
@@ -480,7 +480,7 @@ onMounted(loadPageData);
                   <p class="text-xs text-slate-500">OpenAPI 文档</p>
                   <p class="mt-1 text-sm font-medium text-stone-900">
                     {{
-                      testResult.openapi_doc_reachable ? "可访问" : "不可访问"
+                      testResult.openapi_doc_reachable ? '可访问' : '不可访问'
                     }}
                     <span
                       v-if="testResult.openapi_doc_status !== null"
@@ -495,7 +495,7 @@ onMounted(loadPageData);
                 >
                   <p class="text-xs text-slate-500">鉴权探测</p>
                   <p class="mt-1 text-sm font-medium text-stone-900">
-                    {{ testResult.authenticated ? "已通过" : "未通过" }}
+                    {{ testResult.authenticated ? '已通过' : '未通过' }}
                     <span
                       v-if="testResult.auth_probe_status !== null"
                       class="text-slate-500"
@@ -654,7 +654,7 @@ onMounted(loadPageData);
                 class="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/25 bg-slate-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Save :size="12" />
-                {{ actions.savingMappings ? "保存中..." : "保存映射" }}
+                {{ actions.savingMappings ? '保存中...' : '保存映射' }}
               </button>
             </div>
           </div>
@@ -678,7 +678,7 @@ onMounted(loadPageData);
                 <div class="space-y-2">
                   <div class="flex flex-wrap items-center gap-2">
                     <p class="text-sm font-medium text-stone-900">
-                      {{ draft.safeline_site_name || "未命名站点" }}
+                      {{ draft.safeline_site_name || '未命名站点' }}
                     </p>
                     <StatusBadge
                       v-if="draft.enabled"
@@ -704,7 +704,7 @@ onMounted(loadPageData);
                     站点 ID：{{ draft.safeline_site_id }}
                   </p>
                   <p class="font-mono text-xs text-slate-500">
-                    域名：{{ draft.safeline_site_domain || "未提供域名" }}
+                    域名：{{ draft.safeline_site_domain || '未提供域名' }}
                   </p>
                   <p class="text-xs text-slate-500">
                     上次更新：{{ formatTimestamp(draft.updated_at) }}

@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { RouterLink, useRoute } from "vue-router";
-import { LayoutDashboard, Shield } from "lucide-vue-next";
+import { RouterLink, useRoute } from 'vue-router'
+import { LayoutDashboard, Shield } from 'lucide-vue-next'
 
-const route = useRoute();
+const route = useRoute()
 
 const items = [
-  { name: "L7 总览", path: "/admin/l7", icon: LayoutDashboard },
-  { name: "L7 规则", path: "/admin/l7/rules", icon: Shield },
-];
+  { name: 'L7 总览', path: '/admin/l7', icon: LayoutDashboard },
+  { name: 'L7 规则', path: '/admin/l7/rules', icon: Shield },
+]
 
 const isActive = (path: string) =>
-  route.path === path || route.path.startsWith(`${path}/`);
+  route.path === path || route.path.startsWith(`${path}/`)
 </script>
 
 <template>

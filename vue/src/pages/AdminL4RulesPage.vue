@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
-import L4SectionNav from "../components/l4/L4SectionNav.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
-import { createRule, deleteRule, fetchRulesList, updateRule } from "../lib/api";
-import type { RuleDraft, RuleItem } from "../lib/types";
+import { computed, onMounted, reactive, ref } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
+import L4SectionNav from '../components/l4/L4SectionNav.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
+import { createRule, deleteRule, fetchRulesList, updateRule } from '../lib/api'
+import type { RuleDraft, RuleItem } from '../lib/types'
 import {
   Check,
   Edit3,
@@ -15,149 +15,148 @@ import {
   Search,
   Trash2,
   X,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
-const { actionLabel, severityLabel } = useFormatters();
+const { actionLabel, severityLabel } = useFormatters()
 
-const loading = ref(true);
-const saving = ref(false);
-const error = ref("");
-const successMessage = ref("");
-const isRuleModalOpen = ref(false);
-const editingId = ref<string | null>(null);
-const rules = ref<RuleItem[]>([]);
+const loading = ref(true)
+const saving = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const isRuleModalOpen = ref(false)
+const editingId = ref<string | null>(null)
+const rules = ref<RuleItem[]>([])
 
 const filters = reactive({
-  search: "",
-  action: "all",
-  severity: "all",
-  status: "all",
-});
+  search: '',
+  action: 'all',
+  severity: 'all',
+  status: 'all',
+})
 
 const ruleForm = reactive<RuleDraft>({
-  id: "",
-  name: "",
+  id: '',
+  name: '',
   enabled: true,
-  layer: "l4",
-  pattern: "",
-  action: "block",
-  severity: "high",
-});
+  layer: 'l4',
+  pattern: '',
+  action: 'block',
+  severity: 'high',
+})
 
 const l4Rules = computed(() =>
-  rules.value.filter((rule) => rule.layer === "l4"),
-);
+  rules.value.filter((rule) => rule.layer === 'l4'),
+)
 const filteredRules = computed(() =>
   l4Rules.value.filter((rule) => {
-    if (filters.action !== "all" && rule.action !== filters.action)
-      return false;
-    if (filters.severity !== "all" && rule.severity !== filters.severity)
-      return false;
+    if (filters.action !== 'all' && rule.action !== filters.action) return false
+    if (filters.severity !== 'all' && rule.severity !== filters.severity)
+      return false
     if (
-      filters.status !== "all" &&
-      rule.enabled !== (filters.status === "enabled")
+      filters.status !== 'all' &&
+      rule.enabled !== (filters.status === 'enabled')
     )
-      return false;
-    if (!filters.search.trim()) return true;
-    const keyword = filters.search.trim().toLowerCase();
+      return false
+    if (!filters.search.trim()) return true
+    const keyword = filters.search.trim().toLowerCase()
     return (
       rule.name.toLowerCase().includes(keyword) ||
       rule.id.toLowerCase().includes(keyword) ||
       rule.pattern.toLowerCase().includes(keyword)
-    );
+    )
   }),
-);
+)
 
 const enabledCount = computed(
   () => l4Rules.value.filter((rule) => rule.enabled).length,
-);
+)
 const blockCount = computed(
-  () => l4Rules.value.filter((rule) => rule.action === "block").length,
-);
+  () => l4Rules.value.filter((rule) => rule.action === 'block').length,
+)
 
 const l4RuleTemplates = [
   {
-    label: "封禁 SSH 入口",
-    description: "匹配所有发往 22 端口的连接。",
-    id: "l4-block-ssh",
-    name: "封禁 SSH 入口",
+    label: '封禁 SSH 入口',
+    description: '匹配所有发往 22 端口的连接。',
+    id: 'l4-block-ssh',
+    name: '封禁 SSH 入口',
     pattern: String.raw`dest_port=22\b`,
-    action: "block",
-    severity: "high",
+    action: 'block',
+    severity: 'high',
   },
   {
-    label: "告警 DNS 异常",
-    description: "适合先观察 UDP 53 端口的异常流量。",
-    id: "l4-alert-dns-udp",
-    name: "DNS UDP 异常告警",
+    label: '告警 DNS 异常',
+    description: '适合先观察 UDP 53 端口的异常流量。',
+    id: 'l4-alert-dns-udp',
+    name: 'DNS UDP 异常告警',
     pattern: String.raw`dest_port=53\b.*protocol=UDP`,
-    action: "alert",
-    severity: "medium",
+    action: 'alert',
+    severity: 'medium',
   },
   {
-    label: "封禁指定来源段",
-    description: "快速限制指定来源地址段访问入口端口。",
-    id: "l4-block-source-range",
-    name: "封禁指定来源地址段",
+    label: '封禁指定来源段',
+    description: '快速限制指定来源地址段访问入口端口。',
+    id: 'l4-block-source-range',
+    name: '封禁指定来源地址段',
     pattern: String.raw`source_ip=203\.0\.113\.(10|11)\b.*dest_port=443\b`,
-    action: "block",
-    severity: "critical",
+    action: 'block',
+    severity: 'critical',
   },
-] as const;
+] as const
 
 const resetForm = () => {
   Object.assign(ruleForm, {
-    id: "",
-    name: "",
+    id: '',
+    name: '',
     enabled: true,
-    layer: "l4",
-    pattern: "",
-    action: "block",
-    severity: "high",
-  });
-  editingId.value = null;
-};
+    layer: 'l4',
+    pattern: '',
+    action: 'block',
+    severity: 'high',
+  })
+  editingId.value = null
+}
 
 const applyTemplate = (template: (typeof l4RuleTemplates)[number]) => {
   Object.assign(ruleForm, {
     id: editingId.value ? ruleForm.id : template.id,
     name: template.name,
     enabled: true,
-    layer: "l4",
+    layer: 'l4',
     pattern: template.pattern,
     action: template.action,
     severity: template.severity,
-  });
-};
+  })
+}
 
 const loadRules = async () => {
-  loading.value = true;
+  loading.value = true
   try {
-    const payload = await fetchRulesList();
-    rules.value = payload.rules;
-    error.value = "";
+    const payload = await fetchRulesList()
+    rules.value = payload.rules
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取 L4 规则失败";
+    error.value = e instanceof Error ? e.message : '读取 L4 规则失败'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const openCreateRule = () => {
-  resetForm();
-  isRuleModalOpen.value = true;
-};
+  resetForm()
+  isRuleModalOpen.value = true
+}
 
 const openEditRule = (rule: RuleItem) => {
-  Object.assign(ruleForm, { ...rule, layer: "l4" });
-  editingId.value = rule.id;
-  isRuleModalOpen.value = true;
-};
+  Object.assign(ruleForm, { ...rule, layer: 'l4' })
+  editingId.value = rule.id
+  isRuleModalOpen.value = true
+}
 
 const saveRule = async () => {
-  saving.value = true;
-  error.value = "";
-  successMessage.value = "";
+  saving.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     const payload = {
@@ -165,56 +164,56 @@ const saveRule = async () => {
       id: ruleForm.id.trim(),
       name: ruleForm.name.trim(),
       pattern: ruleForm.pattern.trim(),
-      layer: "l4",
-    };
+      layer: 'l4',
+    }
 
     if (!payload.id || !payload.name || !payload.pattern) {
-      throw new Error("规则 ID、规则名称和匹配内容不能为空");
+      throw new Error('规则 ID、规则名称和匹配内容不能为空')
     }
 
     if (editingId.value) {
-      await updateRule(payload);
-      successMessage.value = `L4 规则 ${payload.id} 已更新。`;
+      await updateRule(payload)
+      successMessage.value = `L4 规则 ${payload.id} 已更新。`
     } else {
-      await createRule(payload);
-      successMessage.value = `L4 规则 ${payload.id} 已创建。`;
+      await createRule(payload)
+      successMessage.value = `L4 规则 ${payload.id} 已创建。`
     }
 
-    isRuleModalOpen.value = false;
-    await loadRules();
+    isRuleModalOpen.value = false
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存 L4 规则失败";
+    error.value = e instanceof Error ? e.message : '保存 L4 规则失败'
   } finally {
-    saving.value = false;
+    saving.value = false
   }
-};
+}
 
 const toggleRuleStatus = async (rule: RuleItem) => {
-  error.value = "";
-  successMessage.value = "";
+  error.value = ''
+  successMessage.value = ''
   try {
-    await updateRule({ ...rule, enabled: !rule.enabled, layer: "l4" });
-    successMessage.value = `L4 规则 ${rule.id} 已${rule.enabled ? "停用" : "启用"}。`;
-    await loadRules();
+    await updateRule({ ...rule, enabled: !rule.enabled, layer: 'l4' })
+    successMessage.value = `L4 规则 ${rule.id} 已${rule.enabled ? '停用' : '启用'}。`
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "更新 L4 规则状态失败";
+    error.value = e instanceof Error ? e.message : '更新 L4 规则状态失败'
   }
-};
+}
 
 const removeRule = async (id: string) => {
-  if (!window.confirm(`确认删除 L4 规则 ${id} 吗？`)) return;
-  error.value = "";
-  successMessage.value = "";
+  if (!window.confirm(`确认删除 L4 规则 ${id} 吗？`)) return
+  error.value = ''
+  successMessage.value = ''
   try {
-    await deleteRule(id);
-    successMessage.value = `L4 规则 ${id} 已删除。`;
-    await loadRules();
+    await deleteRule(id)
+    successMessage.value = `L4 规则 ${id} 已删除。`
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "删除 L4 规则失败";
+    error.value = e instanceof Error ? e.message : '删除 L4 规则失败'
   }
-};
+}
 
-onMounted(loadRules);
+onMounted(loadRules)
 </script>
 
 <template>
@@ -391,7 +390,7 @@ onMounted(loadRules);
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                     >
                       <Check :size="14" />
-                      {{ rule.enabled ? "停用" : "启用" }}
+                      {{ rule.enabled ? '停用' : '启用' }}
                     </button>
                     <button
                       @click="removeRule(rule.id)"
@@ -431,10 +430,10 @@ onMounted(loadRules);
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm tracking-wide text-blue-700">
-              {{ editingId ? "编辑 L4 规则" : "新建 L4 规则" }}
+              {{ editingId ? '编辑 L4 规则' : '新建 L4 规则' }}
             </p>
             <h3 class="mt-2 text-3xl font-semibold text-stone-900">
-              {{ editingId ? "调整四层防护策略" : "创建新的四层防护策略" }}
+              {{ editingId ? '调整四层防护策略' : '创建新的四层防护策略' }}
             </h3>
           </div>
           <button

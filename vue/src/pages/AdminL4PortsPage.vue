@@ -1,129 +1,128 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
-import L4SectionNav from "../components/l4/L4SectionNav.vue";
-import CyberCard from "../components/ui/CyberCard.vue";
-import MetricWidget from "../components/ui/MetricWidget.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
-import { fetchL4Stats } from "../lib/api";
-import type { L4PortStatItem, L4StatsPayload } from "../lib/types";
-import { Activity, AlertTriangle, Database, RefreshCw } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
+import L4SectionNav from '../components/l4/L4SectionNav.vue'
+import CyberCard from '../components/ui/CyberCard.vue'
+import MetricWidget from '../components/ui/MetricWidget.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
+import { fetchL4Stats } from '../lib/api'
+import type { L4PortStatItem, L4StatsPayload } from '../lib/types'
+import { Activity, AlertTriangle, Database, RefreshCw } from 'lucide-vue-next'
 
-const { formatNumber } = useFormatters();
+const { formatNumber } = useFormatters()
 
-const loading = ref(true);
-const refreshing = ref(false);
-const error = ref("");
-const stats = ref<L4StatsPayload | null>(null);
-const refreshTimer = ref<number | null>(null);
+const loading = ref(true)
+const refreshing = ref(false)
+const error = ref('')
+const stats = ref<L4StatsPayload | null>(null)
+const refreshTimer = ref<number | null>(null)
 
 const filters = reactive({
-  search: "",
-  focus: "all" as "all" | "blocked" | "ddos" | "connections",
-  sort_by: "blocks" as
-    | "blocks"
-    | "connections"
-    | "ddos_events"
-    | "bytes_processed"
-    | "port",
-  sort_direction: "desc" as "asc" | "desc",
-});
+  search: '',
+  focus: 'all' as 'all' | 'blocked' | 'ddos' | 'connections',
+  sort_by: 'blocks' as
+    | 'blocks'
+    | 'connections'
+    | 'ddos_events'
+    | 'bytes_processed'
+    | 'port',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
 
 const loadStats = async (showLoader = false) => {
-  if (showLoader) loading.value = true;
-  refreshing.value = true;
+  if (showLoader) loading.value = true
+  refreshing.value = true
   try {
-    stats.value = await fetchL4Stats();
-    error.value = "";
+    stats.value = await fetchL4Stats()
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取端口画像失败";
+    error.value = e instanceof Error ? e.message : '读取端口画像失败'
   } finally {
-    if (showLoader) loading.value = false;
-    refreshing.value = false;
+    if (showLoader) loading.value = false
+    refreshing.value = false
   }
-};
+}
 
 const sortedPorts = computed(() => {
   const items = [...(stats.value?.per_port_stats ?? [])].filter((item) => {
-    if (filters.focus === "blocked" && item.blocks <= 0) return false;
-    if (filters.focus === "ddos" && item.ddos_events <= 0) return false;
-    if (filters.focus === "connections" && item.connections <= 0) return false;
+    if (filters.focus === 'blocked' && item.blocks <= 0) return false
+    if (filters.focus === 'ddos' && item.ddos_events <= 0) return false
+    if (filters.focus === 'connections' && item.connections <= 0) return false
     if (filters.search.trim()) {
-      const keyword = filters.search.trim().toLowerCase();
-      return item.port.toLowerCase().includes(keyword);
+      const keyword = filters.search.trim().toLowerCase()
+      return item.port.toLowerCase().includes(keyword)
     }
-    return true;
-  });
+    return true
+  })
 
   items.sort((left, right) => {
-    const direction = filters.sort_direction === "asc" ? 1 : -1;
+    const direction = filters.sort_direction === 'asc' ? 1 : -1
     const compare = (() => {
       switch (filters.sort_by) {
-        case "connections":
-          return left.connections - right.connections;
-        case "ddos_events":
-          return left.ddos_events - right.ddos_events;
-        case "bytes_processed":
-          return left.bytes_processed - right.bytes_processed;
-        case "port":
-          return left.port.localeCompare(right.port, "zh-CN", {
+        case 'connections':
+          return left.connections - right.connections
+        case 'ddos_events':
+          return left.ddos_events - right.ddos_events
+        case 'bytes_processed':
+          return left.bytes_processed - right.bytes_processed
+        case 'port':
+          return left.port.localeCompare(right.port, 'zh-CN', {
             numeric: true,
-          });
-        case "blocks":
+          })
+        case 'blocks':
         default:
-          return left.blocks - right.blocks;
+          return left.blocks - right.blocks
       }
-    })();
+    })()
 
-    if (typeof compare === "number") return compare * direction;
-    return 0;
-  });
+    if (typeof compare === 'number') return compare * direction
+    return 0
+  })
 
-  return items;
-});
+  return items
+})
 
 const topByConnections = computed(
   () =>
     [...(stats.value?.per_port_stats ?? [])].sort(
       (left, right) => right.connections - left.connections,
     )[0] ?? null,
-);
+)
 const topByBlocks = computed(
   () =>
     [...(stats.value?.per_port_stats ?? [])].sort(
       (left, right) => right.blocks - left.blocks,
     )[0] ?? null,
-);
+)
 const ddosPorts = computed(() =>
   (stats.value?.per_port_stats ?? []).filter((item) => item.ddos_events > 0),
-);
+)
 const totalBytes = computed(() =>
   (stats.value?.per_port_stats ?? []).reduce(
     (sum, item) => sum + item.bytes_processed,
     0,
   ),
-);
+)
 
 const focusBadge = (item: L4PortStatItem) => {
-  if (item.ddos_events > 0)
-    return { text: "DDoS 热点", type: "error" as const };
-  if (item.blocks > 0) return { text: "拦截热点", type: "warning" as const };
-  return { text: "流量观测", type: "muted" as const };
-};
+  if (item.ddos_events > 0) return { text: 'DDoS 热点', type: 'error' as const }
+  if (item.blocks > 0) return { text: '拦截热点', type: 'warning' as const }
+  return { text: '流量观测', type: 'muted' as const }
+}
 
 onMounted(async () => {
-  await loadStats(true);
+  await loadStats(true)
   refreshTimer.value = window.setInterval(() => {
-    loadStats();
-  }, 5000);
-});
+    loadStats()
+  }, 5000)
+})
 
 onBeforeUnmount(() => {
   if (refreshTimer.value) {
-    clearInterval(refreshTimer.value);
+    clearInterval(refreshTimer.value)
   }
-});
+})
 </script>
 
 <template>
@@ -205,27 +204,27 @@ onBeforeUnmount(() => {
               <p class="text-xs tracking-wide text-slate-500">连接最活跃</p>
               <p class="mt-2 text-2xl font-semibold text-stone-900">
                 {{
-                  topByConnections ? `${topByConnections.port} 端口` : "暂无"
+                  topByConnections ? `${topByConnections.port} 端口` : '暂无'
                 }}
               </p>
               <p class="mt-2 text-sm text-slate-500">
                 {{
                   topByConnections
                     ? `累计连接 ${formatNumber(topByConnections.connections)}`
-                    : "还没有足够的端口统计数据。"
+                    : '还没有足够的端口统计数据。'
                 }}
               </p>
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p class="text-xs tracking-wide text-slate-500">拦截最密集</p>
               <p class="mt-2 text-2xl font-semibold text-stone-900">
-                {{ topByBlocks ? `${topByBlocks.port} 端口` : "暂无" }}
+                {{ topByBlocks ? `${topByBlocks.port} 端口` : '暂无' }}
               </p>
               <p class="mt-2 text-sm text-slate-500">
                 {{
                   topByBlocks
                     ? `拦截 ${formatNumber(topByBlocks.blocks)} 次 / DDoS ${formatNumber(topByBlocks.ddos_events)} 次`
-                    : "暂无拦截热点。"
+                    : '暂无拦截热点。'
                 }}
               </p>
             </div>

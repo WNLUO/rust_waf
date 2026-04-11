@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import AppLayout from "../components/layout/AppLayout.vue";
-import L7SectionNav from "../components/l7/L7SectionNav.vue";
-import StatusBadge from "../components/ui/StatusBadge.vue";
-import { useFormatters } from "../composables/useFormatters";
-import { createRule, deleteRule, fetchRulesList, updateRule } from "../lib/api";
-import type { RuleDraft, RuleItem } from "../lib/types";
+import { computed, onMounted, reactive, ref } from 'vue'
+import AppLayout from '../components/layout/AppLayout.vue'
+import L7SectionNav from '../components/l7/L7SectionNav.vue'
+import StatusBadge from '../components/ui/StatusBadge.vue'
+import { useFormatters } from '../composables/useFormatters'
+import { createRule, deleteRule, fetchRulesList, updateRule } from '../lib/api'
+import type { RuleDraft, RuleItem } from '../lib/types'
 import {
   Check,
   Edit3,
@@ -15,158 +15,157 @@ import {
   Search,
   Trash2,
   X,
-} from "lucide-vue-next";
+} from 'lucide-vue-next'
 
-const { actionLabel, severityLabel } = useFormatters();
+const { actionLabel, severityLabel } = useFormatters()
 
-const loading = ref(true);
-const saving = ref(false);
-const error = ref("");
-const successMessage = ref("");
-const isRuleModalOpen = ref(false);
-const editingId = ref<string | null>(null);
-const rules = ref<RuleItem[]>([]);
+const loading = ref(true)
+const saving = ref(false)
+const error = ref('')
+const successMessage = ref('')
+const isRuleModalOpen = ref(false)
+const editingId = ref<string | null>(null)
+const rules = ref<RuleItem[]>([])
 
 const filters = reactive({
-  search: "",
-  action: "all",
-  severity: "all",
-  status: "all",
-});
+  search: '',
+  action: 'all',
+  severity: 'all',
+  status: 'all',
+})
 
 const ruleForm = reactive<RuleDraft>({
-  id: "",
-  name: "",
+  id: '',
+  name: '',
   enabled: true,
-  layer: "l7",
-  pattern: "",
-  action: "block",
-  severity: "high",
-});
+  layer: 'l7',
+  pattern: '',
+  action: 'block',
+  severity: 'high',
+})
 
 const l7Rules = computed(() =>
-  rules.value.filter((rule) => rule.layer === "l7"),
-);
+  rules.value.filter((rule) => rule.layer === 'l7'),
+)
 const filteredRules = computed(() =>
   l7Rules.value.filter((rule) => {
-    if (filters.action !== "all" && rule.action !== filters.action)
-      return false;
-    if (filters.severity !== "all" && rule.severity !== filters.severity)
-      return false;
+    if (filters.action !== 'all' && rule.action !== filters.action) return false
+    if (filters.severity !== 'all' && rule.severity !== filters.severity)
+      return false
     if (
-      filters.status !== "all" &&
-      rule.enabled !== (filters.status === "enabled")
+      filters.status !== 'all' &&
+      rule.enabled !== (filters.status === 'enabled')
     )
-      return false;
-    if (!filters.search.trim()) return true;
-    const keyword = filters.search.trim().toLowerCase();
+      return false
+    if (!filters.search.trim()) return true
+    const keyword = filters.search.trim().toLowerCase()
     return (
       rule.name.toLowerCase().includes(keyword) ||
       rule.id.toLowerCase().includes(keyword) ||
       rule.pattern.toLowerCase().includes(keyword)
-    );
+    )
   }),
-);
+)
 
 const enabledCount = computed(
   () => l7Rules.value.filter((rule) => rule.enabled).length,
-);
+)
 const blockCount = computed(
-  () => l7Rules.value.filter((rule) => rule.action === "block").length,
-);
+  () => l7Rules.value.filter((rule) => rule.action === 'block').length,
+)
 
 const l7RuleTemplates = [
   {
-    label: "拦截后台路径",
-    description: "快速阻断访问敏感后台入口的请求。",
-    id: "l7-block-admin-path",
-    name: "拦截后台路径访问",
+    label: '拦截后台路径',
+    description: '快速阻断访问敏感后台入口的请求。',
+    id: 'l7-block-admin-path',
+    name: '拦截后台路径访问',
     pattern: String.raw`(?:GET|POST)\s+/(?:admin|manage|console)\b`,
-    action: "block",
-    severity: "high",
+    action: 'block',
+    severity: 'high',
   },
   {
-    label: "告警异常 User-Agent",
-    description: "适合先观测扫描器或脚本化工具流量。",
-    id: "l7-alert-suspicious-ua",
-    name: "可疑 User-Agent 告警",
+    label: '告警异常 User-Agent',
+    description: '适合先观测扫描器或脚本化工具流量。',
+    id: 'l7-alert-suspicious-ua',
+    name: '可疑 User-Agent 告警',
     pattern: String.raw`user-agent:\s*(?:sqlmap|curl|python-requests|go-http-client)`,
-    action: "alert",
-    severity: "medium",
+    action: 'alert',
+    severity: 'medium',
   },
   {
-    label: "拦截 SQL 注入特征",
-    description: "对 URI 或 Body 中常见注入片段进行阻断。",
-    id: "l7-block-sqli-basic",
-    name: "基础 SQL 注入阻断",
+    label: '拦截 SQL 注入特征',
+    description: '对 URI 或 Body 中常见注入片段进行阻断。',
+    id: 'l7-block-sqli-basic',
+    name: '基础 SQL 注入阻断',
     pattern: String.raw`(?i)(union\s+select|or\s+1=1|sleep\(|benchmark\()`,
-    action: "block",
-    severity: "critical",
+    action: 'block',
+    severity: 'critical',
   },
   {
-    label: "拦截伪造真实来源头",
-    description: "利用 inspection string 中的头部信息匹配伪造来源行为。",
-    id: "l7-block-forged-real-ip",
-    name: "伪造来源头拦截",
+    label: '拦截伪造真实来源头',
+    description: '利用 inspection string 中的头部信息匹配伪造来源行为。',
+    id: 'l7-block-forged-real-ip',
+    name: '伪造来源头拦截',
     pattern: String.raw`(?:x-forwarded-for|x-real-ip):\s*(?:127\.0\.0\.1|10\.)`,
-    action: "block",
-    severity: "high",
+    action: 'block',
+    severity: 'high',
   },
-] as const;
+] as const
 
 const resetForm = () => {
   Object.assign(ruleForm, {
-    id: "",
-    name: "",
+    id: '',
+    name: '',
     enabled: true,
-    layer: "l7",
-    pattern: "",
-    action: "block",
-    severity: "high",
-  });
-  editingId.value = null;
-};
+    layer: 'l7',
+    pattern: '',
+    action: 'block',
+    severity: 'high',
+  })
+  editingId.value = null
+}
 
 const applyTemplate = (template: (typeof l7RuleTemplates)[number]) => {
   Object.assign(ruleForm, {
     id: editingId.value ? ruleForm.id : template.id,
     name: template.name,
     enabled: true,
-    layer: "l7",
+    layer: 'l7',
     pattern: template.pattern,
     action: template.action,
     severity: template.severity,
-  });
-};
+  })
+}
 
 const loadRules = async () => {
-  loading.value = true;
+  loading.value = true
   try {
-    const payload = await fetchRulesList();
-    rules.value = payload.rules;
-    error.value = "";
+    const payload = await fetchRulesList()
+    rules.value = payload.rules
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "读取 L7 规则失败";
+    error.value = e instanceof Error ? e.message : '读取 L7 规则失败'
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const openCreateRule = () => {
-  resetForm();
-  isRuleModalOpen.value = true;
-};
+  resetForm()
+  isRuleModalOpen.value = true
+}
 
 const openEditRule = (rule: RuleItem) => {
-  Object.assign(ruleForm, { ...rule, layer: "l7" });
-  editingId.value = rule.id;
-  isRuleModalOpen.value = true;
-};
+  Object.assign(ruleForm, { ...rule, layer: 'l7' })
+  editingId.value = rule.id
+  isRuleModalOpen.value = true
+}
 
 const saveRule = async () => {
-  saving.value = true;
-  error.value = "";
-  successMessage.value = "";
+  saving.value = true
+  error.value = ''
+  successMessage.value = ''
 
   try {
     const payload = {
@@ -174,56 +173,56 @@ const saveRule = async () => {
       id: ruleForm.id.trim(),
       name: ruleForm.name.trim(),
       pattern: ruleForm.pattern.trim(),
-      layer: "l7",
-    };
+      layer: 'l7',
+    }
 
     if (!payload.id || !payload.name || !payload.pattern) {
-      throw new Error("规则 ID、规则名称和匹配内容不能为空");
+      throw new Error('规则 ID、规则名称和匹配内容不能为空')
     }
 
     if (editingId.value) {
-      await updateRule(payload);
-      successMessage.value = `L7 规则 ${payload.id} 已更新。`;
+      await updateRule(payload)
+      successMessage.value = `L7 规则 ${payload.id} 已更新。`
     } else {
-      await createRule(payload);
-      successMessage.value = `L7 规则 ${payload.id} 已创建。`;
+      await createRule(payload)
+      successMessage.value = `L7 规则 ${payload.id} 已创建。`
     }
 
-    isRuleModalOpen.value = false;
-    await loadRules();
+    isRuleModalOpen.value = false
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "保存 L7 规则失败";
+    error.value = e instanceof Error ? e.message : '保存 L7 规则失败'
   } finally {
-    saving.value = false;
+    saving.value = false
   }
-};
+}
 
 const toggleRuleStatus = async (rule: RuleItem) => {
-  error.value = "";
-  successMessage.value = "";
+  error.value = ''
+  successMessage.value = ''
   try {
-    await updateRule({ ...rule, enabled: !rule.enabled, layer: "l7" });
-    successMessage.value = `L7 规则 ${rule.id} 已${rule.enabled ? "停用" : "启用"}。`;
-    await loadRules();
+    await updateRule({ ...rule, enabled: !rule.enabled, layer: 'l7' })
+    successMessage.value = `L7 规则 ${rule.id} 已${rule.enabled ? '停用' : '启用'}。`
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "更新 L7 规则状态失败";
+    error.value = e instanceof Error ? e.message : '更新 L7 规则状态失败'
   }
-};
+}
 
 const removeRule = async (id: string) => {
-  if (!window.confirm(`确认删除 L7 规则 ${id} 吗？`)) return;
-  error.value = "";
-  successMessage.value = "";
+  if (!window.confirm(`确认删除 L7 规则 ${id} 吗？`)) return
+  error.value = ''
+  successMessage.value = ''
   try {
-    await deleteRule(id);
-    successMessage.value = `L7 规则 ${id} 已删除。`;
-    await loadRules();
+    await deleteRule(id)
+    successMessage.value = `L7 规则 ${id} 已删除。`
+    await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "删除 L7 规则失败";
+    error.value = e instanceof Error ? e.message : '删除 L7 规则失败'
   }
-};
+}
 
-onMounted(loadRules);
+onMounted(loadRules)
 </script>
 
 <template>
@@ -400,7 +399,7 @@ onMounted(loadRules);
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                     >
                       <Check :size="14" />
-                      {{ rule.enabled ? "停用" : "启用" }}
+                      {{ rule.enabled ? '停用' : '启用' }}
                     </button>
                     <button
                       @click="removeRule(rule.id)"
@@ -440,10 +439,10 @@ onMounted(loadRules);
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm tracking-wide text-blue-700">
-              {{ editingId ? "编辑 L7 规则" : "新建 L7 规则" }}
+              {{ editingId ? '编辑 L7 规则' : '新建 L7 规则' }}
             </p>
             <h3 class="mt-2 text-3xl font-semibold text-stone-900">
-              {{ editingId ? "调整七层检测策略" : "创建新的七层检测策略" }}
+              {{ editingId ? '调整七层检测策略' : '创建新的七层检测策略' }}
             </h3>
           </div>
           <button

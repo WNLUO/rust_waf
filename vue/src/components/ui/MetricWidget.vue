@@ -1,32 +1,32 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import type { Component } from "vue";
-import { TrendingUp, TrendingDown } from "lucide-vue-next";
+import { computed } from 'vue'
+import type { Component } from 'vue'
+import { TrendingUp, TrendingDown } from 'lucide-vue-next'
 
 const props = defineProps<{
-  label: string;
-  value: string | number;
-  hint?: string;
-  trend?: "up" | "down" | "neutral";
-  icon?: Component;
-  series?: number[];
-}>();
+  label: string
+  value: string | number
+  hint?: string
+  trend?: 'up' | 'down' | 'neutral'
+  icon?: Component
+  series?: number[]
+}>()
 
 const chartPath = computed(() => {
-  if (!props.series || props.series.length < 2) return "";
-  const max = Math.max(...props.series);
-  const min = Math.min(...props.series);
-  const range = max - min || 1;
-  const step = 100 / (props.series.length - 1);
+  if (!props.series || props.series.length < 2) return ''
+  const max = Math.max(...props.series)
+  const min = Math.min(...props.series)
+  const range = max - min || 1
+  const step = 100 / (props.series.length - 1)
 
   return props.series
     .map((value, index) => {
-      const x = index * step;
-      const normalized = 100 - ((value - min) / range) * 100;
-      return `${x},${normalized}`;
+      const x = index * step
+      const normalized = 100 - ((value - min) / range) * 100
+      return `${x},${normalized}`
     })
-    .join(" ");
-});
+    .join(' ')
+})
 </script>
 
 <template>
@@ -49,7 +49,7 @@ const chartPath = computed(() => {
         >
           <TrendingUp v-if="trend === 'up'" :size="14" />
           <TrendingDown v-if="trend === 'down'" :size="14" />
-          <span>{{ trend === "up" ? "上升" : "下降" }}</span>
+          <span>{{ trend === 'up' ? '上升' : '下降' }}</span>
         </div>
       </div>
       <svg

@@ -5,12 +5,14 @@ import { ArrowRight, PencilLine, RefreshCw, Shield, X } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import {
+  fetchActionIdeaPresets,
   fetchL7Config,
   fetchLocalSites,
   fetchRuleActionTemplates,
   updateLocalSite,
 } from '../lib/api'
 import type {
+  ActionIdeaPreset,
   L7ConfigPayload,
   LocalSiteDraft,
   LocalSiteItem,
@@ -42,6 +44,7 @@ const successMessage = ref('')
 const siteKeyword = ref('')
 const localSites = ref<LocalSiteItem[]>([])
 const actionTemplates = ref<RuleActionTemplateItem[]>([])
+const actionIdeaPresets = ref<ActionIdeaPreset[]>([])
 const l7Config = ref<L7ConfigPayload | null>(null)
 const editingSite = ref<LocalSiteItem | null>(null)
 const isEditorOpen = ref(false)
@@ -125,7 +128,31 @@ function sameResponseTemplate(
 }
 
 const enabledActionTemplates = computed(() =>
-  actionTemplates.value.filter((item) => item.layer === 'l7'),
+  [
+    ...actionTemplates.value,
+    ...actionIdeaPresets.value.map((idea) => ({
+      template_id: `${idea.plugin_id}:${idea.template_local_id}`,
+      plugin_id: idea.plugin_id,
+      name: idea.title,
+      description: `${idea.template_description}${
+        idea.has_overrides ? '（含已保存自定义内容）' : '（系统内置方案）'
+      }`,
+      layer: 'l7',
+      action: 'respond',
+      pattern: idea.pattern,
+      severity: idea.severity,
+      response_template: {
+        status_code: idea.status_code,
+        content_type: idea.content_type,
+        body_source: 'inline_text',
+        gzip: idea.gzip,
+        body_text: idea.response_content,
+        body_file_path: '',
+        headers: idea.headers,
+      },
+      updated_at: idea.updated_at,
+    })),
+  ].filter((item) => item.layer === 'l7'),
 )
 
 const pendingTemplate = computed(() => {
@@ -229,13 +256,15 @@ async function loadRulesCenter() {
   loading.value = true
   clearFeedback()
   try {
-    const [sitesResponse, templatesResponse, l7Response] = await Promise.all([
+    const [sitesResponse, templatesResponse, l7Response, ideasResponse] = await Promise.all([
       fetchLocalSites(),
       fetchRuleActionTemplates(),
       fetchL7Config(),
+      fetchActionIdeaPresets(),
     ])
     localSites.value = sitesResponse.sites
     actionTemplates.value = templatesResponse.templates
+    actionIdeaPresets.value = ideasResponse.ideas
     l7Config.value = l7Response
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取规则中心失败'

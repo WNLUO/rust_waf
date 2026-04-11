@@ -175,6 +175,31 @@ const copyToClipboard = async (value: string) => {
   await navigator.clipboard.writeText(value)
 }
 
+const isInlineJsIdea = (idea: ActionIdeaPreset | null | undefined) =>
+  idea?.id === 'inline-js'
+
+const wrapInlineJsContent = (script: string, title: string) => `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title || '内嵌JS动作'}</title>
+  <style>
+    body { font-family: sans-serif; background: #f8fafc; color: #0f172a; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; border-radius: 20px; padding: 32px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12); max-width: 560px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>请求已被动作页面接管</h1>
+    <p id="message">页面已正常返回，内嵌脚本会在这里执行。</p>
+  </main>
+  <script>
+${script}
+  <\/script>
+</body>
+</html>`
+
 const createActionIdeaPreviewPayload = (
   idea: ActionIdeaPreset,
 ): RuleActionTemplatePreviewResponse => ({
@@ -186,7 +211,9 @@ const createActionIdeaPreviewPayload = (
   body_source: idea.body_source,
   body_preview: idea.requires_upload
     ? `已上传文件：${idea.uploaded_file_name || '未上传 gzip 文件'}`
-    : idea.response_content,
+    : isInlineJsIdea(idea)
+      ? wrapInlineJsContent(idea.response_content, idea.title)
+      : idea.response_content,
   truncated: false,
 })
 
@@ -290,7 +317,12 @@ const downloadGeneratedPlugin = async (ideaId: string) => {
         2,
       ),
     )
-    zip.file(`responses/${idea.response_file_path}`, idea.response_content)
+    zip.file(
+      `responses/${idea.response_file_path}`,
+      idea.id === 'inline-js'
+        ? wrapInlineJsContent(idea.response_content, idea.title)
+        : idea.response_content,
+    )
 
     const blob = await zip.generateAsync({
       type: 'blob',
@@ -317,7 +349,9 @@ const previewIsActionIdea = computed(() => Boolean(currentPreviewIdea.value))
 
 const previewRenderedBody = computed(() =>
   previewIsActionIdea.value
-    ? previewDraftContent.value
+    ? currentPreviewIdea.value && isInlineJsIdea(currentPreviewIdea.value)
+      ? wrapInlineJsContent(previewDraftContent.value, previewDraftTitle.value || previewTitle.value)
+      : previewDraftContent.value
     : (previewPayload.value?.body_preview ?? ''),
 )
 
@@ -804,10 +838,10 @@ onMounted(loadActionCenter)
             </div>
 
             <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
-              <div
-                v-if="previewIsActionIdea && currentPreviewIdea?.requires_upload"
-                class="rounded-xl border border-slate-200 bg-white/80 p-5"
-              >
+                <div
+                  v-if="previewIsActionIdea && currentPreviewIdea?.requires_upload"
+                  class="rounded-xl border border-slate-200 bg-white/80 p-5"
+                >
                 <div class="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p class="text-xs tracking-wide text-slate-500">Gzip 文件</p>
@@ -862,6 +896,12 @@ onMounted(loadActionCenter)
                   v-if="previewIsActionIdea && !currentPreviewIdea?.requires_upload"
                   class="mt-3 space-y-3"
                 >
+                  <p
+                    v-if="currentPreviewIdea && isInlineJsIdea(currentPreviewIdea)"
+                    class="text-xs leading-6 text-slate-500"
+                  >
+                    这里填写的是纯 JavaScript 代码。系统会自动把它内嵌进一个正常 HTML 页面后再返回。
+                  </p>
                   <textarea
                     v-model="previewDraftContent"
                     class="min-h-[min(42vh,28rem)] w-full rounded-xl border border-slate-200 bg-white px-3 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-blue-500/50"

@@ -57,6 +57,30 @@ const policyForm = reactive<{
   templateId: '',
 })
 
+const isInlineJsIdea = (idea: ActionIdeaPreset) => idea.id === 'inline-js'
+
+const wrapInlineJsContent = (script: string, title: string) => `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title || '内嵌JS动作'}</title>
+  <style>
+    body { font-family: sans-serif; background: #f8fafc; color: #0f172a; display: grid; place-items: center; min-height: 100vh; margin: 0; }
+    .card { background: white; border-radius: 20px; padding: 32px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12); max-width: 560px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>请求已被动作页面接管</h1>
+    <p id="message">页面已正常返回，内嵌脚本会在这里执行。</p>
+  </main>
+  <script>
+${script}
+  <\/script>
+</body>
+</html>`
+
 function cloneHeaders(headers: { key: string; value: string }[]) {
   return headers.map((header) => ({ ...header }))
 }
@@ -148,7 +172,12 @@ const enabledActionTemplates = computed(() =>
         content_type: idea.content_type,
         body_source: idea.body_source,
         gzip: idea.gzip,
-        body_text: idea.body_source === 'inline_text' ? idea.response_content : '',
+        body_text:
+          idea.body_source === 'inline_text'
+            ? isInlineJsIdea(idea)
+              ? wrapInlineJsContent(idea.response_content, idea.title)
+              : idea.response_content
+            : '',
         body_file_path: idea.body_source === 'file' ? idea.runtime_body_file_path : '',
         headers: idea.headers,
       },

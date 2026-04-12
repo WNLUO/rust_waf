@@ -9,6 +9,7 @@ import {
 import type { BlockedIpsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 import { Ban, RefreshCw } from 'lucide-vue-next'
 
 const { formatTimestamp, timeRemaining } = useFormatters()
@@ -25,6 +26,15 @@ const blockedPayload = ref<BlockedIpsResponse>({
   limit: 0,
   offset: 0,
   blocked_ips: [],
+})
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '封禁名单',
+  successTitle: '封禁名单',
+  errorDuration: 5600,
+  successDuration: 3200,
 })
 
 const blockedFilters = reactive({
@@ -144,20 +154,6 @@ watch(
     </template>
 
     <div class="space-y-6">
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <div
         class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"
       >

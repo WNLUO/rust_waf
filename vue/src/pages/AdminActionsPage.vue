@@ -22,6 +22,7 @@ import type {
   RuleActionTemplatePreviewResponse,
   RuleActionTemplateItem,
 } from '../lib/types'
+import { useFlashMessages } from '../composables/useNotifications'
 
 const loading = ref(true)
 const refreshing = ref(false)
@@ -58,6 +59,12 @@ const previewDraftRandomFailureBody = ref('')
 const pagePreviewOpen = ref(false)
 const downloadingIdeaId = ref('')
 const uploadingIdeaId = ref('')
+
+useFlashMessages({
+  error,
+  errorTitle: '动作中心',
+  errorDuration: 5600,
+})
 
 const ideaTemplateMatchers: Record<
   string,
@@ -921,13 +928,6 @@ onMounted(loadActionCenter)
     </template>
 
     <div class="space-y-6">
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
       <AdminRulesPluginSection
         :installed-plugins="installedPlugins"
         @delete-plugin="handleDeletePlugin"

@@ -4,6 +4,7 @@ import AppLayout from '../components/layout/AppLayout.vue'
 import L4SectionNav from '../components/l4/L4SectionNav.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 import { createRule, deleteRule, fetchRulesList, updateRule } from '../lib/api'
 import type { RuleDraft, RuleItem } from '../lib/types'
 import {
@@ -73,6 +74,15 @@ const enabledCount = computed(
 const blockCount = computed(
   () => l4Rules.value.filter((rule) => rule.action === 'block').length,
 )
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: 'L4 规则',
+  successTitle: 'L4 规则',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 
 const l4RuleTemplates = [
   {
@@ -278,20 +288,6 @@ onMounted(loadRules)
           </p>
         </div>
       </section>
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
 
       <div
         class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"

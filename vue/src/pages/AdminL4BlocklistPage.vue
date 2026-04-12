@@ -4,6 +4,7 @@ import AppLayout from '../components/layout/AppLayout.vue'
 import L4SectionNav from '../components/l4/L4SectionNav.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 import {
   fetchBlockedIps,
   fetchL4Config,
@@ -81,6 +82,15 @@ const scopeSummary = computed(() => {
   if (filters.scope === 'safeline')
     return '当前只看雷池回流或远端来源封禁记录。'
   return '当前同时查看本地封禁与远端回流封禁。'
+})
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: 'L4 黑名单',
+  successTitle: 'L4 黑名单',
+  errorDuration: 5600,
+  successDuration: 3200,
 })
 
 const loadPageData = async (showLoader = false) => {
@@ -260,20 +270,6 @@ watch(
           </p>
         </div>
       </section>
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
 
       <div
         class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"

@@ -20,6 +20,7 @@ import type {
   SafeLineInterceptConfigPayload,
 } from '../lib/types'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 
 type PolicyMode =
   | 'inherit'
@@ -48,6 +49,15 @@ const actionIdeaPresets = ref<ActionIdeaPreset[]>([])
 const l7Config = ref<L7ConfigPayload | null>(null)
 const editingSite = ref<LocalSiteItem | null>(null)
 const isEditorOpen = ref(false)
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '规则中心',
+  successTitle: '规则中心',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 
 const policyForm = reactive<{
   mode: PolicyMode
@@ -506,20 +516,6 @@ onMounted(loadRulesCenter)
     </template>
 
     <div class="space-y-6">
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <div
         v-if="pendingTemplate"
         class="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-900"

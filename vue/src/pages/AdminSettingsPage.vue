@@ -7,6 +7,7 @@ import AdminSettingsSafeLineSection from '../components/settings/AdminSettingsSa
 import AdminSettingsSystemSection from '../components/settings/AdminSettingsSystemSection.vue'
 import AdminUploadCertificateDialog from '../components/settings/AdminUploadCertificateDialog.vue'
 import { useAdminSettings } from '../composables/useAdminSettings'
+import { useFlashMessages } from '../composables/useNotifications'
 
 const {
   clearSiteData,
@@ -51,6 +52,15 @@ const {
   generatingCertificate,
 } = useAdminSettings()
 
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '系统设置',
+  successTitle: '系统设置',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
+
 async function handleClearSiteData() {
   if (!window.confirm('确认清空所有站点数据吗？这会删除本地站点、映射、同步链路和缓存站点，但不会删除证书。')) {
     return
@@ -84,21 +94,6 @@ function formatTimestamp(timestamp: number | null) {
       >
         正在从数据库加载设置...
       </div>
-
-      <div
-        v-if="error"
-        class="rounded-lg border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_10px_25px_rgba(166,30,77,0.07)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-lg border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_10px_25px_rgba(16,185,129,0.07)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <div class="space-y-4">
         <AdminSettingsSystemSection
           :clearing-site-data="clearingSiteData"

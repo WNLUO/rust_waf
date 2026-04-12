@@ -8,6 +8,7 @@ import AdminL4StatsSection from '../components/l4/AdminL4StatsSection.vue'
 import L4SectionNav from '../components/l4/L4SectionNav.vue'
 import { useAdminL4 } from '../composables/useAdminL4'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 
 const { formatBytes, formatNumber } = useFormatters()
 const {
@@ -31,6 +32,15 @@ const {
   topPorts,
   totalProcessedBytes,
 } = useAdminL4()
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: 'L4 管理',
+  successTitle: 'L4 管理',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 
 const lastUpdatedLabel = computed(() => {
   if (!lastUpdated.value) return '等待首次拉取'
@@ -88,21 +98,6 @@ const lastUpdatedLabel = computed(() => {
         :stats="stats"
         :top-ports-count="topPorts.length"
       />
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <AdminL4ConfigSection
         :bloom-panels="bloomPanels"
         :false-positive-panels="falsePositivePanels"

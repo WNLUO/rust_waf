@@ -6,6 +6,7 @@ import CyberCard from '../components/ui/CyberCard.vue'
 import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 import { fetchL4Stats } from '../lib/api'
 import type { L4PortStatItem, L4StatsPayload } from '../lib/types'
 import { Activity, AlertTriangle, Database, RefreshCw } from 'lucide-vue-next'
@@ -17,6 +18,12 @@ const refreshing = ref(false)
 const error = ref('')
 const stats = ref<L4StatsPayload | null>(null)
 const refreshTimer = ref<number | null>(null)
+
+useFlashMessages({
+  error,
+  errorTitle: '端口画像',
+  errorDuration: 5600,
+})
 
 const filters = reactive({
   search: '',
@@ -153,13 +160,6 @@ onBeforeUnmount(() => {
           的端口级统计，适合值班时快速定位被重点扫描、被频繁拦截或出现洪泛特征的入口端口。
         </p>
       </section>
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
 
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricWidget

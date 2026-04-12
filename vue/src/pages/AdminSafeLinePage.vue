@@ -6,6 +6,7 @@ import AdminSafeLineMappingsSection from '../components/safeline/AdminSafeLineMa
 import AdminSafeLineOverviewSection from '../components/safeline/AdminSafeLineOverviewSection.vue'
 import { useAdminSafeLine } from '../composables/useAdminSafeLine'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 
 const { formatTimestamp } = useFormatters()
 
@@ -32,6 +33,15 @@ const {
   syncStatusType,
   testResult,
 } = useAdminSafeLine()
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '雷池联动',
+  successTitle: '雷池联动',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 </script>
 
 <template>
@@ -48,20 +58,6 @@ const {
     </template>
 
     <div class="space-y-6">
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <div
         v-if="loading"
         class="rounded-xl border border-white/80 bg-white/75 px-4 py-6 text-center text-sm text-slate-500 shadow-sm"

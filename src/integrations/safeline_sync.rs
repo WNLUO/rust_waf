@@ -463,7 +463,6 @@ pub async fn pull_site(
         bail!("站点 '{}' 当前链路配置不允许从雷池回流", remote_site.id);
     }
 
-    let mut local_certificates = store.list_local_certificates().await?;
     let mut local_sites = store.list_local_sites().await?;
     let linked_local_id = existing_link.as_ref().map(|item| item.local_site_id);
 
@@ -475,28 +474,6 @@ pub async fn pull_site(
         );
     }
 
-    let local_certificate_id = if let Some(cert_id) = remote_site.cert_id {
-        let cert_id_text = cert_id.to_string();
-        let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
-        if let Some(certificate) = remote_certificates
-            .iter()
-            .find(|item| item.id == cert_id_text)
-        {
-            let detail = Some(load_required_certificate_detail(config, certificate).await?);
-            sync_remote_certificate(store, &mut local_certificates, certificate, detail, now)
-                .await?;
-
-            local_certificates
-                .iter()
-                .find(|item| item.provider_remote_id.as_deref() == Some(cert_id_text.as_str()))
-                .map(|item| item.id)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
     let existing_local_site = existing_link.as_ref().and_then(|link| {
         local_sites
             .iter()
@@ -505,7 +482,7 @@ pub async fn pull_site(
     });
     let site_upsert = merge_local_site_upsert_from_remote(
         &remote_site,
-        local_certificate_id,
+        None,
         sync_mode,
         now,
         existing_local_site.as_ref(),
@@ -1141,41 +1118,6 @@ async fn sync_remote_certificate(
     }
 
     Ok(SyncInsertState { inserted, local_id })
-}
-
-async fn load_required_certificate_detail(
-    config: &SafeLineConfig,
-    certificate: &SafeLineCertificateSummary,
-) -> Result<SafeLineCertificateDetail> {
-    let detail = crate::integrations::safeline::load_certificate(config, &certificate.id)
-        .await
-        .map_err(|err| {
-            anyhow!(
-                "读取雷池证书 '{}' 详情失败：{}。当前无法同步证书 PEM 和私钥。",
-                certificate.id,
-                err
-            )
-        })?;
-
-    let has_certificate_pem = detail
-        .certificate_pem
-        .as_deref()
-        .map(|item| !item.trim().is_empty())
-        .unwrap_or(false);
-    let has_private_key_pem = detail
-        .private_key_pem
-        .as_deref()
-        .map(|item| !item.trim().is_empty())
-        .unwrap_or(false);
-
-    if !has_certificate_pem || !has_private_key_pem {
-        bail!(
-            "雷池证书 '{}' 详情缺少完整的证书 PEM 或私钥 PEM，无法完整同步到本地。",
-            certificate.id
-        );
-    }
-
-    Ok(detail)
 }
 
 fn local_site_upsert_from_remote(

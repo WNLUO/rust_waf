@@ -21,6 +21,7 @@ import {
 } from '../lib/adminSites'
 import { useAdminSitesEditor } from './useAdminSitesEditor'
 import { useAdminSitesSync } from './useAdminSitesSync'
+import { useNotifications } from './useNotifications'
 import type {
   LocalCertificateItem,
   LocalSiteDraft,
@@ -79,6 +80,7 @@ function cloneSafelineIntercept(
 export function useAdminSites(
   formatTimestamp: (timestamp?: number | null) => string,
 ) {
+  const { notifyError, notifySuccess } = useNotifications()
   const loading = ref(true)
   const error = ref('')
   const successMessage = ref('')
@@ -614,15 +616,32 @@ export function useAdminSites(
 
     try {
       for (const remoteSiteId of selectedRemoteSiteIds.value) {
+        const candidate = remoteSyncCandidates.value.find((item) => item.id === remoteSiteId)
         try {
           await pullSafeLineSite(
             remoteSiteId,
             remoteSitePullOptions.value[remoteSiteId] ?? createDefaultPullOptions(),
           )
           successCount += 1
+          notifySuccess(
+            `${candidate?.domain || candidate?.name || remoteSiteId} 已同步到本地。`,
+            {
+              title: '站点同步成功',
+              duration: 2400,
+            },
+          )
         } catch (e) {
+          const message =
+            e instanceof Error ? e.message : '站点同步失败'
           failed.push(
             e instanceof Error ? `${remoteSiteId}: ${e.message}` : remoteSiteId,
+          )
+          notifyError(
+            `${candidate?.domain || candidate?.name || remoteSiteId}：${message}`,
+            {
+              title: '站点同步失败',
+              duration: 5600,
+            },
           )
         }
       }

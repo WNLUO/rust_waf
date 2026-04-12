@@ -5,6 +5,7 @@ import type { SecurityEventItem, SecurityEventsResponse } from '../lib/types'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 import { Copy, Eye, RefreshCw, X } from 'lucide-vue-next'
 
 const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
@@ -21,6 +22,15 @@ const eventsPayload = ref<SecurityEventsResponse>({
   limit: 0,
   offset: 0,
   events: [],
+})
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '事件记录',
+  successTitle: '事件记录',
+  errorDuration: 5600,
+  successDuration: 3200,
 })
 
 const eventsFilters = reactive({
@@ -212,20 +222,6 @@ const siteOptions = computed(() => {
     </template>
 
     <div class="min-w-0 space-y-6">
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <div
         class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"
       >

@@ -18,6 +18,7 @@ import MetricWidget from '../components/ui/MetricWidget.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
 import CyberCard from '../components/ui/CyberCard.vue'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 import {
   Activity,
   Database,
@@ -33,6 +34,12 @@ const refreshing = ref(false)
 const error = ref('')
 const lastUpdated = ref<number | null>(null)
 const refreshTimer = ref<number | null>(null)
+
+useFlashMessages({
+  error,
+  errorTitle: '控制台',
+  errorDuration: 5600,
+})
 
 const metricsHistory = reactive({
   totalPackets: [] as number[],
@@ -203,13 +210,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else class="space-y-4">
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricWidget
           label="累计处理报文"

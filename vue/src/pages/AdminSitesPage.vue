@@ -6,6 +6,7 @@ import AdminSitesTableSection from '../components/sites/AdminSitesTableSection.v
 import AppLayout from '../components/layout/AppLayout.vue'
 import { useAdminSites } from '../composables/useAdminSites'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
@@ -57,6 +58,15 @@ const {
   loading,
   upstreamsText,
 } = useAdminSites(formatTimestamp)
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '站点管理',
+  successTitle: '站点管理',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 </script>
 
 <template>
@@ -81,21 +91,6 @@ const {
         @update:keyword="filters.keyword = $event"
         @update:state="filters.state = $event"
       />
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <div
         v-if="loading"
         class="rounded-xl border border-white/80 bg-white/75 px-4 py-6 text-center text-sm text-slate-500 shadow-sm"

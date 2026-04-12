@@ -41,11 +41,9 @@ const fieldOptions: Array<{
   description: string
 }> = [
   { key: 'name', label: '名称', description: '站点展示名称' },
-  { key: 'primary_hostname', label: '主域名', description: '本地主域名字段' },
-  { key: 'hostnames', label: 'Server Names', description: '附加域名列表' },
+  { key: 'hostnames', label: '附加域名', description: '附加域名列表' },
   { key: 'listen_ports', label: '端口', description: '监听端口列表' },
   { key: 'upstreams', label: '下游地址', description: '下游地址列表' },
-  { key: 'enabled', label: '启用状态', description: '是否启用该站点' },
 ]
 
 function fieldChecked(
@@ -203,14 +201,21 @@ function fieldDisabled(
 
                 <td class="px-2 py-2 text-xs text-slate-600 whitespace-nowrap">
                   <div class="space-y-0.5">
-                    <p>{{ candidate.ports.length ? candidate.ports.join(' / ') : '-' }}</p>
-                    <p class="text-slate-400">
-                      SSL端口:
+                    <p>
                       {{
-                        candidate.sslPorts.length
-                          ? candidate.sslPorts.join(' / ')
+                        candidate.ports.filter((port) => !candidate.sslPorts.includes(port))
+                          .length
+                          ? candidate.ports
+                              .filter((port) => !candidate.sslPorts.includes(port))
+                              .join(' / ')
                           : '-'
                       }}
+                      <span
+                        v-if="candidate.sslPorts.length"
+                        class="text-slate-400"
+                      >
+                        / SSL端口: {{ candidate.sslPorts.join(' / ') }}
+                      </span>
                     </p>
                   </div>
                 </td>

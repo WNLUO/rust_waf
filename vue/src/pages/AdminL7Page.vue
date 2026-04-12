@@ -8,6 +8,7 @@ import AdminL7ConfigSection from '../components/l7/AdminL7ConfigSection.vue'
 import AdminL7OverviewSection from '../components/l7/AdminL7OverviewSection.vue'
 import { useAdminL7 } from '../composables/useAdminL7'
 import { useFormatters } from '../composables/useFormatters'
+import { useFlashMessages } from '../composables/useNotifications'
 
 const { actionLabel, formatLatency, formatNumber, formatTimestamp } =
   useFormatters()
@@ -40,6 +41,15 @@ const {
   upstreamStatusType,
   refreshing,
 } = useAdminL7()
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: 'L7 管理',
+  successTitle: 'L7 管理',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 
 const lastUpdatedLabel = computed(() => {
   if (!lastUpdated.value) return '等待首次拉取'
@@ -105,21 +115,6 @@ const lastUpdatedLabel = computed(() => {
         :upstream-status-text="upstreamStatusText"
         :upstream-status-type="upstreamStatusType"
       />
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-[0_14px_30px_rgba(166,30,77,0.08)]"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-[0_14px_30px_rgba(16,185,129,0.08)]"
-      >
-        {{ successMessage }}
-      </div>
-
       <AdminL7ConfigSection
         :form="configForm"
         :listen-addrs-text="listenAddrsText"

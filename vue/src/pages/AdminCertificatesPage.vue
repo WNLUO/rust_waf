@@ -20,6 +20,7 @@ import {
   extractPemBlocks,
   normalizeDomainList,
 } from '../lib/adminSettings'
+import { useFlashMessages } from '../composables/useNotifications'
 import type {
   LocalCertificateDraft,
   LocalCertificateItem,
@@ -48,6 +49,15 @@ const certificateMatchPreviews = ref<
 >({})
 
 const form = reactive<LocalCertificateDraft>(createDefaultUploadCertificateForm())
+
+useFlashMessages({
+  error,
+  success: successMessage,
+  errorTitle: '证书管理',
+  successTitle: '证书管理',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
 
 const domainsText = computed({
   get: () => form.domains.join(', '),
@@ -569,21 +579,6 @@ onMounted(loadCertificates)
       >
         正在读取证书列表...
       </div>
-
-      <div
-        v-if="error"
-        class="rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm text-red-600 shadow-sm"
-      >
-        {{ error }}
-      </div>
-
-      <div
-        v-if="successMessage"
-        class="rounded-xl border border-emerald-300/60 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm"
-      >
-        {{ successMessage }}
-      </div>
-
       <section
         v-if="preflightSummary.total > 0"
         class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"

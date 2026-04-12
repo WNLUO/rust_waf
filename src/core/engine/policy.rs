@@ -645,7 +645,10 @@ fn apply_standard_forwarding_headers(context: &WafContext, request: &mut Unified
 fn apply_request_rewrite_policy(context: &WafContext, request: &mut UnifiedHttpRequest) {
     let gateway = &context.config_snapshot().gateway_config;
     if gateway.rewrite_host_enabled && !gateway.rewrite_host_value.is_empty() {
-        request.add_header("host".to_string(), gateway.rewrite_host_value.clone());
+        let rewritten = expand_request_template(&gateway.rewrite_host_value, request);
+        if !rewritten.trim().is_empty() {
+            request.add_header("host".to_string(), rewritten);
+        }
     }
 
     if !gateway.support_gzip || !gateway.support_brotli {
@@ -670,6 +673,33 @@ fn apply_request_rewrite_policy(context: &WafContext, request: &mut UnifiedHttpR
             request.add_header("accept-encoding".to_string(), filtered);
         }
     }
+}
+
+fn expand_request_template(template: &str, request: &UnifiedHttpRequest) -> String {
+    let original_host = request
+        .get_header("host")
+        .or_else(|| request.get_metadata("authority"))
+        .cloned()
+        .unwrap_or_default();
+    let normalized_host = request_hostname(request).unwrap_or_default();
+    let scheme = request
+        .get_metadata("scheme")
+        .cloned()
+        .unwrap_or_else(|| infer_forwarded_proto(request));
+    let listener_port = request
+        .get_metadata("listener_port")
+        .cloned()
+        .unwrap_or_default();
+
+    template
+        .replace("$http_host", &original_host)
+        .replace("${http_host}", &original_host)
+        .replace("$host", &normalized_host)
+        .replace("${host}", &normalized_host)
+        .replace("$scheme", &scheme)
+        .replace("${scheme}", &scheme)
+        .replace("$server_port", &listener_port)
+        .replace("${server_port}", &listener_port)
 }
 
 fn apply_request_header_operations(context: &WafContext, request: &mut UnifiedHttpRequest) {
@@ -964,4 +994,38 @@ fn unix_timestamp() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::HttpVersion;
+
+    #[test]
+    fn rewrite_host_template_expands_http_host() {
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http2_0,
+            "GET".to_string(),
+            "/".to_string(),
+        );
+        request.add_header("host".to_string(), "wnluo.com:660".to_string());
+        request.add_metadata("listener_port".to_string(), "660".to_string());
+        request.add_metadata("scheme".to_string(), "https".to_string());
+
+        let rendered = expand_request_template("$http_host", &request);
+        assert_eq!(rendered, "wnluo.com:660");
+    }
+
+    #[test]
+    fn rewrite_host_template_expands_host_without_port() {
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/".to_string(),
+        );
+        request.add_header("host".to_string(), "wnluo.com:660".to_string());
+
+        let rendered = expand_request_template("$host", &request);
+        assert_eq!(rendered, "wnluo.com");
+    }
 }

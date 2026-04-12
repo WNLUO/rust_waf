@@ -360,7 +360,7 @@ fn inspect_l7_rules(
 }
 
 fn inspect_transport_layers(context: &WafContext, packet: &PacketInfo) -> InspectionResult {
-    if let Some(l4_inspector) = &context.l4_inspector {
+    if let Some(l4_inspector) = context.l4_inspector() {
         let l4_result = l4_inspector.inspect_packet(packet);
         if l4_result.blocked || l4_result.should_persist_event() {
             return l4_result;

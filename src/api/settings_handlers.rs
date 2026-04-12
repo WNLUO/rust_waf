@@ -13,7 +13,7 @@ pub(super) async fn get_l4_config_handler(
     let config = persisted_config(&state).await?;
     Ok(Json(L4ConfigResponse::from_config(
         &config,
-        state.context.l4_inspector.is_some(),
+        state.context.l4_runtime_enabled(),
     )))
 }
 
@@ -43,11 +43,16 @@ pub(super) async fn update_l4_config_handler(
         .upsert_app_config(&next)
         .await
         .map_err(ApiError::internal)?;
-    state.context.apply_runtime_config(next);
+    state.context.apply_runtime_config(next.clone());
+    state
+        .context
+        .refresh_l4_runtime_from_config()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message: "L4 配置已写入数据库。当前运行中的四层检测实例需重启服务后才会加载新参数。"
+        message: "L4 配置已写入数据库，并已立即刷新运行中的四层检测参数。"
             .to_string(),
     }))
 }
@@ -156,7 +161,7 @@ pub(super) async fn get_l4_stats_handler(
 ) -> ApiResult<Json<L4StatsResponse>> {
     let response = state
         .context
-        .l4_inspector
+        .l4_inspector()
         .as_ref()
         .map(|inspector| L4StatsResponse::from_stats(inspector.get_statistics()))
         .unwrap_or_else(L4StatsResponse::disabled);

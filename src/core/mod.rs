@@ -46,7 +46,7 @@ pub struct Http3RuntimeSnapshot {
 pub struct WafContext {
     pub config: Config,
     runtime_config: Arc<RwLock<Config>>,
-    pub l4_inspector: Option<L4Inspector>,
+    l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
     pub http_processor: HttpTrafficProcessor,
     pub rule_engine: RwLock<Option<RuleEngine>>,
     pub metrics: Option<MetricsCollector>,
@@ -83,13 +83,13 @@ impl WafContext {
 
         Ok(Self {
             runtime_config: Arc::new(RwLock::new(config.clone())),
-            l4_inspector: l4_enabled.then(|| {
-                L4Inspector::new(
+            l4_inspector: RwLock::new(l4_enabled.then(|| {
+                Arc::new(L4Inspector::new(
                     config.l4_config.clone(),
                     bloom_enabled,
                     l4_bloom_verification,
-                )
-            }),
+                ))
+            })),
             http_processor,
             rule_engine: RwLock::new(rule_engine),
             metrics,
@@ -137,6 +137,21 @@ impl WafContext {
             *guard = config;
         }
         self.refresh_http3_runtime_metadata();
+    }
+
+    pub fn l4_inspector(&self) -> Option<Arc<L4Inspector>> {
+        self.l4_inspector
+            .read()
+            .expect("l4_inspector lock poisoned")
+            .as_ref()
+            .cloned()
+    }
+
+    pub fn l4_runtime_enabled(&self) -> bool {
+        self.l4_inspector()
+            .as_ref()
+            .map(|_| true)
+            .unwrap_or(false)
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
@@ -208,6 +223,27 @@ impl WafContext {
         self.gateway_runtime
             .reload(&config, self.sqlite_store.as_deref())
             .await
+    }
+
+    pub async fn refresh_l4_runtime_from_config(&self) -> Result<()> {
+        let config = self.config_snapshot();
+        let l4_enabled =
+            config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
+        let next = l4_enabled.then(|| {
+            Arc::new(L4Inspector::new(
+                config.l4_config.clone(),
+                config.bloom_enabled,
+                config.l4_bloom_false_positive_verification,
+            ))
+        });
+
+        if let Some(inspector) = next.as_ref() {
+            inspector.start(self).await?;
+        }
+
+        let mut guard = self.l4_inspector.write().expect("l4_inspector lock poisoned");
+        *guard = next;
+        Ok(())
     }
 
     pub async fn refresh_rules_from_storage(&self) -> Result<bool> {

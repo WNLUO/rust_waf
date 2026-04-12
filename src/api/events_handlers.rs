@@ -131,7 +131,7 @@ pub(super) async fn delete_blocked_ip_handler(
             match entry.ip.parse::<std::net::IpAddr>() {
                 Ok(ip) => state
                     .context
-                    .l4_inspector
+                    .l4_inspector()
                     .as_ref()
                     .map(|inspector| inspector.unblock_ip(&ip))
                     .unwrap_or(false),

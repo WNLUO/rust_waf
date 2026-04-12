@@ -261,7 +261,7 @@ impl WafEngine {
             startup_config.max_concurrent_tasks
         );
 
-        if let Some(l4_inspector) = &self.context.l4_inspector {
+        if let Some(l4_inspector) = self.context.l4_inspector() {
             l4_inspector.start(self.context.as_ref()).await?;
         }
 
@@ -271,8 +271,8 @@ impl WafEngine {
             .await?;
 
         #[cfg(feature = "api")]
-        if self.context.config.api_enabled {
-            let addr = self.context.config.api_bind.parse()?;
+        if startup_config.api_enabled {
+            let addr = startup_config.api_bind.parse()?;
             let context = Arc::clone(&self.context);
             tokio::spawn(async move {
                 if let Err(err) = crate::api::ApiServer::new(addr, context).start().await {
@@ -282,7 +282,7 @@ impl WafEngine {
         }
 
         #[cfg(not(feature = "api"))]
-        if self.context.config.api_enabled {
+        if startup_config.api_enabled {
             warn!("API support was requested but the binary was built without the 'api' feature");
         }
 
@@ -531,10 +531,10 @@ impl WafEngine {
             warn!("Failed to refresh rules from SQLite: {}", err);
         }
 
-        if let Some(l4_inspector) = &self.context.l4_inspector {
+        if let Some(l4_inspector) = self.context.l4_inspector() {
             l4_inspector.maintenance_tick();
             if matches!(
-                self.context.config.runtime_profile,
+                self.context.config_snapshot().runtime_profile,
                 RuntimeProfile::Standard
             ) {
                 let stats = l4_inspector.get_statistics();

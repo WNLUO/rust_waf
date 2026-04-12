@@ -5,7 +5,7 @@ import L4SectionNav from '@/features/l4/components/L4SectionNav.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
-import { createRule, deleteRule, fetchRulesList, updateRule } from '@/shared/api/client'
+import { createRule, deleteRule, fetchRulesList, updateRule } from '@/shared/api/rules'
 import type { RuleDraft, RuleItem } from '@/shared/types'
 import {
   Check,

@@ -2,10 +2,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   fetchL7Config,
   fetchL7Stats,
-  fetchRulesList,
-  fetchSecurityEvents,
   updateL7Config,
-} from '@/shared/api/client'
+} from '@/shared/api/l7'
+import { fetchRulesList } from '@/shared/api/rules'
+import { fetchSecurityEvents } from '@/shared/api/events'
 import { createDefaultL7ConfigForm, type L7ConfigForm } from '@/features/l7/utils/adminL7'
 import type {
   L7ConfigPayload,

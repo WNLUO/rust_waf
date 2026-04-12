@@ -7,7 +7,7 @@ import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
-import { fetchL4Stats } from '@/shared/api/client'
+import { fetchL4Stats } from '@/shared/api/l4'
 import type { L4PortStatItem, L4StatsPayload } from '@/shared/types'
 import { Activity, AlertTriangle, Database, RefreshCw } from 'lucide-vue-next'
 

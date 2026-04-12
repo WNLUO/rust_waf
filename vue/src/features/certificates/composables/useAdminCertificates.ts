@@ -10,7 +10,7 @@ import {
   pushSafeLineCertificate,
   unbindLocalCertificateRemote,
   updateLocalCertificate,
-} from '@/shared/api/client'
+} from '@/shared/api/certificates'
 import {
   createDefaultUploadCertificateForm,
   defaultCertificateName,

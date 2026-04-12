@@ -1,5 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/client'
+import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/l4'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
 import type { L4BehaviorOverview, L4ConfigPayload, L4StatsPayload } from '@/shared/types'
 

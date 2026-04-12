@@ -2,11 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   fetchBlockedIps,
-  fetchHealth,
-  fetchMetrics,
-  fetchRulesList,
   fetchSecurityEvents,
-} from '@/shared/api/client'
+} from '@/shared/api/events'
+import { fetchRulesList } from '@/shared/api/rules'
+import { fetchHealth, fetchMetrics } from '@/shared/api/system'
 import type {
   DashboardPayload,
   SecurityEventsResponse,

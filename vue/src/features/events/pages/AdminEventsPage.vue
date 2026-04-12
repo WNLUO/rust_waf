@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchSecurityEvents, syncSafeLineEvents } from '@/shared/api/client'
+import { fetchSecurityEvents } from '@/shared/api/events'
+import { syncSafeLineEvents } from '@/shared/api/safeline'
 import type { SecurityEventItem, SecurityEventsResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'

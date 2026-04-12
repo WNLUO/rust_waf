@@ -1,17 +1,21 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
-  clearLocalSiteData,
+  fetchSettings,
+  updateSettings,
+} from '@/shared/api/settings'
+import {
   createLocalCertificate,
   deleteLocalCertificate,
   fetchLocalCertificates,
+  generateLocalCertificate,
+} from '@/shared/api/certificates'
+import {
   fetchSafeLineMappings,
   fetchSafeLineSites,
-  fetchSettings,
-  generateLocalCertificate,
   testSafeLineConnection,
   updateSafeLineMappings,
-  updateSettings,
-} from '@/shared/api/client'
+} from '@/shared/api/safeline'
+import { clearLocalSiteData } from '@/shared/api/sites'
 import {
   createDefaultSystemSettings,
   createDefaultUploadCertificateForm,

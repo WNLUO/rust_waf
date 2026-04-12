@@ -5,12 +5,11 @@ import AppLayout from '@/app/layout/AppLayout.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
   fetchActionIdeaPresets,
-  fetchL7Config,
-  fetchLocalSites,
   fetchRuleActionTemplatePreview,
   fetchRuleActionTemplates,
-  updateLocalSite,
-} from '@/shared/api/client'
+} from '@/shared/api/rules'
+import { fetchL7Config } from '@/shared/api/l7'
+import { fetchLocalSites, updateLocalSite } from '@/shared/api/sites'
 import type {
   ActionIdeaPreset,
   L7ConfigPayload,

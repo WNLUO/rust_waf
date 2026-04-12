@@ -3,13 +3,13 @@ import {
   fetchSafeLineMappings,
   fetchSafeLineSites,
   fetchSafeLineSyncState,
-  fetchSettings,
   pullSafeLineBlockedIps,
   syncSafeLineBlockedIps,
   syncSafeLineEvents,
   testSafeLineConnection,
   updateSafeLineMappings,
-} from '@/shared/api/client'
+} from '@/shared/api/safeline'
+import { fetchSettings } from '@/shared/api/settings'
 import {
   mergeMappingDrafts,
   sortMappingDrafts,

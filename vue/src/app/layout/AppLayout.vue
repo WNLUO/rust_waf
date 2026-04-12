@@ -25,7 +25,7 @@ import {
   clearAdminApiToken,
   getAdminApiToken,
   setAdminApiToken,
-} from '@/shared/api/client'
+} from '@/shared/api/auth'
 
 interface NavItem {
   name: string

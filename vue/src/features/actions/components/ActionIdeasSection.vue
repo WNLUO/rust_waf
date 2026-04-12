@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ActionIdeaCard } from '@/features/actions/composables/useAdminActions'
+import type { ActionIdeaCard } from '@/features/actions/utils/actionIdeaPreview'
 
 defineProps<{
   downloadingIdeaId: string

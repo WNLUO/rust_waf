@@ -7,10 +7,9 @@ import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 import {
   fetchBlockedIps,
-  fetchL4Config,
-  fetchL4Stats,
   unblockIp,
-} from '@/shared/api/client'
+} from '@/shared/api/events'
+import { fetchL4Config, fetchL4Stats } from '@/shared/api/l4'
 import type {
   BlockedIpItem,
   BlockedIpsResponse,

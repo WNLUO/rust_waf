@@ -2,21 +2,23 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import {
   createLocalSite,
   deleteLocalSite,
-  fetchCachedSafeLineSites,
   fetchGlobalEntryConfig,
-  fetchL7Config,
-  fetchLocalCertificates,
   fetchLocalSites,
+  pullSafeLineSite,
+  pushSafeLineSite,
+  updateLocalSite,
+  updateGlobalEntryConfig,
+} from '@/shared/api/sites'
+import { fetchL7Config } from '@/shared/api/l7'
+import { fetchLocalCertificates } from '@/shared/api/certificates'
+import {
+  fetchCachedSafeLineSites,
   fetchSafeLineMappings,
   fetchSafeLineSites,
   fetchSiteSyncLinks,
-  fetchSettings,
-  pullSafeLineSite,
-  pushSafeLineSite,
   testSafeLineConnection,
-  updateLocalSite,
-  updateGlobalEntryConfig,
-} from '@/shared/api/client'
+} from '@/shared/api/safeline'
+import { fetchSettings } from '@/shared/api/settings'
 import {
   mergeSiteRows,
   type SiteRowDraft,

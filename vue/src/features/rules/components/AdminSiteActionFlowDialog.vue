@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { ArrowRight, Eye, Network, Shield, ShieldBan, X, Zap } from 'lucide-vue-next'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import { fetchRuleActionTemplatePreview } from '@/shared/api/client'
+import { fetchRuleActionTemplatePreview } from '@/shared/api/rules'
 import type {
   L7ConfigPayload,
   LocalSiteItem,

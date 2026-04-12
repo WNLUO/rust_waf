@@ -2,10 +2,9 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import {
   fetchBlockedIps,
-  pullSafeLineBlockedIps,
-  syncSafeLineBlockedIps,
   unblockIp,
-} from '@/shared/api/client'
+} from '@/shared/api/events'
+import { pullSafeLineBlockedIps, syncSafeLineBlockedIps } from '@/shared/api/safeline'
 import type { BlockedIpsResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'

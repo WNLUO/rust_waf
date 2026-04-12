@@ -11,7 +11,7 @@ import {
   updateRuleActionPlugin,
   uploadRuleActionPlugin,
   updateRule,
-} from '@/shared/api/client'
+} from '@/shared/api/rules'
 import {
   applyPluginTemplateToDraft,
   buildRulePayload,

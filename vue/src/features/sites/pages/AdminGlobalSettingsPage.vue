@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/client'
+import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
 import type { GlobalSettingsPayload, HeaderOperationItem } from '@/shared/types'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 

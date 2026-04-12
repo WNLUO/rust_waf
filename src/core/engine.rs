@@ -9,13 +9,15 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig as RustlsClientConfig, DigitallySignedStruct, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::io::Read;
+use std::pin::Pin;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::task::{Context, Poll};
 use std::time::Instant;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
@@ -67,6 +69,64 @@ struct RunningEntryListener {
     addr: String,
     shutdown_tx: mpsc::Sender<()>,
     task: JoinHandle<()>,
+}
+
+struct PrefixedStream<S> {
+    prefix: Vec<u8>,
+    cursor: usize,
+    inner: S,
+}
+
+impl<S> PrefixedStream<S> {
+    fn new(prefix: Vec<u8>, inner: S) -> Self {
+        Self {
+            prefix,
+            cursor: 0,
+            inner,
+        }
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for PrefixedStream<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        if self.cursor < self.prefix.len() {
+            let remaining = self.prefix.len() - self.cursor;
+            let to_copy = remaining.min(buf.remaining());
+            buf.put_slice(&self.prefix[self.cursor..self.cursor + to_copy]);
+            self.cursor += to_copy;
+            return Poll::Ready(Ok(()));
+        }
+
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for PrefixedStream<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
 }
 
 struct EntryListenerRuntime {
@@ -732,8 +792,11 @@ async fn handle_connection(
         return Ok(());
     }
 
+    let (stream, metadata) =
+        parse_proxy_protocol_stream(context.as_ref(), stream, peer_addr).await?;
+
     // 协议检测和路由
-    match detect_and_handle_protocol(context, stream, peer_addr, &packet).await {
+    match detect_and_handle_protocol(context, stream, peer_addr, &packet, metadata).await {
         Ok(_) => Ok(()),
         Err(e) => {
             warn!("Connection handling error for {}: {}", peer_addr, e);
@@ -768,6 +831,9 @@ async fn handle_tls_connection(
         return Ok(());
     }
 
+    let (stream, mut metadata) =
+        parse_proxy_protocol_stream(context.as_ref(), stream, peer_addr).await?;
+
     let tls_stream = tokio::time::timeout(
         std::time::Duration::from_millis(config.l7_config.tls_handshake_timeout_ms),
         tls_acceptor.accept(stream),
@@ -779,7 +845,7 @@ async fn handle_tls_connection(
         .1
         .alpn_protocol()
         .map(|proto| String::from_utf8_lossy(proto).to_string());
-    let mut metadata = vec![("transport".to_string(), "tls".to_string())];
+    metadata.push(("transport".to_string(), "tls".to_string()));
     if let Some(protocol) = &alpn {
         metadata.push(("tls.alpn".to_string(), protocol.clone()));
     }
@@ -1807,13 +1873,72 @@ fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>> {
     Ok(decoded)
 }
 
-/// 检测协议版本并路由到相应的处理器
-async fn detect_and_handle_protocol(
-    context: Arc<WafContext>,
+async fn parse_proxy_protocol_stream(
+    context: &WafContext,
     stream: TcpStream,
     peer_addr: std::net::SocketAddr,
+) -> Result<(PrefixedStream<TcpStream>, Vec<(String, String)>)> {
+    if context.config_snapshot().gateway_config.source_ip_strategy
+        != crate::config::SourceIpStrategy::ProxyProtocol
+    {
+        return Ok((PrefixedStream::new(Vec::new(), stream), Vec::new()));
+    }
+
+    let mut peeked = vec![0u8; 256];
+    let bytes_read = tokio::time::timeout(
+        std::time::Duration::from_millis(context.config_snapshot().l7_config.first_byte_timeout_ms),
+        stream.peek(&mut peeked),
+    )
+    .await??;
+    let preview = &peeked[..bytes_read];
+
+    let Some(line_end) = preview.windows(2).position(|item| item == b"\r\n") else {
+        return Ok((PrefixedStream::new(Vec::new(), stream), Vec::new()));
+    };
+    let line = &preview[..line_end + 2];
+    let Some(source_ip) = parse_proxy_protocol_v1_source_ip(line) else {
+        return Ok((PrefixedStream::new(Vec::new(), stream), Vec::new()));
+    };
+
+    let mut stream = stream;
+    let mut consumed = vec![0u8; line.len()];
+    stream.read_exact(&mut consumed).await?;
+    debug!(
+        "Parsed PROXY protocol source ip {} for peer {}",
+        source_ip, peer_addr
+    );
+
+    Ok((
+        PrefixedStream::new(Vec::new(), stream),
+        vec![("proxy_protocol_source_ip".to_string(), source_ip.to_string())],
+    ))
+}
+
+fn parse_proxy_protocol_v1_source_ip(line: &[u8]) -> Option<std::net::IpAddr> {
+    let text = std::str::from_utf8(line).ok()?.trim();
+    let mut parts = text.split_whitespace();
+    if parts.next()? != "PROXY" {
+        return None;
+    }
+
+    match parts.next()? {
+        "TCP4" | "TCP6" => parts.next()?.parse::<std::net::IpAddr>().ok(),
+        "UNKNOWN" => None,
+        _ => None,
+    }
+}
+
+/// 检测协议版本并路由到相应的处理器
+async fn detect_and_handle_protocol<S>(
+    context: Arc<WafContext>,
+    mut stream: S,
+    peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
-) -> Result<()> {
+    extra_metadata: Vec<(String, String)>,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let config = context.config_snapshot();
     // 创建协议检测器
     let detector = ProtocolDetector::default();
@@ -1822,9 +1947,10 @@ async fn detect_and_handle_protocol(
     let mut initial_buffer = vec![0u8; 256];
     let bytes_read = tokio::time::timeout(
         std::time::Duration::from_millis(config.l7_config.first_byte_timeout_ms),
-        stream.peek(&mut initial_buffer),
+        stream.read(&mut initial_buffer),
     )
     .await??;
+    let stream = PrefixedStream::new(initial_buffer[..bytes_read].to_vec(), stream);
 
     let detected_version = if bytes_read > 0 {
         let preview = &initial_buffer[..bytes_read];
@@ -1847,9 +1973,9 @@ async fn detect_and_handle_protocol(
     // 根据检测到的协议版本路由到相应处理器
     match detected_version {
         HttpVersion::Http2_0 if config.l7_config.http2_config.enabled => {
-            handle_http2_connection(context, stream, peer_addr, packet, Vec::new()).await
+            handle_http2_connection(context, stream, peer_addr, packet, extra_metadata).await
         }
-        _ => handle_http1_connection(context, stream, peer_addr, packet, Vec::new()).await,
+        _ => handle_http1_connection(context, stream, peer_addr, packet, extra_metadata).await,
     }
 }
 
@@ -3821,6 +3947,15 @@ mod tests {
         assert_eq!(
             request.get_header("x-forwarded-proto").map(String::as_str),
             Some("https")
+        );
+    }
+
+    #[test]
+    fn parse_proxy_protocol_v1_source_ip_supports_tcp4() {
+        let line = b"PROXY TCP4 203.0.113.10 198.51.100.2 45678 443\r\n";
+        assert_eq!(
+            parse_proxy_protocol_v1_source_ip(line),
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 10)))
         );
     }
 

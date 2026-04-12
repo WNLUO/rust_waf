@@ -385,6 +385,49 @@ pub(super) async fn push_safeline_certificate_handler(
     }))
 }
 
+pub(super) async fn preview_safeline_certificate_match_handler(
+    State(state): State<ApiState>,
+    Path(local_certificate_id): Path<i64>,
+) -> ApiResult<Json<SafeLineCertificateMatchPreviewResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let preview = crate::integrations::safeline_sync::preview_certificate_match(
+        store,
+        safeline,
+        local_certificate_id,
+    )
+    .await
+    .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(SafeLineCertificateMatchPreviewResponse {
+        success: true,
+        status: preview.status,
+        strategy: preview.strategy,
+        local_certificate_id: preview.local_certificate_id,
+        local_domains: preview.local_domains,
+        linked_remote_id: preview.linked_remote_id,
+        matched_remote_id: preview.matched_remote_id,
+        message: preview.message,
+        candidates: preview
+            .candidates
+            .into_iter()
+            .map(|item| SafeLineCertificateMatchCandidateResponse {
+                id: item.id,
+                domains: item.domains,
+                issuer: item.issuer,
+                valid_to: item.valid_to,
+                related_sites: item.related_sites,
+            })
+            .collect(),
+    }))
+}
+
 pub(super) async fn sync_safeline_events_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<SafeLineEventSyncResponse>> {

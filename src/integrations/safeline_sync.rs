@@ -824,6 +824,108 @@ pub async fn push_certificate(
     Ok(remote_id)
 }
 
+pub async fn preview_certificate_match(
+    store: &SqliteStore,
+    config: &SafeLineConfig,
+    local_certificate_id: i64,
+) -> Result<CertificateMatchPreview> {
+    ensure_enabled(config)?;
+
+    if local_certificate_id <= 0 {
+        bail!("local_certificate_id 必须大于 0");
+    }
+
+    let local_certificate = store
+        .load_local_certificate(local_certificate_id)
+        .await?
+        .ok_or_else(|| anyhow!("本地证书 '{}' 不存在", local_certificate_id))?;
+    let local_domains = parse_json_vec(&local_certificate.domains_json)?;
+    let normalized_local_domains = normalized_domain_set(&local_domains);
+    let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
+
+    if let Some(remote_id) = local_certificate.provider_remote_id.as_deref() {
+        if let Some(remote) = remote_certificates.iter().find(|item| item.id == remote_id) {
+            let normalized_remote_domains = normalized_domain_set(&remote.domains);
+            if normalized_remote_domains == normalized_local_domains {
+                return Ok(CertificateMatchPreview {
+                    status: "ok".to_string(),
+                    strategy: "remote_id".to_string(),
+                    local_certificate_id,
+                    local_domains,
+                    linked_remote_id: local_certificate.provider_remote_id.clone(),
+                    matched_remote_id: Some(remote.id.clone()),
+                    message: format!("将按已绑定的雷池证书 ID {} 直接更新。", remote.id),
+                    candidates: vec![remote.clone()],
+                });
+            }
+
+            return Ok(CertificateMatchPreview {
+                status: "conflict".to_string(),
+                strategy: "drifted".to_string(),
+                local_certificate_id,
+                local_domains,
+                linked_remote_id: local_certificate.provider_remote_id.clone(),
+                matched_remote_id: Some(remote.id.clone()),
+                message: format!(
+                    "已绑定的雷池证书 {} 仍存在，但域名集合已漂移。本地：{}；远端：{}。",
+                    remote.id,
+                    normalized_local_domains.join(", "),
+                    normalized_remote_domains.join(", ")
+                ),
+                candidates: vec![remote.clone()],
+            });
+        }
+    }
+
+    let domain_matches = remote_certificates
+        .iter()
+        .filter(|item| normalized_domain_set(&item.domains) == normalized_local_domains)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if domain_matches.len() == 1 {
+        let remote = domain_matches[0].clone();
+        return Ok(CertificateMatchPreview {
+            status: "ok".to_string(),
+            strategy: "domains".to_string(),
+            local_certificate_id,
+            local_domains,
+            linked_remote_id: local_certificate.provider_remote_id.clone(),
+            matched_remote_id: Some(remote.id.clone()),
+            message: format!(
+                "未命中已绑定 ID，将按域名集合匹配并更新雷池证书 {}。",
+                remote.id
+            ),
+            candidates: vec![remote],
+        });
+    }
+
+    if domain_matches.len() > 1 {
+        return Ok(CertificateMatchPreview {
+            status: "conflict".to_string(),
+            strategy: "domains".to_string(),
+            local_certificate_id,
+            local_domains,
+            linked_remote_id: local_certificate.provider_remote_id.clone(),
+            matched_remote_id: None,
+            message: "雷池中存在多张域名集合相同的证书，当前不会自动覆盖，请先人工确认目标。"
+                .to_string(),
+            candidates: domain_matches,
+        });
+    }
+
+    Ok(CertificateMatchPreview {
+        status: "create".to_string(),
+        strategy: "create".to_string(),
+        local_certificate_id,
+        local_domains,
+        linked_remote_id: local_certificate.provider_remote_id.clone(),
+        matched_remote_id: None,
+        message: "未找到可复用的雷池证书，推送时将创建新证书。".to_string(),
+        candidates: Vec::new(),
+    })
+}
+
 pub async fn push_blocked_ips(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -944,6 +1046,18 @@ impl RemoteCertificateMatchResult {
             _ => format!("已在雷池创建新证书 {}。", remote_id),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct CertificateMatchPreview {
+    pub status: String,
+    pub strategy: String,
+    pub local_certificate_id: i64,
+    pub local_domains: Vec<String>,
+    pub linked_remote_id: Option<String>,
+    pub matched_remote_id: Option<String>,
+    pub message: String,
+    pub candidates: Vec<SafeLineCertificateSummary>,
 }
 
 async fn sync_remote_certificate(

@@ -3,12 +3,15 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import AppLayout from '../components/layout/AppLayout.vue'
 import AdminCertificateEditorDialog from '../components/sites/AdminCertificateEditorDialog.vue'
 import {
+  bindLocalCertificateRemote,
   createLocalCertificate,
   deleteLocalCertificate,
   fetchLocalCertificate,
   fetchLocalCertificates,
+  previewSafeLineCertificateMatch,
   pullSafeLineCertificates,
   pushSafeLineCertificate,
+  unbindLocalCertificateRemote,
   updateLocalCertificate,
 } from '../lib/api'
 import {
@@ -17,7 +20,11 @@ import {
   extractPemBlocks,
   normalizeDomainList,
 } from '../lib/adminSettings'
-import type { LocalCertificateDraft, LocalCertificateItem } from '../lib/types'
+import type {
+  LocalCertificateDraft,
+  LocalCertificateItem,
+  SafeLineCertificateMatchPreviewResponse,
+} from '../lib/types'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -25,6 +32,9 @@ const openingEditor = ref(false)
 const readingClipboard = ref(false)
 const pullingSafeLine = ref(false)
 const pushingIds = ref<number[]>([])
+const previewingIds = ref<number[]>([])
+const bindingIds = ref<number[]>([])
+const preflightingAll = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const certificates = ref<LocalCertificateItem[]>([])
@@ -33,6 +43,9 @@ const deletingIds = ref<number[]>([])
 const dialogOpen = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const editingCertificateId = ref<number | null>(null)
+const certificateMatchPreviews = ref<
+  Record<number, SafeLineCertificateMatchPreviewResponse | undefined>
+>({})
 
 const form = reactive<LocalCertificateDraft>(createDefaultUploadCertificateForm())
 
@@ -45,6 +58,30 @@ const domainsText = computed({
 
 const allSelected = computed(
   () => certificates.value.length > 0 && selectedIds.value.length === certificates.value.length,
+)
+
+const preflightSummary = computed(() => {
+  const previews = certificates.value
+    .map((certificate) => ({
+      certificate,
+      preview: certificateMatchPreviews.value[certificate.id],
+    }))
+    .filter((item) => item.preview)
+
+  return {
+    total: previews.length,
+    ok: previews.filter((item) => item.preview?.status === 'ok').length,
+    create: previews.filter((item) => item.preview?.status === 'create').length,
+    conflict: previews.filter((item) => item.preview?.status === 'conflict').length,
+  }
+})
+
+const autoPushableIds = computed(() =>
+  certificates.value
+    .filter(
+      (certificate) => certificateMatchPreviews.value[certificate.id]?.status === 'ok',
+    )
+    .map((certificate) => certificate.id),
 )
 
 function formatTimestamp(timestamp: number | null) {
@@ -94,12 +131,53 @@ function syncStatusText(status: string) {
   }
 }
 
+async function confirmPushCertificates(ids: number[]) {
+  const riskyItems: string[] = []
+
+  for (const id of ids) {
+    const certificate = certificates.value.find((item) => item.id === id)
+    const preview = certificateMatchPreviews.value[id]
+    const detail = await fetchLocalCertificate(id)
+    const reasons: string[] = []
+
+    if (preview?.status === 'create') {
+      reasons.push('预检结果为“将新建”')
+    }
+    if (preview?.status === 'conflict') {
+      reasons.push('预检结果为“需人工确认”')
+    }
+    if (!detail.private_key_pem?.trim()) {
+      reasons.push('本地没有私钥')
+    }
+
+    if (reasons.length) {
+      const label = certificate ? `#${certificate.id} ${certificate.name}` : `#${id}`
+      riskyItems.push(`${label}：${reasons.join('，')}`)
+    }
+  }
+
+  if (!riskyItems.length) {
+    return true
+  }
+
+  return window.confirm(
+    `以下证书存在高风险推送条件：\n${riskyItems.join(
+      '\n',
+    )}\n\n是否仍然继续同步到雷池？`,
+  )
+}
+
 async function loadCertificates() {
   loading.value = true
   clearFeedback()
   try {
     const response = await fetchLocalCertificates()
     certificates.value = response.certificates
+    certificateMatchPreviews.value = Object.fromEntries(
+      Object.entries(certificateMatchPreviews.value).filter(([id]) =>
+        response.certificates.some((certificate) => certificate.id === Number(id)),
+      ),
+    )
     selectedIds.value = selectedIds.value.filter((id) =>
       certificates.value.some((certificate) => certificate.id === id),
     )
@@ -254,6 +332,8 @@ async function syncFromSafeLine() {
 
 async function pushCertificates(ids: number[]) {
   if (!ids.length) return
+  const confirmed = await confirmPushCertificates(ids)
+  if (!confirmed) return
   pushingIds.value = [...new Set([...pushingIds.value, ...ids])]
   clearFeedback()
   let successCount = 0
@@ -288,6 +368,99 @@ async function pushSingleCertificate(id: number) {
 async function pushSelectedCertificates() {
   if (!selectedIds.value.length) return
   await pushCertificates([...selectedIds.value])
+}
+
+async function pushAutoMatchedCertificates() {
+  if (!autoPushableIds.value.length) return
+  await pushCertificates([...autoPushableIds.value])
+}
+
+async function loadCertificateMatchPreview(id: number) {
+  previewingIds.value = [...new Set([...previewingIds.value, id])]
+  clearFeedback()
+  try {
+    const preview = await previewSafeLineCertificateMatch(id)
+    certificateMatchPreviews.value = {
+      ...certificateMatchPreviews.value,
+      [id]: preview,
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取雷池证书匹配预览失败'
+  } finally {
+    previewingIds.value = previewingIds.value.filter((item) => item !== id)
+  }
+}
+
+async function runCertificatePreflight() {
+  if (!certificates.value.length) return
+  preflightingAll.value = true
+  clearFeedback()
+  try {
+    for (const certificate of certificates.value) {
+      try {
+        const preview = await previewSafeLineCertificateMatch(certificate.id)
+        certificateMatchPreviews.value = {
+          ...certificateMatchPreviews.value,
+          [certificate.id]: preview,
+        }
+      } catch (e) {
+        certificateMatchPreviews.value = {
+          ...certificateMatchPreviews.value,
+          [certificate.id]: {
+            success: false,
+            status: 'conflict',
+            strategy: 'error',
+            local_certificate_id: certificate.id,
+            local_domains: certificate.domains,
+            linked_remote_id: certificate.provider_remote_id,
+            matched_remote_id: null,
+            message: e instanceof Error ? e.message : '预检失败',
+            candidates: [],
+          },
+        }
+      }
+    }
+    successMessage.value = `已完成 ${certificates.value.length} 张证书的雷池预检。`
+  } finally {
+    preflightingAll.value = false
+  }
+}
+
+async function bindRemoteCertificate(
+  localCertificateId: number,
+  remoteCertificateId: string,
+  remoteDomains: string[],
+) {
+  bindingIds.value = [...new Set([...bindingIds.value, localCertificateId])]
+  clearFeedback()
+  try {
+    const response = await bindLocalCertificateRemote(localCertificateId, {
+      remote_certificate_id: remoteCertificateId,
+      remote_domains: remoteDomains,
+    })
+    successMessage.value = response.message
+    await loadCertificates()
+    await loadCertificateMatchPreview(localCertificateId)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '绑定雷池证书失败'
+  } finally {
+    bindingIds.value = bindingIds.value.filter((id) => id !== localCertificateId)
+  }
+}
+
+async function unbindRemoteCertificate(localCertificateId: number) {
+  bindingIds.value = [...new Set([...bindingIds.value, localCertificateId])]
+  clearFeedback()
+  try {
+    const response = await unbindLocalCertificateRemote(localCertificateId)
+    successMessage.value = response.message
+    await loadCertificates()
+    await loadCertificateMatchPreview(localCertificateId)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '解除雷池证书绑定失败'
+  } finally {
+    bindingIds.value = bindingIds.value.filter((id) => id !== localCertificateId)
+  }
 }
 
 async function removeCertificates(ids: number[]) {
@@ -354,6 +527,13 @@ onMounted(loadCertificates)
               {{ pullingSafeLine ? '同步中...' : '同步雷池证书' }}
             </button>
             <button
+              :disabled="preflightingAll || certificates.length === 0"
+              class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              @click="runCertificatePreflight"
+            >
+              {{ preflightingAll ? '预检中...' : '批量自动预检' }}
+            </button>
+            <button
               class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-600/90"
               @click="openCreateDialog"
             >
@@ -403,6 +583,44 @@ onMounted(loadCertificates)
       >
         {{ successMessage }}
       </div>
+
+      <section
+        v-if="preflightSummary.total > 0"
+        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+      >
+        <div class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-sm font-semibold text-stone-900">雷池证书预检</span>
+            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
+              已分析 {{ preflightSummary.total }} 张
+            </span>
+            <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs text-emerald-700">
+              可自动更新 {{ preflightSummary.ok }}
+            </span>
+            <span class="rounded-full bg-blue-50 px-2.5 py-1 text-xs text-blue-700">
+              将新建 {{ preflightSummary.create }}
+            </span>
+            <span class="rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
+              需人工确认 {{ preflightSummary.conflict }}
+            </span>
+          </div>
+          <p class="text-xs text-slate-500">
+            预检不会改动雷池，只会根据当前本地证书、已绑定远端 ID 和雷池证书目录分析后续推送路径。
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <button
+              :disabled="autoPushableIds.length === 0 || pushingIds.length > 0"
+              class="inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              @click="pushAutoMatchedCertificates"
+            >
+              仅同步可自动命中的证书
+            </button>
+            <span class="text-xs leading-8 text-slate-500">
+              基于当前预检结果，仅推送“可自动更新”的证书。
+            </span>
+          </div>
+        </div>
+      </section>
 
       <section
         v-if="!loading"
@@ -518,6 +736,29 @@ onMounted(loadCertificates)
                   <div class="mt-1 text-[11px] text-slate-500">
                     {{ certificate.sync_message || '尚未执行证书同步。' }}
                   </div>
+                  <div
+                    v-if="certificateMatchPreviews[certificate.id]"
+                    class="mt-2 flex flex-wrap gap-2"
+                  >
+                    <span
+                      class="rounded-full px-2.5 py-1 text-[11px]"
+                      :class="
+                        certificateMatchPreviews[certificate.id]?.status === 'ok'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : certificateMatchPreviews[certificate.id]?.status === 'create'
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'bg-amber-50 text-amber-700'
+                      "
+                    >
+                      {{
+                        certificateMatchPreviews[certificate.id]?.status === 'ok'
+                          ? '预检可自动命中'
+                          : certificateMatchPreviews[certificate.id]?.status === 'create'
+                            ? '预检将新建'
+                            : '预检需人工确认'
+                      }}
+                    </span>
+                  </div>
                 </td>
                 <td class="px-4 py-3 align-top text-xs text-slate-600">
                   <div>开始：{{ formatTimestamp(certificate.valid_from) }}</div>
@@ -527,11 +768,29 @@ onMounted(loadCertificates)
                 <td class="px-4 py-3 align-top">
                   <div class="flex flex-wrap gap-2">
                     <button
+                      :disabled="previewingIds.includes(certificate.id)"
+                      class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      @click="loadCertificateMatchPreview(certificate.id)"
+                    >
+                      {{ previewingIds.includes(certificate.id) ? '分析中...' : '匹配预览' }}
+                    </button>
+                    <button
                       :disabled="pushingIds.includes(certificate.id)"
                       class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                       @click="pushSingleCertificate(certificate.id)"
                     >
                       {{ pushingIds.includes(certificate.id) ? '同步中...' : '同步雷池' }}
+                    </button>
+                    <button
+                      :disabled="bindingIds.includes(certificate.id)"
+                      class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700 transition hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      @click="unbindRemoteCertificate(certificate.id)"
+                    >
+                      {{
+                        bindingIds.includes(certificate.id)
+                          ? '解绑中...'
+                          : '解除绑定'
+                      }}
                     </button>
                     <button
                       :disabled="openingEditor"
@@ -547,6 +806,82 @@ onMounted(loadCertificates)
                     >
                       {{ deletingIds.includes(certificate.id) ? '删除中...' : '删除' }}
                     </button>
+                  </div>
+                  <div
+                    v-if="certificateMatchPreviews[certificate.id]"
+                    class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
+                  >
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span
+                        class="rounded-full px-2.5 py-1"
+                        :class="
+                          certificateMatchPreviews[certificate.id]?.status === 'ok'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : certificateMatchPreviews[certificate.id]?.status === 'create'
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-amber-50 text-amber-700'
+                        "
+                      >
+                        {{
+                          certificateMatchPreviews[certificate.id]?.status === 'ok'
+                            ? '可自动命中'
+                            : certificateMatchPreviews[certificate.id]?.status === 'create'
+                              ? '将新建'
+                              : '需要人工确认'
+                        }}
+                      </span>
+                      <span class="text-slate-500">
+                        策略：{{ certificateMatchPreviews[certificate.id]?.strategy }}
+                      </span>
+                    </div>
+                    <p class="mt-2 leading-5">
+                      {{ certificateMatchPreviews[certificate.id]?.message }}
+                    </p>
+                    <div
+                      v-if="certificateMatchPreviews[certificate.id]?.candidates.length"
+                      class="mt-3 space-y-2"
+                    >
+                      <div
+                        v-for="candidate in certificateMatchPreviews[certificate.id]?.candidates"
+                        :key="candidate.id"
+                        class="rounded-lg border border-slate-200 bg-white p-2"
+                      >
+                        <div class="font-medium text-stone-900">
+                          雷池证书 {{ candidate.id }}
+                        </div>
+                        <div class="mt-1 text-slate-600">
+                          域名：{{ candidate.domains.join(' / ') || '未提供' }}
+                        </div>
+                        <div class="mt-1 text-slate-600">
+                          签发者：{{ candidate.issuer || '未提供' }}
+                        </div>
+                        <div class="mt-1 text-slate-600">
+                          到期：{{ formatTimestamp(candidate.valid_to) }}
+                        </div>
+                        <div class="mt-1 text-slate-500">
+                          关联站点：{{ candidate.related_sites.join(' / ') || '无' }}
+                        </div>
+                        <div class="mt-2">
+                          <button
+                            :disabled="bindingIds.includes(certificate.id)"
+                            class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            @click="
+                              bindRemoteCertificate(
+                                certificate.id,
+                                candidate.id,
+                                candidate.domains,
+                              )
+                            "
+                          >
+                            {{
+                              bindingIds.includes(certificate.id)
+                                ? '绑定中...'
+                                : '绑定为目标证书'
+                            }}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </td>
               </tr>

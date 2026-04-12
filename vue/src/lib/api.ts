@@ -15,6 +15,7 @@ import type {
   L7StatsPayload,
   LocalCertificateDraft,
   LocalCertificateItem,
+  LocalCertificateRemoteBindRequest,
   LocalCertificatesResponse,
   LocalSiteDraft,
   LocalSiteItem,
@@ -27,6 +28,7 @@ import type {
   RulesResponse,
   SafeLineBlocklistPullResponse,
   SafeLineBlocklistSyncResponse,
+  SafeLineCertificateMatchPreviewResponse,
   SafeLineCertificatesPullResponse,
   SafeLineEventSyncResponse,
   SafeLineMappingsResponse,
@@ -554,9 +556,40 @@ export function deleteLocalCertificate(id: number) {
   })
 }
 
+export function bindLocalCertificateRemote(
+  id: number,
+  payload: LocalCertificateRemoteBindRequest,
+) {
+  return apiRequest<WriteStatusResponse>(
+    `/certificates/local/${id}/remote-binding`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function unbindLocalCertificateRemote(id: number) {
+  return apiRequest<WriteStatusResponse>(
+    `/certificates/local/${id}/remote-binding`,
+    {
+      method: 'DELETE',
+    },
+  )
+}
+
 export function pushSafeLineCertificate(localCertificateId: number) {
   return apiRequest<WriteStatusResponse>(
     `/integrations/safeline/push/certificates/${localCertificateId}`,
+    {
+      method: 'POST',
+    },
+  )
+}
+
+export function previewSafeLineCertificateMatch(localCertificateId: number) {
+  return apiRequest<SafeLineCertificateMatchPreviewResponse>(
+    `/integrations/safeline/match/certificates/${localCertificateId}`,
     {
       method: 'POST',
     },

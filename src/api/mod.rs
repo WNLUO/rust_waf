@@ -177,6 +177,11 @@ fn build_router(state: ApiState) -> Router {
                 .delete(sites_handlers::delete_local_certificate_handler),
         )
         .route(
+            "/certificates/local/:id/remote-binding",
+            axum::routing::post(sites_handlers::bind_local_certificate_remote_handler)
+                .delete(sites_handlers::unbind_local_certificate_remote_handler),
+        )
+        .route(
             "/integrations/safeline/test",
             axum::routing::post(safeline_handlers::test_safeline_handler),
         )
@@ -220,6 +225,10 @@ fn build_router(state: ApiState) -> Router {
         .route(
             "/integrations/safeline/push/certificates/:local_certificate_id",
             axum::routing::post(safeline_handlers::push_safeline_certificate_handler),
+        )
+        .route(
+            "/integrations/safeline/match/certificates/:local_certificate_id",
+            axum::routing::post(safeline_handlers::preview_safeline_certificate_match_handler),
         )
         .route(
             "/integrations/safeline/site-links",

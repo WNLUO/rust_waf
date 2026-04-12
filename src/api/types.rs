@@ -402,6 +402,13 @@ pub struct GeneratedLocalCertificateRequest {
     pub(crate) notes: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LocalCertificateRemoteBindRequest {
+    pub(crate) remote_certificate_id: String,
+    #[serde(default)]
+    pub(crate) remote_domains: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SiteSyncLinksResponse {
     pub(crate) total: u32,
@@ -524,6 +531,28 @@ pub struct SafeLineCertificatesPullResponse {
     pub(crate) updated_certificates: u32,
     pub(crate) skipped_certificates: u32,
     pub(crate) message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineCertificateMatchCandidateResponse {
+    pub(crate) id: String,
+    pub(crate) domains: Vec<String>,
+    pub(crate) issuer: String,
+    pub(crate) valid_to: Option<i64>,
+    pub(crate) related_sites: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineCertificateMatchPreviewResponse {
+    pub(crate) success: bool,
+    pub(crate) status: String,
+    pub(crate) strategy: String,
+    pub(crate) local_certificate_id: i64,
+    pub(crate) local_domains: Vec<String>,
+    pub(crate) linked_remote_id: Option<String>,
+    pub(crate) matched_remote_id: Option<String>,
+    pub(crate) message: String,
+    pub(crate) candidates: Vec<SafeLineCertificateMatchCandidateResponse>,
 }
 
 #[derive(Debug, Serialize)]

@@ -153,12 +153,37 @@ export interface LocalCertificateDraft {
   private_key_pem?: string | null
 }
 
+export interface LocalCertificateRemoteBindRequest {
+  remote_certificate_id: string
+  remote_domains: string[]
+}
+
 export interface SafeLineCertificatesPullResponse {
   success: boolean
   imported_certificates: number
   updated_certificates: number
   skipped_certificates: number
   message: string
+}
+
+export interface SafeLineCertificateMatchCandidate {
+  id: string
+  domains: string[]
+  issuer: string
+  valid_to: number | null
+  related_sites: string[]
+}
+
+export interface SafeLineCertificateMatchPreviewResponse {
+  success: boolean
+  status: string
+  strategy: string
+  local_certificate_id: number
+  local_domains: string[]
+  linked_remote_id: string | null
+  matched_remote_id: string | null
+  message: string
+  candidates: SafeLineCertificateMatchCandidate[]
 }
 
 export interface GeneratedLocalCertificateRequest {

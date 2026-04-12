@@ -354,6 +354,107 @@ pub(super) async fn update_local_certificate_handler(
     }
 }
 
+pub(super) async fn bind_local_certificate_remote_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    ExtractJson(payload): ExtractJson<LocalCertificateRemoteBindRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let certificate = store
+        .load_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("本地证书 '{}' 不存在", id)))?;
+
+    let remote_certificate_id = payload.remote_certificate_id.trim().to_string();
+    if remote_certificate_id.is_empty() {
+        return Err(ApiError::bad_request(
+            "remote_certificate_id 不能为空".to_string(),
+        ));
+    }
+
+    let updated = crate::storage::LocalCertificateUpsert {
+        name: certificate.name.clone(),
+        domains: serde_json::from_str(&certificate.domains_json).map_err(ApiError::internal)?,
+        issuer: certificate.issuer.clone(),
+        valid_from: certificate.valid_from,
+        valid_to: certificate.valid_to,
+        source_type: certificate.source_type.clone(),
+        provider_remote_id: Some(remote_certificate_id.clone()),
+        provider_remote_domains: payload.remote_domains,
+        last_remote_fingerprint: certificate.last_remote_fingerprint.clone(),
+        sync_status: "linked".to_string(),
+        sync_message: format!("已手动绑定到雷池证书 {}。", remote_certificate_id),
+        auto_sync_enabled: certificate.auto_sync_enabled,
+        trusted: certificate.trusted,
+        expired: certificate.expired,
+        notes: certificate.notes.clone(),
+        last_synced_at: certificate.last_synced_at,
+    };
+
+    store
+        .update_local_certificate(id, &updated)
+        .await
+        .map_err(map_storage_write_error)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: format!(
+            "本地证书 #{} 已绑定到雷池证书 {}。",
+            id, remote_certificate_id
+        ),
+    }))
+}
+
+pub(super) async fn unbind_local_certificate_remote_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let certificate = store
+        .load_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("本地证书 '{}' 不存在", id)))?;
+
+    let domains = serde_json::from_str(&certificate.domains_json).map_err(ApiError::internal)?;
+    let previous_remote_id = certificate.provider_remote_id.clone();
+    let updated = crate::storage::LocalCertificateUpsert {
+        name: certificate.name.clone(),
+        domains,
+        issuer: certificate.issuer.clone(),
+        valid_from: certificate.valid_from,
+        valid_to: certificate.valid_to,
+        source_type: certificate.source_type.clone(),
+        provider_remote_id: None,
+        provider_remote_domains: Vec::new(),
+        last_remote_fingerprint: certificate.last_remote_fingerprint.clone(),
+        sync_status: "idle".to_string(),
+        sync_message: match previous_remote_id.as_deref() {
+            Some(remote_id) => format!("已解除与雷池证书 {} 的绑定。", remote_id),
+            None => "已清除雷池证书绑定信息。".to_string(),
+        },
+        auto_sync_enabled: certificate.auto_sync_enabled,
+        trusted: certificate.trusted,
+        expired: certificate.expired,
+        notes: certificate.notes.clone(),
+        last_synced_at: certificate.last_synced_at,
+    };
+
+    store
+        .update_local_certificate(id, &updated)
+        .await
+        .map_err(map_storage_write_error)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: match previous_remote_id {
+            Some(remote_id) => format!("本地证书 #{} 已解除与雷池证书 {} 的绑定。", id, remote_id),
+            None => format!("本地证书 #{} 当前没有雷池绑定，已清理残留同步信息。", id),
+        },
+    }))
+}
+
 pub(super) async fn delete_local_certificate_handler(
     State(state): State<ApiState>,
     Path(id): Path<i64>,

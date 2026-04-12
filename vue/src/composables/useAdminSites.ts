@@ -17,9 +17,7 @@ import {
 } from '../lib/api'
 import {
   mergeSiteRows,
-  type ScopeFilter,
   type SiteRowDraft,
-  type StateFilter,
 } from '../lib/adminSites'
 import { useAdminSitesEditor } from './useAdminSitesEditor'
 import { useAdminSitesSync } from './useAdminSitesSync'
@@ -27,12 +25,45 @@ import type {
   LocalCertificateItem,
   LocalSiteDraft,
   LocalSiteItem,
+  SafeLineSitePullOptions,
   SafeLineMappingItem,
   SafeLineSiteItem,
   SafeLineTestResponse,
   SettingsPayload,
   SiteSyncLinkItem,
 } from '../lib/types'
+
+export type LocalSitesStateFilter = 'all' | 'enabled' | 'disabled'
+
+export interface RemoteSyncCandidate {
+  id: string
+  name: string
+  domain: string
+  serverNames: string[]
+  upstreams: string[]
+  ports: string[]
+  sslPorts: string[]
+  sslEnabled: boolean
+  localMatchLabel: string | null
+  recommendation: 'recommended' | 'update' | 'hostname_conflict' | 'name_conflict'
+  recommendationText: string
+  selectable: boolean
+  defaultSelected: boolean
+  linkedLocalSiteId: number | null
+}
+
+function createDefaultPullOptions(): SafeLineSitePullOptions {
+  return {
+    name: true,
+    primary_hostname: true,
+    hostnames: true,
+    listen_ports: true,
+    upstreams: true,
+    enabled: true,
+    tls_enabled: true,
+    local_certificate_id: true,
+  }
+}
 
 function cloneSafelineIntercept(
   value: LocalSiteDraft['safeline_intercept'],
@@ -75,9 +106,12 @@ export function useAdminSites(
 
   const filters = reactive({
     keyword: '',
-    scope: 'all' as ScopeFilter,
-    state: 'all' as StateFilter,
+    state: 'all' as LocalSitesStateFilter,
   })
+  const isRemoteSyncDialogOpen = ref(false)
+  const selectedRemoteSiteIds = ref<string[]>([])
+  const remoteSitePullOptions = ref<Record<string, SafeLineSitePullOptions>>({})
+  const syncingRemoteSelection = ref(false)
 
   function clearFeedback() {
     error.value = ''
@@ -137,66 +171,193 @@ export function useAdminSites(
       null,
   )
 
+  const localRows = computed(() =>
+    siteRows.value
+      .filter((item) => item.local_present)
+      .sort((left, right) => {
+        if (left.is_primary !== right.is_primary)
+          return left.is_primary ? -1 : 1
+        if (left.local_enabled !== right.local_enabled)
+          return left.local_enabled ? -1 : 1
+        return (left.local_site_name || left.local_primary_hostname).localeCompare(
+          right.local_site_name || right.local_primary_hostname,
+          'zh-CN',
+        )
+      }),
+  )
+
   const filteredRows = computed(() => {
     const keyword = filters.keyword.trim().toLowerCase()
 
-    return [...siteRows.value]
+    return [...localRows.value]
       .filter((item) => {
-        if (filters.scope === 'mapped' && !item.saved) return false
-        if (
-          filters.scope === 'unmapped' &&
-          (!item.remote_present || item.saved)
-        )
-          return false
-        if (filters.scope === 'orphaned' && !item.orphaned) return false
-        if (filters.scope === 'local_only' && item.row_kind !== 'local_only')
-          return false
-        if (
-          filters.scope === 'missing_remote' &&
-          item.row_kind !== 'missing_remote'
-        )
-          return false
-        if (filters.state === 'enabled' && !item.enabled) return false
-        if (filters.state === 'disabled' && item.enabled) return false
-        if (filters.state === 'primary' && !item.is_primary) return false
+        if (filters.state === 'enabled' && !item.local_enabled) return false
+        if (filters.state === 'disabled' && item.local_enabled) return false
         if (!keyword) return true
 
         return [
-          item.local_alias,
           item.local_site_name,
           item.local_primary_hostname,
+          item.local_hostnames.join(' '),
+          item.local_listen_ports.join(' '),
+          item.local_upstreams.join(' '),
+          item.local_notes,
+          item.local_alias,
           item.safeline_site_name,
           item.safeline_site_domain,
           item.safeline_site_id,
-          item.local_listen_ports.join(' '),
-          item.local_upstreams.join(' '),
-          item.server_names.join(' '),
-          item.notes,
-          item.local_notes,
           item.link_last_error ?? '',
         ]
           .join(' ')
           .toLowerCase()
           .includes(keyword)
       })
+  })
+
+  const totalEnabledLocalSites = computed(
+    () => localRows.value.filter((item) => item.local_enabled).length,
+  )
+  const totalSitesWithRemoteLink = computed(
+    () => localRows.value.filter((item) => item.link_id !== null).length,
+  )
+
+  const remoteSyncCandidates = computed<RemoteSyncCandidate[]>(() => {
+    const localByHostname = new Map<string, LocalSiteItem>()
+    const localByName = new Map<string, LocalSiteItem>()
+    for (const site of localSites.value) {
+      const names = [
+        site.primary_hostname,
+        ...site.hostnames,
+      ]
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+      for (const hostname of names) {
+        if (!localByHostname.has(hostname)) {
+          localByHostname.set(hostname, site)
+        }
+      }
+      const normalizedName = site.name.trim().toLowerCase()
+      if (normalizedName && !localByName.has(normalizedName)) {
+        localByName.set(normalizedName, site)
+      }
+    }
+
+    return [...sites.value]
+      .map((site) => {
+        const linkedRow =
+          siteRows.value.find(
+            (item) => item.safeline_site_id === site.id && item.local_present,
+          ) ?? null
+        const hostnameMatch = [
+          site.domain,
+          ...site.server_names,
+        ]
+          .map((item) => item.trim().toLowerCase())
+          .find((hostname) => localByHostname.has(hostname))
+        const matchedByHostname = hostnameMatch
+          ? (localByHostname.get(hostnameMatch) ?? null)
+          : null
+        const matchedByName =
+          localByName.get(site.name.trim().toLowerCase()) ?? null
+
+        if (linkedRow) {
+          return {
+            id: site.id,
+            name: site.name || site.domain || `站点 ${site.id}`,
+            domain: site.domain,
+            serverNames: site.server_names,
+            upstreams: site.upstreams,
+            ports: site.ports,
+            sslPorts: site.ssl_ports,
+            sslEnabled: site.ssl_enabled,
+            localMatchLabel:
+              linkedRow.local_site_name || linkedRow.local_primary_hostname,
+            recommendation: 'update' as const,
+            recommendationText: '已有关联本地站点，可按需更新本地配置。',
+            selectable: true,
+            defaultSelected: false,
+            linkedLocalSiteId: linkedRow.local_site_id,
+          }
+        }
+
+        if (matchedByHostname) {
+          return {
+            id: site.id,
+            name: site.name || site.domain || `站点 ${site.id}`,
+            domain: site.domain,
+            serverNames: site.server_names,
+            upstreams: site.upstreams,
+            ports: site.ports,
+            sslPorts: site.ssl_ports,
+            sslEnabled: site.ssl_enabled,
+            localMatchLabel:
+              matchedByHostname.name || matchedByHostname.primary_hostname,
+            recommendation: 'hostname_conflict' as const,
+            recommendationText:
+              '本地域名已存在相似站点，建议人工确认后再导入。',
+            selectable: true,
+            defaultSelected: false,
+            linkedLocalSiteId: null,
+          }
+        }
+
+        if (matchedByName) {
+          return {
+            id: site.id,
+            name: site.name || site.domain || `站点 ${site.id}`,
+            domain: site.domain,
+            serverNames: site.server_names,
+            upstreams: site.upstreams,
+            ports: site.ports,
+            sslPorts: site.ssl_ports,
+            sslEnabled: site.ssl_enabled,
+            localMatchLabel:
+              matchedByName.name || matchedByName.primary_hostname,
+            recommendation: 'name_conflict' as const,
+            recommendationText:
+              '本地已有同名站点，默认不勾选，避免重复导入。',
+            selectable: true,
+            defaultSelected: false,
+            linkedLocalSiteId: null,
+          }
+        }
+
+        return {
+          id: site.id,
+          name: site.name || site.domain || `站点 ${site.id}`,
+          domain: site.domain,
+          serverNames: site.server_names,
+          upstreams: site.upstreams,
+          ports: site.ports,
+          sslPorts: site.ssl_ports,
+          sslEnabled: site.ssl_enabled,
+          localMatchLabel: null,
+          recommendation: 'recommended' as const,
+          recommendationText: '本地未发现重复站点，建议直接导入。',
+          selectable: true,
+          defaultSelected: true,
+          linkedLocalSiteId: null,
+        }
+      })
       .sort((left, right) => {
-        if (left.is_primary !== right.is_primary)
-          return left.is_primary ? -1 : 1
-        if (left.saved !== right.saved) return left.saved ? -1 : 1
-        if (left.remote_present !== right.remote_present)
-          return left.remote_present ? -1 : 1
-        return (
-          left.local_alias ||
-          left.local_site_name ||
-          left.safeline_site_name
-        ).localeCompare(
-          right.local_alias ||
-            right.local_site_name ||
-            right.safeline_site_name,
-          'zh-CN',
-        )
+        const priority = {
+          recommended: 0,
+          update: 1,
+          hostname_conflict: 2,
+          name_conflict: 3,
+        }
+        if (priority[left.recommendation] !== priority[right.recommendation]) {
+          return priority[left.recommendation] - priority[right.recommendation]
+        }
+        return left.name.localeCompare(right.name, 'zh-CN')
       })
   })
+
+  const recommendedRemoteSiteIds = computed(() =>
+    remoteSyncCandidates.value
+      .filter((item) => item.defaultSelected && item.selectable)
+      .map((item) => item.id),
+  )
 
   async function refreshCollections(remoteSource: 'none' | 'cached' | 'live') {
     const [
@@ -388,6 +549,99 @@ export function useAdminSites(
       actions.loadingSites = false
     }
   }
+
+  async function openRemoteSyncDialog() {
+    await loadRemoteSites()
+    if (error.value) return
+    selectedRemoteSiteIds.value = recommendedRemoteSiteIds.value
+    remoteSitePullOptions.value = Object.fromEntries(
+      remoteSyncCandidates.value.map((candidate) => [
+        candidate.id,
+        createDefaultPullOptions(),
+      ]),
+    )
+    isRemoteSyncDialogOpen.value = true
+  }
+
+  function closeRemoteSyncDialog() {
+    isRemoteSyncDialogOpen.value = false
+  }
+
+  function toggleRemoteSiteSelection(remoteSiteId: string) {
+    if (selectedRemoteSiteIds.value.includes(remoteSiteId)) {
+      selectedRemoteSiteIds.value = selectedRemoteSiteIds.value.filter(
+        (item) => item !== remoteSiteId,
+      )
+      return
+    }
+    selectedRemoteSiteIds.value = [...selectedRemoteSiteIds.value, remoteSiteId]
+  }
+
+  function selectRecommendedRemoteSites() {
+    selectedRemoteSiteIds.value = recommendedRemoteSiteIds.value
+  }
+
+  function clearRemoteSiteSelection() {
+    selectedRemoteSiteIds.value = []
+  }
+
+  function toggleRemoteSitePullOption(
+    remoteSiteId: string,
+    field: keyof SafeLineSitePullOptions,
+  ) {
+    const candidate = remoteSyncCandidates.value.find((item) => item.id === remoteSiteId)
+    if (!candidate) return
+    if (field === 'primary_hostname' && candidate.linkedLocalSiteId === null) return
+
+    const current = remoteSitePullOptions.value[remoteSiteId] ?? createDefaultPullOptions()
+    remoteSitePullOptions.value = {
+      ...remoteSitePullOptions.value,
+      [remoteSiteId]: {
+        ...current,
+        [field]: !current[field],
+      },
+    }
+  }
+
+  async function syncSelectedRemoteSites() {
+    if (!selectedRemoteSiteIds.value.length) {
+      error.value = '请先选择要同步的雷池站点。'
+      return
+    }
+
+    syncingRemoteSelection.value = true
+    clearFeedback()
+    let successCount = 0
+    const failed: string[] = []
+
+    try {
+      for (const remoteSiteId of selectedRemoteSiteIds.value) {
+        try {
+          await pullSafeLineSite(
+            remoteSiteId,
+            remoteSitePullOptions.value[remoteSiteId] ?? createDefaultPullOptions(),
+          )
+          successCount += 1
+        } catch (e) {
+          failed.push(
+            e instanceof Error ? `${remoteSiteId}: ${e.message}` : remoteSiteId,
+          )
+        }
+      }
+
+      await refreshCollections('live')
+      if (failed.length) {
+        error.value = `已同步 ${successCount} 个站点，${failed.length} 个失败：${failed.join('；')}`
+      } else {
+        successMessage.value = `已从雷池同步 ${successCount} 个站点到本地。`
+      }
+      if (successCount > 0) {
+        closeRemoteSyncDialog()
+      }
+    } finally {
+      syncingRemoteSelection.value = false
+    }
+  }
   const {
     localActionLabel,
     remoteActionLabel,
@@ -424,6 +678,7 @@ export function useAdminSites(
     filters,
     hasSavedConfig,
     hostnamesText,
+    isRemoteSyncDialogOpen,
     isLocalSiteModalOpen,
     listenPortsText,
     loadRemoteSites,
@@ -432,7 +687,10 @@ export function useAdminSites(
     localSiteForm,
     localSites,
     openCreateLocalSiteModal,
+    openRemoteSyncDialog,
     primaryDraft,
+    recommendedRemoteSiteIds,
+    remoteSyncCandidates,
     refreshPageData,
     remoteActionLabel,
     removeCurrentLocalSite,
@@ -442,19 +700,30 @@ export function useAdminSites(
     rowSyncText,
     runConnectionTest,
     saveLocalSite,
+    selectRecommendedRemoteSites,
+    clearRemoteSiteSelection,
+    closeRemoteSyncDialog,
     sites,
     sitesLoadedAt,
+    selectedRemoteSiteIds,
+    remoteSitePullOptions,
     successMessage,
     syncLocalSite,
+    syncSelectedRemoteSites,
     syncRemoteSite,
+    syncingRemoteSelection,
     testResult,
+    toggleRemoteSiteSelection,
+    toggleRemoteSitePullOption,
     totalLinkedSites,
     totalLocalOnly,
     totalLocalSites,
+    totalEnabledLocalSites,
     totalMapped,
     totalMissingRemote,
     totalOrphaned,
     totalSyncErrors,
+    totalSitesWithRemoteLink,
     totalUnmapped,
     closeLocalSiteModal,
     editLocalSite,

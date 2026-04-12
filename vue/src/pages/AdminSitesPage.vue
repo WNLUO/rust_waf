@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { Link2 } from 'lucide-vue-next'
-import { RouterLink } from 'vue-router'
 import AdminSiteEditorDialog from '../components/sites/AdminSiteEditorDialog.vue'
+import AdminSitesSyncDialog from '../components/sites/AdminSitesSyncDialog.vue'
 import AdminSitesSummarySection from '../components/sites/AdminSitesSummarySection.vue'
 import AdminSitesTableSection from '../components/sites/AdminSitesTableSection.vue'
 import AppLayout from '../components/layout/AppLayout.vue'
@@ -22,37 +21,37 @@ const {
   hasSavedConfig,
   hostnamesText,
   isLocalSiteModalOpen,
+  isRemoteSyncDialogOpen,
   listenPortsText,
-  loadRemoteSites,
   localActionLabel,
   localCertificates,
   localSiteForm,
   localSites,
   openCreateLocalSiteModal,
+  openRemoteSyncDialog,
   primaryDraft,
+  remoteSyncCandidates,
+  remoteSitePullOptions,
   refreshPageData,
-  remoteActionLabel,
   removeCurrentLocalSite,
   resetLocalSiteForm,
-  rowActionPending,
-  rowBusy,
   rowSyncText,
-  runConnectionTest,
   saveLocalSite,
-  sites,
   sitesLoadedAt,
+  selectedRemoteSiteIds,
+  selectRecommendedRemoteSites,
+  clearRemoteSiteSelection,
+  closeRemoteSyncDialog,
   successMessage,
   syncLocalSite,
-  syncRemoteSite,
-  testResult,
-  totalLinkedSites,
-  totalLocalOnly,
+  syncSelectedRemoteSites,
+  syncingRemoteSelection,
   totalLocalSites,
-  totalMapped,
-  totalMissingRemote,
-  totalOrphaned,
   totalSyncErrors,
-  totalUnmapped,
+  totalEnabledLocalSites,
+  totalSitesWithRemoteLink,
+  toggleRemoteSitePullOption,
+  toggleRemoteSiteSelection,
   closeLocalSiteModal,
   editLocalSite,
   loading,
@@ -62,16 +61,6 @@ const {
 
 <template>
   <AppLayout>
-    <template #header-extra>
-      <RouterLink
-        to="/admin/safeline"
-        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90"
-      >
-        <Link2 :size="12" />
-        编辑映射
-      </RouterLink>
-    </template>
-
     <div class="min-w-0 space-y-4">
       <AdminSitesSummarySection
         :actions="actions"
@@ -80,24 +69,16 @@ const {
         :has-saved-config="hasSavedConfig"
         :keyword="filters.keyword"
         :primary-draft="primaryDraft"
-        :scope="filters.scope"
-        :sites-count="sites.length"
         :sites-loaded-at="sitesLoadedAt"
         :state="filters.state"
-        :test-result="testResult"
-        :total-linked-sites="totalLinkedSites"
-        :total-local-only="totalLocalOnly"
+        :total-enabled-local-sites="totalEnabledLocalSites"
         :total-local-sites="totalLocalSites"
-        :total-mapped="totalMapped"
-        :total-missing-remote="totalMissingRemote"
-        :total-orphaned="totalOrphaned"
         :total-sync-errors="totalSyncErrors"
-        :total-unmapped="totalUnmapped"
-        @load-remote="loadRemoteSites"
+        :total-sites-with-remote-link="totalSitesWithRemoteLink"
+        @create-local-site="openCreateLocalSiteModal"
+        @load-remote="openRemoteSyncDialog"
         @refresh="refreshPageData"
-        @test="runConnectionTest"
         @update:keyword="filters.keyword = $event"
-        @update:scope="filters.scope = $event"
         @update:state="filters.state = $event"
       />
 
@@ -128,15 +109,9 @@ const {
         :format-timestamp="formatTimestamp"
         :has-saved-config="hasSavedConfig"
         :local-action-label="localActionLabel"
-        :remote-action-label="remoteActionLabel"
-        :row-action-pending="rowActionPending"
-        :row-busy="rowBusy"
         :row-sync-text="rowSyncText"
-        :sites-loaded-at="sitesLoadedAt"
-        @create-local-site="openCreateLocalSiteModal"
         @edit-local-site="editLocalSite"
         @sync-local-site="syncLocalSite"
-        @sync-remote-site="syncRemoteSite"
       />
     </div>
 
@@ -163,6 +138,22 @@ const {
       @update:hostnames-text="hostnamesText = $event"
       @update:listen-ports-text="listenPortsText = $event"
       @update:upstreams-text="upstreamsText = $event"
+    />
+
+    <AdminSitesSyncDialog
+      :is-open="isRemoteSyncDialogOpen"
+      :loading="actions.loadingSites"
+      :saving="syncingRemoteSelection"
+      :candidates="remoteSyncCandidates"
+      :selected-site-ids="selectedRemoteSiteIds"
+      :site-pull-options="remoteSitePullOptions"
+      @close="closeRemoteSyncDialog"
+      @submit="syncSelectedRemoteSites"
+      @toggle-field="toggleRemoteSitePullOption"
+      @toggle-site="toggleRemoteSiteSelection"
+      @select-recommended="selectRecommendedRemoteSites"
+      @clear-selection="clearRemoteSiteSelection"
+      @reload="openRemoteSyncDialog"
     />
   </AppLayout>
 </template>

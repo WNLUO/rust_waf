@@ -38,6 +38,33 @@ pub enum SingleSiteSyncAction {
     Updated,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SafeLineSitePullOptions {
+    pub name: bool,
+    pub primary_hostname: bool,
+    pub hostnames: bool,
+    pub listen_ports: bool,
+    pub upstreams: bool,
+    pub enabled: bool,
+    pub tls_enabled: bool,
+    pub local_certificate_id: bool,
+}
+
+impl Default for SafeLineSitePullOptions {
+    fn default() -> Self {
+        Self {
+            name: true,
+            primary_hostname: true,
+            hostnames: true,
+            listen_ports: true,
+            upstreams: true,
+            enabled: true,
+            tls_enabled: true,
+            local_certificate_id: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SafeLineSingleSitePullResult {
     pub action: SingleSiteSyncAction,
@@ -93,9 +120,7 @@ pub async fn pull_sites(
             &mut local_certificates,
             certificate,
             if referenced_certificate_ids.contains(&certificate.id) {
-                crate::integrations::safeline::load_certificate(config, &certificate.id)
-                    .await
-                    .ok()
+                Some(load_required_certificate_detail(config, certificate).await?)
             } else {
                 None
             },
@@ -377,6 +402,7 @@ pub async fn pull_site(
     store: &SqliteStore,
     config: &SafeLineConfig,
     remote_site_id: &str,
+    options: SafeLineSitePullOptions,
 ) -> Result<SafeLineSingleSitePullResult> {
     ensure_enabled(config)?;
 
@@ -425,9 +451,7 @@ pub async fn pull_site(
             .iter()
             .find(|item| item.id == cert_id_text)
         {
-            let detail = crate::integrations::safeline::load_certificate(config, &certificate.id)
-                .await
-                .ok();
+            let detail = Some(load_required_certificate_detail(config, certificate).await?);
             sync_remote_certificate(store, &mut local_certificates, certificate, detail, now)
                 .await?;
 
@@ -442,14 +466,20 @@ pub async fn pull_site(
         None
     };
 
-    let site_upsert =
-        local_site_upsert_from_remote(&remote_site, local_certificate_id, sync_mode, now);
     let existing_local_site = existing_link.as_ref().and_then(|link| {
         local_sites
             .iter()
             .find(|item| item.id == link.local_site_id)
             .cloned()
     });
+    let site_upsert = merge_local_site_upsert_from_remote(
+        &remote_site,
+        local_certificate_id,
+        sync_mode,
+        now,
+        existing_local_site.as_ref(),
+        options,
+    );
 
     let (local_site_id, action) = if let Some(existing_site) = existing_local_site {
         store
@@ -818,6 +848,41 @@ async fn sync_remote_certificate(
     Ok(SyncInsertState { inserted })
 }
 
+async fn load_required_certificate_detail(
+    config: &SafeLineConfig,
+    certificate: &SafeLineCertificateSummary,
+) -> Result<SafeLineCertificateDetail> {
+    let detail = crate::integrations::safeline::load_certificate(config, &certificate.id)
+        .await
+        .map_err(|err| {
+            anyhow!(
+                "读取雷池证书 '{}' 详情失败：{}。当前无法同步证书 PEM 和私钥。",
+                certificate.id,
+                err
+            )
+        })?;
+
+    let has_certificate_pem = detail
+        .certificate_pem
+        .as_deref()
+        .map(|item| !item.trim().is_empty())
+        .unwrap_or(false);
+    let has_private_key_pem = detail
+        .private_key_pem
+        .as_deref()
+        .map(|item| !item.trim().is_empty())
+        .unwrap_or(false);
+
+    if !has_certificate_pem || !has_private_key_pem {
+        bail!(
+            "雷池证书 '{}' 详情缺少完整的证书 PEM 或私钥 PEM，无法完整同步到本地。",
+            certificate.id
+        );
+    }
+
+    Ok(detail)
+}
+
 fn local_site_upsert_from_remote(
     remote_site: &SafeLineSiteSummary,
     local_certificate_id: Option<i64>,
@@ -856,6 +921,111 @@ fn local_site_upsert_from_remote(
         notes: format!("Imported from SafeLine site {}", remote_site.id),
         last_synced_at: Some(now),
     }
+}
+
+fn merge_local_site_upsert_from_remote(
+    remote_site: &SafeLineSiteSummary,
+    local_certificate_id: Option<i64>,
+    sync_mode: &str,
+    now: i64,
+    existing_site: Option<&LocalSiteEntry>,
+    options: SafeLineSitePullOptions,
+) -> LocalSiteUpsert {
+    let remote_upsert = local_site_upsert_from_remote(remote_site, local_certificate_id, sync_mode, now);
+
+    let mut merged = if let Some(existing_site) = existing_site {
+        let mut hostnames = if options.hostnames {
+            remote_upsert.hostnames.clone()
+        } else {
+            parse_json_vec(&existing_site.hostnames_json)
+                .unwrap_or_else(|_| vec![existing_site.primary_hostname.clone()])
+        };
+
+        let primary_hostname = if options.primary_hostname {
+            remote_upsert.primary_hostname.clone()
+        } else {
+            existing_site.primary_hostname.clone()
+        };
+
+        if !hostnames.iter().any(|item| item == &primary_hostname) {
+            hostnames.insert(0, primary_hostname.clone());
+        }
+
+        LocalSiteUpsert {
+            name: if options.name {
+                remote_upsert.name.clone()
+            } else {
+                existing_site.name.clone()
+            },
+            primary_hostname,
+            hostnames,
+            listen_ports: if options.listen_ports {
+                remote_upsert.listen_ports.clone()
+            } else {
+                parse_json_vec(&existing_site.listen_ports_json).unwrap_or_default()
+            },
+            upstreams: if options.upstreams {
+                remote_upsert.upstreams.clone()
+            } else {
+                parse_json_vec(&existing_site.upstreams_json).unwrap_or_default()
+            },
+            safeline_intercept: existing_site
+                .safeline_intercept_json
+                .as_ref()
+                .and_then(|value| serde_json::from_str(value).ok()),
+            enabled: if options.enabled {
+                remote_upsert.enabled
+            } else {
+                existing_site.enabled
+            },
+            tls_enabled: if options.tls_enabled {
+                remote_upsert.tls_enabled
+            } else {
+                existing_site.tls_enabled
+            },
+            local_certificate_id: if options.local_certificate_id {
+                remote_upsert.local_certificate_id
+            } else {
+                existing_site.local_certificate_id
+            },
+            source: existing_site.source.clone(),
+            sync_mode: sync_mode.to_string(),
+            notes: existing_site.notes.clone(),
+            last_synced_at: Some(now),
+        }
+    } else {
+        let mut created = remote_upsert;
+        created.hostnames = if options.hostnames {
+            created.hostnames
+        } else {
+            vec![created.primary_hostname.clone()]
+        };
+        if !created.hostnames.iter().any(|item| item == &created.primary_hostname) {
+            created.hostnames.insert(0, created.primary_hostname.clone());
+        }
+        if !options.listen_ports {
+            created.listen_ports = Vec::new();
+        }
+        if !options.upstreams {
+            created.upstreams = Vec::new();
+        }
+        if !options.enabled {
+            created.enabled = true;
+        }
+        if !options.tls_enabled {
+            created.tls_enabled = false;
+        }
+        if !options.local_certificate_id {
+            created.local_certificate_id = None;
+        }
+        created
+    };
+
+    if !merged.hostnames.iter().any(|item| item == &merged.primary_hostname) {
+        merged.hostnames.insert(0, merged.primary_hostname.clone());
+    }
+
+    merged
 }
 
 fn replace_local_certificate(

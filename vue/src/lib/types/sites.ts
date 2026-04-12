@@ -118,6 +118,8 @@ export interface LocalCertificateItem {
   last_synced_at: number | null
   created_at: number
   updated_at: number
+  certificate_pem?: string | null
+  private_key_pem?: string | null
 }
 
 export interface LocalCertificatesResponse {
@@ -201,4 +203,19 @@ export interface SafeLineSitesPushResponse {
   skipped_sites: number
   failed_sites: number
   message: string
+}
+
+export interface SafeLineSitePullOptions {
+  name: boolean
+  primary_hostname: boolean
+  hostnames: boolean
+  listen_ports: boolean
+  upstreams: boolean
+  enabled: boolean
+  tls_enabled: boolean
+  local_certificate_id: boolean
+}
+
+export interface SafeLineSitePullRequest {
+  options: SafeLineSitePullOptions
 }

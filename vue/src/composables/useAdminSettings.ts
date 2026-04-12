@@ -1,5 +1,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
+  clearLocalSiteData,
   createLocalCertificate,
   deleteLocalCertificate,
   fetchLocalCertificates,
@@ -40,6 +41,7 @@ export function useAdminSettings() {
   const generatingCertificate = ref(false)
   const savingDefaultCertificate = ref(false)
   const readingClipboard = ref(false)
+  const clearingSiteData = ref(false)
   const deletingCertificateId = ref<number | null>(null)
   const showGenerateModal = ref(false)
   const showUploadModal = ref(false)
@@ -413,6 +415,22 @@ export function useAdminSettings() {
     }
   }
 
+  async function clearSiteData() {
+    clearingSiteData.value = true
+    clearFeedback()
+    try {
+      const response = await clearLocalSiteData()
+      sites.value = []
+      mappings.value = []
+      sitesLoadedAt.value = null
+      successMessage.value = response.message
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '清空站点数据失败'
+    } finally {
+      clearingSiteData.value = false
+    }
+  }
+
   onMounted(async () => {
     await loadSettings()
     await loadCertificates()
@@ -420,6 +438,8 @@ export function useAdminSettings() {
   })
 
   return {
+    clearSiteData,
+    clearingSiteData,
     deletingCertificateId,
     error,
     generateCertificate,

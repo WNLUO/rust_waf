@@ -32,6 +32,8 @@ import type {
   SafeLineMappingsUpdateRequest,
   SafeLineSitesPullResponse,
   SafeLineSitesPushResponse,
+  SafeLineSitePullOptions,
+  SafeLineSitePullRequest,
   SafeLineSyncOverviewResponse,
   SafeLineSitesResponse,
   SafeLineTestResponse,
@@ -425,11 +427,18 @@ export function pullSafeLineSites() {
   )
 }
 
-export function pullSafeLineSite(remoteSiteId: string) {
+export function pullSafeLineSite(
+  remoteSiteId: string,
+  options?: SafeLineSitePullOptions,
+) {
+  const payload: SafeLineSitePullRequest | undefined = options
+    ? { options }
+    : undefined
   return apiRequest<WriteStatusResponse>(
     `/integrations/safeline/pull/sites/${encodeURIComponent(remoteSiteId)}`,
     {
       method: 'POST',
+      body: payload ? JSON.stringify(payload) : undefined,
     },
   )
 }
@@ -477,6 +486,12 @@ export function updateLocalSite(id: number, payload: LocalSiteDraft) {
 export function deleteLocalSite(id: number) {
   return apiRequest<WriteStatusResponse>(`/sites/local/${id}`, {
     method: 'DELETE',
+  })
+}
+
+export function clearLocalSiteData() {
+  return apiRequest<WriteStatusResponse>('/sites/local/reset', {
+    method: 'POST',
   })
 }
 

@@ -355,6 +355,8 @@ pub struct LocalCertificateResponse {
     pub(crate) last_synced_at: Option<i64>,
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
+    pub(crate) certificate_pem: Option<String>,
+    pub(crate) private_key_pem: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -416,6 +418,51 @@ pub struct SiteSyncLinkUpsertRequest {
     pub(crate) last_remote_hash: Option<String>,
     pub(crate) last_error: Option<String>,
     pub(crate) last_synced_at: Option<i64>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SafeLineSitePullOptionsRequest {
+    #[serde(default = "default_true")]
+    pub(crate) name: bool,
+    #[serde(default = "default_true")]
+    pub(crate) primary_hostname: bool,
+    #[serde(default = "default_true")]
+    pub(crate) hostnames: bool,
+    #[serde(default = "default_true")]
+    pub(crate) listen_ports: bool,
+    #[serde(default = "default_true")]
+    pub(crate) upstreams: bool,
+    #[serde(default = "default_true")]
+    pub(crate) enabled: bool,
+    #[serde(default = "default_true")]
+    pub(crate) tls_enabled: bool,
+    #[serde(default = "default_true")]
+    pub(crate) local_certificate_id: bool,
+}
+
+impl Default for SafeLineSitePullOptionsRequest {
+    fn default() -> Self {
+        Self {
+            name: true,
+            primary_hostname: true,
+            hostnames: true,
+            listen_ports: true,
+            upstreams: true,
+            enabled: true,
+            tls_enabled: true,
+            local_certificate_id: true,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct SafeLineSitePullRequest {
+    #[serde(default)]
+    pub(crate) options: SafeLineSitePullOptionsRequest,
 }
 
 #[derive(Debug, Clone)]

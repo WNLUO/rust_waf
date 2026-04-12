@@ -19,6 +19,7 @@ import {
   AppWindow,
   Sparkles,
   KeyRound,
+  ChevronDown,
 } from 'lucide-vue-next'
 import {
   clearAdminApiToken,
@@ -26,9 +27,27 @@ import {
   setAdminApiToken,
 } from '../../lib/api'
 
-const navItems = [
+interface NavItem {
+  name: string
+  path?: string
+  icon: unknown
+  children?: Array<{
+    name: string
+    path: string
+    icon?: unknown
+  }>
+}
+
+const navItems: NavItem[] = [
   { name: '总览', path: '/admin', icon: LayoutDashboard },
-  { name: '站点管理', path: '/admin/sites', icon: AppWindow },
+  {
+    name: '站点管理',
+    icon: AppWindow,
+    children: [
+      { name: '站点管理', path: '/admin/sites' },
+      { name: '证书管理', path: '/admin/certificates' },
+    ],
+  },
   { name: '规则中心', path: '/admin/rules', icon: Shield },
   { name: '动作中心', path: '/admin/actions', icon: Sparkles },
   { name: 'L4管理', path: '/admin/l4', icon: ServerCog },
@@ -54,6 +73,11 @@ const isRouteActive = (path: string) => {
   return route.path === path || route.path.startsWith(`${path}/`)
 }
 
+const isNavItemActive = (item: NavItem) => {
+  if (item.path) return isRouteActive(item.path)
+  return item.children?.some((child) => isRouteActive(child.path)) ?? false
+}
+
 const syncViewport = () => {
   const nextIsDesktop = window.innerWidth >= DESKTOP_BREAKPOINT
   isDesktop.value = nextIsDesktop
@@ -76,9 +100,18 @@ const sidebarExpanded = computed(
   () => !isDesktop.value || !desktopCollapsed.value,
 )
 const currentPageName = computed(
-  () => navItems.find((item) => isRouteActive(item.path))?.name ?? '控制台',
+  () =>
+    navItems
+      .flatMap((item) =>
+        item.children?.length
+          ? item.children.map((child) => ({ name: child.name, path: child.path }))
+          : item.path
+            ? [{ name: item.name, path: item.path }]
+            : [],
+      )
+      .find((item) => isRouteActive(item.path))?.name ?? '控制台',
 )
-const sidebarWidth = computed(() => (desktopCollapsed.value ? '4rem' : '16rem'))
+const sidebarWidth = computed(() => (desktopCollapsed.value ? '4rem' : '12rem'))
 const layoutStyle = computed(() => ({
   '--sidebar-width': isDesktop.value ? sidebarWidth.value : '100%',
 }))
@@ -162,25 +195,87 @@ const clearToken = () => {
         v-show="shouldShowNav"
         class="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-1"
       >
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.path"
-          :to="item.path"
-          class="flex items-center rounded-md transition-colors duration-150"
-          :title="sidebarExpanded ? '' : item.name"
-          :aria-label="item.name"
-          :class="[
-            sidebarExpanded ? 'gap-3 px-3 py-2' : 'justify-center p-2',
-            isRouteActive(item.path)
-              ? 'bg-blue-50 text-blue-700 font-medium'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-          ]"
-        >
-          <component :is="item.icon" :size="20" class="shrink-0" />
-          <span v-if="sidebarExpanded" class="truncate text-sm">{{
-            item.name
-          }}</span>
-        </RouterLink>
+        <div v-for="item in navItems" :key="item.path || item.name" class="space-y-1">
+          <RouterLink
+            v-if="item.path"
+            :to="item.path"
+            class="flex items-center rounded-md transition-colors duration-150"
+            :title="sidebarExpanded ? '' : item.name"
+            :aria-label="item.name"
+            :class="[
+              sidebarExpanded ? 'gap-3 px-3 py-2' : 'justify-center p-2',
+              isNavItemActive(item)
+                ? 'bg-blue-50 text-blue-700 font-medium'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+            ]"
+          >
+            <component :is="item.icon" :size="20" class="shrink-0" />
+            <span v-if="sidebarExpanded" class="truncate text-sm">{{
+              item.name
+            }}</span>
+          </RouterLink>
+
+          <RouterLink
+            v-else-if="!sidebarExpanded"
+            :to="item.children?.find((child) => isRouteActive(child.path))?.path || item.children?.[0]?.path || '/admin/sites'"
+            class="flex items-center rounded-md transition-colors duration-150"
+            :title="item.name"
+            :aria-label="item.name"
+            :class="[
+              'justify-center p-2',
+              isNavItemActive(item)
+                ? 'bg-blue-50 text-blue-700 font-medium'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+            ]"
+          >
+            <component :is="item.icon" :size="20" class="shrink-0" />
+          </RouterLink>
+
+          <div
+            v-else
+            class="rounded-md"
+            :class="
+              isNavItemActive(item)
+                ? 'bg-slate-50'
+                : ''
+            "
+          >
+            <div
+              class="flex items-center rounded-md transition-colors duration-150"
+              :class="[
+                sidebarExpanded ? 'gap-3 px-3 py-2' : 'justify-center p-2',
+                isNavItemActive(item)
+                  ? 'text-blue-700 font-medium'
+                  : 'text-slate-600',
+              ]"
+            >
+              <component :is="item.icon" :size="20" class="shrink-0" />
+              <template v-if="sidebarExpanded">
+                <span class="truncate text-sm">{{ item.name }}</span>
+                <ChevronDown
+                  :size="16"
+                  class="ml-auto shrink-0 text-slate-400"
+                />
+              </template>
+            </div>
+
+            <div v-if="sidebarExpanded" class="mt-1 space-y-1 px-2 pb-2">
+              <RouterLink
+                v-for="child in item.children"
+                :key="child.path"
+                :to="child.path"
+                class="flex items-center rounded-md px-3 py-2 text-sm transition-colors duration-150"
+                :class="
+                  isRouteActive(child.path)
+                    ? 'bg-blue-50 font-medium text-blue-700'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                "
+              >
+                <span class="truncate">{{ child.name }}</span>
+              </RouterLink>
+            </div>
+          </div>
+        </div>
       </nav>
 
       <div

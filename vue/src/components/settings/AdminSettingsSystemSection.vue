@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Settings } from 'lucide-vue-next'
+import { RotateCcw, Settings } from 'lucide-vue-next'
 import type { LocalCertificateItem } from '../../lib/types'
 import type { SystemSettingsForm } from '../../lib/adminSettings'
 
 const props = defineProps<{
+  clearingSiteData: boolean
   localCertificates: LocalCertificateItem[]
   savingDefaultCertificate: boolean
   systemSettings: SystemSettingsForm
 }>()
 
 const emit = defineEmits<{
+  clearSiteData: []
   defaultCertificateChange: [event: Event]
   'update:systemSettings': [value: SystemSettingsForm]
 }>()
@@ -160,6 +162,25 @@ const upstreamEndpoint = computed({
           class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
         />
       </label>
+    </div>
+
+    <div class="mt-4 rounded-[16px] border border-red-200 bg-red-50 px-4 py-4">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p class="text-sm font-medium text-red-900">站点数据维护</p>
+          <p class="mt-1 text-xs leading-5 text-red-700">
+            清空本地站点、雷池映射、同步链路和雷池缓存站点数据。证书不会被删除。
+          </p>
+        </div>
+        <button
+          :disabled="clearingSiteData"
+          class="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+          @click="emit('clearSiteData')"
+        >
+          <RotateCcw :size="14" />
+          {{ clearingSiteData ? '清空中...' : '清空站点数据' }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

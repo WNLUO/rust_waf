@@ -201,6 +201,7 @@ pub(super) async fn pull_safeline_sites_handler(
 pub(super) async fn pull_safeline_site_handler(
     State(state): State<ApiState>,
     Path(remote_site_id): Path<String>,
+    payload: Option<ExtractJson<SafeLineSitePullRequest>>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let config = persisted_config(&state).await?;
@@ -210,9 +211,23 @@ pub(super) async fn pull_safeline_site_handler(
         return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
     }
 
-    let result = crate::integrations::safeline_sync::pull_site(store, safeline, &remote_site_id)
-        .await
-        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let options = payload
+        .map(|item| crate::integrations::safeline_sync::SafeLineSitePullOptions {
+            name: item.options.name,
+            primary_hostname: item.options.primary_hostname,
+            hostnames: item.options.hostnames,
+            listen_ports: item.options.listen_ports,
+            upstreams: item.options.upstreams,
+            enabled: item.options.enabled,
+            tls_enabled: item.options.tls_enabled,
+            local_certificate_id: item.options.local_certificate_id,
+        })
+        .unwrap_or_default();
+
+    let result =
+        crate::integrations::safeline_sync::pull_site(store, safeline, &remote_site_id, options)
+            .await
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     Ok(Json(WriteStatusResponse {
         success: true,

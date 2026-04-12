@@ -152,6 +152,10 @@ fn build_router(state: ApiState) -> Router {
                 .post(sites_handlers::create_local_site_handler),
         )
         .route(
+            "/sites/local/reset",
+            axum::routing::post(sites_handlers::clear_local_site_data_handler),
+        )
+        .route(
             "/sites/local/:id",
             get(sites_handlers::get_local_site_handler)
                 .put(sites_handlers::update_local_site_handler)

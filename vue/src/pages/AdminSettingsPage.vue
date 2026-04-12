@@ -9,6 +9,8 @@ import AdminUploadCertificateDialog from '../components/settings/AdminUploadCert
 import { useAdminSettings } from '../composables/useAdminSettings'
 
 const {
+  clearSiteData,
+  clearingSiteData,
   deletingCertificateId,
   error,
   generateCertificate,
@@ -48,6 +50,13 @@ const {
   closeUploadModal,
   generatingCertificate,
 } = useAdminSettings()
+
+async function handleClearSiteData() {
+  if (!window.confirm('确认清空所有站点数据吗？这会删除本地站点、映射、同步链路和缓存站点，但不会删除证书。')) {
+    return
+  }
+  await clearSiteData()
+}
 
 function formatTimestamp(timestamp: number | null) {
   if (!timestamp) return '暂无'
@@ -92,9 +101,11 @@ function formatTimestamp(timestamp: number | null) {
 
       <div class="space-y-4">
         <AdminSettingsSystemSection
+          :clearing-site-data="clearingSiteData"
           :local-certificates="localCertificates"
           :saving-default-certificate="savingDefaultCertificate"
           :system-settings="systemSettings"
+          @clear-site-data="handleClearSiteData"
           @default-certificate-change="handleDefaultCertificateChange"
           @update:system-settings="Object.assign(systemSettings, $event)"
         />

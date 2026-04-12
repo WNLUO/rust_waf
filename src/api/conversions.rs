@@ -748,6 +748,8 @@ impl TryFrom<crate::storage::LocalCertificateEntry> for LocalCertificateResponse
             last_synced_at: value.last_synced_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
+            certificate_pem: None,
+            private_key_pem: None,
         })
     }
 }

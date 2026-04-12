@@ -734,6 +734,25 @@ impl SqliteStore {
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn clear_site_data(&self) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM safeline_site_mappings")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM site_sync_links")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM local_sites")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM safeline_cached_sites")
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn list_local_certificates(&self) -> Result<Vec<LocalCertificateEntry>> {
         let rows = sqlx::query_as::<_, LocalCertificateEntry>(
             r#"

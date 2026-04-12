@@ -1,5 +1,23 @@
 use super::*;
 
+async fn local_certificate_response_with_secret(
+    store: &crate::storage::SqliteStore,
+    certificate: crate::storage::LocalCertificateEntry,
+) -> Result<LocalCertificateResponse, ApiError> {
+    let certificate_id = certificate.id;
+    let mut response =
+        LocalCertificateResponse::try_from(certificate).map_err(ApiError::internal)?;
+    if let Some(secret) = store
+        .load_local_certificate_secret(certificate_id)
+        .await
+        .map_err(ApiError::internal)?
+    {
+        response.certificate_pem = Some(secret.certificate_pem);
+        response.private_key_pem = Some(secret.private_key_pem);
+    }
+    Ok(response)
+}
+
 pub(super) async fn list_local_sites_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<LocalSitesResponse>> {
@@ -119,6 +137,23 @@ pub(super) async fn delete_local_site_handler(
     }
 }
 
+pub(super) async fn clear_local_site_data_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    store.clear_site_data().await.map_err(ApiError::internal)?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "本地站点、同步链路、雷池站点映射和缓存站点数据已清空。".to_string(),
+    }))
+}
+
 pub(super) async fn list_local_certificates_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<LocalCertificatesResponse>> {
@@ -150,7 +185,7 @@ pub(super) async fn get_local_certificate_handler(
         .map_err(ApiError::internal)?;
     match certificate {
         Some(certificate) => Ok(Json(
-            LocalCertificateResponse::try_from(certificate).map_err(ApiError::internal)?,
+            local_certificate_response_with_secret(store, certificate).await?,
         )),
         None => Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id))),
     }
@@ -187,7 +222,7 @@ pub(super) async fn create_local_certificate_handler(
 
     Ok((
         StatusCode::CREATED,
-        Json(LocalCertificateResponse::try_from(created).map_err(ApiError::internal)?),
+        Json(local_certificate_response_with_secret(store, created).await?),
     ))
 }
 
@@ -224,7 +259,7 @@ pub(super) async fn generate_local_certificate_handler(
 
     Ok((
         StatusCode::CREATED,
-        Json(LocalCertificateResponse::try_from(created).map_err(ApiError::internal)?),
+        Json(local_certificate_response_with_secret(store, created).await?),
     ))
 }
 

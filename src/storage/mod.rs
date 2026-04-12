@@ -7,8 +7,8 @@ pub use self::models::*;
 pub use self::query::*;
 
 use crate::config::{Config, Rule};
-use anyhow::Result;
-use log::{debug, warn};
+use anyhow::{Context, Result};
+use log::{debug, info, warn};
 use serde_json;
 use sha2::{Digest, Sha256};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -29,11 +29,14 @@ use self::query::{
 use self::schema::initialize_schema;
 
 const STORAGE_QUEUE_CAPACITY: usize = 1024;
+const SQLITE_STARTUP_BACKUP_RETENTION: usize = 5;
+const SQLITE_CORRUPT_BACKUP_RETENTION: usize = 5;
 
 #[derive(Clone)]
 pub struct SqliteStore {
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pool: SqlitePool,
+    db_path: PathBuf,
     sender: mpsc::Sender<StorageCommand>,
 }
 
@@ -46,27 +49,70 @@ impl SqliteStore {
     pub async fn new(path: String, auto_migrate: bool) -> Result<Self> {
         let db_path = PathBuf::from(path);
         ensure_parent_dir(&db_path).await?;
+        let existed_before = tokio::fs::try_exists(&db_path).await.unwrap_or(false);
 
-        let connect_options =
-            SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))?
-                .create_if_missing(true)
-                .journal_mode(SqliteJournalMode::Wal)
-                .synchronous(SqliteSynchronous::Normal)
-                .foreign_keys(true);
+        info!(
+            "Opening SQLite database: path={}, existed_before={}, auto_migrate={}, journal_mode=WAL, synchronous=NORMAL",
+            db_path.display(),
+            existed_before,
+            auto_migrate
+        );
 
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(connect_options)
-            .await?;
+        let pool = match open_pool(&db_path, auto_migrate).await {
+            Ok(pool) => {
+                info!("SQLite database is ready: {}", db_path.display());
+                pool
+            }
+            Err(err) if is_sqlite_corruption_error(&err) => {
+                warn!(
+                    "SQLite database at {} is corrupted, backing it up and recreating a fresh database",
+                    db_path.display()
+                );
+                let backup_path = backup_corrupted_db(&db_path).await?;
+                warn!(
+                    "Moved corrupted SQLite database to backup: {}",
+                    backup_path.display()
+                );
+                let pool = open_pool(&db_path, auto_migrate).await?;
+                info!(
+                    "Recreated SQLite database after recovery: {}",
+                    db_path.display()
+                );
+                pool
+            }
+            Err(err) => {
+                log_sqlite_open_error(&db_path, &err);
+                return Err(err);
+            }
+        };
 
-        if auto_migrate {
-            initialize_schema(&pool).await?;
+        if existed_before {
+            match create_backup_snapshot(&pool, &db_path, BackupKind::Startup).await {
+                Ok(backup_path) => info!(
+                    "Created SQLite startup backup: {}",
+                    backup_path.display()
+                ),
+                Err(err) => warn!(
+                    "Failed to create SQLite startup backup for {}: {}",
+                    db_path.display(),
+                    err
+                ),
+            }
         }
 
         let (sender, receiver) = mpsc::channel(STORAGE_QUEUE_CAPACITY);
         tokio::spawn(run_writer(pool.clone(), receiver));
 
-        Ok(Self { pool, sender })
+        Ok(Self {
+            pool,
+            db_path,
+            sender,
+        })
+    }
+
+    #[cfg_attr(not(feature = "api"), allow(dead_code))]
+    pub async fn create_backup(&self) -> Result<PathBuf> {
+        create_backup_snapshot(&self.pool, &self.db_path, BackupKind::Manual).await
     }
 
     pub fn enqueue_security_event(&self, event: SecurityEventRecord) {
@@ -1503,6 +1549,280 @@ impl SqliteStore {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqliteOpenErrorKind {
+    Corruption,
+    PermissionDenied,
+    PathUnavailable,
+    DiskFull,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackupKind {
+    Startup,
+    Manual,
+    Corrupt,
+}
+
+async fn open_pool(db_path: &Path, auto_migrate: bool) -> Result<SqlitePool> {
+    let connect_options =
+        SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .foreign_keys(true);
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(connect_options)
+        .await?;
+
+    validate_database(&pool).await?;
+
+    if auto_migrate {
+        initialize_schema(&pool).await?;
+    }
+
+    Ok(pool)
+}
+
+fn classify_sqlite_error(error: &anyhow::Error) -> SqliteOpenErrorKind {
+    if is_sqlite_corruption_error(error) {
+        return SqliteOpenErrorKind::Corruption;
+    }
+
+    let message = error.to_string().to_ascii_lowercase();
+
+    if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
+        return match io_error.kind() {
+            std::io::ErrorKind::PermissionDenied => SqliteOpenErrorKind::PermissionDenied,
+            std::io::ErrorKind::NotFound => SqliteOpenErrorKind::PathUnavailable,
+            _ => SqliteOpenErrorKind::Other,
+        };
+    }
+
+    if message.contains("permission denied") || message.contains("readonly") {
+        return SqliteOpenErrorKind::PermissionDenied;
+    }
+    if message.contains("no such file")
+        || message.contains("unable to open database file")
+        || message.contains("cannot open")
+    {
+        return SqliteOpenErrorKind::PathUnavailable;
+    }
+    if message.contains("disk is full") || message.contains("database or disk is full") {
+        return SqliteOpenErrorKind::DiskFull;
+    }
+
+    SqliteOpenErrorKind::Other
+}
+
+async fn validate_database(pool: &SqlitePool) -> Result<()> {
+    let integrity_check: String = sqlx::query_scalar("PRAGMA integrity_check(1)")
+        .fetch_one(pool)
+        .await?;
+    if integrity_check.eq_ignore_ascii_case("ok") {
+        Ok(())
+    } else {
+        anyhow::bail!("sqlite integrity check failed: {integrity_check}");
+    }
+}
+
+fn is_sqlite_corruption_error(error: &anyhow::Error) -> bool {
+    let Some(sqlx_error) = error.downcast_ref::<sqlx::Error>() else {
+        return error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("integrity check failed");
+    };
+
+    if let Some(database_error) = sqlx_error.as_database_error() {
+        let message = database_error.message().to_ascii_lowercase();
+        if message.contains("database disk image is malformed")
+            || message.contains("malformed")
+            || message.contains("file is not a database")
+        {
+            return true;
+        }
+        if database_error.code().is_some_and(|code| code == "11") {
+            return true;
+        }
+        if database_error.code().is_some_and(|code| code == "26") {
+            return true;
+        }
+    }
+
+    let message = sqlx_error.to_string().to_ascii_lowercase();
+    message.contains("database disk image is malformed")
+        || message.contains("database corrupt")
+        || message.contains("file is not a database")
+        || message.contains("malformed")
+        || message.contains("integrity check failed")
+}
+
+fn log_sqlite_open_error(path: &Path, error: &anyhow::Error) {
+    let kind = classify_sqlite_error(error);
+    warn!(
+        "Failed to open SQLite database: path={}, kind={:?}, error={}",
+        path.display(),
+        kind,
+        error
+    );
+}
+
+async fn backup_corrupted_db(path: &Path) -> Result<PathBuf> {
+    if !tokio::fs::try_exists(path).await? {
+        return Ok(corrupted_backup_path(path, &timestamp_suffix()));
+    }
+
+    ensure_backup_dir(path).await?;
+    let backup_path = backup_file_path(path, BackupKind::Corrupt, &timestamp_suffix());
+    tokio::fs::rename(path, &backup_path)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to move corrupted SQLite database {} to {}",
+                path.display(),
+                backup_path.display()
+            )
+        })?;
+
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{}", path.display(), suffix));
+        if tokio::fs::try_exists(&sidecar).await? {
+            let backup_sidecar = PathBuf::from(format!("{}{}", backup_path.display(), suffix));
+            tokio::fs::rename(&sidecar, &backup_sidecar)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to move corrupted SQLite sidecar {} to {}",
+                        sidecar.display(),
+                        backup_sidecar.display()
+                    )
+                })?;
+        }
+    }
+
+    prune_backups(path, BackupKind::Corrupt, SQLITE_CORRUPT_BACKUP_RETENTION).await?;
+
+    Ok(backup_path)
+}
+
+async fn create_backup_snapshot(pool: &SqlitePool, db_path: &Path, kind: BackupKind) -> Result<PathBuf> {
+    ensure_backup_dir(db_path).await?;
+    let backup_path = backup_file_path(db_path, kind, &timestamp_suffix());
+    checkpoint_wal(pool).await?;
+
+    let escaped_backup_path = backup_path.to_string_lossy().replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{}'", escaped_backup_path))
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to create SQLite backup snapshot from {} to {}",
+                db_path.display(),
+                backup_path.display()
+            )
+        })?;
+
+    if kind == BackupKind::Startup {
+        prune_backups(
+            db_path,
+            BackupKind::Startup,
+            SQLITE_STARTUP_BACKUP_RETENTION,
+        )
+        .await?;
+    }
+
+    Ok(backup_path)
+}
+
+async fn checkpoint_wal(pool: &SqlitePool) -> Result<()> {
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn ensure_backup_dir(path: &Path) -> Result<()> {
+    tokio::fs::create_dir_all(backup_dir(path)).await?;
+    Ok(())
+}
+
+fn backup_dir(path: &Path) -> PathBuf {
+    path.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("backups")
+}
+
+fn backup_file_path(path: &Path, kind: BackupKind, timestamp: &str) -> PathBuf {
+    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("sqlite");
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| format!(".{ext}"))
+        .unwrap_or_default();
+    backup_dir(path).join(format!("{stem}.{}.{}{ext}", backup_kind_label(kind), timestamp))
+}
+
+fn backup_kind_label(kind: BackupKind) -> &'static str {
+    match kind {
+        BackupKind::Startup => "startup.",
+        BackupKind::Manual => "manual.",
+        BackupKind::Corrupt => "corrupt.",
+    }
+}
+
+async fn prune_backups(path: &Path, kind: BackupKind, retain: usize) -> Result<()> {
+    let dir = backup_dir(path);
+    if !tokio::fs::try_exists(&dir).await? {
+        return Ok(());
+    }
+
+    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("sqlite");
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{value}"))
+        .unwrap_or_default();
+    let prefix = format!("{stem}.{}", backup_kind_label(kind));
+
+    let mut entries = tokio::fs::read_dir(&dir).await?;
+    let mut backup_files = Vec::new();
+    while let Some(entry) = entries.next_entry().await? {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if file_name.starts_with(&prefix) && file_name.ends_with(&ext) {
+            backup_files.push(entry.path());
+        }
+    }
+
+    backup_files.sort();
+    let remove_count = backup_files.len().saturating_sub(retain);
+    for backup_path in backup_files.into_iter().take(remove_count) {
+        tokio::fs::remove_file(&backup_path).await.with_context(|| {
+            format!("failed to remove old SQLite backup {}", backup_path.display())
+        })?;
+    }
+
+    Ok(())
+}
+
+fn corrupted_backup_path(path: &Path, timestamp: &str) -> PathBuf {
+    backup_file_path(path, BackupKind::Corrupt, timestamp)
+}
+
+fn timestamp_suffix() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .to_string()
+}
+
 #[derive(Debug, Clone)]
 pub struct SafeLineSiteMappingUpsert {
     pub safeline_site_id: String,
@@ -1859,6 +2179,78 @@ mod tests {
         assert_eq!(local_sites_exists, 1);
         assert_eq!(site_sync_links_exists, 1);
         assert_eq!(local_certificate_secrets_exists, 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_recovers_from_corrupted_database() {
+        let path = unique_test_db_path("corrupted_recovery");
+        tokio::fs::write(&path, b"this-is-not-a-valid-sqlite-database")
+            .await
+            .unwrap();
+
+        let _store = SqliteStore::new(path.clone(), true).await.unwrap();
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", path))
+            .await
+            .unwrap();
+
+        let integrity_check: String = sqlx::query_scalar("PRAGMA integrity_check(1)")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(integrity_check, "ok");
+
+        let file_name = Path::new(&path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap();
+        let backup_prefix = format!("{file_name}.corrupt.");
+        let backup_exists = backup_dir(Path::new(&path))
+            .read_dir()
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| {
+                entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with(&backup_prefix) && name.ends_with(".db")
+                })
+            });
+        assert!(backup_exists, "expected corrupted database backup to exist");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_creates_startup_backup_for_existing_database() {
+        let path = unique_test_db_path("startup_backup");
+        let _store = SqliteStore::new(path.clone(), true).await.unwrap();
+
+        let _reopened = SqliteStore::new(path.clone(), true).await.unwrap();
+
+        let file_name = Path::new(&path)
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap();
+        let backup_prefix = format!("{file_name}.startup.");
+        let backup_exists = backup_dir(Path::new(&path))
+            .read_dir()
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .any(|entry| {
+                entry.file_name().to_str().is_some_and(|name| {
+                    name.starts_with(&backup_prefix) && name.ends_with(".db")
+                })
+            });
+        assert!(backup_exists, "expected startup database backup to exist");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_manual_backup_creates_snapshot() {
+        let path = unique_test_db_path("manual_backup");
+        let store = SqliteStore::new(path, true).await.unwrap();
+
+        let backup_path = store.create_backup().await.unwrap();
+
+        assert!(backup_path.exists(), "expected manual backup file to exist");
     }
 
     #[tokio::test]

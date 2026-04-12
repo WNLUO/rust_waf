@@ -1202,7 +1202,7 @@ mod tests {
                 "www.portal.example.com".to_string()
             ]
         );
-        assert_eq!(site.listen_ports, vec!["443".to_string()]);
+        assert!(site.listen_ports.is_empty());
         assert_eq!(site.upstreams, vec!["http://127.0.0.1:8080".to_string()]);
         assert_eq!(site.source, "manual");
         assert_eq!(site.sync_mode, "manual");

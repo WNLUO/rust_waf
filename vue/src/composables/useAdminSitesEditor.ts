@@ -79,13 +79,6 @@ export function useAdminSitesEditor(
     },
   })
 
-  const listenPortsText = computed({
-    get: () => localSiteForm.listen_ports.join(', '),
-    set: (value: string) => {
-      localSiteForm.listen_ports = splitEditorList(value)
-    },
-  })
-
   const upstreamsText = computed({
     get: () => localSiteForm.upstreams.join(', '),
     set: (value: string) => {
@@ -107,19 +100,12 @@ export function useAdminSitesEditor(
       : `编辑本地站点 #${editingLocalSiteId.value}`,
   )
 
-  function defaultListenPorts() {
-    const httpsListenAddr = settings.value?.https_listen_addr?.trim() ?? ''
-    if (!httpsListenAddr) return []
-    const port = httpsListenAddr.split(':').pop()?.trim()
-    return port ? [port] : []
-  }
-
   function resetLocalSiteForm() {
     editingLocalSiteId.value = null
     localSiteForm.name = ''
     localSiteForm.primary_hostname = ''
     localSiteForm.hostnames = []
-    localSiteForm.listen_ports = defaultListenPorts()
+    localSiteForm.listen_ports = []
     localSiteForm.upstreams = []
     localSiteForm.safeline_intercept = null
     localSiteForm.enabled = true
@@ -149,7 +135,7 @@ export function useAdminSitesEditor(
     localSiteForm.name = site.name
     localSiteForm.primary_hostname = site.primary_hostname
     localSiteForm.hostnames = [...site.hostnames]
-    localSiteForm.listen_ports = [...site.listen_ports]
+    localSiteForm.listen_ports = []
     localSiteForm.upstreams = [...site.upstreams]
     localSiteForm.safeline_intercept = cloneSafelineIntercept(
       site.safeline_intercept,
@@ -168,7 +154,7 @@ export function useAdminSitesEditor(
       name: site.name,
       primary_hostname: site.primary_hostname,
       hostnames: [...site.hostnames],
-      listen_ports: [...site.listen_ports],
+      listen_ports: [],
       upstreams: [...site.upstreams],
       safeline_intercept: cloneSafelineIntercept(site.safeline_intercept),
       enabled: site.enabled,
@@ -202,13 +188,6 @@ export function useAdminSitesEditor(
         : primaryHostname
           ? [primaryHostname]
           : []
-    const listenPorts = row.local_listen_ports.length
-      ? [...row.local_listen_ports]
-      : row.remote_ssl_ports.length
-        ? [...row.remote_ssl_ports]
-        : row.remote_ports.length
-          ? [...row.remote_ports]
-          : defaultListenPorts()
     const upstreams = row.local_upstreams.length
       ? [...row.local_upstreams]
       : row.remote_upstreams.length
@@ -223,7 +202,7 @@ export function useAdminSitesEditor(
         primaryHostname,
       primary_hostname: primaryHostname,
       hostnames,
-      listen_ports: listenPorts,
+      listen_ports: [],
       upstreams,
       safeline_intercept: cloneSafelineIntercept(
         localSite?.safeline_intercept ?? null,
@@ -269,7 +248,6 @@ export function useAdminSitesEditor(
     editorTitle,
     hostnamesText,
     isLocalSiteModalOpen,
-    listenPortsText,
     localSiteForm,
     openCreateLocalSiteModal,
     populateLocalSiteForm,

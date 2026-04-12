@@ -715,7 +715,7 @@ impl LocalSiteUpsertRequest {
         if !hostnames.iter().any(|item| item == &primary_hostname) {
             hostnames.insert(0, primary_hostname.clone());
         }
-        let listen_ports = normalize_string_list(self.listen_ports);
+        let listen_ports = Vec::new();
         let upstreams = normalize_string_list(self.upstreams);
         let safeline_intercept = self
             .safeline_intercept
@@ -725,9 +725,6 @@ impl LocalSiteUpsertRequest {
         let sync_mode = non_empty_string(self.sync_mode).unwrap_or_else(|| "manual".to_string());
         let notes = self.notes.trim().to_string();
 
-        for listen_port in &listen_ports {
-            validate_listen_port_token(listen_port)?;
-        }
         for upstream in &upstreams {
             crate::core::gateway::normalize_upstream_endpoint(upstream)
                 .map_err(|err| format!("上游地址 '{}' 无效: {}", upstream, err))?;
@@ -1259,32 +1256,6 @@ fn parse_json_string_vec(value: &str) -> Result<Vec<String>, anyhow::Error> {
 
 fn parse_json_value(value: &str) -> Result<serde_json::Value, anyhow::Error> {
     Ok(serde_json::from_str::<serde_json::Value>(value)?)
-}
-
-fn validate_listen_port_token(value: &str) -> Result<(), String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Err("监听端口不能为空".to_string());
-    }
-
-    if trimmed.parse::<u16>().is_ok() {
-        return Ok(());
-    }
-
-    if let Ok(uri) = trimmed.parse::<http::Uri>() {
-        if uri.port_u16().is_some() {
-            return Ok(());
-        }
-    }
-
-    match trimmed
-        .rsplit(':')
-        .next()
-        .and_then(|item| item.parse::<u16>().ok())
-    {
-        Some(_) => Ok(()),
-        None => Err(format!("监听端口 '{}' 无效", trimmed)),
-    }
 }
 
 async fn ensure_local_certificate_exists(

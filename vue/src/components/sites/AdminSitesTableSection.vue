@@ -108,13 +108,7 @@ const emit = defineEmits<{
                       : '未设置'
                   }}
                 </p>
-                <p>
-                  监听端口：{{
-                    row.local_listen_ports.length
-                      ? row.local_listen_ports.join(' / ')
-                      : '未设置'
-                  }}
-                </p>
+                <p>入口端口：由站点页顶部“全局入口”统一配置</p>
                 <p class="truncate" :title="row.local_upstreams.join(' / ')">
                   Upstream：{{
                     row.local_upstreams.length

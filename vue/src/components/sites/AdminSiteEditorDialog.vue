@@ -22,7 +22,6 @@ const props = defineProps<{
   defaultSafelineInterceptConfig: NonNullable<LocalSiteDraft['safeline_intercept']>
   hostnamesText: string
   isOpen: boolean
-  listenPortsText: string
   localCertificates: LocalCertificateItem[]
   localSiteForm: LocalSiteDraft
   localSitesCount: number
@@ -36,7 +35,6 @@ const emit = defineEmits<{
   save: []
   'update:form': [value: LocalSiteDraft]
   'update:hostnamesText': [value: string]
-  'update:listenPortsText': [value: string]
   'update:upstreamsText': [value: string]
 }>()
 
@@ -310,7 +308,7 @@ const safelineResponseHeadersTextModel = computed({
           <div class="mb-3">
             <p class="text-sm font-medium text-stone-900">站点信息</p>
             <p class="mt-1 text-xs text-slate-500">
-              这里填写站点本身的入口配置，包括域名、端口、证书和下游地址。
+              这里填写站点本身的入口配置，包括域名、证书和下游地址。
             </p>
           </div>
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -358,21 +356,6 @@ const safelineResponseHeadersTextModel = computed({
                 @input="
                   emit(
                     'update:hostnamesText',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label class="space-y-1.5">
-              <span class="text-xs text-slate-500">监听端口</span>
-              <input
-                :value="listenPortsText"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-                type="text"
-                placeholder="例如 660"
-                @input="
-                  emit(
-                    'update:listenPortsText',
                     ($event.target as HTMLInputElement).value,
                   )
                 "

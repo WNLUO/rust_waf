@@ -342,33 +342,9 @@ fn normalize_sni_hostname(value: &str) -> Option<String> {
 }
 
 fn site_matches_port(site: &GatewaySiteRuntime, listener_port: u16) -> bool {
-    if site.listen_ports.is_empty() {
-        return true;
-    }
-
-    site.listen_ports
-        .iter()
-        .any(|port| normalize_port_token(port) == Some(listener_port))
-}
-
-fn normalize_port_token(value: &str) -> Option<u16> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    if let Ok(port) = trimmed.parse::<u16>() {
-        return Some(port);
-    }
-
-    if let Ok(uri) = trimmed.parse::<http::Uri>() {
-        return uri.port_u16();
-    }
-
-    trimmed
-        .rsplit(':')
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
+    let _ = site;
+    let _ = listener_port;
+    true
 }
 
 pub fn parse_upstream_endpoint(value: &str) -> Result<UpstreamEndpoint> {

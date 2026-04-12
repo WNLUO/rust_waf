@@ -332,6 +332,7 @@ pub struct LocalSiteUpsertRequest {
     pub(crate) name: String,
     pub(crate) primary_hostname: String,
     pub(crate) hostnames: Vec<String>,
+    #[allow(dead_code)]
     pub(crate) listen_ports: Vec<String>,
     pub(crate) upstreams: Vec<String>,
     #[serde(default)]

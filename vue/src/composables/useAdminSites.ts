@@ -134,7 +134,6 @@ export function useAdminSites(
     editorTitle,
     hostnamesText,
     isLocalSiteModalOpen,
-    listenPortsText,
     localSiteForm,
     openCreateLocalSiteModal,
     populateLocalSiteForm,
@@ -445,9 +444,7 @@ export function useAdminSites(
         hostnames: localSiteForm.hostnames
           .map((item) => item.trim())
           .filter(Boolean),
-        listen_ports: localSiteForm.listen_ports
-          .map((item) => item.trim())
-          .filter(Boolean),
+        listen_ports: [],
         upstreams: localSiteForm.upstreams
           .map((item) => item.trim())
           .filter(Boolean),
@@ -744,7 +741,6 @@ export function useAdminSites(
     isGlobalEntryModalOpen,
     isRemoteSyncDialogOpen,
     isLocalSiteModalOpen,
-    listenPortsText,
     loadRemoteSites,
     localActionLabel,
     localCertificates,

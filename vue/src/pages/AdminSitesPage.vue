@@ -26,7 +26,6 @@ const {
   isGlobalEntryModalOpen,
   isLocalSiteModalOpen,
   isRemoteSyncDialogOpen,
-  listenPortsText,
   localActionLabel,
   localCertificates,
   localSiteForm,
@@ -127,7 +126,6 @@ useFlashMessages({
       :default-safeline-intercept-config="defaultSafelineInterceptConfig"
       :hostnames-text="hostnamesText"
       :is-open="isLocalSiteModalOpen"
-      :listen-ports-text="listenPortsText"
       :local-certificates="localCertificates"
       :local-site-form="localSiteForm"
       :local-sites-count="localSites.length"
@@ -138,7 +136,6 @@ useFlashMessages({
       @save="saveLocalSite"
       @update:form="Object.assign(localSiteForm, $event)"
       @update:hostnames-text="hostnamesText = $event"
-      @update:listen-ports-text="listenPortsText = $event"
       @update:upstreams-text="upstreamsText = $event"
     />
 

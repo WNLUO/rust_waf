@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::net::SocketAddr;
@@ -41,7 +42,7 @@ pub struct Config {
     pub sqlite_path: String,
     #[serde(default = "default_sqlite_auto_migrate")]
     pub sqlite_auto_migrate: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_boolish")]
     pub sqlite_rules_enabled: bool,
     #[serde(default)]
     pub max_concurrent_tasks: usize,
@@ -292,7 +293,7 @@ impl Default for Config {
             sqlite_enabled: default_sqlite_enabled(),
             sqlite_path: default_sqlite_path(),
             sqlite_auto_migrate: default_sqlite_auto_migrate(),
-            sqlite_rules_enabled: false,
+            sqlite_rules_enabled: default_sqlite_rules_enabled(),
             max_concurrent_tasks: 0,
             console_settings: ConsoleSettings::default(),
             integrations: IntegrationsConfig::default(),
@@ -589,6 +590,35 @@ impl Config {
     }
 }
 
+fn deserialize_boolish<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Boolish {
+        Bool(bool),
+        Int(u8),
+        String(String),
+    }
+
+    match Boolish::deserialize(deserializer)? {
+        Boolish::Bool(value) => Ok(value),
+        Boolish::Int(0) => Ok(false),
+        Boolish::Int(1) => Ok(true),
+        Boolish::Int(other) => Err(de::Error::custom(format!(
+            "invalid integer {other}, expected 0 or 1"
+        ))),
+        Boolish::String(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            other => Err(de::Error::custom(format!(
+                "invalid string '{other}', expected true/false/0/1"
+            ))),
+        },
+    }
+}
+
 impl Default for ConsoleSettings {
     fn default() -> Self {
         Self {
@@ -663,6 +693,10 @@ const fn default_auto_refresh_seconds() -> u32 {
 }
 
 const fn default_sqlite_enabled() -> bool {
+    true
+}
+
+const fn default_sqlite_rules_enabled() -> bool {
     true
 }
 

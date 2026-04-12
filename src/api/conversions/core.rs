@@ -212,7 +212,6 @@ impl GlobalSettingsResponse {
                 SourceIpStrategy::XForwardedForLastButTwo => {
                     "x_forwarded_for_last_but_two".to_string()
                 }
-                SourceIpStrategy::XForwardedForAny => "x_forwarded_for_first".to_string(),
                 SourceIpStrategy::Header => "header".to_string(),
                 SourceIpStrategy::ProxyProtocol => "proxy_protocol".to_string(),
             },

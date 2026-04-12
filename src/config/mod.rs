@@ -556,9 +556,6 @@ impl Config {
             .custom_source_ip_header
             .trim()
             .to_ascii_lowercase();
-        if self.gateway_config.source_ip_strategy == SourceIpStrategy::XForwardedForAny {
-            self.gateway_config.source_ip_strategy = SourceIpStrategy::XForwardedForFirst;
-        }
         self.gateway_config.rewrite_host_value =
             self.gateway_config.rewrite_host_value.trim().to_string();
         self.gateway_config.ssl_protocols =
@@ -816,20 +813,9 @@ mod tests {
     }
 
     #[test]
-    fn normalized_rewrites_deprecated_source_ip_strategy() {
-        let config = Config {
-            gateway_config: GatewayConfig {
-                source_ip_strategy: SourceIpStrategy::XForwardedForAny,
-                ..GatewayConfig::default()
-            },
-            ..Config::default()
-        }
-        .normalized();
-
-        assert_eq!(
-            config.gateway_config.source_ip_strategy,
-            SourceIpStrategy::XForwardedForFirst
-        );
+    fn legacy_source_ip_strategy_alias_deserializes_to_first() {
+        let strategy: SourceIpStrategy = serde_json::from_str("\"x_forwarded_for_any\"").unwrap();
+        assert_eq!(strategy, SourceIpStrategy::XForwardedForFirst);
     }
 
     #[test]

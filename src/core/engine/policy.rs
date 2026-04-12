@@ -905,9 +905,6 @@ fn resolve_client_ip(
         crate::config::SourceIpStrategy::XForwardedForLastButTwo => request
             .get_header("x-forwarded-for")
             .and_then(|value| extract_forwarded_ip_from_right(value, 2)),
-        crate::config::SourceIpStrategy::XForwardedForAny => request
-            .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0)),
         crate::config::SourceIpStrategy::Header => gateway
             .custom_source_ip_header
             .trim()

@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 pub enum SourceIpStrategy {
     #[default]
     Connection,
+    #[serde(alias = "x_forwarded_for_any")]
     XForwardedForFirst,
     XForwardedForLast,
     XForwardedForLastButOne,
     XForwardedForLastButTwo,
-    XForwardedForAny,
     Header,
     ProxyProtocol,
 }
@@ -85,8 +85,6 @@ pub struct GatewayConfig {
     pub ssl_ciphers: String,
     #[serde(default)]
     pub header_operations: Vec<HeaderOperation>,
-    #[serde(default)]
-    pub group_management_enabled: bool,
 }
 
 impl Default for GatewayConfig {
@@ -112,7 +110,6 @@ impl Default for GatewayConfig {
             ssl_protocols: default_ssl_protocols(),
             ssl_ciphers: String::new(),
             header_operations: Vec::new(),
-            group_management_enabled: false,
         }
     }
 }

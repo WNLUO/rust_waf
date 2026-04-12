@@ -187,6 +187,11 @@ impl UnifiedHttpRequest {
         let mut request = format!("{} {} HTTP/1.1\r\n", self.method, self.uri).into_bytes();
         let has_content_length = self.headers.contains_key("content-length");
         let has_host = self.headers.contains_key("host");
+        let connection_mode = self
+            .metadata
+            .get("proxy_connection_mode")
+            .map(String::as_str)
+            .unwrap_or("close");
 
         for (key, value) in &self.headers {
             if key.eq_ignore_ascii_case("connection") || key.starts_with(':') {
@@ -201,7 +206,7 @@ impl UnifiedHttpRequest {
             }
         }
 
-        request.extend_from_slice(b"connection: close\r\n");
+        request.extend_from_slice(format!("connection: {}\r\n", connection_mode).as_bytes());
 
         if !self.body.is_empty() && !has_content_length {
             request

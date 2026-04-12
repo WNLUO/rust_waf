@@ -1408,6 +1408,8 @@ where
 
     let mut response_bytes = Vec::new();
     let mut buffer = vec![0u8; 8192];
+    let mut expected_total_len: Option<usize> = None;
+    let mut chunked = false;
     loop {
         let read_result = tokio::time::timeout(
             std::time::Duration::from_millis(read_timeout_ms),
@@ -1417,7 +1419,47 @@ where
         .map_err(|_| anyhow::anyhow!("Upstream read timed out"))?;
         match read_result {
             Ok(0) => break,
-            Ok(n) => response_bytes.extend_from_slice(&buffer[..n]),
+            Ok(n) => {
+                response_bytes.extend_from_slice(&buffer[..n]);
+
+                if let Some(headers_end) = response_bytes
+                    .windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+                {
+                    if expected_total_len.is_none() && !chunked {
+                        let header_block = &response_bytes[..headers_end];
+                        let header_text = String::from_utf8_lossy(header_block);
+                        let mut content_length = None;
+                        for line in header_text.lines() {
+                            if let Some((name, value)) = line.split_once(':') {
+                                if name.eq_ignore_ascii_case("content-length") {
+                                    content_length = value.trim().parse::<usize>().ok();
+                                }
+                                if name.eq_ignore_ascii_case("transfer-encoding")
+                                    && value.to_ascii_lowercase().contains("chunked")
+                                {
+                                    chunked = true;
+                                }
+                            }
+                        }
+                        if let Some(length) = content_length {
+                            expected_total_len = Some(headers_end + 4 + length);
+                        }
+                    }
+
+                    if let Some(expected) = expected_total_len {
+                        if response_bytes.len() >= expected {
+                            break;
+                        }
+                    } else if chunked
+                        && response_bytes[headers_end + 4..]
+                            .windows(5)
+                            .any(|window| window == b"0\r\n\r\n")
+                    {
+                        break;
+                    }
+                }
+            }
             Err(err) if !response_bytes.is_empty() => {
                 debug!(
                     "Ignoring upstream read error after receiving response bytes: {}",
@@ -1527,9 +1569,6 @@ fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
                 && value.to_ascii_lowercase().contains("chunked")
             {
                 chunked = true;
-                continue;
-            }
-            if name.eq_ignore_ascii_case("connection") {
                 continue;
             }
             headers.push((name, value));
@@ -3033,9 +3072,22 @@ fn apply_client_identity(
 
 fn prepare_request_for_proxy(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
+    if context.config_snapshot().gateway_config.enable_ntlm && request_looks_like_ntlm(request) {
+        request.add_metadata("proxy_connection_mode".to_string(), "keep-alive".to_string());
+    }
     apply_standard_forwarding_headers(context, request);
     apply_request_rewrite_policy(context, request);
     apply_request_header_operations(context, request);
+}
+
+fn request_looks_like_ntlm(request: &UnifiedHttpRequest) -> bool {
+    ["authorization", "proxy-authorization"]
+        .iter()
+        .filter_map(|header| request.get_header(header))
+        .any(|value| {
+            let lower = value.to_ascii_lowercase();
+            lower.starts_with("ntlm ") || lower.starts_with("negotiate ")
+        })
 }
 
 fn apply_proxy_headers(

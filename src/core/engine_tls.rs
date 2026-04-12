@@ -12,7 +12,7 @@ use crate::core::WafContext;
 
 pub(super) fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAcceptor>> {
     if context
-        .config
+        .config_snapshot()
         .gateway_config
         .https_listen_addr
         .trim()

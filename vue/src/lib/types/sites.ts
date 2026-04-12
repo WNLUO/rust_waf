@@ -87,6 +87,11 @@ export interface LocalSitesResponse {
   sites: LocalSiteItem[]
 }
 
+export interface GlobalEntryConfigPayload {
+  http_port: string
+  https_port: string
+}
+
 export interface LocalSiteDraft {
   name: string
   primary_hostname: string

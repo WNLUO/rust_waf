@@ -186,9 +186,10 @@ pub(super) async fn run_upstream_healthcheck_loop(context: Arc<WafContext>) {
 }
 
 pub(super) async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> Result<()> {
+    let authority = crate::core::gateway::parse_upstream_endpoint(upstream_addr)?.authority;
     tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),
-        TcpStream::connect(upstream_addr),
+        TcpStream::connect(authority.as_str()),
     )
     .await
     .map_err(|_| anyhow::anyhow!("Upstream health check timed out"))??;

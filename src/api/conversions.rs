@@ -37,7 +37,7 @@ impl SettingsResponse {
         Self {
             gateway_name: config.console_settings.gateway_name.clone(),
             auto_refresh_seconds: config.console_settings.auto_refresh_seconds,
-            https_listen_addr: config.gateway_config.https_listen_addr.clone(),
+            https_listen_addr: display_https_listen_port(&config.gateway_config.https_listen_addr),
             default_certificate_id: config.gateway_config.default_certificate_id,
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             api_endpoint: config.api_bind.clone(),
@@ -331,12 +331,7 @@ impl SettingsUpdateRequest {
         if self.api_endpoint.trim().is_empty() {
             return Err("控制面 API 地址不能为空".to_string());
         }
-        let https_listen_addr = self.https_listen_addr.trim().to_string();
-        if !https_listen_addr.is_empty() {
-            https_listen_addr
-                .parse::<SocketAddr>()
-                .map_err(|err| format!("HTTPS 入口地址 '{}' 无效: {}", https_listen_addr, err))?;
-        }
+        let https_listen_addr = normalize_https_listen_addr_input(&self.https_listen_addr)?;
 
         if let (Some(store), Some(default_certificate_id)) = (store, self.default_certificate_id) {
             ensure_local_certificate_exists(store, default_certificate_id).await?;
@@ -358,6 +353,37 @@ impl SettingsUpdateRequest {
 
         Ok(current.normalized())
     }
+}
+
+fn display_https_listen_port(value: &str) -> String {
+    value
+        .trim()
+        .parse::<SocketAddr>()
+        .map(|addr| addr.port().to_string())
+        .unwrap_or_else(|_| value.trim().to_string())
+}
+
+fn normalize_https_listen_addr_input(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    if let Ok(port) = trimmed.parse::<u16>() {
+        if port == 0 {
+            return Err("HTTPS 入口端口不能为 0".to_string());
+        }
+        return Ok(format!("0.0.0.0:{port}"));
+    }
+
+    let addr = trimmed
+        .parse::<SocketAddr>()
+        .map_err(|err| format!("HTTPS 入口 '{}' 无效: {}", trimmed, err))?;
+    if addr.port() == 0 {
+        return Err("HTTPS 入口端口不能为 0".to_string());
+    }
+
+    Ok(format!("0.0.0.0:{}", addr.port()))
 }
 
 impl SafeLineSettingsRequest {

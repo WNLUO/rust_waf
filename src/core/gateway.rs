@@ -6,6 +6,7 @@ use log::warn;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
+use std::fmt;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Cursor};
 use std::sync::{Arc, RwLock};
@@ -27,6 +28,27 @@ pub struct GatewaySiteRuntime {
 pub struct GatewayRuntime {
     inner: Arc<RwLock<GatewayRuntimeState>>,
     cert_resolver: Arc<GatewayCertResolver>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamScheme {
+    Http,
+    Https,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpstreamEndpoint {
+    pub scheme: UpstreamScheme,
+    pub authority: String,
+}
+
+impl fmt::Display for UpstreamEndpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.scheme {
+            UpstreamScheme::Http => f.write_str(&self.authority),
+            UpstreamScheme::Https => write!(f, "https://{}", self.authority),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -349,14 +371,21 @@ fn normalize_port_token(value: &str) -> Option<u16> {
         .and_then(|value| value.parse::<u16>().ok())
 }
 
-pub fn normalize_upstream_endpoint(value: &str) -> Result<String> {
+pub fn parse_upstream_endpoint(value: &str) -> Result<UpstreamEndpoint> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         anyhow::bail!("上游地址不能为空");
     }
 
     if trimmed.starts_with("https://") {
-        anyhow::bail!("暂不支持 HTTPS 回源，请使用 ip:port 或 http://ip:port");
+        let uri = trimmed.parse::<http::Uri>()?;
+        let authority = uri
+            .authority()
+            .ok_or_else(|| anyhow::anyhow!("HTTPS 回源地址缺少 authority"))?;
+        return Ok(UpstreamEndpoint {
+            scheme: UpstreamScheme::Https,
+            authority: authority.as_str().to_string(),
+        });
     }
 
     if trimmed.starts_with("http://") {
@@ -364,12 +393,42 @@ pub fn normalize_upstream_endpoint(value: &str) -> Result<String> {
         let authority = uri
             .authority()
             .ok_or_else(|| anyhow::anyhow!("HTTP 回源地址缺少 authority"))?;
-        return Ok(authority.as_str().to_string());
+        return Ok(UpstreamEndpoint {
+            scheme: UpstreamScheme::Http,
+            authority: authority.as_str().to_string(),
+        });
     }
 
     if trimmed.contains(':') {
-        return Ok(trimmed.to_string());
+        return Ok(UpstreamEndpoint {
+            scheme: UpstreamScheme::Http,
+            authority: trimmed.to_string(),
+        });
     }
 
     anyhow::bail!("上游地址 '{}' 缺少端口", trimmed)
+}
+
+pub fn normalize_upstream_endpoint(value: &str) -> Result<String> {
+    parse_upstream_endpoint(value).map(|endpoint| endpoint.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_upstream_endpoint, parse_upstream_endpoint, UpstreamScheme};
+
+    #[test]
+    fn normalize_upstream_endpoint_preserves_https_scheme() {
+        assert_eq!(
+            normalize_upstream_endpoint("https://127.0.0.1:9443").unwrap(),
+            "https://127.0.0.1:9443"
+        );
+    }
+
+    #[test]
+    fn parse_upstream_endpoint_supports_plain_authority() {
+        let endpoint = parse_upstream_endpoint("127.0.0.1:8080").unwrap();
+        assert_eq!(endpoint.scheme, UpstreamScheme::Http);
+        assert_eq!(endpoint.authority, "127.0.0.1:8080");
+    }
 }

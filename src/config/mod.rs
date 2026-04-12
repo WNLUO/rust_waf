@@ -348,8 +348,8 @@ impl Config {
             if trimmed.is_empty() {
                 None
             } else {
-                match trimmed.parse::<SocketAddr>() {
-                    Ok(_) => Some(trimmed.to_string()),
+                match crate::core::gateway::normalize_upstream_endpoint(trimmed) {
+                    Ok(endpoint) => Some(endpoint),
                     Err(err) => {
                         log::warn!(
                             "Invalid tcp_upstream_addr '{}': {}, disabling TCP forwarding",
@@ -537,7 +537,13 @@ impl Config {
         self.console_settings.retain_days = self.console_settings.retain_days.clamp(1, 365);
         self.console_settings.notes = self.console_settings.notes.trim().to_string();
         self.gateway_config.https_listen_addr =
-            self.gateway_config.https_listen_addr.trim().to_string();
+            match normalize_https_listen_addr(&self.gateway_config.https_listen_addr) {
+                Ok(addr) => addr,
+                Err(err) => {
+                    log::warn!("{}", err);
+                    String::new()
+                }
+            };
         if self.gateway_config.default_certificate_id == Some(0) {
             self.gateway_config.default_certificate_id = None;
         }
@@ -890,6 +896,29 @@ fn default_sqlite_path() -> String {
     "data/waf.db".to_string()
 }
 
+fn normalize_https_listen_addr(value: &str) -> std::result::Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    if let Ok(port) = trimmed.parse::<u16>() {
+        if port == 0 {
+            return Err("HTTPS 入口端口不能为 0".to_string());
+        }
+        return Ok(format!("0.0.0.0:{port}"));
+    }
+
+    let addr = trimmed
+        .parse::<SocketAddr>()
+        .map_err(|err| format!("HTTPS 入口 '{}' 无效: {}", trimmed, err))?;
+    if addr.port() == 0 {
+        return Err("HTTPS 入口端口不能为 0".to_string());
+    }
+
+    Ok(format!("0.0.0.0:{}", addr.port()))
+}
+
 const fn default_sqlite_auto_migrate() -> bool {
     true
 }
@@ -929,6 +958,34 @@ mod tests {
         .normalized();
 
         assert!(config.tcp_upstream_addr.is_none());
+    }
+
+    #[test]
+    fn normalized_keeps_https_tcp_upstream_addr() {
+        let config = Config {
+            tcp_upstream_addr: Some("https://127.0.0.1:9443".to_string()),
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(
+            config.tcp_upstream_addr.as_deref(),
+            Some("https://127.0.0.1:9443")
+        );
+    }
+
+    #[test]
+    fn normalized_expands_https_listen_port_to_global_bind() {
+        let config = Config {
+            gateway_config: GatewayConfig {
+                https_listen_addr: "660".to_string(),
+                ..GatewayConfig::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(config.gateway_config.https_listen_addr, "0.0.0.0:660");
     }
 
     #[test]

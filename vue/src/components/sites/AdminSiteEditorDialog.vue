@@ -305,16 +305,20 @@ const safelineResponseHeadersTextModel = computed({
         </div>
       </div>
 
-      <div
-        class="grid gap-4 px-4 py-4 md:px-6 md:py-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(22rem,0.9fr)]"
-      >
-        <div class="space-y-4">
-          <div class="grid gap-4 md:grid-cols-2">
+      <div class="space-y-4 px-4 py-4 md:px-6 md:py-6">
+        <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div class="mb-3">
+            <p class="text-sm font-medium text-stone-900">站点信息</p>
+            <p class="mt-1 text-xs text-slate-500">
+              这里填写站点本身的入口配置，包括域名、端口、证书和下游地址。
+            </p>
+          </div>
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             <label class="space-y-1.5">
               <span class="text-xs text-slate-500">站点名称</span>
               <input
                 v-model="nameModel"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
                 type="text"
                 placeholder="例如 Portal"
               />
@@ -323,16 +327,32 @@ const safelineResponseHeadersTextModel = computed({
               <span class="text-xs text-slate-500">主域名</span>
               <input
                 v-model="primaryHostnameModel"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
                 type="text"
                 placeholder="例如 portal.example.com"
               />
             </label>
-            <label class="space-y-1.5 md:col-span-2">
-              <span class="text-xs text-slate-500">Hostnames</span>
+            <label class="space-y-1.5 xl:col-span-1">
+              <span class="text-xs text-slate-500">证书</span>
+              <select
+                v-model="certificateIdModel"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+              >
+                <option :value="null">未设置</option>
+                <option
+                  v-for="certificate in localCertificates"
+                  :key="certificate.id"
+                  :value="certificate.id"
+                >
+                  #{{ certificate.id }} · {{ certificate.name }}
+                </option>
+              </select>
+            </label>
+            <label class="space-y-1.5 md:col-span-2 xl:col-span-3">
+              <span class="text-xs text-slate-500">附加域名</span>
               <input
                 :value="hostnamesText"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
                 type="text"
                 placeholder="多个域名用逗号分隔"
                 @input="
@@ -347,7 +367,7 @@ const safelineResponseHeadersTextModel = computed({
               <span class="text-xs text-slate-500">监听端口</span>
               <input
                 :value="listenPortsText"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
                 type="text"
                 placeholder="例如 660"
                 @input="
@@ -358,29 +378,13 @@ const safelineResponseHeadersTextModel = computed({
                 "
               />
             </label>
-            <label class="space-y-1.5">
-              <span class="text-xs text-slate-500">证书</span>
-              <select
-                v-model="certificateIdModel"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
-              >
-                <option :value="null">未设置</option>
-                <option
-                  v-for="certificate in localCertificates"
-                  :key="certificate.id"
-                  :value="certificate.id"
-                >
-                  #{{ certificate.id }} · {{ certificate.name }}
-                </option>
-              </select>
-            </label>
-            <label class="space-y-1.5 md:col-span-2">
-              <span class="text-xs text-slate-500">上游地址</span>
+            <label class="space-y-1.5 md:col-span-2 xl:col-span-2">
+              <span class="text-xs text-slate-500">下游地址</span>
               <input
                 :value="upstreamsText"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
                 type="text"
-                placeholder="多个地址用逗号分隔，例如 127.0.0.1:880"
+                placeholder="多个地址用逗号分隔，例如 127.0.0.1:880 或 https://127.0.0.1:9443"
                 @input="
                   emit(
                     'update:upstreamsText',
@@ -389,20 +393,28 @@ const safelineResponseHeadersTextModel = computed({
                 "
               />
               <span class="block text-xs text-slate-400">
-                当前运行时会优先使用第一个有效上游地址。
+                当前运行时会优先使用第一个有效下游地址。
               </span>
             </label>
-            <label class="space-y-1.5 md:col-span-2">
+            <label class="space-y-1.5 md:col-span-2 xl:col-span-3">
               <span class="text-xs text-slate-500">备注</span>
               <textarea
                 v-model="notesModel"
-                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
-                rows="3"
+                class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+                rows="2"
               />
             </label>
           </div>
+        </section>
 
-          <div class="grid gap-3 md:grid-cols-3">
+        <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="mb-4">
+            <p class="text-sm font-medium text-stone-900">运行设置</p>
+            <p class="mt-1 text-xs text-slate-500">
+              控制这个站点是否启用，以及是否参与本地 TLS 证书匹配。
+            </p>
+          </div>
+          <div class="grid gap-3 md:grid-cols-2">
             <label
               class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
             >
@@ -430,13 +442,24 @@ const safelineResponseHeadersTextModel = computed({
               />
               <span>
                 <span class="block text-sm font-medium text-stone-900"
-                  >启用 TLS 站点证书</span
+                  >启用 TLS</span
                 >
                 <span class="mt-0.5 block text-xs text-slate-500"
                   >启用后会参与 SNI 证书匹配。</span
                 >
               </span>
             </label>
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="mb-4">
+            <p class="text-sm font-medium text-stone-900">联动设置</p>
+            <p class="mt-1 text-xs text-slate-500">
+              这里控制这个站点与雷池之间的同步行为，不会改变站点本体字段的保存。
+            </p>
+          </div>
+          <div class="grid gap-3 md:grid-cols-[minmax(0,16rem)_1fr]">
             <label class="space-y-1.5">
               <span class="text-xs text-slate-500">同步模式</span>
               <select
@@ -449,56 +472,63 @@ const safelineResponseHeadersTextModel = computed({
                 <option value="bidirectional">双向同步</option>
               </select>
             </label>
+            <div
+              class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs leading-5 text-slate-500"
+            >
+              <p>站点同步和证书同步已经拆分，这里只控制站点与雷池之间的联动方向。</p>
+              <p class="mt-1">
+                选择“仅回流”或“仅推送”后，后续相关同步操作会按这个模式受限。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div
+            class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+          >
+            <div>
+              <p class="text-sm font-medium text-stone-900">高级策略</p>
+              <p class="mt-1 text-xs leading-5 text-slate-500">
+                默认继承全局 SafeLine 接管策略。只有在这个站点需要特殊行为时，才开启覆盖。
+              </p>
+            </div>
+            <label
+              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700"
+            >
+              <input
+                v-model="safelineOverrideEnabledModel"
+                type="checkbox"
+                class="accent-blue-600"
+              />
+              启用站点级覆盖
+            </label>
           </div>
 
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div
-              class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
-            >
-              <div>
-                <p class="text-sm font-medium text-stone-900">
-                  SafeLine 响应接管
-                </p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">
-                  默认继承全局接管策略。只有在这个站点需要不同动作时，才开启覆盖。
-                </p>
-              </div>
-              <label
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700"
-              >
-                <input
-                  v-model="safelineOverrideEnabledModel"
-                  type="checkbox"
-                  class="accent-blue-600"
-                />
-                启用站点级覆盖
-              </label>
-            </div>
+          <div
+            v-if="!localSiteForm.safeline_intercept"
+            class="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500"
+          >
+            <p>
+              当前继承全局策略：
+              <span class="font-medium text-stone-900">
+                {{
+                  defaultSafelineInterceptConfig.enabled
+                    ? '已启用接管'
+                    : '未启用接管'
+                }}
+              </span>
+            </p>
+            <p class="mt-1">
+              动作 {{ defaultSafelineInterceptConfig.action }}，匹配
+              {{ defaultSafelineInterceptConfig.match_mode }}。
+            </p>
+          </div>
 
-            <div
-              v-if="!localSiteForm.safeline_intercept"
-              class="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500"
-            >
-              <p>
-                当前继承全局策略：
-                <span class="font-medium text-stone-900">
-                  {{
-                    defaultSafelineInterceptConfig.enabled
-                      ? '已启用接管'
-                      : '未启用接管'
-                  }}
-                </span>
-              </p>
-              <p class="mt-1">
-                动作 {{ defaultSafelineInterceptConfig.action }}，匹配
-                {{ defaultSafelineInterceptConfig.match_mode }}。
-              </p>
-            </div>
-
-            <div
-              v-else
-              class="mt-4 space-y-4 rounded-lg border border-slate-200 bg-white p-4"
-            >
+          <div
+            v-else
+            class="mt-4 space-y-4 rounded-lg border border-slate-200 bg-white p-4"
+          >
               <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 <label class="space-y-1.5">
                   <span class="text-xs text-slate-500">是否启用接管</span>
@@ -652,80 +682,41 @@ const safelineResponseHeadersTextModel = computed({
                 </label>
               </div>
             </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              :disabled="actions.savingLocalSite"
-              class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
-              @click="emit('save')"
-            >
-              <PencilLine :size="14" />
-              {{
-                actions.savingLocalSite
-                  ? '保存中...'
-                  : editingLocalSiteId === null
-                    ? '创建本地站点'
-                    : '保存本地站点'
-              }}
-            </button>
-            <button
-              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              @click="emit('reset')"
-            >
-              <RotateCcw :size="14" />
-              重置表单
-            </button>
-            <button
-              v-if="editingLocalSiteId !== null"
-              :disabled="actions.deletingLocalSite"
-              class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
-              @click="emit('remove')"
-            >
-              <Trash2 :size="14" />
-              {{ actions.deletingLocalSite ? '删除中...' : '删除本地站点' }}
-            </button>
-          </div>
-        </div>
+        </section>
 
         <div
-          class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4"
+          class="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white/95 px-1 pt-2 backdrop-blur"
         >
-          <div>
-            <p class="text-sm font-medium text-stone-900">编辑提示</p>
-            <p class="mt-1 text-xs leading-5 text-slate-500">
-              你可以直接从右侧对账列表点“编辑本地”带入，也可以手动新建。对同一个域名，建议统一走系统设置里的
-              HTTPS 入口端口。
-            </p>
-          </div>
-          <div class="grid gap-2 text-xs text-slate-500">
-            <p>监听端口：建议填统一入口端口，例如 `660`。</p>
-            <p>
-              证书：TLS 站点建议绑定真实证书；`IP:660`
-              回包用系统设置里的默认证书。
-            </p>
-            <p>上游地址：支持 `127.0.0.1:880` 或 `http://127.0.0.1:880`。</p>
-            <p>
-              SafeLine 接管：默认继承全局策略，只有特殊站点再做单站覆盖。
-            </p>
-            <p>
-              保存后写入数据库，当前服务需要重启才会加载新的监听与站点路由。
-            </p>
-          </div>
-          <div
-            v-if="currentLocalSite"
-            class="rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-500"
+          <button
+            :disabled="actions.savingLocalSite"
+            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
+            @click="emit('save')"
           >
-            <p class="font-medium text-stone-900">
-              {{ currentLocalSite.name }}
-            </p>
-            <p class="mt-1">
-              最近更新：{{ formatTimestamp(currentLocalSite.updated_at) }}
-            </p>
-            <p class="mt-1">
-              当前主域名：{{ currentLocalSite.primary_hostname }}
-            </p>
-          </div>
+            <PencilLine :size="14" />
+            {{
+              actions.savingLocalSite
+                ? '保存中...'
+                : editingLocalSiteId === null
+                  ? '创建本地站点'
+                  : '保存本地站点'
+            }}
+          </button>
+          <button
+            class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+            @click="emit('reset')"
+          >
+            <RotateCcw :size="14" />
+            重置表单
+          </button>
+          <button
+            v-if="editingLocalSiteId !== null"
+            :disabled="actions.deletingLocalSite"
+            class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+            @click="emit('remove')"
+          >
+            <Trash2 :size="14" />
+            {{ actions.deletingLocalSite ? '删除中...' : '删除本地站点' }}
+          </button>
         </div>
       </div>
     </div>

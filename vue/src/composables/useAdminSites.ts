@@ -3,6 +3,7 @@ import {
   createLocalSite,
   deleteLocalSite,
   fetchCachedSafeLineSites,
+  fetchGlobalEntryConfig,
   fetchL7Config,
   fetchLocalCertificates,
   fetchLocalSites,
@@ -14,6 +15,7 @@ import {
   pushSafeLineSite,
   testSafeLineConnection,
   updateLocalSite,
+  updateGlobalEntryConfig,
 } from '../lib/api'
 import {
   mergeSiteRows,
@@ -94,6 +96,11 @@ export function useAdminSites(
   const testResult = ref<SafeLineTestResponse | null>(null)
   const siteRows = ref<SiteRowDraft[]>([])
   const sitesLoadedAt = ref<number | null>(null)
+  const isGlobalEntryModalOpen = ref(false)
+  const globalEntryForm = reactive({
+    http_port: '',
+    https_port: '',
+  })
 
   const actions = reactive({
     refreshing: false,
@@ -102,6 +109,7 @@ export function useAdminSites(
     loadingCertificates: false,
     savingLocalSite: false,
     deletingLocalSite: false,
+    savingGlobalEntry: false,
   })
 
   const filters = reactive({
@@ -409,12 +417,14 @@ export function useAdminSites(
     loading.value = true
     clearFeedback()
     try {
-      const [settingsResponse, l7ConfigResponse] = await Promise.all([
+      const [settingsResponse, l7ConfigResponse, globalEntryResponse] = await Promise.all([
         fetchSettings(),
         fetchL7Config(),
+        fetchGlobalEntryConfig(),
       ])
       settings.value = settingsResponse
       globalL7Config.value = l7ConfigResponse
+      Object.assign(globalEntryForm, globalEntryResponse)
       resetLocalSiteForm()
       await loadLocalCertificates()
       await refreshCollections('cached')
@@ -504,12 +514,46 @@ export function useAdminSites(
     actions.refreshing = true
     clearFeedback()
     try {
+      const [settingsResponse, l7ConfigResponse, globalEntryResponse] = await Promise.all([
+        fetchSettings(),
+        fetchL7Config(),
+        fetchGlobalEntryConfig(),
+      ])
+      settings.value = settingsResponse
+      globalL7Config.value = l7ConfigResponse
+      Object.assign(globalEntryForm, globalEntryResponse)
       await refreshCollections(sitesLoadedAt.value !== null ? 'cached' : 'none')
       successMessage.value = '页面数据已刷新。'
     } catch (e) {
       error.value = e instanceof Error ? e.message : '刷新页面数据失败'
     } finally {
       actions.refreshing = false
+    }
+  }
+
+  function openGlobalEntryModal() {
+    isGlobalEntryModalOpen.value = true
+  }
+
+  function closeGlobalEntryModal() {
+    isGlobalEntryModalOpen.value = false
+  }
+
+  async function saveGlobalEntry() {
+    actions.savingGlobalEntry = true
+    clearFeedback()
+    try {
+      const response = await updateGlobalEntryConfig({
+        http_port: globalEntryForm.http_port.trim(),
+        https_port: globalEntryForm.https_port.trim(),
+      })
+      successMessage.value = response.message
+      Object.assign(globalEntryForm, await fetchGlobalEntryConfig())
+      closeGlobalEntryModal()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '保存全局入口失败'
+    } finally {
+      actions.savingGlobalEntry = false
     }
   }
 
@@ -686,6 +730,7 @@ export function useAdminSites(
 
   return {
     actions,
+    closeGlobalEntryModal,
     currentLocalSite,
     defaultSafelineInterceptConfig,
     editorTitle,
@@ -693,8 +738,10 @@ export function useAdminSites(
     error,
     filteredRows,
     filters,
+    globalEntryForm,
     hasSavedConfig,
     hostnamesText,
+    isGlobalEntryModalOpen,
     isRemoteSyncDialogOpen,
     isLocalSiteModalOpen,
     listenPortsText,
@@ -704,6 +751,7 @@ export function useAdminSites(
     localSiteForm,
     localSites,
     openCreateLocalSiteModal,
+    openGlobalEntryModal,
     openRemoteSyncDialog,
     primaryDraft,
     recommendedRemoteSiteIds,
@@ -716,6 +764,7 @@ export function useAdminSites(
     rowBusy,
     rowSyncText,
     runConnectionTest,
+    saveGlobalEntry,
     saveLocalSite,
     selectRecommendedRemoteSites,
     clearRemoteSiteSelection,

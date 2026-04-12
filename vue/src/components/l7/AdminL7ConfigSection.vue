@@ -303,17 +303,12 @@ const safelineResponseHeadersText = computed({
 
     <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <label class="text-sm text-stone-700 md:col-span-2">
-        监听地址
+        监听地址（由站点页“全局入口”维护）
         <textarea
           :value="listenAddrsText"
           :class="listFieldClass"
-          placeholder="每行一个，例如 0.0.0.0:8080"
-          @input="
-            emit(
-              'update:listenAddrsText',
-              ($event.target as HTMLTextAreaElement).value,
-            )
-          "
+          placeholder="请前往 /admin/sites 配置统一 HTTP 入口端口"
+          disabled
         />
       </label>
       <label class="text-sm text-stone-700 md:col-span-2">

@@ -296,6 +296,18 @@ pub struct LocalSitesResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct GlobalEntryConfigResponse {
+    pub(crate) http_port: String,
+    pub(crate) https_port: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GlobalEntryConfigUpdateRequest {
+    pub(crate) http_port: String,
+    pub(crate) https_port: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct LocalSiteResponse {
     pub(crate) id: i64,
     pub(crate) name: String,

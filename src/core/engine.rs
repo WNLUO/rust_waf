@@ -3,16 +3,19 @@ use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
 use rand::Rng;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
 #[cfg(feature = "http3")]
@@ -32,7 +35,9 @@ use crate::config::l7::{
     UpstreamFailureMode,
 };
 use crate::config::{Config, RuntimeProfile};
-use crate::core::gateway::{normalize_hostname, GatewaySiteRuntime};
+use crate::core::gateway::{
+    normalize_hostname, parse_upstream_endpoint, GatewaySiteRuntime, UpstreamScheme,
+};
 use crate::core::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
 };
@@ -47,6 +52,132 @@ static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 pub(crate) const BROWSER_FINGERPRINT_REPORT_PATH: &str =
     "/.well-known/waf/browser-fingerprint-report";
 const MAX_BROWSER_FINGERPRINT_DETAILS_BYTES: usize = 128 * 1024;
+static ENTRY_LISTENER_RUNTIME: OnceLock<Arc<EntryListenerRuntime>> = OnceLock::new();
+
+#[derive(Default)]
+struct EntryListenerRuntimeState {
+    http: Vec<RunningEntryListener>,
+    https: Option<RunningEntryListener>,
+}
+
+struct RunningEntryListener {
+    addr: String,
+    shutdown_tx: mpsc::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+struct EntryListenerRuntime {
+    state: Mutex<EntryListenerRuntimeState>,
+}
+
+impl EntryListenerRuntime {
+    fn global() -> Arc<Self> {
+        ENTRY_LISTENER_RUNTIME
+            .get_or_init(|| {
+                Arc::new(Self {
+                    state: Mutex::new(EntryListenerRuntimeState::default()),
+                })
+            })
+            .clone()
+    }
+
+    async fn validate_config(&self, context: Arc<WafContext>) -> Result<()> {
+        let config = context.config_snapshot();
+        let requested_http = config.listen_addrs.clone();
+        let requested_https = config.gateway_config.https_listen_addr.trim().to_string();
+        let tls_enabled = build_tls_acceptor(context.as_ref())?.is_some();
+
+        let guard = self.state.lock().await;
+        for addr in &requested_http {
+            if guard.http.iter().any(|listener| listener.addr == *addr) {
+                continue;
+            }
+            TcpListener::bind(addr)
+                .await
+                .map_err(|err| anyhow::anyhow!("HTTP 入口 {} 已被其他进程占用或无法监听: {}", addr, err))?;
+        }
+
+        if !requested_https.is_empty() {
+            if !tls_enabled {
+                anyhow::bail!("当前没有可用证书，无法开启 HTTPS 入口端口");
+            }
+            let owned = guard
+                .https
+                .as_ref()
+                .map(|listener| listener.addr == requested_https)
+                .unwrap_or(false);
+            if !owned {
+                TcpListener::bind(&requested_https).await.map_err(|err| {
+                    anyhow::anyhow!(
+                        "HTTPS 入口 {} 已被其他进程占用或无法监听: {}",
+                        requested_https,
+                        err
+                    )
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn sync(&self, context: Arc<WafContext>, connection_semaphore: Arc<Semaphore>) -> Result<()> {
+        let config = context.config_snapshot();
+        let tls_acceptor = build_tls_acceptor(context.as_ref())?;
+        let requested_http = config.listen_addrs.clone();
+        let requested_https = config.gateway_config.https_listen_addr.trim().to_string();
+
+        let mut prepared_http = Vec::new();
+        for addr in &requested_http {
+            prepared_http.push(spawn_http_entry_listener(
+                addr,
+                Arc::clone(&context),
+                Arc::clone(&connection_semaphore),
+            )
+            .await?);
+        }
+        let prepared_https = if requested_https.is_empty() {
+            None
+        } else if let Some(acceptor) = tls_acceptor {
+            Some(
+                spawn_https_entry_listener(
+                    &requested_https,
+                    acceptor,
+                    Arc::clone(&context),
+                    Arc::clone(&connection_semaphore),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+
+        let mut guard = self.state.lock().await;
+        let previous_http = std::mem::take(&mut guard.http);
+        let previous_https = guard.https.take();
+        guard.http = prepared_http;
+        guard.https = prepared_https;
+        drop(guard);
+
+        shutdown_entry_listeners(previous_http).await;
+        if let Some(listener) = previous_https {
+            shutdown_entry_listener(listener).await;
+        }
+
+        Ok(())
+    }
+
+    async fn shutdown_all(&self) {
+        let mut guard = self.state.lock().await;
+        let previous_http = std::mem::take(&mut guard.http);
+        let previous_https = guard.https.take();
+        drop(guard);
+
+        shutdown_entry_listeners(previous_http).await;
+        if let Some(listener) = previous_https {
+            shutdown_entry_listener(listener).await;
+        }
+    }
+}
 
 pub struct WafEngine {
     context: Arc<WafContext>,
@@ -123,24 +254,12 @@ impl WafEngine {
 
         // 创建多个监听器，每个监听器在独立任务中运行
         let mut shutdown_senders = Vec::new();
-        let mut tcp_listener_addresses = Vec::new();
         let mut udp_listener_addresses = Vec::new();
-        let mut tls_listener = None;
         #[cfg(feature = "http3")]
         let mut quic_listener = None;
 
-        // 先绑定所有TCP/UDP监听器
+        // 先绑定所有 UDP 监听器
         for addr in &startup_config.listen_addrs {
-            match TcpListener::bind(addr).await {
-                Ok(listener) => {
-                    let addr = listener.local_addr()?;
-                    tcp_listener_addresses.push((addr, listener));
-                }
-                Err(err) => {
-                    warn!("Failed to bind TCP listener on {}: {}", addr, err);
-                }
-            }
-
             match UdpSocket::bind(addr).await {
                 Ok(socket) => {
                     let addr = socket.local_addr()?;
@@ -148,19 +267,6 @@ impl WafEngine {
                 }
                 Err(err) => {
                     warn!("Failed to bind UDP listener on {}: {}", addr, err);
-                }
-            }
-        }
-
-        if let Some(tls_acceptor) = super::engine_tls::build_tls_acceptor(self.context.as_ref())? {
-            let tls_addr = &startup_config.gateway_config.https_listen_addr;
-            match TcpListener::bind(tls_addr).await {
-                Ok(listener) => {
-                    let addr = listener.local_addr()?;
-                    tls_listener = Some((addr, listener, tls_acceptor));
-                }
-                Err(err) => {
-                    warn!("Failed to bind TLS listener on {}: {}", tls_addr, err);
                 }
             }
         }
@@ -218,66 +324,7 @@ impl WafEngine {
         #[cfg(feature = "http3")]
         let has_quic_listener = quic_listener.is_some();
         #[cfg(not(feature = "http3"))]
-        let has_quic_listener = false;
-
-        if tcp_listener_addresses.is_empty()
-            && udp_listener_addresses.is_empty()
-            && tls_listener.is_none()
-            && !has_quic_listener
-        {
-            anyhow::bail!("No TCP, UDP, TLS, or HTTP/3 listeners could be started. Please check configuration.");
-        }
-
-        // 为每个TCP监听器启动独立任务
-        for (addr, listener) in tcp_listener_addresses {
-            info!("TCP inspection listener started on {}", addr);
-            let context = Arc::clone(&self.context);
-            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-            let connection_semaphore = Arc::clone(&self.connection_semaphore);
-
-            let task = tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = shutdown_rx.recv() => {
-                            info!("Listener shutdown signal received for {}", addr);
-                            break;
-                        }
-                        accept_result = listener.accept() => {
-                            match accept_result {
-                                Ok((stream, peer_addr)) => {
-                                    match connection_semaphore.clone().try_acquire_owned() {
-                                        Ok(permit) => {
-                                            let ctx = Arc::clone(&context);
-                                            tokio::spawn(async move {
-                                                if let Err(err) =
-                                                    handle_connection(ctx, stream, peer_addr, permit).await
-                                                {
-                                                    warn!("Connection handling failed: {}", err);
-                                                }
-                                            });
-                                        }
-                                        Err(_) => {
-                                            warn!(
-                                                "Dropping connection from {} due to concurrency limit",
-                                                peer_addr
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    warn!("Failed to accept connection on {}: {}", addr, err);
-                                }
-                            }
-                        }
-                        _ = tokio::signal::ctrl_c() => {
-                            info!("Ctrl+C received, shutting down listener on {}", addr);
-                            break;
-                        }
-                    }
-                }
-            });
-            shutdown_senders.push((task, shutdown_tx));
-        }
+        let _has_quic_listener = false;
 
         // 为每个UDP监听器启动独立任务
         for (addr, socket) in udp_listener_addresses {
@@ -330,57 +377,6 @@ impl WafEngine {
                         }
                         _ = tokio::signal::ctrl_c() => {
                             info!("Ctrl+C received, shutting down UDP listener on {}", addr);
-                            break;
-                        }
-                    }
-                }
-            });
-            shutdown_senders.push((task, shutdown_tx));
-        }
-
-        if let Some((addr, listener, tls_acceptor)) = tls_listener {
-            info!("TLS inspection listener started on {}", addr);
-            let context = Arc::clone(&self.context);
-            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-            let connection_semaphore = Arc::clone(&self.connection_semaphore);
-
-            let task = tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = shutdown_rx.recv() => {
-                            info!("TLS listener shutdown signal received for {}", addr);
-                            break;
-                        }
-                        accept_result = listener.accept() => {
-                            match accept_result {
-                                Ok((stream, peer_addr)) => {
-                                    match connection_semaphore.clone().try_acquire_owned() {
-                                        Ok(permit) => {
-                                            let ctx = Arc::clone(&context);
-                                            let acceptor = tls_acceptor.clone();
-                                            tokio::spawn(async move {
-                                                if let Err(err) =
-                                                    handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await
-                                                {
-                                                    warn!("TLS connection handling failed: {}", err);
-                                                }
-                                            });
-                                        }
-                                        Err(_) => {
-                                            warn!(
-                                                "Dropping TLS connection from {} due to concurrency limit",
-                                                peer_addr
-                                            );
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    warn!("Failed to accept TLS connection on {}: {}", addr, err);
-                                }
-                            }
-                        }
-                        _ = tokio::signal::ctrl_c() => {
-                            info!("Ctrl+C received, shutting down TLS listener on {}", addr);
                             break;
                         }
                     }
@@ -443,6 +439,11 @@ impl WafEngine {
             shutdown_senders.len()
         );
 
+        let entry_runtime = EntryListenerRuntime::global();
+        entry_runtime
+            .sync(Arc::clone(&self.context), Arc::clone(&self.connection_semaphore))
+            .await?;
+
         // 主循环处理维护任务
         loop {
             tokio::select! {
@@ -452,6 +453,7 @@ impl WafEngine {
                     for (_, shutdown_tx) in &shutdown_senders {
                         let _ = shutdown_tx.send(()).await;
                     }
+                    entry_runtime.shutdown_all().await;
                     break Ok(());
                 }
                 _ = maintenance.tick() => {
@@ -463,6 +465,7 @@ impl WafEngine {
                     for (_, shutdown_tx) in &shutdown_senders {
                         let _ = shutdown_tx.send(()).await;
                     }
+                    entry_runtime.shutdown_all().await;
                     break Ok(());
                 }
             }
@@ -509,6 +512,138 @@ impl WafEngine {
             }
         }
     }
+}
+
+pub async fn validate_entry_listener_config(context: Arc<WafContext>) -> Result<()> {
+    EntryListenerRuntime::global().validate_config(context).await
+}
+
+pub async fn sync_entry_listener_runtime(
+    context: Arc<WafContext>,
+    concurrency_limit: usize,
+) -> Result<()> {
+    EntryListenerRuntime::global()
+        .sync(context, Arc::new(Semaphore::new(concurrency_limit.max(1))))
+        .await
+}
+
+async fn spawn_http_entry_listener(
+    addr: &str,
+    context: Arc<WafContext>,
+    connection_semaphore: Arc<Semaphore>,
+) -> Result<RunningEntryListener> {
+    let listener = TcpListener::bind(addr).await?;
+    let addr_string = listener.local_addr()?.to_string();
+    info!("HTTP inspection listener started on {}", addr_string);
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+    let task_addr = addr_string.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    info!("HTTP listener shutdown signal received for {}", task_addr);
+                    break;
+                }
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, peer_addr)) => {
+                            match connection_semaphore.clone().try_acquire_owned() {
+                                Ok(permit) => {
+                                    let ctx = Arc::clone(&context);
+                                    tokio::spawn(async move {
+                                        if let Err(err) = handle_connection(ctx, stream, peer_addr, permit).await {
+                                            warn!("Connection handling failed: {}", err);
+                                        }
+                                    });
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Dropping connection from {} due to concurrency limit",
+                                        peer_addr
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!("Failed to accept connection on {}: {}", task_addr, err);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(RunningEntryListener {
+        addr: addr_string,
+        shutdown_tx,
+        task,
+    })
+}
+
+async fn spawn_https_entry_listener(
+    addr: &str,
+    tls_acceptor: TlsAcceptor,
+    context: Arc<WafContext>,
+    connection_semaphore: Arc<Semaphore>,
+) -> Result<RunningEntryListener> {
+    let listener = TcpListener::bind(addr).await?;
+    let addr_string = listener.local_addr()?.to_string();
+    info!("TLS inspection listener started on {}", addr_string);
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+    let task_addr = addr_string.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    info!("TLS listener shutdown signal received for {}", task_addr);
+                    break;
+                }
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, peer_addr)) => {
+                            match connection_semaphore.clone().try_acquire_owned() {
+                                Ok(permit) => {
+                                    let ctx = Arc::clone(&context);
+                                    let acceptor = tls_acceptor.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(err) = handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await {
+                                            warn!("TLS connection handling failed: {}", err);
+                                        }
+                                    });
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Dropping TLS connection from {} due to concurrency limit",
+                                        peer_addr
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!("Failed to accept TLS connection on {}: {}", task_addr, err);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(RunningEntryListener {
+        addr: addr_string,
+        shutdown_tx,
+        task,
+    })
+}
+
+async fn shutdown_entry_listeners(listeners: Vec<RunningEntryListener>) {
+    for listener in listeners {
+        shutdown_entry_listener(listener).await;
+    }
+}
+
+async fn shutdown_entry_listener(listener: RunningEntryListener) {
+    let _ = listener.shutdown_tx.send(()).await;
+    let _ = listener.task.await;
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1091,37 +1226,114 @@ async fn proxy_http_request(
     write_timeout_ms: u64,
     read_timeout_ms: u64,
 ) -> Result<UpstreamHttpResponse> {
-    let mut upstream_stream = tokio::time::timeout(
-        std::time::Duration::from_millis(connect_timeout_ms),
-        TcpStream::connect(upstream_addr),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-    let request_bytes = request.to_http1_bytes();
-    tokio::time::timeout(
-        std::time::Duration::from_millis(write_timeout_ms),
-        upstream_stream.write_all(&request_bytes),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
-    tokio::time::timeout(
-        std::time::Duration::from_millis(write_timeout_ms),
-        upstream_stream.shutdown(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream shutdown timed out"))??;
+    let upstream = parse_upstream_endpoint(upstream_addr)?;
+    if matches!(upstream.scheme, UpstreamScheme::Http) {
+        let mut upstream_stream = tokio::time::timeout(
+            std::time::Duration::from_millis(connect_timeout_ms),
+            TcpStream::connect(upstream.authority.as_str()),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+        let request_bytes = request.to_http1_bytes();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(write_timeout_ms),
+            upstream_stream.write_all(&request_bytes),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
+        tokio::time::timeout(
+            std::time::Duration::from_millis(write_timeout_ms),
+            upstream_stream.shutdown(),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Upstream shutdown timed out"))??;
 
-    let mut response_bytes = Vec::new();
-    tokio::time::timeout(
-        std::time::Duration::from_millis(read_timeout_ms),
-        upstream_stream.read_to_end(&mut response_bytes),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream read timed out"))??;
+        let mut response_bytes = Vec::new();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(read_timeout_ms),
+            upstream_stream.read_to_end(&mut response_bytes),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Upstream read timed out"))??;
 
-    let parsed = parse_http1_response(&response_bytes)?;
+        let parsed = parse_http1_response(&response_bytes)?;
+        context.set_upstream_health(true, None);
+        return Ok(parsed);
+    }
+
+    let url = format!(
+        "{}://{}{}",
+        match upstream.scheme {
+            UpstreamScheme::Http => "http",
+            UpstreamScheme::Https => "https",
+        },
+        upstream.authority,
+        request.uri
+    );
+
+    let method = reqwest::Method::from_bytes(request.method.as_bytes())
+        .map_err(|err| anyhow::anyhow!("Unsupported upstream method '{}': {}", request.method, err))?;
+    let headers = build_upstream_header_map(request)?;
+    let total_timeout_ms = write_timeout_ms.saturating_add(read_timeout_ms).max(read_timeout_ms);
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_millis(connect_timeout_ms))
+        .timeout(std::time::Duration::from_millis(total_timeout_ms))
+        .redirect(reqwest::redirect::Policy::none())
+        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_hostnames(true)
+        .build()?;
+
+    let response = client
+        .request(method, &url)
+        .headers(headers)
+        .body(request.body.clone())
+        .send()
+        .await?;
+
+    let status_code = response.status().as_u16();
+    let status_text = response.status().canonical_reason().map(ToOwned::to_owned);
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            if name.as_str().eq_ignore_ascii_case("transfer-encoding")
+                || name.as_str().eq_ignore_ascii_case("connection")
+            {
+                return None;
+            }
+            Some((
+                name.as_str().to_string(),
+                value.to_str().unwrap_or_default().to_string(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let body = response.bytes().await?.to_vec();
+
+    let parsed = UpstreamHttpResponse {
+        status_code,
+        status_text,
+        headers,
+        body,
+    };
     context.set_upstream_health(true, None);
     Ok(parsed)
+}
+
+fn build_upstream_header_map(request: &UnifiedHttpRequest) -> Result<HeaderMap> {
+    let mut headers = HeaderMap::new();
+    for (key, value) in &request.headers {
+        if key.eq_ignore_ascii_case("connection") || key.eq_ignore_ascii_case("content-length") {
+            continue;
+        }
+
+        let name = HeaderName::from_bytes(key.as_bytes())
+            .map_err(|err| anyhow::anyhow!("Invalid upstream request header '{}': {}", key, err))?;
+        let value = HeaderValue::from_bytes(value.as_bytes()).map_err(|err| {
+            anyhow::anyhow!("Invalid upstream request header value for '{}': {}", key, err)
+        })?;
+        headers.append(name, value);
+    }
+    Ok(headers)
 }
 
 fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {

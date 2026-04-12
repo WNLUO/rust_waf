@@ -7,6 +7,7 @@ import type {
   DashboardPayload,
   DashboardQueryOptions,
   GeneratedLocalCertificateRequest,
+  GlobalEntryConfigPayload,
   EventsQuery,
   HealthResponse,
   L4ConfigPayload,
@@ -466,6 +467,17 @@ export function pushSafeLineSite(localSiteId: number) {
 
 export function fetchLocalSites() {
   return apiRequest<LocalSitesResponse>('/sites/local')
+}
+
+export function fetchGlobalEntryConfig() {
+  return apiRequest<GlobalEntryConfigPayload>('/sites/global-entry')
+}
+
+export function updateGlobalEntryConfig(payload: GlobalEntryConfigPayload) {
+  return apiRequest<WriteStatusResponse>('/sites/global-entry', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function fetchLocalSite(id: number) {

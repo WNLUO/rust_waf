@@ -32,10 +32,6 @@ const autoRefreshSeconds = computed({
   get: () => props.systemSettings.auto_refresh_seconds,
   set: (value: number) => updateSystemSettings({ auto_refresh_seconds: value }),
 })
-const httpsListenAddr = computed({
-  get: () => props.systemSettings.https_listen_addr,
-  set: (value: string) => updateSystemSettings({ https_listen_addr: value }),
-})
 const apiEndpoint = computed({
   get: () => props.systemSettings.api_endpoint,
   set: (value: string) => updateSystemSettings({ api_endpoint: value }),
@@ -94,15 +90,6 @@ const upstreamEndpoint = computed({
           type="number"
           min="3"
           max="60"
-          class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-        />
-      </label>
-      <label class="space-y-1">
-        <span class="text-xs text-slate-500">统一 HTTPS 入口</span>
-        <input
-          v-model="httpsListenAddr"
-          type="text"
-          placeholder="例如 0.0.0.0:660"
           class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
         />
       </label>

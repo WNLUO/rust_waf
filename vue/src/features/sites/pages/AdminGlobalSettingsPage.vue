@@ -207,6 +207,9 @@ onMounted(loadPage)
           class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <p class="text-sm font-semibold text-stone-900">协议兼容</p>
+          <p class="mt-1 text-xs leading-5 text-slate-500">
+            HTTP/3 依赖 QUIC、TLS 1.3 与可用证书配置；仅打开开关还需要服务端监听和证书链完整才能对外生效。
+          </p>
           <div class="mt-4 grid gap-3 md:grid-cols-3">
             <label
               class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"

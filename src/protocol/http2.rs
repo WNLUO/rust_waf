@@ -13,6 +13,16 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub type Http2ResponseBody = Full<Bytes>;
 
+fn is_disallowed_http2_response_header(header_name: &str) -> bool {
+    header_name.eq_ignore_ascii_case("transfer-encoding")
+        || header_name.eq_ignore_ascii_case("connection")
+        || header_name.eq_ignore_ascii_case("keep-alive")
+        || header_name.eq_ignore_ascii_case("proxy-connection")
+        || header_name.eq_ignore_ascii_case("upgrade")
+        || header_name.eq_ignore_ascii_case("te")
+        || header_name.starts_with(':')
+}
+
 #[derive(Debug, Clone)]
 pub struct Http2Response {
     pub status_code: u16,
@@ -107,7 +117,9 @@ impl Http2Handler {
         builder
             .serve_connection(io, service)
             .await
-            .map_err(|err| ProtocolError::ParseError(format!("HTTP/2 connection error: {}", err)))
+            .map_err(|err| {
+                ProtocolError::ParseError(format!("HTTP/2 connection error: {:?}", err))
+            })
     }
 
     async fn request_to_unified<B>(
@@ -197,7 +209,7 @@ impl Http2Handler {
         let mut has_content_length = false;
 
         for (key, value) in response.headers {
-            if key.eq_ignore_ascii_case("transfer-encoding") || key.starts_with(':') {
+            if is_disallowed_http2_response_header(&key) {
                 continue;
             }
             if key.eq_ignore_ascii_case("content-type") {
@@ -396,6 +408,8 @@ mod tests {
             status_code: 200,
             headers: vec![
                 ("transfer-encoding".to_string(), "chunked".to_string()),
+                ("connection".to_string(), "keep-alive".to_string()),
+                ("keep-alive".to_string(), "timeout=5".to_string()),
                 ("content-type".to_string(), "text/plain".to_string()),
             ],
             body: b"ok".to_vec(),
@@ -403,6 +417,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get("transfer-encoding").is_none());
+        assert!(response.headers().get("connection").is_none());
+        assert!(response.headers().get("keep-alive").is_none());
         assert_eq!(response.headers()["content-type"], "text/plain");
     }
 

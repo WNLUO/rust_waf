@@ -349,6 +349,11 @@ pub struct LocalCertificateResponse {
     pub(crate) valid_to: Option<i64>,
     pub(crate) source_type: String,
     pub(crate) provider_remote_id: Option<String>,
+    pub(crate) provider_remote_domains: Vec<String>,
+    pub(crate) last_remote_fingerprint: Option<String>,
+    pub(crate) sync_status: String,
+    pub(crate) sync_message: String,
+    pub(crate) auto_sync_enabled: bool,
     pub(crate) trusted: bool,
     pub(crate) expired: bool,
     pub(crate) notes: String,
@@ -368,12 +373,26 @@ pub struct LocalCertificateUpsertRequest {
     pub(crate) valid_to: Option<i64>,
     pub(crate) source_type: String,
     pub(crate) provider_remote_id: Option<String>,
+    #[serde(default)]
+    pub(crate) provider_remote_domains: Vec<String>,
+    #[serde(default)]
+    pub(crate) last_remote_fingerprint: Option<String>,
+    #[serde(default = "default_certificate_sync_status")]
+    pub(crate) sync_status: String,
+    #[serde(default)]
+    pub(crate) sync_message: String,
+    #[serde(default)]
+    pub(crate) auto_sync_enabled: bool,
     pub(crate) trusted: bool,
     pub(crate) expired: bool,
     pub(crate) notes: String,
     pub(crate) last_synced_at: Option<i64>,
     pub(crate) certificate_pem: Option<String>,
     pub(crate) private_key_pem: Option<String>,
+}
+
+fn default_certificate_sync_status() -> String {
+    "idle".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -424,10 +443,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_false() -> bool {
-    false
-}
-
 #[derive(Debug, Deserialize, Clone)]
 pub struct SafeLineSitePullOptionsRequest {
     #[serde(default = "default_true")]
@@ -444,8 +459,6 @@ pub struct SafeLineSitePullOptionsRequest {
     pub(crate) enabled: bool,
     #[serde(default = "default_true")]
     pub(crate) tls_enabled: bool,
-    #[serde(default = "default_false")]
-    pub(crate) local_certificate_id: bool,
 }
 
 impl Default for SafeLineSitePullOptionsRequest {
@@ -458,7 +471,6 @@ impl Default for SafeLineSitePullOptionsRequest {
             upstreams: true,
             enabled: true,
             tls_enabled: true,
-            local_certificate_id: false,
         }
     }
 }
@@ -502,6 +514,15 @@ pub struct SafeLineSitesPushResponse {
     pub(crate) reused_certificates: u32,
     pub(crate) skipped_sites: u32,
     pub(crate) failed_sites: u32,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SafeLineCertificatesPullResponse {
+    pub(crate) success: bool,
+    pub(crate) imported_certificates: u32,
+    pub(crate) updated_certificates: u32,
+    pub(crate) skipped_certificates: u32,
     pub(crate) message: String,
 }
 

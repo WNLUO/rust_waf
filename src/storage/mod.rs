@@ -756,7 +756,9 @@ impl SqliteStore {
         let rows = sqlx::query_as::<_, LocalCertificateEntry>(
             r#"
             SELECT id, name, domains_json, issuer, valid_from, valid_to, source_type,
-                   provider_remote_id, trusted, expired, notes, last_synced_at, created_at, updated_at
+                   provider_remote_id, provider_remote_domains_json, last_remote_fingerprint,
+                   sync_status, sync_message, auto_sync_enabled,
+                   trusted, expired, notes, last_synced_at, created_at, updated_at
             FROM local_certificates
             ORDER BY updated_at DESC, id DESC
             "#,
@@ -772,7 +774,9 @@ impl SqliteStore {
         let row = sqlx::query_as::<_, LocalCertificateEntry>(
             r#"
             SELECT id, name, domains_json, issuer, valid_from, valid_to, source_type,
-                   provider_remote_id, trusted, expired, notes, last_synced_at, created_at, updated_at
+                   provider_remote_id, provider_remote_domains_json, last_remote_fingerprint,
+                   sync_status, sync_message, auto_sync_enabled,
+                   trusted, expired, notes, last_synced_at, created_at, updated_at
             FROM local_certificates
             WHERE id = ?
             "#,
@@ -794,9 +798,11 @@ impl SqliteStore {
             r#"
             INSERT INTO local_certificates (
                 name, domains_json, issuer, valid_from, valid_to, source_type,
-                provider_remote_id, trusted, expired, notes, last_synced_at, created_at, updated_at
+                provider_remote_id, provider_remote_domains_json, last_remote_fingerprint,
+                sync_status, sync_message, auto_sync_enabled,
+                trusted, expired, notes, last_synced_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&certificate.name)
@@ -806,6 +812,11 @@ impl SqliteStore {
         .bind(certificate.valid_to)
         .bind(&certificate.source_type)
         .bind(&certificate.provider_remote_id)
+        .bind(serialize_string_vec(&certificate.provider_remote_domains)?)
+        .bind(&certificate.last_remote_fingerprint)
+        .bind(&certificate.sync_status)
+        .bind(&certificate.sync_message)
+        .bind(certificate.auto_sync_enabled)
         .bind(certificate.trusted)
         .bind(certificate.expired)
         .bind(&certificate.notes)
@@ -834,6 +845,11 @@ impl SqliteStore {
                 valid_to = ?,
                 source_type = ?,
                 provider_remote_id = ?,
+                provider_remote_domains_json = ?,
+                last_remote_fingerprint = ?,
+                sync_status = ?,
+                sync_message = ?,
+                auto_sync_enabled = ?,
                 trusted = ?,
                 expired = ?,
                 notes = ?,
@@ -849,6 +865,11 @@ impl SqliteStore {
         .bind(certificate.valid_to)
         .bind(&certificate.source_type)
         .bind(&certificate.provider_remote_id)
+        .bind(serialize_string_vec(&certificate.provider_remote_domains)?)
+        .bind(&certificate.last_remote_fingerprint)
+        .bind(&certificate.sync_status)
+        .bind(&certificate.sync_message)
+        .bind(certificate.auto_sync_enabled)
         .bind(certificate.trusted)
         .bind(certificate.expired)
         .bind(&certificate.notes)
@@ -1917,6 +1938,11 @@ pub struct LocalCertificateUpsert {
     pub valid_to: Option<i64>,
     pub source_type: String,
     pub provider_remote_id: Option<String>,
+    pub provider_remote_domains: Vec<String>,
+    pub last_remote_fingerprint: Option<String>,
+    pub sync_status: String,
+    pub sync_message: String,
+    pub auto_sync_enabled: bool,
     pub trusted: bool,
     pub expired: bool,
     pub notes: String,
@@ -2837,6 +2863,14 @@ mod tests {
                 valid_to: Some(1_800_000_000),
                 source_type: "manual".to_string(),
                 provider_remote_id: Some("31".to_string()),
+                provider_remote_domains: vec![
+                    "example.com".to_string(),
+                    "*.example.com".to_string(),
+                ],
+                last_remote_fingerprint: Some("fp31".to_string()),
+                sync_status: "synced".to_string(),
+                sync_message: "ok".to_string(),
+                auto_sync_enabled: true,
                 trusted: true,
                 expired: false,
                 notes: "initial import".to_string(),
@@ -2883,6 +2917,11 @@ mod tests {
                     valid_to: Some(1_900_000_000),
                     source_type: "safeline".to_string(),
                     provider_remote_id: Some("32".to_string()),
+                    provider_remote_domains: vec!["example.com".to_string()],
+                    last_remote_fingerprint: Some("fp32".to_string()),
+                    sync_status: "synced".to_string(),
+                    sync_message: "updated".to_string(),
+                    auto_sync_enabled: false,
                     trusted: true,
                     expired: false,
                     notes: "rotated".to_string(),
@@ -2944,6 +2983,11 @@ mod tests {
                 valid_to: None,
                 source_type: "manual".to_string(),
                 provider_remote_id: None,
+                provider_remote_domains: Vec::new(),
+                last_remote_fingerprint: None,
+                sync_status: "idle".to_string(),
+                sync_message: String::new(),
+                auto_sync_enabled: false,
                 trusted: false,
                 expired: false,
                 notes: String::new(),

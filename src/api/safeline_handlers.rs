@@ -218,7 +218,6 @@ pub(super) async fn pull_safeline_site_handler(
                 upstreams: item.options.upstreams,
                 enabled: item.options.enabled,
                 tls_enabled: item.options.tls_enabled,
-                local_certificate_id: false,
             },
         )
         .unwrap_or_default();
@@ -304,6 +303,85 @@ pub(super) async fn push_safeline_site_handler(
                 result.local_site_id, result.remote_site_id
             ),
         },
+    }))
+}
+
+pub(super) async fn pull_safeline_certificates_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<SafeLineCertificatesPullResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let result = crate::integrations::safeline_sync::pull_certificates(store, safeline)
+        .await
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(SafeLineCertificatesPullResponse {
+        success: true,
+        imported_certificates: result.imported_certificates as u32,
+        updated_certificates: result.updated_certificates as u32,
+        skipped_certificates: result.skipped_certificates as u32,
+        message: format!(
+            "雷池证书同步完成，新增 {} 张、更新 {} 张。",
+            result.imported_certificates, result.updated_certificates
+        ),
+    }))
+}
+
+pub(super) async fn pull_safeline_certificate_handler(
+    State(state): State<ApiState>,
+    Path(remote_cert_id): Path<String>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let local_id =
+        crate::integrations::safeline_sync::pull_certificate(store, safeline, &remote_cert_id)
+            .await
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: format!(
+            "雷池证书 {} 已同步到本地证书 #{}。",
+            remote_cert_id, local_id
+        ),
+    }))
+}
+
+pub(super) async fn push_safeline_certificate_handler(
+    State(state): State<ApiState>,
+    Path(local_certificate_id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let config = persisted_config(&state).await?;
+    let safeline = &config.integrations.safeline;
+
+    if !safeline.enabled {
+        return Err(ApiError::conflict("雷池集成尚未启用".to_string()));
+    }
+
+    let remote_id =
+        crate::integrations::safeline_sync::push_certificate(store, safeline, local_certificate_id)
+            .await
+            .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: format!(
+            "本地证书 #{} 已同步到雷池证书 {}。",
+            local_certificate_id, remote_id
+        ),
     }))
 }
 

@@ -18,6 +18,35 @@ async fn local_certificate_response_with_secret(
     Ok(response)
 }
 
+async fn maybe_push_certificate_to_safeline(
+    state: &ApiState,
+    certificate_id: i64,
+    auto_sync_enabled: bool,
+) -> Result<Option<String>, ApiError> {
+    if !auto_sync_enabled {
+        return Ok(None);
+    }
+
+    let store = sqlite_store(state)?;
+    let config = persisted_config(state).await?;
+    let safeline = &config.integrations.safeline;
+    if !safeline.enabled {
+        return Ok(Some(
+            "证书已保存，但雷池集成未启用，已跳过自动同步。".to_string(),
+        ));
+    }
+
+    let message =
+        match crate::integrations::safeline_sync::push_certificate(store, safeline, certificate_id)
+            .await
+        {
+            Ok(remote_id) => format!("证书已自动同步到雷池证书 {}。", remote_id),
+            Err(err) => format!("证书已保存，但自动同步到雷池失败：{}", err),
+        };
+
+    Ok(Some(message))
+}
+
 pub(super) async fn list_local_sites_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<LocalSitesResponse>> {
@@ -209,21 +238,29 @@ pub(super) async fn create_local_certificate_handler(
             .await
             .map_err(map_storage_write_error)?;
     }
+    let auto_sync_message =
+        maybe_push_certificate_to_safeline(&state, id, certificate.auto_sync_enabled).await?;
     let created = store
         .load_local_certificate(id)
         .await
         .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::internal("新建证书后未能重新读取记录"))?;
+        .ok_or_else(|| ApiError::internal("自动同步后未能重新读取证书记录"))?;
     state
         .context
         .refresh_gateway_runtime_from_storage()
         .await
         .map_err(ApiError::internal)?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(local_certificate_response_with_secret(store, created).await?),
-    ))
+    let mut response = local_certificate_response_with_secret(store, created).await?;
+    if let Some(message) = auto_sync_message {
+        response.sync_message = if response.sync_message.trim().is_empty() {
+            message
+        } else {
+            format!("{} {}", response.sync_message, message)
+        };
+    }
+
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 pub(super) async fn generate_local_certificate_handler(
@@ -295,6 +332,8 @@ pub(super) async fn update_local_certificate_handler(
                     .map_err(map_storage_write_error)?;
             }
         }
+        let auto_sync_message =
+            maybe_push_certificate_to_safeline(&state, id, certificate.auto_sync_enabled).await?;
         state
             .context
             .refresh_gateway_runtime_from_storage()
@@ -302,7 +341,13 @@ pub(super) async fn update_local_certificate_handler(
             .map_err(ApiError::internal)?;
         Ok(Json(WriteStatusResponse {
             success: true,
-            message: format!("本地证书 {} 已更新，并已立即刷新新连接的证书选择。", id),
+            message: match auto_sync_message {
+                Some(message) => format!(
+                    "本地证书 {} 已更新，并已立即刷新新连接的证书选择。{}",
+                    id, message
+                ),
+                None => format!("本地证书 {} 已更新，并已立即刷新新连接的证书选择。", id),
+            },
         }))
     } else {
         Err(ApiError::not_found(format!("本地证书 '{}' 不存在", id)))

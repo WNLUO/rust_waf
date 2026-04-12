@@ -293,7 +293,7 @@ pub async fn create_certificate(
     let path = normalized_or_default(DEFAULT_CERT_PATH, DEFAULT_CERT_PATH);
     let url = format!("{base_url}{path}");
     let payload = serde_json::json!({
-        "type": 0,
+        "type": 2,
         "domains": certificate.domains,
         "manual": {
             "crt": certificate.certificate_pem,
@@ -322,6 +322,77 @@ pub async fn create_certificate(
         status_code: status.as_u16(),
         message: body_or_status(status, &body),
     })
+}
+
+pub async fn update_certificate(
+    config: &SafeLineConfig,
+    remote_id: &str,
+    certificate: &SafeLineCertificateUpsert,
+) -> Result<SafeLineCertificateWriteSummary> {
+    let base_url = normalize_base_url(&config.base_url)?;
+    if !has_any_auth(config) {
+        return Err(anyhow!(
+            "未填写 API Token，且未配置雷池账号密码，无法更新雷池证书"
+        ));
+    }
+
+    let remote_id = remote_id.trim();
+    if remote_id.is_empty() {
+        return Err(anyhow!("remote_id 不能为空"));
+    }
+
+    let client = build_client(config)?;
+    let path = normalized_or_default(DEFAULT_CERT_PATH, DEFAULT_CERT_PATH);
+    let url = format!("{base_url}{path}");
+    let payload = serde_json::json!({
+        "id": remote_id,
+        "type": 2,
+        "domains": certificate.domains,
+        "manual": {
+            "crt": certificate.certificate_pem,
+            "key": certificate.private_key_pem,
+        }
+    });
+
+    let attempts = [
+        ("PUT", format!("{url}/{remote_id}"), payload.clone()),
+        ("PUT", url.clone(), payload.clone()),
+        ("POST", url, payload),
+    ];
+
+    let mut last_failure = SafeLineCertificateWriteSummary {
+        remote_id: Some(remote_id.to_string()),
+        accepted: false,
+        status_code: StatusCode::BAD_GATEWAY.as_u16(),
+        message: "未执行任何证书写入尝试".to_string(),
+    };
+
+    for (method, url, payload) in attempts {
+        let (status, body) = send_with_auth(&client, &base_url, config, |auth| match method {
+            "PUT" => with_auth_headers(client.put(&url).json(&payload), auth),
+            _ => with_auth_headers(client.post(&url).json(&payload), auth),
+        })
+        .await?;
+
+        if status.is_success() {
+            return Ok(SafeLineCertificateWriteSummary {
+                remote_id: extract_write_response_id_from_body(&body)
+                    .or_else(|| Some(remote_id.to_string())),
+                accepted: true,
+                status_code: status.as_u16(),
+                message: body_or_status(status, &body),
+            });
+        }
+
+        last_failure = SafeLineCertificateWriteSummary {
+            remote_id: Some(remote_id.to_string()),
+            accepted: false,
+            status_code: status.as_u16(),
+            message: body_or_status(status, &body),
+        };
+    }
+
+    Ok(last_failure)
 }
 
 pub async fn upsert_site(

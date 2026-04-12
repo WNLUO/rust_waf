@@ -742,6 +742,11 @@ impl TryFrom<crate::storage::LocalCertificateEntry> for LocalCertificateResponse
             valid_to: value.valid_to,
             source_type: value.source_type,
             provider_remote_id: value.provider_remote_id,
+            provider_remote_domains: parse_json_string_vec(&value.provider_remote_domains_json)?,
+            last_remote_fingerprint: value.last_remote_fingerprint,
+            sync_status: value.sync_status,
+            sync_message: value.sync_message,
+            auto_sync_enabled: value.auto_sync_enabled,
             trusted: value.trusted,
             expired: value.expired,
             notes: value.notes,
@@ -770,6 +775,10 @@ impl LocalCertificateUpsertRequest {
         let source_type =
             non_empty_string(self.source_type).unwrap_or_else(|| "manual".to_string());
         let provider_remote_id = self.provider_remote_id.and_then(non_empty_string);
+        let provider_remote_domains = normalize_string_list(self.provider_remote_domains);
+        let last_remote_fingerprint = self.last_remote_fingerprint.and_then(non_empty_string);
+        let sync_status = non_empty_string(self.sync_status).unwrap_or_else(|| "idle".to_string());
+        let sync_message = self.sync_message.trim().to_string();
         let notes = self.notes.trim().to_string();
         let certificate_pem = self.certificate_pem.unwrap_or_default().trim().to_string();
         let private_key_pem = self.private_key_pem.unwrap_or_default().trim().to_string();
@@ -800,6 +809,11 @@ impl LocalCertificateUpsertRequest {
                 valid_to: self.valid_to,
                 source_type,
                 provider_remote_id,
+                provider_remote_domains,
+                last_remote_fingerprint,
+                sync_status,
+                sync_message,
+                auto_sync_enabled: self.auto_sync_enabled,
                 trusted: self.trusted,
                 expired: self.expired,
                 notes,
@@ -842,6 +856,11 @@ impl GeneratedLocalCertificateRequest {
                 valid_to: Some(valid_to),
                 source_type: "generated".to_string(),
                 provider_remote_id: None,
+                provider_remote_domains: Vec::new(),
+                last_remote_fingerprint: None,
+                sync_status: "idle".to_string(),
+                sync_message: String::new(),
+                auto_sync_enabled: false,
                 trusted: false,
                 expired: false,
                 notes,

@@ -112,6 +112,11 @@ export interface LocalCertificateItem {
   valid_to: number | null
   source_type: string
   provider_remote_id: string | null
+  provider_remote_domains: string[]
+  last_remote_fingerprint: string | null
+  sync_status: string
+  sync_message: string
+  auto_sync_enabled: boolean
   trusted: boolean
   expired: boolean
   notes: string
@@ -135,12 +140,25 @@ export interface LocalCertificateDraft {
   valid_to: number | null
   source_type: string
   provider_remote_id: string | null
+  provider_remote_domains: string[]
+  last_remote_fingerprint: string | null
+  sync_status: string
+  sync_message: string
+  auto_sync_enabled: boolean
   trusted: boolean
   expired: boolean
   notes: string
   last_synced_at: number | null
   certificate_pem?: string | null
   private_key_pem?: string | null
+}
+
+export interface SafeLineCertificatesPullResponse {
+  success: boolean
+  imported_certificates: number
+  updated_certificates: number
+  skipped_certificates: number
+  message: string
 }
 
 export interface GeneratedLocalCertificateRequest {
@@ -213,7 +231,6 @@ export interface SafeLineSitePullOptions {
   upstreams: boolean
   enabled: boolean
   tls_enabled: boolean
-  local_certificate_id: boolean
 }
 
 export interface SafeLineSitePullRequest {

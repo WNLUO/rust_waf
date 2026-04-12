@@ -27,6 +27,7 @@ import type {
   RulesResponse,
   SafeLineBlocklistPullResponse,
   SafeLineBlocklistSyncResponse,
+  SafeLineCertificatesPullResponse,
   SafeLineEventSyncResponse,
   SafeLineMappingsResponse,
   SafeLineMappingsUpdateRequest,
@@ -499,6 +500,24 @@ export function fetchLocalCertificates() {
   return apiRequest<LocalCertificatesResponse>('/certificates/local')
 }
 
+export function pullSafeLineCertificates() {
+  return apiRequest<SafeLineCertificatesPullResponse>(
+    '/integrations/safeline/pull/certificates',
+    {
+      method: 'POST',
+    },
+  )
+}
+
+export function pullSafeLineCertificate(remoteCertId: string) {
+  return apiRequest<WriteStatusResponse>(
+    `/integrations/safeline/pull/certificates/${encodeURIComponent(remoteCertId)}`,
+    {
+      method: 'POST',
+    },
+  )
+}
+
 export function fetchLocalCertificate(id: number) {
   return apiRequest<LocalCertificateItem>(`/certificates/local/${id}`)
 }
@@ -533,6 +552,15 @@ export function deleteLocalCertificate(id: number) {
   return apiRequest<WriteStatusResponse>(`/certificates/local/${id}`, {
     method: 'DELETE',
   })
+}
+
+export function pushSafeLineCertificate(localCertificateId: number) {
+  return apiRequest<WriteStatusResponse>(
+    `/integrations/safeline/push/certificates/${localCertificateId}`,
+    {
+      method: 'POST',
+    },
+  )
 }
 
 export function fetchSiteSyncLinks() {

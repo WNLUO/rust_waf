@@ -210,6 +210,18 @@ fn build_router(state: ApiState) -> Router {
             axum::routing::post(safeline_handlers::push_safeline_site_handler),
         )
         .route(
+            "/integrations/safeline/pull/certificates",
+            axum::routing::post(safeline_handlers::pull_safeline_certificates_handler),
+        )
+        .route(
+            "/integrations/safeline/pull/certificates/:remote_cert_id",
+            axum::routing::post(safeline_handlers::pull_safeline_certificate_handler),
+        )
+        .route(
+            "/integrations/safeline/push/certificates/:local_certificate_id",
+            axum::routing::post(safeline_handlers::push_safeline_certificate_handler),
+        )
+        .route(
             "/integrations/safeline/site-links",
             get(safeline_handlers::list_site_sync_links_handler)
                 .put(safeline_handlers::upsert_site_sync_link_handler),
@@ -1220,6 +1232,11 @@ mod tests {
             valid_to: Some(100),
             source_type: "manual".to_string(),
             provider_remote_id: Some("31".to_string()),
+            provider_remote_domains: vec!["portal.example.com".to_string()],
+            last_remote_fingerprint: Some("fp31".to_string()),
+            sync_status: "synced".to_string(),
+            sync_message: String::new(),
+            auto_sync_enabled: false,
             trusted: true,
             expired: false,
             notes: String::new(),
@@ -1295,6 +1312,11 @@ mod tests {
             valid_to: Some(200),
             source_type: "manual".to_string(),
             provider_remote_id: Some("31".to_string()),
+            provider_remote_domains_json: r#"["portal.example.com","api.example.com"]"#.to_string(),
+            last_remote_fingerprint: Some("fp31".to_string()),
+            sync_status: "synced".to_string(),
+            sync_message: "ok".to_string(),
+            auto_sync_enabled: true,
             trusted: true,
             expired: false,
             notes: String::new(),

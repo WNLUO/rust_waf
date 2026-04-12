@@ -31,6 +31,13 @@ pub struct SafeLineSitesPushResult {
     pub failed_sites: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SafeLineCertificatesPullResult {
+    pub imported_certificates: usize,
+    pub updated_certificates: usize,
+    pub skipped_certificates: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SingleSiteSyncAction {
     Created,
@@ -46,7 +53,6 @@ pub struct SafeLineSitePullOptions {
     pub upstreams: bool,
     pub enabled: bool,
     pub tls_enabled: bool,
-    pub local_certificate_id: bool,
 }
 
 impl Default for SafeLineSitePullOptions {
@@ -59,7 +65,6 @@ impl Default for SafeLineSitePullOptions {
             upstreams: true,
             enabled: true,
             tls_enabled: true,
-            local_certificate_id: false,
         }
     }
 }
@@ -193,6 +198,73 @@ pub async fn pull_sites(
     }
 
     Ok(result)
+}
+
+pub async fn pull_certificates(
+    store: &SqliteStore,
+    config: &SafeLineConfig,
+) -> Result<SafeLineCertificatesPullResult> {
+    ensure_enabled(config)?;
+
+    let now = unix_timestamp();
+    let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
+    let mut local_certificates = store.list_local_certificates().await?;
+    let mut result = SafeLineCertificatesPullResult::default();
+
+    for certificate in &remote_certificates {
+        let detail = crate::integrations::safeline::load_certificate(config, &certificate.id)
+            .await
+            .ok();
+        let sync_state =
+            sync_remote_certificate(store, &mut local_certificates, certificate, detail, now)
+                .await?;
+        if sync_state.inserted {
+            result.imported_certificates += 1;
+        } else {
+            result.updated_certificates += 1;
+        }
+    }
+
+    store
+        .upsert_safeline_sync_state(
+            "certificates_pull",
+            Some(now),
+            result.imported_certificates + result.updated_certificates,
+            result.skipped_certificates,
+        )
+        .await?;
+
+    Ok(result)
+}
+
+pub async fn pull_certificate(
+    store: &SqliteStore,
+    config: &SafeLineConfig,
+    remote_cert_id: &str,
+) -> Result<i64> {
+    ensure_enabled(config)?;
+
+    let remote_cert_id = remote_cert_id.trim();
+    if remote_cert_id.is_empty() {
+        bail!("remote_cert_id 不能为空");
+    }
+
+    let now = unix_timestamp();
+    let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
+    let certificate = remote_certificates
+        .iter()
+        .find(|item| item.id == remote_cert_id)
+        .ok_or_else(|| anyhow!("雷池证书 '{}' 不存在或当前账号不可见", remote_cert_id))?;
+    let detail = crate::integrations::safeline::load_certificate(config, remote_cert_id)
+        .await
+        .ok();
+    let mut local_certificates = store.list_local_certificates().await?;
+    let sync_state =
+        sync_remote_certificate(store, &mut local_certificates, certificate, detail, now).await?;
+    store
+        .upsert_safeline_sync_state("certificates_pull", Some(now), 1, 0)
+        .await?;
+    Ok(sync_state.local_id)
 }
 
 pub async fn push_sites(
@@ -642,6 +714,116 @@ pub async fn push_site(
     })
 }
 
+pub async fn push_certificate(
+    store: &SqliteStore,
+    config: &SafeLineConfig,
+    local_certificate_id: i64,
+) -> Result<String> {
+    ensure_enabled(config)?;
+
+    if local_certificate_id <= 0 {
+        bail!("local_certificate_id 必须大于 0");
+    }
+
+    let now = unix_timestamp();
+    let local_certificate = store
+        .load_local_certificate(local_certificate_id)
+        .await?
+        .ok_or_else(|| anyhow!("本地证书 '{}' 不存在", local_certificate_id))?;
+    let secret = store
+        .load_local_certificate_secret(local_certificate_id)
+        .await?
+        .ok_or_else(|| {
+            anyhow!(
+                "本地证书 #{} 缺少证书内容，无法推送到雷池",
+                local_certificate_id
+            )
+        })?;
+
+    if secret.certificate_pem.trim().is_empty() || secret.private_key_pem.trim().is_empty() {
+        update_certificate_sync_metadata(
+            store,
+            &local_certificate,
+            CertificateSyncMetadataUpdate {
+                provider_remote_id: local_certificate.provider_remote_id.clone(),
+                provider_remote_domains: parse_json_vec(
+                    &local_certificate.provider_remote_domains_json,
+                )
+                .unwrap_or_default(),
+                last_remote_fingerprint: local_certificate.last_remote_fingerprint.clone(),
+                sync_status: "blocked".to_string(),
+                sync_message: "本地证书缺少完整私钥，无法推送到雷池".to_string(),
+                last_synced_at: local_certificate.last_synced_at,
+            },
+        )
+        .await?;
+        bail!(
+            "本地证书 #{} 缺少完整私钥，无法推送到雷池",
+            local_certificate_id
+        );
+    }
+
+    let local_domains = parse_json_vec(&local_certificate.domains_json)?;
+    let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
+    let match_result =
+        match_remote_certificate(&local_certificate, &local_domains, &remote_certificates)?;
+
+    let payload = SafeLineCertificateUpsert {
+        domains: local_domains.clone(),
+        certificate_pem: secret.certificate_pem.clone(),
+        private_key_pem: secret.private_key_pem.clone(),
+    };
+
+    let summary = if let Some(remote_id) = match_result.remote_id.as_deref() {
+        crate::integrations::safeline::update_certificate(config, remote_id, &payload).await?
+    } else {
+        crate::integrations::safeline::create_certificate(config, &payload).await?
+    };
+
+    if !summary.accepted {
+        update_certificate_sync_metadata(
+            store,
+            &local_certificate,
+            CertificateSyncMetadataUpdate {
+                provider_remote_id: local_certificate.provider_remote_id.clone(),
+                provider_remote_domains: match_result.remote_domains,
+                last_remote_fingerprint: local_certificate.last_remote_fingerprint.clone(),
+                sync_status: "error".to_string(),
+                sync_message: summary.message.clone(),
+                last_synced_at: local_certificate.last_synced_at,
+            },
+        )
+        .await?;
+        bail!("{}", summary.message);
+    }
+
+    let remote_id = summary
+        .remote_id
+        .clone()
+        .or_else(|| match_result.remote_id.clone())
+        .ok_or_else(|| anyhow!("雷池证书写入成功，但未返回远端证书 ID"))?;
+
+    update_certificate_sync_metadata(
+        store,
+        &local_certificate,
+        CertificateSyncMetadataUpdate {
+            provider_remote_id: Some(remote_id.clone()),
+            provider_remote_domains: local_domains,
+            last_remote_fingerprint: certificate_fingerprint(&secret.certificate_pem),
+            sync_status: "synced".to_string(),
+            sync_message: match_result.success_message(&remote_id),
+            last_synced_at: Some(now),
+        },
+    )
+    .await?;
+
+    store
+        .upsert_safeline_sync_state("certificates_push", Some(now), 1, 0)
+        .await?;
+
+    Ok(remote_id)
+}
+
 pub async fn push_blocked_ips(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -736,6 +918,32 @@ fn matches_mapping(
 
 struct SyncInsertState {
     inserted: bool,
+    local_id: i64,
+}
+
+struct CertificateSyncMetadataUpdate {
+    provider_remote_id: Option<String>,
+    provider_remote_domains: Vec<String>,
+    last_remote_fingerprint: Option<String>,
+    sync_status: String,
+    sync_message: String,
+    last_synced_at: Option<i64>,
+}
+
+struct RemoteCertificateMatchResult {
+    remote_id: Option<String>,
+    remote_domains: Vec<String>,
+    strategy: &'static str,
+}
+
+impl RemoteCertificateMatchResult {
+    fn success_message(&self, remote_id: &str) -> String {
+        match self.strategy {
+            "remote_id" => format!("已按雷池证书 ID 命中并更新远端证书 {}。", remote_id),
+            "domains" => format!("已按域名匹配并更新远端证书 {}。", remote_id),
+            _ => format!("已在雷池创建新证书 {}。", remote_id),
+        }
+    }
 }
 
 async fn sync_remote_certificate(
@@ -757,6 +965,14 @@ async fn sync_remote_certificate(
         valid_to: certificate.valid_to,
         source_type: "safeline".to_string(),
         provider_remote_id: Some(certificate.id.clone()),
+        provider_remote_domains: certificate.domains.clone(),
+        last_remote_fingerprint: detail
+            .as_ref()
+            .and_then(|item| item.certificate_pem.as_deref())
+            .and_then(certificate_fingerprint),
+        sync_status: "synced".to_string(),
+        sync_message: "已从雷池同步证书元数据".to_string(),
+        auto_sync_enabled: false,
         trusted: certificate.trusted,
         expired: certificate.expired || certificate.revoked,
         notes: "Imported from SafeLine".to_string(),
@@ -783,6 +999,11 @@ async fn sync_remote_certificate(
             valid_to: upsert.valid_to,
             source_type: upsert.source_type.clone(),
             provider_remote_id: upsert.provider_remote_id.clone(),
+            provider_remote_domains_json: serde_json::to_string(&upsert.provider_remote_domains)?,
+            last_remote_fingerprint: upsert.last_remote_fingerprint.clone(),
+            sync_status: upsert.sync_status.clone(),
+            sync_message: upsert.sync_message.clone(),
+            auto_sync_enabled: upsert.auto_sync_enabled,
             trusted: upsert.trusted,
             expired: upsert.expired,
             notes: upsert.notes.clone(),
@@ -794,19 +1015,20 @@ async fn sync_remote_certificate(
     };
 
     if let Some(detail) = detail {
-        if let (Some(certificate_pem), Some(private_key_pem)) = (
-            detail.certificate_pem.as_deref(),
-            detail.private_key_pem.as_deref(),
-        ) {
-            if !certificate_pem.trim().is_empty() && !private_key_pem.trim().is_empty() {
+        if let Some(certificate_pem) = detail.certificate_pem.as_deref() {
+            if !certificate_pem.trim().is_empty() {
                 store
-                    .upsert_local_certificate_secret(local_id, certificate_pem, private_key_pem)
+                    .upsert_local_certificate_secret(
+                        local_id,
+                        certificate_pem,
+                        detail.private_key_pem.as_deref().unwrap_or_default(),
+                    )
                     .await?;
             }
         }
     }
 
-    Ok(SyncInsertState { inserted })
+    Ok(SyncInsertState { inserted, local_id })
 }
 
 async fn load_required_certificate_detail(
@@ -945,11 +1167,7 @@ fn merge_local_site_upsert_from_remote(
             } else {
                 existing_site.tls_enabled
             },
-            local_certificate_id: if options.local_certificate_id {
-                remote_upsert.local_certificate_id
-            } else {
-                existing_site.local_certificate_id
-            },
+            local_certificate_id: existing_site.local_certificate_id,
             source: existing_site.source.clone(),
             sync_mode: sync_mode.to_string(),
             notes: existing_site.notes.clone(),
@@ -983,9 +1201,7 @@ fn merge_local_site_upsert_from_remote(
         if !options.tls_enabled {
             created.tls_enabled = false;
         }
-        if !options.local_certificate_id {
-            created.local_certificate_id = None;
-        }
+        created.local_certificate_id = None;
         created
     };
 
@@ -998,6 +1214,113 @@ fn merge_local_site_upsert_from_remote(
     }
 
     merged
+}
+
+fn normalized_domain_set(domains: &[String]) -> Vec<String> {
+    let mut items = domains
+        .iter()
+        .map(|item| item.trim().to_ascii_lowercase())
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    items.sort();
+    items.dedup();
+    items
+}
+
+fn certificate_fingerprint(certificate_pem: &str) -> Option<String> {
+    let normalized = certificate_pem.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(normalized.as_bytes());
+    Some(format!("{:x}", hasher.finalize()))
+}
+
+fn match_remote_certificate(
+    local_certificate: &LocalCertificateEntry,
+    local_domains: &[String],
+    remote_certificates: &[SafeLineCertificateSummary],
+) -> Result<RemoteCertificateMatchResult> {
+    let normalized_local_domains = normalized_domain_set(local_domains);
+
+    if let Some(remote_id) = local_certificate.provider_remote_id.as_deref() {
+        if let Some(remote) = remote_certificates.iter().find(|item| item.id == remote_id) {
+            let normalized_remote_domains = normalized_domain_set(&remote.domains);
+            if normalized_remote_domains == normalized_local_domains {
+                return Ok(RemoteCertificateMatchResult {
+                    remote_id: Some(remote.id.clone()),
+                    remote_domains: remote.domains.clone(),
+                    strategy: "remote_id",
+                });
+            }
+
+            bail!(
+                "本地证书 #{} 绑定的雷池证书 {} 仍存在，但域名集合已漂移。本地域名：{}；远端域名：{}。请先人工确认后再同步。",
+                local_certificate.id,
+                remote.id,
+                normalized_local_domains.join(", "),
+                normalized_remote_domains.join(", ")
+            );
+        }
+    }
+
+    let domain_matches = remote_certificates
+        .iter()
+        .filter(|item| normalized_domain_set(&item.domains) == normalized_local_domains)
+        .collect::<Vec<_>>();
+
+    if domain_matches.len() == 1 {
+        let remote = domain_matches[0];
+        return Ok(RemoteCertificateMatchResult {
+            remote_id: Some(remote.id.clone()),
+            remote_domains: remote.domains.clone(),
+            strategy: "domains",
+        });
+    }
+
+    if domain_matches.len() > 1 {
+        bail!(
+            "雷池中存在多张域名集合相同的证书（{}），当前无法自动判断应覆盖哪一张，请先人工处理。",
+            normalized_local_domains.join(", ")
+        );
+    }
+
+    Ok(RemoteCertificateMatchResult {
+        remote_id: None,
+        remote_domains: Vec::new(),
+        strategy: "create",
+    })
+}
+
+async fn update_certificate_sync_metadata(
+    store: &SqliteStore,
+    certificate: &LocalCertificateEntry,
+    metadata: CertificateSyncMetadataUpdate,
+) -> Result<()> {
+    let upsert = LocalCertificateUpsert {
+        name: certificate.name.clone(),
+        domains: parse_json_vec(&certificate.domains_json)?,
+        issuer: certificate.issuer.clone(),
+        valid_from: certificate.valid_from,
+        valid_to: certificate.valid_to,
+        source_type: certificate.source_type.clone(),
+        provider_remote_id: metadata.provider_remote_id,
+        provider_remote_domains: metadata.provider_remote_domains,
+        last_remote_fingerprint: metadata.last_remote_fingerprint,
+        sync_status: metadata.sync_status,
+        sync_message: metadata.sync_message,
+        auto_sync_enabled: certificate.auto_sync_enabled,
+        trusted: certificate.trusted,
+        expired: certificate.expired,
+        notes: certificate.notes.clone(),
+        last_synced_at: metadata.last_synced_at,
+    };
+    store
+        .update_local_certificate(certificate.id, &upsert)
+        .await?;
+    Ok(())
 }
 
 fn replace_local_certificate(
@@ -1015,6 +1338,12 @@ fn replace_local_certificate(
         item.valid_to = upsert.valid_to;
         item.source_type = upsert.source_type.clone();
         item.provider_remote_id = upsert.provider_remote_id.clone();
+        item.provider_remote_domains_json = serde_json::to_string(&upsert.provider_remote_domains)
+            .unwrap_or_else(|_| "[]".to_string());
+        item.last_remote_fingerprint = upsert.last_remote_fingerprint.clone();
+        item.sync_status = upsert.sync_status.clone();
+        item.sync_message = upsert.sync_message.clone();
+        item.auto_sync_enabled = upsert.auto_sync_enabled;
         item.trusted = upsert.trusted;
         item.expired = upsert.expired;
         item.notes = upsert.notes.clone();
@@ -1252,7 +1581,7 @@ async fn create_remote_certificate(
     let summary = crate::integrations::safeline::create_certificate(
         config,
         &SafeLineCertificateUpsert {
-            domains,
+            domains: domains.clone(),
             certificate_pem: certificate_pem.to_string(),
             private_key_pem: private_key_pem.to_string(),
         },
@@ -1278,6 +1607,11 @@ async fn create_remote_certificate(
         valid_to: local_certificate.valid_to,
         source_type: local_certificate.source_type.clone(),
         provider_remote_id: Some(remote_id),
+        provider_remote_domains: domains,
+        last_remote_fingerprint: certificate_fingerprint(certificate_pem),
+        sync_status: "synced".to_string(),
+        sync_message: "站点推送时已创建雷池证书。".to_string(),
+        auto_sync_enabled: local_certificate.auto_sync_enabled,
         trusted: local_certificate.trusted,
         expired: local_certificate.expired,
         notes: local_certificate.notes.clone(),

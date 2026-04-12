@@ -55,6 +55,11 @@ const expiredModel = computed({
   set: (value: boolean) => updateForm('expired', value),
 })
 
+const autoSyncModel = computed({
+  get: () => props.form.auto_sync_enabled,
+  set: (value: boolean) => updateForm('auto_sync_enabled', value),
+})
+
 const certificatePemModel = computed({
   get: () => props.form.certificate_pem,
   set: (value: string) => updateForm('certificate_pem', value),
@@ -154,8 +159,21 @@ const privateKeyPemModel = computed({
               <input v-model="expiredModel" type="checkbox" />
               标记为已过期
             </label>
+            <label class="inline-flex items-center gap-2">
+              <input v-model="autoSyncModel" type="checkbox" />
+              变更后自动同步到雷池
+            </label>
           </div>
         </label>
+        <div
+          class="rounded-[16px] border border-slate-200 bg-slate-50 px-3.5 py-3 text-xs leading-5 text-slate-600"
+        >
+          <div>雷池远端 ID：{{ props.form.provider_remote_id || '未关联' }}</div>
+          <div class="mt-1">同步状态：{{ props.form.sync_status || 'idle' }}</div>
+          <div class="mt-1">
+            {{ props.form.sync_message || '保存后可手动同步到雷池。' }}
+          </div>
+        </div>
         <div
           v-if="mode === 'edit'"
           class="rounded-[16px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs leading-5 text-amber-900"

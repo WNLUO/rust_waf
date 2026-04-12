@@ -61,7 +61,6 @@ function createDefaultPullOptions(): SafeLineSitePullOptions {
     upstreams: true,
     enabled: true,
     tls_enabled: true,
-    local_certificate_id: false,
   }
 }
 

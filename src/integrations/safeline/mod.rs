@@ -7,7 +7,8 @@ mod sync_helpers;
 
 pub use api_client::{
     create_certificate, delete_blocked_ip, list_blocked_ips, list_certificates,
-    list_security_events, list_sites, load_certificate, probe, push_blocked_ip, upsert_site,
+    list_security_events, list_sites, load_certificate, probe, push_blocked_ip, update_certificate,
+    upsert_site,
 };
 
 #[derive(Debug, Clone, Serialize)]

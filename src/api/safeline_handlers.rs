@@ -217,7 +217,6 @@ pub(super) async fn pull_safeline_site_handler(
                 listen_ports: item.options.listen_ports,
                 upstreams: item.options.upstreams,
                 enabled: item.options.enabled,
-                tls_enabled: item.options.tls_enabled,
             },
         )
         .unwrap_or_default();

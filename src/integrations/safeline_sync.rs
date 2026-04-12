@@ -52,7 +52,6 @@ pub struct SafeLineSitePullOptions {
     pub listen_ports: bool,
     pub upstreams: bool,
     pub enabled: bool,
-    pub tls_enabled: bool,
 }
 
 impl Default for SafeLineSitePullOptions {
@@ -64,7 +63,6 @@ impl Default for SafeLineSitePullOptions {
             listen_ports: true,
             upstreams: true,
             enabled: true,
-            tls_enabled: true,
         }
     }
 }
@@ -1276,11 +1274,7 @@ fn merge_local_site_upsert_from_remote(
             } else {
                 existing_site.enabled
             },
-            tls_enabled: if options.tls_enabled {
-                remote_upsert.tls_enabled
-            } else {
-                existing_site.tls_enabled
-            },
+            tls_enabled: remote_upsert.tls_enabled,
             local_certificate_id: existing_site.local_certificate_id,
             source: existing_site.source.clone(),
             sync_mode: sync_mode.to_string(),
@@ -1311,9 +1305,6 @@ fn merge_local_site_upsert_from_remote(
         }
         if !options.enabled {
             created.enabled = true;
-        }
-        if !options.tls_enabled {
-            created.tls_enabled = false;
         }
         created.local_certificate_id = None;
         created

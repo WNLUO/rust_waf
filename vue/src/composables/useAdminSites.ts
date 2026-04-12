@@ -60,7 +60,6 @@ function createDefaultPullOptions(): SafeLineSitePullOptions {
     listen_ports: true,
     upstreams: true,
     enabled: true,
-    tls_enabled: true,
   }
 }
 

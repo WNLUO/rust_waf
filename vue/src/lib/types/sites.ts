@@ -255,7 +255,6 @@ export interface SafeLineSitePullOptions {
   listen_ports: boolean
   upstreams: boolean
   enabled: boolean
-  tls_enabled: boolean
 }
 
 export interface SafeLineSitePullRequest {

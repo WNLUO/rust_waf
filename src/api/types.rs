@@ -464,8 +464,6 @@ pub struct SafeLineSitePullOptionsRequest {
     pub(crate) upstreams: bool,
     #[serde(default = "default_true")]
     pub(crate) enabled: bool,
-    #[serde(default = "default_true")]
-    pub(crate) tls_enabled: bool,
 }
 
 impl Default for SafeLineSitePullOptionsRequest {
@@ -477,7 +475,6 @@ impl Default for SafeLineSitePullOptionsRequest {
             listen_ports: true,
             upstreams: true,
             enabled: true,
-            tls_enabled: true,
         }
     }
 }

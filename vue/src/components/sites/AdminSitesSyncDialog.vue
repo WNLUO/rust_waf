@@ -44,9 +44,8 @@ const fieldOptions: Array<{
   { key: 'primary_hostname', label: '主域名', description: '本地主域名字段' },
   { key: 'hostnames', label: 'Server Names', description: '附加域名列表' },
   { key: 'listen_ports', label: '端口', description: '监听端口列表' },
-  { key: 'upstreams', label: 'Upstream', description: '上游地址列表' },
+  { key: 'upstreams', label: '下游地址', description: '下游地址列表' },
   { key: 'enabled', label: '启用状态', description: '是否启用该站点' },
-  { key: 'tls_enabled', label: 'TLS', description: 'TLS 开关状态' },
 ]
 
 function fieldChecked(
@@ -131,6 +130,9 @@ function fieldDisabled(
           <p class="text-xs text-slate-500">
             当前仅同步站点字段，不会回流雷池证书。证书请在“证书管理”页单独维护。
           </p>
+          <p class="text-xs text-slate-500">
+            TLS 状态会根据雷池站点的 SSL 端口和证书配置自动判断，无需单独选择。
+          </p>
         </div>
       </div>
 
@@ -203,7 +205,7 @@ function fieldDisabled(
                   <div class="space-y-0.5">
                     <p>{{ candidate.ports.length ? candidate.ports.join(' / ') : '-' }}</p>
                     <p class="text-slate-400">
-                      TLS:
+                      SSL端口:
                       {{
                         candidate.sslPorts.length
                           ? candidate.sslPorts.join(' / ')

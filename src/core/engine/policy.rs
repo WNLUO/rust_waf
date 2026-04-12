@@ -727,6 +727,7 @@ fn apply_response_policies(
 ) {
     let gateway = &context.config_snapshot().gateway_config;
     if gateway.enable_hsts {
+        response.retain(|(key, _)| !key.eq_ignore_ascii_case("strict-transport-security"));
         response.push((
             "strict-transport-security".to_string(),
             "max-age=31536000; includeSubDomains".to_string(),
@@ -1027,5 +1028,28 @@ mod tests {
 
         let rendered = expand_request_template("$host", &request);
         assert_eq!(rendered, "wnluo.com");
+    }
+
+    #[tokio::test]
+    async fn apply_response_policies_replaces_existing_hsts_header() {
+        let mut config = crate::config::Config::default();
+        config.gateway_config.enable_hsts = true;
+        let context = WafContext::new(config).await.unwrap();
+        let mut response = vec![
+            (
+                "strict-transport-security".to_string(),
+                "max-age=123".to_string(),
+            ),
+            ("content-type".to_string(), "text/plain".to_string()),
+        ];
+
+        apply_response_policies(&context, &mut response, 200);
+
+        let hsts: Vec<_> = response
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case("strict-transport-security"))
+            .collect();
+        assert_eq!(hsts.len(), 1);
+        assert_eq!(hsts[0].1, "max-age=31536000; includeSubDomains");
     }
 }

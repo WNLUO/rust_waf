@@ -194,6 +194,7 @@ impl Http2Handler {
         let body_len = response.body.len();
         let mut builder = Response::builder().status(status);
         let mut has_content_type = false;
+        let mut has_content_length = false;
 
         for (key, value) in response.headers {
             if key.eq_ignore_ascii_case("transfer-encoding") || key.starts_with(':') {
@@ -202,13 +203,19 @@ impl Http2Handler {
             if key.eq_ignore_ascii_case("content-type") {
                 has_content_type = true;
             }
+            if key.eq_ignore_ascii_case("content-length") {
+                has_content_length = true;
+                continue;
+            }
             builder = builder.header(key, value);
         }
 
         if !has_content_type {
             builder = builder.header("content-type", "text/plain; charset=utf-8");
         }
-        builder = builder.header("content-length", body_len.to_string());
+        if has_content_length || body_len > 0 || status != StatusCode::NO_CONTENT {
+            builder = builder.header("content-length", body_len.to_string());
+        }
 
         builder
             .body(Full::new(Bytes::from(response.body)))
@@ -397,5 +404,21 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get("transfer-encoding").is_none());
         assert_eq!(response.headers()["content-type"], "text/plain");
+    }
+
+    #[test]
+    fn test_build_response_rewrites_duplicate_content_length() {
+        let response = Http2Handler::build_response(Http2Response {
+            status_code: 200,
+            headers: vec![
+                ("content-length".to_string(), "999".to_string()),
+                ("content-type".to_string(), "text/plain".to_string()),
+            ],
+            body: b"ok".to_vec(),
+        });
+
+        let values = response.headers().get_all("content-length");
+        assert_eq!(values.iter().count(), 1);
+        assert_eq!(response.headers()["content-length"], "2");
     }
 }

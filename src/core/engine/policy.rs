@@ -532,12 +532,15 @@ fn apply_client_identity(
     );
 }
 
-fn prepare_request_for_proxy(context: &WafContext, request: &mut UnifiedHttpRequest) {
+fn prepare_request_for_routing(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
     if context.config_snapshot().gateway_config.enable_ntlm && request_looks_like_ntlm(request) {
         request.add_metadata("proxy_connection_mode".to_string(), "keep-alive".to_string());
     }
     apply_standard_forwarding_headers(context, request);
+}
+
+fn prepare_request_for_proxy(context: &WafContext, request: &mut UnifiedHttpRequest) {
     apply_request_rewrite_policy(context, request);
     apply_request_header_operations(context, request);
 }

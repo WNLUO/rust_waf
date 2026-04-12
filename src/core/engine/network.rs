@@ -176,7 +176,7 @@ async fn handle_http3_request(
         std::net::SocketAddr::new(packet.source_ip, packet.source_port),
         &mut unified,
     );
-    prepare_request_for_proxy(context.as_ref(), &mut unified);
+    prepare_request_for_routing(context.as_ref(), &mut unified);
     let matched_site = resolve_gateway_site(context.as_ref(), &unified);
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);
@@ -198,6 +198,8 @@ async fn handle_http3_request(
         .await?;
         return Ok(());
     }
+
+    prepare_request_for_proxy(context.as_ref(), &mut unified);
 
     let request_dump = unified.to_inspection_string();
     if let Some(metrics) = context.metrics.as_ref() {
@@ -639,7 +641,7 @@ async fn handle_http1_connection(
         for (key, value) in &extra_metadata {
             request.add_metadata(key.clone(), value.clone());
         }
-        prepare_request_for_proxy(context.as_ref(), &mut request);
+        prepare_request_for_routing(context.as_ref(), &mut request);
         let matched_site = resolve_gateway_site(context.as_ref(), &request);
         if let Some(site) = matched_site.as_ref() {
             apply_gateway_site_metadata(&mut request, site);
@@ -700,6 +702,8 @@ async fn handle_http1_connection(
             }
             continue;
         }
+
+        prepare_request_for_proxy(context.as_ref(), &mut request);
 
         debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
 
@@ -953,7 +957,7 @@ async fn handle_http2_connection(
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);
                     }
-                    prepare_request_for_proxy(context.as_ref(), &mut request);
+                    prepare_request_for_routing(context.as_ref(), &mut request);
                     let matched_site = resolve_gateway_site(context.as_ref(), &request);
                     if let Some(site) = matched_site.as_ref() {
                         apply_gateway_site_metadata(&mut request, site);
@@ -974,6 +978,8 @@ async fn handle_http2_connection(
                             body,
                         });
                     }
+
+                    prepare_request_for_proxy(context.as_ref(), &mut request);
 
                     debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
 
@@ -1163,4 +1169,3 @@ async fn handle_http2_connection(
 
     Ok(())
 }
-

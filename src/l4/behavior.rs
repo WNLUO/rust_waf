@@ -1068,4 +1068,29 @@ mod tests {
                 >= 1
         );
     }
+
+    #[tokio::test]
+    async fn connection_admission_reacts_to_active_connection_pressure() {
+        let engine = L4BehaviorEngine::new(&L4Config {
+            max_tracked_ips: 16,
+            ..L4Config::default()
+        });
+        let p = packet(21);
+        let mut key = None;
+
+        for idx in 0..220 {
+            key = Some(engine.observe_connection_open(
+                format!("active-{idx}"),
+                &PacketInfo { timestamp: idx, ..p.clone() },
+                Some("busy.example"),
+                Some("h2"),
+                "tls",
+                "h2",
+            ));
+        }
+
+        sleep(Duration::from_millis(50)).await;
+        let policy = engine.connection_admission_for_key(&key.expect("bucket key"));
+        assert!(policy.suggested_delay_ms > 0 || policy.reject_new_connections);
+    }
 }

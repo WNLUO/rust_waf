@@ -21,7 +21,7 @@ fn unique_test_db_path(name: &str) -> String {
 
 #[test]
 fn test_build_metrics_response_without_sources() {
-    let response = build_metrics_response(None, 0, None);
+    let response = build_metrics_response(None, 0, None, None);
 
     assert_eq!(response.total_packets, 0);
     assert_eq!(response.blocked_packets, 0);
@@ -32,6 +32,8 @@ fn test_build_metrics_response_without_sources() {
     assert_eq!(response.persisted_rules, 0);
     assert!(response.last_persisted_event_at.is_none());
     assert!(response.last_rule_update_at.is_none());
+    assert_eq!(response.l4_bucket_count, 0);
+    assert_eq!(response.l4_overload_level, "normal");
 }
 
 #[test]
@@ -60,6 +62,20 @@ fn test_build_metrics_response_with_sources() {
             rules: 5,
             latest_rule_update_at: Some(1234567899),
         }),
+        Some(crate::l4::behavior::L4BehaviorOverview {
+            bucket_count: 9,
+            fine_grained_buckets: 5,
+            coarse_buckets: 3,
+            peer_only_buckets: 1,
+            normal_buckets: 4,
+            suspicious_buckets: 3,
+            high_risk_buckets: 2,
+            safeline_feedback_hits: 6,
+            l7_feedback_hits: 8,
+            dropped_events: 11,
+            overload_level: crate::l4::behavior::L4OverloadLevel::High,
+            overload_reason: Some("bucket_pressure".to_string()),
+        }),
     );
 
     assert_eq!(response.total_packets, 12);
@@ -82,6 +98,13 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.persisted_rules, 5);
     assert_eq!(response.last_persisted_event_at, Some(1234567890));
     assert_eq!(response.last_rule_update_at, Some(1234567899));
+    assert_eq!(response.l4_bucket_count, 9);
+    assert_eq!(response.l4_fine_grained_buckets, 5);
+    assert_eq!(response.l4_coarse_buckets, 3);
+    assert_eq!(response.l4_peer_only_buckets, 1);
+    assert_eq!(response.l4_high_risk_buckets, 2);
+    assert_eq!(response.l4_behavior_dropped_events, 11);
+    assert_eq!(response.l4_overload_level, "high");
 }
 
 #[test]

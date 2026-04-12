@@ -19,6 +19,13 @@ pub struct MetricsResponse {
     pub(crate) persisted_rules: u64,
     pub(crate) last_persisted_event_at: Option<i64>,
     pub(crate) last_rule_update_at: Option<i64>,
+    pub(crate) l4_bucket_count: u64,
+    pub(crate) l4_fine_grained_buckets: u64,
+    pub(crate) l4_coarse_buckets: u64,
+    pub(crate) l4_peer_only_buckets: u64,
+    pub(crate) l4_high_risk_buckets: u64,
+    pub(crate) l4_behavior_dropped_events: u64,
+    pub(crate) l4_overload_level: String,
 }
 
 #[derive(Debug, Serialize)]

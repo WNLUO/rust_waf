@@ -33,5 +33,9 @@ pub(super) async fn metrics_handler(State(state): State<ApiState>) -> Json<Metri
         metrics,
         state.context.active_rule_count(),
         storage_summary,
+        state
+            .context
+            .l4_inspector()
+            .map(|inspector| inspector.get_statistics().behavior.overview),
     ))
 }

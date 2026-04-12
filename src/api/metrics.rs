@@ -4,6 +4,7 @@ pub(super) fn build_metrics_response(
     metrics: Option<crate::metrics::MetricsSnapshot>,
     active_rules: u64,
     storage_summary: Option<crate::storage::StorageMetricsSummary>,
+    l4_behavior: Option<crate::l4::behavior::L4BehaviorOverview>,
 ) -> MetricsResponse {
     let snapshot = metrics.unwrap_or(crate::metrics::MetricsSnapshot {
         total_packets: 0,
@@ -22,6 +23,20 @@ pub(super) fn build_metrics_response(
     });
     let sqlite_enabled = storage_summary.is_some();
     let storage_summary = storage_summary.unwrap_or_default();
+    let l4_behavior = l4_behavior.unwrap_or(crate::l4::behavior::L4BehaviorOverview {
+        bucket_count: 0,
+        fine_grained_buckets: 0,
+        coarse_buckets: 0,
+        peer_only_buckets: 0,
+        normal_buckets: 0,
+        suspicious_buckets: 0,
+        high_risk_buckets: 0,
+        safeline_feedback_hits: 0,
+        l7_feedback_hits: 0,
+        dropped_events: 0,
+        overload_level: crate::l4::behavior::L4OverloadLevel::Normal,
+        overload_reason: None,
+    });
 
     MetricsResponse {
         total_packets: snapshot.total_packets,
@@ -44,5 +59,16 @@ pub(super) fn build_metrics_response(
         persisted_rules: storage_summary.rules,
         last_persisted_event_at: storage_summary.latest_event_at,
         last_rule_update_at: storage_summary.latest_rule_update_at,
+        l4_bucket_count: l4_behavior.bucket_count,
+        l4_fine_grained_buckets: l4_behavior.fine_grained_buckets,
+        l4_coarse_buckets: l4_behavior.coarse_buckets,
+        l4_peer_only_buckets: l4_behavior.peer_only_buckets,
+        l4_high_risk_buckets: l4_behavior.high_risk_buckets,
+        l4_behavior_dropped_events: l4_behavior.dropped_events,
+        l4_overload_level: match l4_behavior.overload_level {
+            crate::l4::behavior::L4OverloadLevel::Normal => "normal".to_string(),
+            crate::l4::behavior::L4OverloadLevel::High => "high".to_string(),
+            crate::l4::behavior::L4OverloadLevel::Critical => "critical".to_string(),
+        },
     }
 }

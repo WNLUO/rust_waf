@@ -2,40 +2,31 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import {
   createLocalSite,
   deleteLocalSite,
-  fetchGlobalEntryConfig,
   fetchLocalSites,
   pullSafeLineSite,
   pushSafeLineSite,
   updateLocalSite,
-  updateGlobalEntryConfig,
 } from '@/shared/api/sites'
-import { fetchL7Config } from '@/shared/api/l7'
-import { fetchLocalCertificates } from '@/shared/api/certificates'
 import {
   fetchCachedSafeLineSites,
   fetchSafeLineMappings,
   fetchSafeLineSites,
   fetchSiteSyncLinks,
-  testSafeLineConnection,
 } from '@/shared/api/safeline'
-import { fetchSettings } from '@/shared/api/settings'
 import {
   mergeSiteRows,
   type SiteRowDraft,
 } from '@/features/sites/utils/adminSites'
 import { useAdminSitesEditor } from './useAdminSitesEditor'
+import { useAdminSitesGlobalEntry } from './useAdminSitesGlobalEntry'
+import { useAdminSitesData } from './useAdminSitesData'
 import { useAdminSitesSync } from './useAdminSitesSync'
 import { useNotifications } from '@/shared/composables/useNotifications'
 import type {
-  LocalCertificateItem,
   LocalSiteDraft,
   LocalSiteItem,
   SafeLineSitePullOptions,
-  SafeLineMappingItem,
-  SafeLineSiteItem,
-  SafeLineTestResponse,
   SettingsPayload,
-  SiteSyncLinkItem,
 } from '@/shared/types'
 
 export type LocalSitesStateFilter = 'all' | 'enabled' | 'disabled'
@@ -85,35 +76,8 @@ export function useAdminSites(
   formatTimestamp: (timestamp?: number | null) => string,
 ) {
   const { notifyError, notifySuccess } = useNotifications()
-  const loading = ref(true)
   const error = ref('')
   const successMessage = ref('')
-  const settings = ref<SettingsPayload | null>(null)
-  const globalL7Config = ref<Awaited<ReturnType<typeof fetchL7Config>> | null>(null)
-  const mappings = ref<SafeLineMappingItem[]>([])
-  const sites = ref<SafeLineSiteItem[]>([])
-  const localSites = ref<LocalSiteItem[]>([])
-  const localCertificates = ref<LocalCertificateItem[]>([])
-  const siteLinks = ref<SiteSyncLinkItem[]>([])
-  const testResult = ref<SafeLineTestResponse | null>(null)
-  const siteRows = ref<SiteRowDraft[]>([])
-  const sitesLoadedAt = ref<number | null>(null)
-  const isGlobalEntryModalOpen = ref(false)
-  const globalEntryForm = reactive({
-    http_port: '',
-    https_port: '',
-  })
-
-  const actions = reactive({
-    refreshing: false,
-    testing: false,
-    loadingSites: false,
-    loadingCertificates: false,
-    savingLocalSite: false,
-    deletingLocalSite: false,
-    savingGlobalEntry: false,
-  })
-
   const filters = reactive({
     keyword: '',
     state: 'all' as LocalSitesStateFilter,
@@ -127,6 +91,14 @@ export function useAdminSites(
     error.value = ''
     successMessage.value = ''
   }
+  const data = useAdminSitesData({
+    clearFeedback,
+    error,
+    resetLocalSiteForm: () => {
+      // initialized below; this placeholder is replaced immediately after editor setup
+    },
+    successMessage,
+  })
   const {
     closeLocalSiteModal,
     currentLocalSite,
@@ -142,7 +114,13 @@ export function useAdminSites(
     resetLocalSiteForm,
     siteDraftFromItem,
     upstreamsText,
-  } = useAdminSitesEditor(settings, localSites, globalL7Config)
+  } = useAdminSitesEditor(data.settings, data.localSites, data.globalL7Config)
+  const dataWithEditor = useAdminSitesData({
+    clearFeedback,
+    error,
+    resetLocalSiteForm,
+    successMessage,
+  })
 
   const hasSavedConfig = computed(() =>
     Boolean(settings.value?.safeline.base_url.trim()),

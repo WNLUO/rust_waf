@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AdminGlobalEntryDialog from '@/features/sites/components/AdminGlobalEntryDialog.vue'
 import AdminSiteEditorDialog from '@/features/sites/components/AdminSiteEditorDialog.vue'
 import AdminSitesSyncDialog from '@/features/sites/components/AdminSitesSyncDialog.vue'
 import AdminSitesSummarySection from '@/features/sites/components/AdminSitesSummarySection.vue'
@@ -22,8 +23,10 @@ const {
   error,
   filteredRows,
   filters,
+  globalEntryForm,
   hasSavedConfig,
   hostnamesText,
+  isGlobalEntryModalOpen,
   isLocalSiteModalOpen,
   isRemoteSyncDialogOpen,
   localActionLabel,
@@ -31,6 +34,7 @@ const {
   localSiteForm,
   localSites,
   openCreateLocalSiteModal,
+  openGlobalEntryModal,
   openRemoteSyncDialog,
   primaryDraft,
   remoteSyncCandidates,
@@ -39,11 +43,13 @@ const {
   removeCurrentLocalSite,
   resetLocalSiteForm,
   rowSyncText,
+  saveGlobalEntry,
   saveLocalSite,
   sitesLoadedAt,
   selectedRemoteSiteIds,
   selectRecommendedRemoteSites,
   clearRemoteSiteSelection,
+  closeGlobalEntryModal,
   closeRemoteSyncDialog,
   successMessage,
   syncLocalSite,
@@ -93,6 +99,7 @@ useFlashMessages({
         :total-sites-with-remote-link="totalSitesWithRemoteLink"
         @create-local-site="openCreateLocalSiteModal"
         @load-remote="openRemoteSyncDialog"
+        @open-global-entry="openGlobalEntryModal"
         @open-global-settings="openGlobalSettingsPage"
         @refresh="refreshPageData"
         @update:keyword="filters.keyword = $event"
@@ -116,6 +123,15 @@ useFlashMessages({
         @sync-local-site="syncLocalSite"
       />
     </div>
+
+    <AdminGlobalEntryDialog
+      :actions="actions"
+      :form="globalEntryForm"
+      :is-open="isGlobalEntryModalOpen"
+      @close="closeGlobalEntryModal"
+      @save="saveGlobalEntry"
+      @update:form="Object.assign(globalEntryForm, $event)"
+    />
 
     <AdminSiteEditorDialog
       :actions="actions"

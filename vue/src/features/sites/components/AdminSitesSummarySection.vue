@@ -25,6 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   createLocalSite: []
+  openGlobalEntry: []
   openGlobalSettings: []
   refresh: []
   loadRemote: []
@@ -119,6 +120,13 @@ const stateModel = computed({
             :class="{ 'animate-spin': actions.refreshing }"
           />
           {{ actions.refreshing ? '刷新中...' : '刷新列表' }}
+        </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+          @click="emit('openGlobalEntry')"
+        >
+          <Network :size="14" />
+          全局入口
         </button>
         <button
           class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"

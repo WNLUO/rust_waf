@@ -1319,6 +1319,17 @@ enum UpstreamResponseDisposition {
     Drop,
 }
 
+enum UpstreamClientConnection {
+    Plain {
+        authority: String,
+        stream: TcpStream,
+    },
+    Tls {
+        authority: String,
+        stream: tokio_rustls::client::TlsStream<TcpStream>,
+    },
+}
+
 fn resolve_runtime_custom_response(response: &CustomHttpResponse) -> CustomHttpResponse {
     let mut resolved = response.clone();
     if let Some(random_status) = response.random_status.as_ref() {
@@ -1387,6 +1398,111 @@ async fn proxy_http_request(
         proxy_raw_http1_over_stream(tls_stream, request, write_timeout_ms, read_timeout_ms).await?;
     context.set_upstream_health(true, None);
     Ok(parsed)
+}
+
+async fn proxy_http_request_with_session_affinity(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream_addr: &str,
+    connect_timeout_ms: u64,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
+    reusable_connection: &mut Option<UpstreamClientConnection>,
+) -> Result<UpstreamHttpResponse> {
+    let upstream = parse_upstream_endpoint(upstream_addr)?;
+    let same_authority = reusable_connection
+        .as_ref()
+        .map(|connection| match connection {
+            UpstreamClientConnection::Plain { authority, .. }
+            | UpstreamClientConnection::Tls { authority, .. } => authority == &upstream.authority,
+        })
+        .unwrap_or(false);
+    if !same_authority {
+        *reusable_connection = None;
+    }
+    if reusable_connection.is_none() {
+        *reusable_connection = Some(
+            connect_upstream_client(&upstream, connect_timeout_ms).await?,
+        );
+    }
+
+    let response = match reusable_connection.as_mut() {
+        Some(UpstreamClientConnection::Plain { stream, .. }) => {
+            proxy_raw_http1_over_stream(stream, request, write_timeout_ms, read_timeout_ms).await
+        }
+        Some(UpstreamClientConnection::Tls { stream, .. }) => {
+            proxy_raw_http1_over_stream(stream, request, write_timeout_ms, read_timeout_ms).await
+        }
+        None => Err(anyhow::anyhow!("missing upstream connection after connect")),
+    };
+
+    match response {
+        Ok(response) => {
+            let should_close = response
+                .headers
+                .iter()
+                .any(|(key, value)| {
+                    key.eq_ignore_ascii_case("connection")
+                        && value.to_ascii_lowercase().contains("close")
+                });
+            if should_close {
+                *reusable_connection = None;
+            }
+            context.set_upstream_health(true, None);
+            Ok(response)
+        }
+        Err(err) => {
+            *reusable_connection = None;
+            Err(err)
+        }
+    }
+}
+
+async fn connect_upstream_client(
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    connect_timeout_ms: u64,
+) -> Result<UpstreamClientConnection> {
+    match upstream.scheme {
+        UpstreamScheme::Http => {
+            let stream = tokio::time::timeout(
+                std::time::Duration::from_millis(connect_timeout_ms),
+                TcpStream::connect(upstream.authority.as_str()),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+            Ok(UpstreamClientConnection::Plain {
+                authority: upstream.authority.clone(),
+                stream,
+            })
+        }
+        UpstreamScheme::Https => {
+            let upstream_stream = tokio::time::timeout(
+                std::time::Duration::from_millis(connect_timeout_ms),
+                TcpStream::connect(upstream.authority.as_str()),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+            let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
+            let server_name = ServerName::try_from(
+                authority_uri
+                    .host()
+                    .ok_or_else(|| anyhow::anyhow!("HTTPS upstream missing host"))?
+                    .to_string(),
+            )
+            .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
+            let tls_connector = build_insecure_upstream_tls_connector();
+            let stream = tokio::time::timeout(
+                std::time::Duration::from_millis(connect_timeout_ms),
+                tls_connector.connect(server_name, upstream_stream),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Upstream TLS handshake timed out"))??;
+            Ok(UpstreamClientConnection::Tls {
+                authority: upstream.authority.clone(),
+                stream,
+            })
+        }
+    }
 }
 
 async fn proxy_raw_http1_over_stream<S>(
@@ -2028,261 +2144,298 @@ async fn handle_http1_connection(
 ) -> Result<()> {
     let config = context.config_snapshot();
     let http1_handler = Http1Handler::new();
+    let extra_metadata = extra_metadata;
+    let mut reusable_upstream_connection = None;
 
-    // 读取HTTP/1.1请求
-    let mut request = http1_handler
-        .read_request(
-            &mut stream,
-            config.l7_config.max_request_size,
-            config.l7_config.first_byte_timeout_ms,
-            config.l7_config.read_idle_timeout_ms,
-        )
-        .await?;
-
-    apply_client_identity(context.as_ref(), peer_addr, &mut request);
-    request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
-    request.add_metadata("protocol".to_string(), "HTTP/1.1".to_string());
-    for (key, value) in extra_metadata {
-        request.add_metadata(key, value);
-    }
-    prepare_request_for_proxy(context.as_ref(), &mut request);
-    let matched_site = resolve_gateway_site(context.as_ref(), &request);
-    if let Some(site) = matched_site.as_ref() {
-        apply_gateway_site_metadata(&mut request, site);
-    }
-
-    if request.uri.is_empty() {
-        debug!("Empty request from {}, ignoring", peer_addr);
-        return Ok(());
-    }
-
-    if matches!(request.version, HttpVersion::Http1_0) && !config.gateway_config.enable_http1_0 {
-        http1_handler
-            .write_response(&mut stream, 505, "HTTP Version Not Supported", b"http/1.0 disabled")
-            .await?;
-        return Ok(());
-    }
-
-    if let Some(location) = redirect_to_https_location(context.as_ref(), &request) {
-        http1_handler
-            .write_response_with_headers(
+    loop {
+        // 读取HTTP/1.1请求
+        let mut request = http1_handler
+            .read_request(
                 &mut stream,
-                308,
-                "Permanent Redirect",
-                &[("location".to_string(), location)],
-                b"",
+                config.l7_config.max_request_size,
+                config.l7_config.first_byte_timeout_ms,
+                config.l7_config.read_idle_timeout_ms,
             )
             .await?;
-        return Ok(());
-    }
 
-    if let Some(response) = try_handle_browser_fingerprint_report(
-        context.as_ref(),
-        packet,
-        &request,
-        matched_site.as_ref(),
-    ) {
-        let body = body_for_request(&request, &response.body);
-        http1_handler
-            .write_response_with_headers(
-                &mut stream,
-                response.status_code,
-                http_status_text(response.status_code),
-                &response.headers,
-                &body,
-            )
-            .await?;
-        return Ok(());
-    }
-
-    debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
-
-    let request_dump = request.to_inspection_string();
-    if let Some(metrics) = context.metrics.as_ref() {
-        metrics.record_packet(request_dump.len());
-    }
-
-    let inspection_result =
-        inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
-
-    if inspection_result.should_persist_event() {
-        persist_http_inspection_event(context.as_ref(), packet, &request, &inspection_result);
-    }
-
-    // 写入响应
-    if inspection_result.blocked {
-        if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_block(inspection_result.layer.clone());
+        apply_client_identity(context.as_ref(), peer_addr, &mut request);
+        request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
+        request.add_metadata("protocol".to_string(), "HTTP/1.1".to_string());
+        for (key, value) in &extra_metadata {
+            request.add_metadata(key.clone(), value.clone());
         }
-        if let Some(response) = inspection_result.custom_response.as_ref() {
-            let response = resolve_runtime_custom_response(response);
-            let body = body_for_request(&request, &response.body);
-            if let Some(tarpit) = response.tarpit.as_ref() {
-                http1_handler
-                    .write_response_with_headers_tarpit(
-                        &mut stream,
-                        response.status_code,
-                        http_status_text(response.status_code),
-                        &response.headers,
-                        &body,
-                        tarpit,
-                    )
-                    .await?;
-            } else {
-                http1_handler
-                    .write_response_with_headers(
-                        &mut stream,
-                        response.status_code,
-                        http_status_text(response.status_code),
-                        &response.headers,
-                        &body,
-                    )
-                    .await?;
-            }
+        prepare_request_for_proxy(context.as_ref(), &mut request);
+        let matched_site = resolve_gateway_site(context.as_ref(), &request);
+        if let Some(site) = matched_site.as_ref() {
+            apply_gateway_site_metadata(&mut request, site);
+        }
+
+        if request.uri.is_empty() {
+            debug!("Empty request from {}, ignoring", peer_addr);
             return Ok(());
         }
-        http1_handler
-            .write_response(
-                &mut stream,
-                403,
-                "Forbidden",
-                inspection_result.reason.as_bytes(),
-            )
-            .await?;
-    } else {
-        let upstream_addr = select_upstream_target(context.as_ref(), matched_site.as_ref());
-        if let Some(upstream_addr) = upstream_addr.as_deref() {
-            if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_fail_close_rejection();
-                }
-                http1_handler
-                    .write_response(
-                        &mut stream,
-                        503,
-                        "Service Unavailable",
-                        reason.to_string().as_bytes(),
-                    )
-                    .await?;
-                return Ok(());
-            }
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_proxy_attempt();
-            }
-            let proxy_started_at = Instant::now();
-            match proxy_http_request(
-                context.as_ref(),
-                &request,
-                upstream_addr,
-                config.l7_config.proxy_connect_timeout_ms,
-                config.l7_config.proxy_write_timeout_ms,
-                config.l7_config.proxy_read_timeout_ms,
-            )
-            .await
-            {
-                Ok(response) => {
-                    if let Some(metrics) = context.metrics.as_ref() {
-                        metrics.record_proxy_success(proxy_started_at.elapsed());
-                    }
-                    match apply_safeline_upstream_action(
-                        context.as_ref(),
-                        packet,
-                        &request,
-                        matched_site.as_ref(),
-                        resolve_safeline_intercept_config(&config, matched_site.as_ref()),
-                        response,
-                    ) {
-                        UpstreamResponseDisposition::Forward(response) => {
-                            write_http1_upstream_response(context.as_ref(), &mut stream, &response)
-                                .await?;
-                        }
-                        UpstreamResponseDisposition::Custom(response) => {
-                            let response = resolve_runtime_custom_response(&response);
-                            let body = body_for_request(&request, &response.body);
-                            let mut headers = response.headers.clone();
-                            apply_response_policies(
-                                context.as_ref(),
-                                &mut headers,
-                                response.status_code,
-                            );
-                            if let Some(tarpit) = response.tarpit.as_ref() {
-                                http1_handler
-                                    .write_response_with_headers_tarpit(
-                                        &mut stream,
-                                        response.status_code,
-                                        http_status_text(response.status_code),
-                                        &headers,
-                                        &body,
-                                        tarpit,
-                                    )
-                                    .await?;
-                            } else {
-                                http1_handler
-                                    .write_response_with_headers(
-                                        &mut stream,
-                                        response.status_code,
-                                        http_status_text(response.status_code),
-                                        &headers,
-                                        &body,
-                                    )
-                                    .await?;
-                            }
-                        }
-                        UpstreamResponseDisposition::Drop => {
-                            let _ = stream.shutdown().await;
-                        }
-                    }
-                }
-                Err(err) => {
-                    if let Some(metrics) = context.metrics.as_ref() {
-                        metrics.record_proxy_failure();
-                    }
-                    context.set_upstream_health(false, Some(err.to_string()));
-                    warn!(
-                        "Failed to proxy HTTP/1.1 request from {} to {}: {}",
-                        peer_addr, upstream_addr, err
-                    );
-                    http1_handler
-                        .write_response(&mut stream, 502, "Bad Gateway", b"upstream proxy failed")
-                        .await?;
-                }
-            }
-        } else if matched_site.is_some() {
+
+        if matches!(request.version, HttpVersion::Http1_0) && !config.gateway_config.enable_http1_0
+        {
             http1_handler
                 .write_response(
                     &mut stream,
-                    502,
-                    "Bad Gateway",
-                    b"site upstream not configured",
+                    505,
+                    "HTTP Version Not Supported",
+                    b"http/1.0 disabled",
                 )
                 .await?;
-        } else if should_reject_unmatched_site(context.as_ref(), &request) {
-            http1_handler
-                .write_response(&mut stream, 421, "Misdirected Request", b"site not found")
-                .await?;
-        } else {
-            let metrics = context.metrics_snapshot();
-            let metrics_line = metrics
-                .map(|snapshot| {
-                    format!(
-                        "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
-                        snapshot.total_packets,
-                        snapshot.blocked_packets,
-                        snapshot.blocked_l4,
-                        snapshot.blocked_l7,
-                        snapshot.total_bytes
-                    )
-                })
-                .unwrap_or_else(|| "metrics=disabled".to_string());
+            return Ok(());
+        }
 
-            let body = format!("allowed\n{}\n", metrics_line);
+        if let Some(location) = redirect_to_https_location(context.as_ref(), &request) {
             http1_handler
-                .write_response(&mut stream, 200, "OK", body.as_bytes())
+                .write_response_with_headers(
+                    &mut stream,
+                    308,
+                    "Permanent Redirect",
+                    &[("location".to_string(), location)],
+                    b"",
+                )
                 .await?;
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+
+        if let Some(response) = try_handle_browser_fingerprint_report(
+            context.as_ref(),
+            packet,
+            &request,
+            matched_site.as_ref(),
+        ) {
+            let body = body_for_request(&request, &response.body);
+            http1_handler
+                .write_response_with_headers(
+                    &mut stream,
+                    response.status_code,
+                    http_status_text(response.status_code),
+                    &response.headers,
+                    &body,
+                )
+                .await?;
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+
+        debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
+
+        let request_dump = request.to_inspection_string();
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_packet(request_dump.len());
+        }
+
+        let inspection_result =
+            inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
+
+        if inspection_result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), packet, &request, &inspection_result);
+        }
+
+        // 写入响应
+        if inspection_result.blocked {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(inspection_result.layer.clone());
+            }
+            if let Some(response) = inspection_result.custom_response.as_ref() {
+                let response = resolve_runtime_custom_response(response);
+                let body = body_for_request(&request, &response.body);
+                if let Some(tarpit) = response.tarpit.as_ref() {
+                    http1_handler
+                        .write_response_with_headers_tarpit(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                            tarpit,
+                        )
+                        .await?;
+                } else {
+                    http1_handler
+                        .write_response_with_headers(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                        )
+                        .await?;
+                }
+            } else {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        403,
+                        "Forbidden",
+                        inspection_result.reason.as_bytes(),
+                    )
+                    .await?;
+            }
+        } else {
+            let upstream_addr = select_upstream_target(context.as_ref(), matched_site.as_ref());
+            if let Some(upstream_addr) = upstream_addr.as_deref() {
+                if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        metrics.record_fail_close_rejection();
+                    }
+                    http1_handler
+                        .write_response(
+                            &mut stream,
+                            503,
+                            "Service Unavailable",
+                            reason.to_string().as_bytes(),
+                        )
+                        .await?;
+                    return Ok(());
+                }
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_proxy_attempt();
+                }
+                let proxy_started_at = Instant::now();
+                let proxy_result = if config.gateway_config.enable_ntlm {
+                    proxy_http_request_with_session_affinity(
+                        context.as_ref(),
+                        &request,
+                        upstream_addr,
+                        config.l7_config.proxy_connect_timeout_ms,
+                        config.l7_config.proxy_write_timeout_ms,
+                        config.l7_config.proxy_read_timeout_ms,
+                        &mut reusable_upstream_connection,
+                    )
+                    .await
+                } else {
+                    proxy_http_request(
+                        context.as_ref(),
+                        &request,
+                        upstream_addr,
+                        config.l7_config.proxy_connect_timeout_ms,
+                        config.l7_config.proxy_write_timeout_ms,
+                        config.l7_config.proxy_read_timeout_ms,
+                    )
+                    .await
+                };
+                match proxy_result {
+                    Ok(response) => {
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_proxy_success(proxy_started_at.elapsed());
+                        }
+                        match apply_safeline_upstream_action(
+                            context.as_ref(),
+                            packet,
+                            &request,
+                            matched_site.as_ref(),
+                            resolve_safeline_intercept_config(&config, matched_site.as_ref()),
+                            response,
+                        ) {
+                            UpstreamResponseDisposition::Forward(response) => {
+                                write_http1_upstream_response(context.as_ref(), &mut stream, &response)
+                                    .await?;
+                            }
+                            UpstreamResponseDisposition::Custom(response) => {
+                                let response = resolve_runtime_custom_response(&response);
+                                let body = body_for_request(&request, &response.body);
+                                let mut headers = response.headers.clone();
+                                apply_response_policies(
+                                    context.as_ref(),
+                                    &mut headers,
+                                    response.status_code,
+                                );
+                                if let Some(tarpit) = response.tarpit.as_ref() {
+                                    http1_handler
+                                        .write_response_with_headers_tarpit(
+                                            &mut stream,
+                                            response.status_code,
+                                            http_status_text(response.status_code),
+                                            &headers,
+                                            &body,
+                                            tarpit,
+                                        )
+                                        .await?;
+                                } else {
+                                    http1_handler
+                                        .write_response_with_headers(
+                                            &mut stream,
+                                            response.status_code,
+                                            http_status_text(response.status_code),
+                                            &headers,
+                                            &body,
+                                        )
+                                        .await?;
+                                }
+                            }
+                            UpstreamResponseDisposition::Drop => {
+                                let _ = stream.shutdown().await;
+                                return Ok(());
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_proxy_failure();
+                        }
+                        context.set_upstream_health(false, Some(err.to_string()));
+                        warn!(
+                            "Failed to proxy HTTP/1.1 request from {} to {}: {}",
+                            peer_addr, upstream_addr, err
+                        );
+                        http1_handler
+                            .write_response(
+                                &mut stream,
+                                502,
+                                "Bad Gateway",
+                                b"upstream proxy failed",
+                            )
+                            .await?;
+                    }
+                }
+            } else if matched_site.is_some() {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        502,
+                        "Bad Gateway",
+                        b"site upstream not configured",
+                    )
+                    .await?;
+            } else if should_reject_unmatched_site(context.as_ref(), &request) {
+                http1_handler
+                    .write_response(&mut stream, 421, "Misdirected Request", b"site not found")
+                    .await?;
+            } else {
+                let metrics = context.metrics_snapshot();
+                let metrics_line = metrics
+                    .map(|snapshot| {
+                        format!(
+                            "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
+                            snapshot.total_packets,
+                            snapshot.blocked_packets,
+                            snapshot.blocked_l4,
+                            snapshot.blocked_l7,
+                            snapshot.total_bytes
+                        )
+                    })
+                    .unwrap_or_else(|| "metrics=disabled".to_string());
+
+                let body = format!("allowed\n{}\n", metrics_line);
+                http1_handler
+                    .write_response(&mut stream, 200, "OK", body.as_bytes())
+                    .await?;
+            }
+        }
+
+        if !should_keep_client_connection_open(&request) {
+            return Ok(());
         }
     }
-
-    Ok(())
 }
 
 /// 处理HTTP/2.0连接
@@ -3088,6 +3241,19 @@ fn request_looks_like_ntlm(request: &UnifiedHttpRequest) -> bool {
             let lower = value.to_ascii_lowercase();
             lower.starts_with("ntlm ") || lower.starts_with("negotiate ")
         })
+}
+
+fn should_keep_client_connection_open(request: &UnifiedHttpRequest) -> bool {
+    let connection = request
+        .get_header("connection")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    match request.version {
+        HttpVersion::Http1_0 => connection.contains("keep-alive"),
+        HttpVersion::Http1_1 => !connection.contains("close"),
+        _ => false,
+    }
 }
 
 fn apply_proxy_headers(

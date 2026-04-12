@@ -880,7 +880,7 @@ async fn handle_http3_request(
         std::net::SocketAddr::new(packet.source_ip, packet.source_port),
         &mut unified,
     );
-    prepare_request_for_proxy(&mut unified);
+    prepare_request_for_proxy(context.as_ref(), &mut unified);
     let matched_site = resolve_gateway_site(context.as_ref(), &unified);
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);
@@ -1228,7 +1228,7 @@ where
     )
     .await?;
     let approx_bytes = response.body.len() as u64;
-    write_http1_upstream_response(client_stream, &response).await?;
+    write_http1_upstream_response(context, client_stream, &response).await?;
     Ok(approx_bytes)
 }
 
@@ -1485,12 +1485,15 @@ fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
 }
 
 async fn write_http1_upstream_response<W>(
+    context: &WafContext,
     client_stream: &mut W,
     response: &UpstreamHttpResponse,
 ) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {
+    let mut headers = response.headers.clone();
+    apply_response_policies(context, &mut headers, response.status_code);
     Http1Handler::new()
         .write_response_with_headers(
             client_stream,
@@ -1499,7 +1502,7 @@ where
                 .status_text
                 .as_deref()
                 .unwrap_or(http_status_text(response.status_code)),
-            &response.headers,
+            &headers,
             &response.body,
         )
         .await?;
@@ -1877,7 +1880,7 @@ async fn handle_http1_connection(
     for (key, value) in extra_metadata {
         request.add_metadata(key, value);
     }
-    prepare_request_for_proxy(&mut request);
+    prepare_request_for_proxy(context.as_ref(), &mut request);
     let matched_site = resolve_gateway_site(context.as_ref(), &request);
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut request, site);
@@ -1885,6 +1888,26 @@ async fn handle_http1_connection(
 
     if request.uri.is_empty() {
         debug!("Empty request from {}, ignoring", peer_addr);
+        return Ok(());
+    }
+
+    if matches!(request.version, HttpVersion::Http1_0) && !config.gateway_config.enable_http1_0 {
+        http1_handler
+            .write_response(&mut stream, 505, "HTTP Version Not Supported", b"http/1.0 disabled")
+            .await?;
+        return Ok(());
+    }
+
+    if let Some(location) = redirect_to_https_location(context.as_ref(), &request) {
+        http1_handler
+            .write_response_with_headers(
+                &mut stream,
+                308,
+                "Permanent Redirect",
+                &[("location".to_string(), location)],
+                b"",
+            )
+            .await?;
         return Ok(());
     }
 
@@ -2005,18 +2028,25 @@ async fn handle_http1_connection(
                         response,
                     ) {
                         UpstreamResponseDisposition::Forward(response) => {
-                            write_http1_upstream_response(&mut stream, &response).await?;
+                            write_http1_upstream_response(context.as_ref(), &mut stream, &response)
+                                .await?;
                         }
                         UpstreamResponseDisposition::Custom(response) => {
                             let response = resolve_runtime_custom_response(&response);
                             let body = body_for_request(&request, &response.body);
+                            let mut headers = response.headers.clone();
+                            apply_response_policies(
+                                context.as_ref(),
+                                &mut headers,
+                                response.status_code,
+                            );
                             if let Some(tarpit) = response.tarpit.as_ref() {
                                 http1_handler
                                     .write_response_with_headers_tarpit(
                                         &mut stream,
                                         response.status_code,
                                         http_status_text(response.status_code),
-                                        &response.headers,
+                                        &headers,
                                         &body,
                                         tarpit,
                                     )
@@ -2027,7 +2057,7 @@ async fn handle_http1_connection(
                                         &mut stream,
                                         response.status_code,
                                         http_status_text(response.status_code),
-                                        &response.headers,
+                                        &headers,
                                         &body,
                                     )
                                     .await?;
@@ -2130,7 +2160,7 @@ async fn handle_http2_connection(
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);
                     }
-                    prepare_request_for_proxy(&mut request);
+                    prepare_request_for_proxy(context.as_ref(), &mut request);
                     let matched_site = resolve_gateway_site(context.as_ref(), &request);
                     if let Some(site) = matched_site.as_ref() {
                         apply_gateway_site_metadata(&mut request, site);
@@ -2143,9 +2173,11 @@ async fn handle_http2_connection(
                         matched_site.as_ref(),
                     ) {
                         let body = body_for_request(&request, &response.body);
+                        let mut headers = response.headers.clone();
+                        apply_response_policies(context.as_ref(), &mut headers, response.status_code);
                         return Ok(Http2Response {
                             status_code: response.status_code,
-                            headers: response.headers,
+                            headers,
                             body,
                         });
                     }
@@ -2180,9 +2212,15 @@ async fn handle_http2_connection(
                         if let Some(response) = inspection_result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
                             let body = body_for_request(&request, &response.body);
+                            let mut headers = response.headers.clone();
+                            apply_response_policies(
+                                context.as_ref(),
+                                &mut headers,
+                                response.status_code,
+                            );
                             return Ok(Http2Response {
                                 status_code: response.status_code,
-                                headers: response.headers,
+                                headers,
                                 body,
                             });
                         }
@@ -2239,18 +2277,30 @@ async fn handle_http2_connection(
                                     response,
                                 ) {
                                     UpstreamResponseDisposition::Forward(response) => {
+                                        let mut headers = response.headers.clone();
+                                        apply_response_policies(
+                                            context.as_ref(),
+                                            &mut headers,
+                                            response.status_code,
+                                        );
                                         Ok(Http2Response {
                                             status_code: response.status_code,
-                                            headers: response.headers,
+                                            headers,
                                             body: response.body,
                                         })
                                     }
                                     UpstreamResponseDisposition::Custom(response) => {
                                         let response = resolve_runtime_custom_response(&response);
                                         let body = body_for_request(&request, &response.body);
+                                        let mut headers = response.headers.clone();
+                                        apply_response_policies(
+                                            context.as_ref(),
+                                            &mut headers,
+                                            response.status_code,
+                                        );
                                         Ok(Http2Response {
                                             status_code: response.status_code,
-                                            headers: response.headers,
+                                            headers,
                                             body,
                                         })
                                     }
@@ -2832,8 +2882,8 @@ fn apply_client_identity(
     peer_addr: std::net::SocketAddr,
     request: &mut UnifiedHttpRequest,
 ) {
-    let resolved_client_ip = resolve_client_ip(context, peer_addr, request);
-    let used_forwarded_header = resolved_client_ip != peer_addr.ip();
+    let (resolved_client_ip, source_label) = resolve_client_ip(context, peer_addr, request);
+    let used_forwarded_header = source_label != "socket_peer";
 
     request.set_client_ip(resolved_client_ip.to_string());
     request.add_metadata("network.peer_ip".to_string(), peer_addr.ip().to_string());
@@ -2843,14 +2893,11 @@ fn apply_client_identity(
     );
     request.add_metadata(
         "network.client_ip_source".to_string(),
-        if used_forwarded_header {
-            "forwarded_header".to_string()
-        } else {
-            "socket_peer".to_string()
-        },
+        source_label.to_string(),
     );
 
     apply_proxy_headers(
+        context,
         peer_addr,
         request,
         resolved_client_ip,
@@ -2858,12 +2905,15 @@ fn apply_client_identity(
     );
 }
 
-fn prepare_request_for_proxy(request: &mut UnifiedHttpRequest) {
+fn prepare_request_for_proxy(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
-    apply_standard_forwarding_headers(request);
+    apply_standard_forwarding_headers(context, request);
+    apply_request_rewrite_policy(context, request);
+    apply_request_header_operations(context, request);
 }
 
 fn apply_proxy_headers(
+    context: &WafContext,
     peer_addr: std::net::SocketAddr,
     request: &mut UnifiedHttpRequest,
     resolved_client_ip: std::net::IpAddr,
@@ -2871,10 +2921,9 @@ fn apply_proxy_headers(
 ) {
     request.add_header("x-real-ip".to_string(), resolved_client_ip.to_string());
 
-    let forwarded_for = match (
-        preserve_forwarded_chain,
-        request.get_header("x-forwarded-for"),
-    ) {
+    let preserve_forwarded_chain =
+        preserve_forwarded_chain && !context.config_snapshot().gateway_config.rewrite_x_forwarded_for;
+    let forwarded_for = match (preserve_forwarded_chain, request.get_header("x-forwarded-for")) {
         (true, Some(existing)) if !existing.trim().is_empty() => {
             let existing = existing.trim();
             let peer_ip = peer_addr.ip().to_string();
@@ -2906,7 +2955,10 @@ fn ensure_request_id(request: &mut UnifiedHttpRequest) {
     request.add_metadata("request_id".to_string(), request_id);
 }
 
-fn apply_standard_forwarding_headers(request: &mut UnifiedHttpRequest) {
+fn apply_standard_forwarding_headers(context: &WafContext, request: &mut UnifiedHttpRequest) {
+    if !context.config_snapshot().gateway_config.add_x_forwarded_headers {
+        return;
+    }
     let forwarded_proto = request
         .get_header("x-forwarded-proto")
         .cloned()
@@ -2934,6 +2986,100 @@ fn apply_standard_forwarding_headers(request: &mut UnifiedHttpRequest) {
     }
 }
 
+fn apply_request_rewrite_policy(context: &WafContext, request: &mut UnifiedHttpRequest) {
+    let gateway = &context.config_snapshot().gateway_config;
+    if gateway.rewrite_host_enabled && !gateway.rewrite_host_value.is_empty() {
+        request.add_header("host".to_string(), gateway.rewrite_host_value.clone());
+    }
+
+    if !gateway.support_gzip || !gateway.support_brotli {
+        let filtered = request
+            .get_header("accept-encoding")
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|item| item.trim())
+                    .filter(|item| {
+                        (!item.starts_with("gzip") || gateway.support_gzip)
+                            && (!item.starts_with("br") || gateway.support_brotli)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+
+        if filtered.is_empty() {
+            request.headers.remove("accept-encoding");
+        } else {
+            request.add_header("accept-encoding".to_string(), filtered);
+        }
+    }
+}
+
+fn apply_request_header_operations(context: &WafContext, request: &mut UnifiedHttpRequest) {
+    for item in &context.config_snapshot().gateway_config.header_operations {
+        if item.scope != crate::config::HeaderOperationScope::Request {
+            continue;
+        }
+
+        match item.action {
+            crate::config::HeaderOperationAction::Set
+            | crate::config::HeaderOperationAction::Add => {
+                request.add_header(item.header.clone(), item.value.clone());
+            }
+            crate::config::HeaderOperationAction::Remove => {
+                request.headers.remove(&item.header);
+            }
+        }
+    }
+}
+
+fn apply_response_policies(
+    context: &WafContext,
+    response: &mut Vec<(String, String)>,
+    status_code: u16,
+) {
+    let gateway = &context.config_snapshot().gateway_config;
+    if gateway.enable_hsts {
+        response.push((
+            "strict-transport-security".to_string(),
+            "max-age=31536000; includeSubDomains".to_string(),
+        ));
+    }
+
+    if !gateway.support_sse {
+        response.retain(|(key, value)| {
+            !(key.eq_ignore_ascii_case("content-type")
+                && value.to_ascii_lowercase().contains("text/event-stream"))
+        });
+    }
+
+    for item in &gateway.header_operations {
+        if item.scope != crate::config::HeaderOperationScope::Response {
+            continue;
+        }
+        match item.action {
+            crate::config::HeaderOperationAction::Set => {
+                response.retain(|(key, _)| !key.eq_ignore_ascii_case(&item.header));
+                response.push((item.header.clone(), item.value.clone()));
+            }
+            crate::config::HeaderOperationAction::Add => {
+                response.push((item.header.clone(), item.value.clone()));
+            }
+            crate::config::HeaderOperationAction::Remove => {
+                response.retain(|(key, _)| !key.eq_ignore_ascii_case(&item.header));
+            }
+        }
+    }
+
+    if status_code >= 500 && gateway.fallback_self_signed_certificate {
+        response.push((
+            "x-rust-waf-fallback-certificate".to_string(),
+            "self-signed".to_string(),
+        ));
+    }
+}
+
 fn infer_forwarded_proto(request: &UnifiedHttpRequest) -> String {
     if matches!(request.version, HttpVersion::Http3_0) {
         return "https".to_string();
@@ -2950,6 +3096,34 @@ fn infer_forwarded_proto(request: &UnifiedHttpRequest) -> String {
     }
 
     "http".to_string()
+}
+
+fn redirect_to_https_location(context: &WafContext, request: &UnifiedHttpRequest) -> Option<String> {
+    let gateway = &context.config_snapshot().gateway_config;
+    if !gateway.http_to_https_redirect || gateway.https_listen_addr.trim().is_empty() {
+        return None;
+    }
+    if infer_forwarded_proto(request) == "https" {
+        return None;
+    }
+
+    let host = request
+        .get_header("host")
+        .cloned()
+        .or_else(|| request.get_metadata("authority").cloned())?;
+    let host_without_port = request_hostname(request).unwrap_or(host.clone());
+    let https_port = gateway
+        .https_listen_addr
+        .parse::<std::net::SocketAddr>()
+        .ok()
+        .map(|addr| addr.port())
+        .unwrap_or(443);
+    let authority = if https_port == 443 {
+        host_without_port
+    } else {
+        format!("{host_without_port}:{https_port}")
+    };
+    Some(format!("https://{}{}", authority, request.uri))
 }
 
 fn resolve_gateway_site(
@@ -3057,22 +3231,49 @@ fn resolve_client_ip(
     context: &WafContext,
     peer_addr: std::net::SocketAddr,
     request: &UnifiedHttpRequest,
-) -> std::net::IpAddr {
+) -> (std::net::IpAddr, &'static str) {
     if !peer_is_trusted_proxy(context, peer_addr.ip()) {
-        return peer_addr.ip();
+        return (peer_addr.ip(), "socket_peer");
     }
 
-    for header in &context.config_snapshot().l7_config.real_ip_headers {
-        let Some(value) = request.get_header(header) else {
-            continue;
-        };
+    let gateway = &context.config_snapshot().gateway_config;
+    let resolved = match gateway.source_ip_strategy {
+        crate::config::SourceIpStrategy::Connection => None,
+        crate::config::SourceIpStrategy::XForwardedForFirst => request
+            .get_header("x-forwarded-for")
+            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0)),
+        crate::config::SourceIpStrategy::XForwardedForLast => request
+            .get_header("x-forwarded-for")
+            .and_then(|value| extract_forwarded_ip_from_right(value, 0)),
+        crate::config::SourceIpStrategy::XForwardedForLastButOne => request
+            .get_header("x-forwarded-for")
+            .and_then(|value| extract_forwarded_ip_from_right(value, 1)),
+        crate::config::SourceIpStrategy::XForwardedForLastButTwo => request
+            .get_header("x-forwarded-for")
+            .and_then(|value| extract_forwarded_ip_from_right(value, 2)),
+        crate::config::SourceIpStrategy::XForwardedForAny => request
+            .get_header("x-forwarded-for")
+            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0)),
+        crate::config::SourceIpStrategy::Header => gateway
+            .custom_source_ip_header
+            .trim()
+            .is_empty()
+            .then_some(None)
+            .unwrap_or_else(|| {
+                request
+                    .get_header(&gateway.custom_source_ip_header)
+                    .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+            }),
+        crate::config::SourceIpStrategy::ProxyProtocol => request
+            .get_metadata("proxy_protocol_source_ip")
+            .and_then(|value| value.parse::<std::net::IpAddr>().ok()),
+    };
 
-        if let Some(ip) = extract_forwarded_ip(value) {
-            return ip;
-        }
+    if let Some(ip) = resolved {
+        (ip, "forwarded_header")
+    } else {
+        (peer_addr.ip(), "socket_peer")
     }
-
-    peer_addr.ip()
 }
 
 fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> bool {
@@ -3089,10 +3290,19 @@ fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> boo
         .any(|network| network.contains(&peer_ip))
 }
 
-fn extract_forwarded_ip(value: &str) -> Option<std::net::IpAddr> {
+fn extract_forwarded_ip_by_strategy(value: &str, index: usize) -> Option<std::net::IpAddr> {
     value
         .split(',')
-        .find_map(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
+        .nth(index)
+        .and_then(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
+}
+
+fn extract_forwarded_ip_from_right(value: &str, index_from_right: usize) -> Option<std::net::IpAddr> {
+    value
+        .split(',')
+        .rev()
+        .nth(index_from_right)
+        .and_then(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
 }
 
 fn unix_timestamp() -> i64 {
@@ -3331,7 +3541,7 @@ mod tests {
         request.add_header("host".to_string(), "portal.example.com".to_string());
         request.add_metadata("listener_port".to_string(), "443".to_string());
         request.body = br#"{"fingerprintId":"fp-test-123","timezone":"Asia/Shanghai","platform":"MacIntel","fonts":["Arial","Monaco"],"canvas":"data:image/png;base64,abc"}"#.to_vec();
-        prepare_request_for_proxy(&mut request);
+        prepare_request_for_proxy(&context, &mut request);
 
         let response =
             try_handle_browser_fingerprint_report(&context, &packet, &request, None).unwrap();
@@ -3560,13 +3770,19 @@ mod tests {
 
     #[test]
     fn prepare_request_for_proxy_sets_request_id_and_forwarding_headers() {
+        let context = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(WafContext::new(test_config(vec![])))
+            .unwrap();
         let mut request =
             UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
         request.add_header("host".to_string(), "example.com".to_string());
         request.add_metadata("listener_port".to_string(), "8080".to_string());
         request.add_metadata("transport".to_string(), "tls".to_string());
 
-        prepare_request_for_proxy(&mut request);
+        prepare_request_for_proxy(&context, &mut request);
 
         assert!(request.get_header("x-request-id").is_some());
         assert_eq!(
@@ -3585,12 +3801,18 @@ mod tests {
 
     #[test]
     fn prepare_request_for_proxy_preserves_existing_request_id_and_forwarded_proto() {
+        let context = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(WafContext::new(test_config(vec![])))
+            .unwrap();
         let mut request =
             UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
         request.add_header("x-request-id".to_string(), "req-123".to_string());
         request.add_header("x-forwarded-proto".to_string(), "https".to_string());
 
-        prepare_request_for_proxy(&mut request);
+        prepare_request_for_proxy(&context, &mut request);
 
         assert_eq!(
             request.get_header("x-request-id").map(String::as_str),

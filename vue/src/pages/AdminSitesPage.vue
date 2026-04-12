@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import AdminGlobalEntryDialog from '../components/sites/AdminGlobalEntryDialog.vue'
 import AdminSiteEditorDialog from '../components/sites/AdminSiteEditorDialog.vue'
 import AdminSitesSyncDialog from '../components/sites/AdminSitesSyncDialog.vue'
 import AdminSitesSummarySection from '../components/sites/AdminSitesSummarySection.vue'
@@ -8,6 +7,9 @@ import AppLayout from '../components/layout/AppLayout.vue'
 import { useAdminSites } from '../composables/useAdminSites'
 import { useFormatters } from '../composables/useFormatters'
 import { useFlashMessages } from '../composables/useNotifications'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
@@ -20,10 +22,8 @@ const {
   error,
   filteredRows,
   filters,
-  globalEntryForm,
   hasSavedConfig,
   hostnamesText,
-  isGlobalEntryModalOpen,
   isLocalSiteModalOpen,
   isRemoteSyncDialogOpen,
   localActionLabel,
@@ -31,7 +31,6 @@ const {
   localSiteForm,
   localSites,
   openCreateLocalSiteModal,
-  openGlobalEntryModal,
   openRemoteSyncDialog,
   primaryDraft,
   remoteSyncCandidates,
@@ -41,13 +40,11 @@ const {
   resetLocalSiteForm,
   rowSyncText,
   saveLocalSite,
-  saveGlobalEntry,
   sitesLoadedAt,
   selectedRemoteSiteIds,
   selectRecommendedRemoteSites,
   clearRemoteSiteSelection,
   closeRemoteSyncDialog,
-  closeGlobalEntryModal,
   successMessage,
   syncLocalSite,
   syncSelectedRemoteSites,
@@ -63,6 +60,10 @@ const {
   loading,
   upstreamsText,
 } = useAdminSites(formatTimestamp)
+
+function openGlobalSettingsPage() {
+  router.push('/admin/global-settings')
+}
 
 useFlashMessages({
   error,
@@ -92,7 +93,7 @@ useFlashMessages({
         :total-sites-with-remote-link="totalSitesWithRemoteLink"
         @create-local-site="openCreateLocalSiteModal"
         @load-remote="openRemoteSyncDialog"
-        @open-global-entry="openGlobalEntryModal"
+        @open-global-settings="openGlobalSettingsPage"
         @refresh="refreshPageData"
         @update:keyword="filters.keyword = $event"
         @update:state="filters.state = $event"
@@ -137,15 +138,6 @@ useFlashMessages({
       @update:form="Object.assign(localSiteForm, $event)"
       @update:hostnames-text="hostnamesText = $event"
       @update:upstreams-text="upstreamsText = $event"
-    />
-
-    <AdminGlobalEntryDialog
-      :actions="actions"
-      :form="globalEntryForm"
-      :is-open="isGlobalEntryModalOpen"
-      @close="closeGlobalEntryModal"
-      @save="saveGlobalEntry"
-      @update:form="Object.assign(globalEntryForm, $event)"
     />
 
     <AdminSitesSyncDialog

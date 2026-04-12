@@ -90,6 +90,11 @@ fn build_router(state: ApiState) -> Router {
                 .put(settings_handlers::update_settings_handler),
         )
         .route(
+            "/global-settings",
+            get(settings_handlers::get_global_settings_handler)
+                .put(settings_handlers::update_global_settings_handler),
+        )
+        .route(
             "/events",
             get(events_handlers::list_security_events_handler),
         )

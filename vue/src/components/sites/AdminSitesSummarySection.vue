@@ -25,7 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   createLocalSite: []
-  openGlobalEntry: []
+  openGlobalSettings: []
   refresh: []
   loadRemote: []
   'update:keyword': [value: string]
@@ -122,10 +122,10 @@ const stateModel = computed({
         </button>
         <button
           class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-          @click="emit('openGlobalEntry')"
+          @click="emit('openGlobalSettings')"
         >
           <Network :size="14" />
-          全局入口
+          全局设置
         </button>
       </div>
     </div>

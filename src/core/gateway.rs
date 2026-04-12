@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::storage::{LocalCertificateSecretEntry, LocalSiteEntry, SqliteStore};
 use anyhow::Result;
 use log::warn;
+use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
@@ -160,10 +161,13 @@ async fn build_runtime_state(
     }
 
     let certified_keys = load_certified_keys(store, &certificate_ids).await?;
-    let default_cert = config
+    let mut default_cert = config
         .gateway_config
         .default_certificate_id
         .and_then(|id| certified_keys.get(&id).cloned());
+    if default_cert.is_none() && config.gateway_config.fallback_self_signed_certificate {
+        default_cert = build_fallback_self_signed_cert().ok().map(Arc::new);
+    }
 
     let mut sites = Vec::with_capacity(enabled_sites.len());
     let mut host_index: HashMap<String, Vec<usize>> = HashMap::new();
@@ -206,6 +210,22 @@ async fn build_runtime_state(
         by_name: certificates_by_name,
         default_cert,
     })
+}
+
+fn build_fallback_self_signed_cert() -> Result<CertifiedKey> {
+    let generated = generate_simple_self_signed(vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+    ])?;
+    let cert_der = CertificateDer::from(generated.cert.der().to_vec());
+    let key_der = PrivateKeyDer::try_from(generated.key_pair.serialize_der())
+        .map_err(|err| anyhow::anyhow!("failed to parse generated private key: {}", err))?;
+    crate::tls::ensure_rustls_crypto_provider();
+    Ok(CertifiedKey::from_der(
+        vec![cert_der],
+        key_der,
+        &rustls::crypto::aws_lc_rs::default_provider(),
+    )?)
 }
 
 fn runtime_site_from_entry(site: &LocalSiteEntry) -> GatewaySiteRuntime {

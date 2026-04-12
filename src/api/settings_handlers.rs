@@ -24,6 +24,13 @@ pub(super) async fn get_l7_config_handler(
     Ok(Json(L7ConfigResponse::from_config(&config, true)))
 }
 
+pub(super) async fn get_global_settings_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<GlobalSettingsResponse>> {
+    let config = persisted_config(&state).await?;
+    Ok(Json(GlobalSettingsResponse::from_config(&config)))
+}
+
 pub(super) async fn update_l4_config_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<L4ConfigUpdateRequest>,
@@ -113,6 +120,51 @@ pub(super) async fn update_settings_handler(
         } else {
             "系统设置已写入数据库，并已立即刷新默认证书、上游地址与 SafeLine 运行时配置。"
                 .to_string()
+        },
+    }))
+}
+
+pub(super) async fn update_global_settings_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<GlobalSettingsUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let current = persisted_config(&state).await?;
+    let previous = current.clone();
+    let next = payload.into_config(current).map_err(ApiError::bad_request)?;
+
+    state.context.apply_runtime_config(next.clone());
+    let validation_result =
+        crate::core::engine::validate_entry_listener_config(Arc::clone(&state.context)).await;
+    state.context.apply_runtime_config(previous.clone());
+    validation_result.map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    store
+        .upsert_app_config(&next)
+        .await
+        .map_err(ApiError::internal)?;
+    state.context.apply_runtime_config(next.clone());
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+    crate::core::engine::sync_entry_listener_runtime(
+        Arc::clone(&state.context),
+        next.max_concurrent_tasks,
+    )
+    .await
+    .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: if previous.listen_addrs != next.listen_addrs
+            || previous.gateway_config.https_listen_addr != next.gateway_config.https_listen_addr
+        {
+            "全局设置已保存，入口监听已尝试热更新；源 IP 解析、转发头与响应策略也已立即刷新。"
+                .to_string()
+        } else {
+            "全局设置已保存，并已立即刷新源 IP 解析、转发头与响应策略。".to_string()
         },
     }))
 }

@@ -136,8 +136,12 @@ impl Http1Handler {
         let mut parts = request_line.split_whitespace();
         let method = parts.next().unwrap_or("GET").to_string();
         let uri = parts.next().unwrap_or("/").to_string();
+        let version = match parts.next().unwrap_or("HTTP/1.1") {
+            "HTTP/1.0" => HttpVersion::Http1_0,
+            _ => HttpVersion::Http1_1,
+        };
 
-        let mut unified_request = UnifiedHttpRequest::new(HttpVersion::Http1_1, method, uri);
+        let mut unified_request = UnifiedHttpRequest::new(version, method, uri);
 
         // 解析头部
         let mut headers_complete = false;

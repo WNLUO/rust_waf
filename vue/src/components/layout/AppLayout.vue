@@ -45,6 +45,7 @@ const navItems: NavItem[] = [
     icon: AppWindow,
     children: [
       { name: '站点管理', path: '/admin/sites' },
+      { name: '全局设置', path: '/admin/global-settings' },
       { name: '证书管理', path: '/admin/certificates' },
     ],
   },

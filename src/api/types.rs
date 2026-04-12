@@ -307,6 +307,69 @@ pub struct GlobalEntryConfigUpdateRequest {
     pub(crate) https_port: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderOperationPayload {
+    pub(crate) scope: String,
+    pub(crate) action: String,
+    pub(crate) header: String,
+    pub(crate) value: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GlobalSettingsResponse {
+    pub(crate) http_port: String,
+    pub(crate) https_port: String,
+    pub(crate) listen_ipv6: bool,
+    pub(crate) enable_http1_0: bool,
+    pub(crate) http2_enabled: bool,
+    pub(crate) source_ip_strategy: String,
+    pub(crate) custom_source_ip_header: String,
+    pub(crate) trusted_proxy_cidrs: Vec<String>,
+    pub(crate) http_to_https_redirect: bool,
+    pub(crate) enable_hsts: bool,
+    pub(crate) rewrite_host_enabled: bool,
+    pub(crate) rewrite_host_value: String,
+    pub(crate) add_x_forwarded_headers: bool,
+    pub(crate) rewrite_x_forwarded_for: bool,
+    pub(crate) support_gzip: bool,
+    pub(crate) support_brotli: bool,
+    pub(crate) support_sse: bool,
+    pub(crate) enable_ntlm: bool,
+    pub(crate) fallback_self_signed_certificate: bool,
+    pub(crate) ssl_protocols: Vec<String>,
+    pub(crate) ssl_ciphers: String,
+    pub(crate) header_operations: Vec<HeaderOperationPayload>,
+    pub(crate) group_management_enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GlobalSettingsUpdateRequest {
+    pub(crate) http_port: String,
+    pub(crate) https_port: String,
+    pub(crate) listen_ipv6: bool,
+    pub(crate) enable_http1_0: bool,
+    pub(crate) http2_enabled: bool,
+    pub(crate) source_ip_strategy: String,
+    pub(crate) custom_source_ip_header: String,
+    pub(crate) trusted_proxy_cidrs: Vec<String>,
+    pub(crate) http_to_https_redirect: bool,
+    pub(crate) enable_hsts: bool,
+    pub(crate) rewrite_host_enabled: bool,
+    pub(crate) rewrite_host_value: String,
+    pub(crate) add_x_forwarded_headers: bool,
+    pub(crate) rewrite_x_forwarded_for: bool,
+    pub(crate) support_gzip: bool,
+    pub(crate) support_brotli: bool,
+    pub(crate) support_sse: bool,
+    pub(crate) enable_ntlm: bool,
+    pub(crate) fallback_self_signed_certificate: bool,
+    pub(crate) ssl_protocols: Vec<String>,
+    pub(crate) ssl_ciphers: String,
+    #[serde(default)]
+    pub(crate) header_operations: Vec<HeaderOperationPayload>,
+    pub(crate) group_management_enabled: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct LocalSiteResponse {
     pub(crate) id: i64,

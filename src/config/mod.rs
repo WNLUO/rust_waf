@@ -9,7 +9,9 @@ pub mod http3;
 pub mod l4;
 pub mod l7;
 
-pub use gateway::GatewayConfig;
+pub use gateway::{
+    GatewayConfig, HeaderOperation, HeaderOperationAction, HeaderOperationScope, SourceIpStrategy,
+};
 pub use http3::Http3Config;
 pub use l4::L4Config;
 pub use l7::L7Config;
@@ -547,6 +549,32 @@ impl Config {
         if self.gateway_config.default_certificate_id == Some(0) {
             self.gateway_config.default_certificate_id = None;
         }
+        self.gateway_config.custom_source_ip_header = self
+            .gateway_config
+            .custom_source_ip_header
+            .trim()
+            .to_ascii_lowercase();
+        self.gateway_config.rewrite_host_value =
+            self.gateway_config.rewrite_host_value.trim().to_string();
+        self.gateway_config.ssl_protocols = normalize_string_list(&self.gateway_config.ssl_protocols);
+        if self.gateway_config.ssl_protocols.is_empty() {
+            self.gateway_config.ssl_protocols = gateway::default_ssl_protocols();
+        }
+        self.gateway_config.ssl_ciphers = self.gateway_config.ssl_ciphers.trim().to_string();
+        self.gateway_config.header_operations = self
+            .gateway_config
+            .header_operations
+            .into_iter()
+            .filter_map(|mut item| {
+                item.header = item.header.trim().to_ascii_lowercase();
+                item.value = item.value.trim().to_string();
+                if item.header.is_empty() {
+                    None
+                } else {
+                    Some(item)
+                }
+            })
+            .collect();
 
         self.integrations.safeline.base_url =
             normalize_base_url(&self.integrations.safeline.base_url);

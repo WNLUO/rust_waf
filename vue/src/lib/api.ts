@@ -7,6 +7,7 @@ import type {
   DashboardPayload,
   DashboardQueryOptions,
   GeneratedLocalCertificateRequest,
+  GlobalSettingsPayload,
   GlobalEntryConfigPayload,
   EventsQuery,
   HealthResponse,
@@ -475,6 +476,17 @@ export function fetchGlobalEntryConfig() {
 
 export function updateGlobalEntryConfig(payload: GlobalEntryConfigPayload) {
   return apiRequest<WriteStatusResponse>('/sites/global-entry', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchGlobalSettings() {
+  return apiRequest<GlobalSettingsPayload>('/global-settings')
+}
+
+export function updateGlobalSettings(payload: GlobalSettingsPayload) {
+  return apiRequest<WriteStatusResponse>('/global-settings', {
     method: 'PUT',
     body: JSON.stringify(payload),
   })

@@ -4,8 +4,9 @@ use super::{
     runtime_profile_label, unix_timestamp,
 };
 use crate::config::{
-    Config, GatewayConfig, Http3Config, L4Config, Rule, RuleResponseBodySource, RuleResponseHeader,
-    RuleResponseTemplate, RuntimeProfile, SafeLineConfig,
+    Config, GatewayConfig, HeaderOperation, HeaderOperationAction, HeaderOperationScope,
+    Http3Config, L4Config, Rule, RuleResponseBodySource, RuleResponseHeader, RuleResponseTemplate,
+    RuntimeProfile, SafeLineConfig, SourceIpStrategy,
 };
 use crate::core::WafContext;
 use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
@@ -170,6 +171,101 @@ impl SafeLineSettingsResponse {
             blocklist_sync_path: config.blocklist_sync_path.clone(),
             blocklist_delete_path: config.blocklist_delete_path.clone(),
             blocklist_ip_group_ids: config.blocklist_ip_group_ids.clone(),
+        }
+    }
+}
+
+impl HeaderOperationPayload {
+    pub(super) fn from_config(config: &HeaderOperation) -> Self {
+        Self {
+            scope: match config.scope {
+                HeaderOperationScope::Request => "request".to_string(),
+                HeaderOperationScope::Response => "response".to_string(),
+            },
+            action: match config.action {
+                HeaderOperationAction::Set => "set".to_string(),
+                HeaderOperationAction::Add => "add".to_string(),
+                HeaderOperationAction::Remove => "remove".to_string(),
+            },
+            header: config.header.clone(),
+            value: config.value.clone(),
+        }
+    }
+
+    pub(super) fn into_config(self) -> Result<HeaderOperation, String> {
+        let scope = match self.scope.trim().to_ascii_lowercase().as_str() {
+            "request" => HeaderOperationScope::Request,
+            "response" => HeaderOperationScope::Response,
+            other => return Err(format!("Header 操作范围仅支持 request/response，收到 '{}'", other)),
+        };
+        let action = match self.action.trim().to_ascii_lowercase().as_str() {
+            "set" => HeaderOperationAction::Set,
+            "add" => HeaderOperationAction::Add,
+            "remove" => HeaderOperationAction::Remove,
+            other => return Err(format!("Header 操作仅支持 set/add/remove，收到 '{}'", other)),
+        };
+
+        Ok(HeaderOperation {
+            scope,
+            action,
+            header: self.header.trim().to_ascii_lowercase(),
+            value: self.value.trim().to_string(),
+        })
+    }
+}
+
+impl GlobalSettingsResponse {
+    pub(super) fn from_config(config: &Config) -> Self {
+        let http_port = config
+            .listen_addrs
+            .iter()
+            .find(|addr| !addr.starts_with('['))
+            .map(|addr| display_https_listen_port(addr))
+            .or_else(|| config.listen_addrs.first().map(|addr| display_https_listen_port(addr)))
+            .unwrap_or_default();
+
+        Self {
+            http_port,
+            https_port: display_https_listen_port(&config.gateway_config.https_listen_addr),
+            listen_ipv6: config.gateway_config.listen_ipv6,
+            enable_http1_0: config.gateway_config.enable_http1_0,
+            http2_enabled: config.l7_config.http2_config.enabled,
+            source_ip_strategy: match config.gateway_config.source_ip_strategy {
+                SourceIpStrategy::Connection => "connection".to_string(),
+                SourceIpStrategy::XForwardedForFirst => "x_forwarded_for_first".to_string(),
+                SourceIpStrategy::XForwardedForLast => "x_forwarded_for_last".to_string(),
+                SourceIpStrategy::XForwardedForLastButOne => {
+                    "x_forwarded_for_last_but_one".to_string()
+                }
+                SourceIpStrategy::XForwardedForLastButTwo => {
+                    "x_forwarded_for_last_but_two".to_string()
+                }
+                SourceIpStrategy::XForwardedForAny => "x_forwarded_for_any".to_string(),
+                SourceIpStrategy::Header => "header".to_string(),
+                SourceIpStrategy::ProxyProtocol => "proxy_protocol".to_string(),
+            },
+            custom_source_ip_header: config.gateway_config.custom_source_ip_header.clone(),
+            trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
+            http_to_https_redirect: config.gateway_config.http_to_https_redirect,
+            enable_hsts: config.gateway_config.enable_hsts,
+            rewrite_host_enabled: config.gateway_config.rewrite_host_enabled,
+            rewrite_host_value: config.gateway_config.rewrite_host_value.clone(),
+            add_x_forwarded_headers: config.gateway_config.add_x_forwarded_headers,
+            rewrite_x_forwarded_for: config.gateway_config.rewrite_x_forwarded_for,
+            support_gzip: config.gateway_config.support_gzip,
+            support_brotli: config.gateway_config.support_brotli,
+            support_sse: config.gateway_config.support_sse,
+            enable_ntlm: config.gateway_config.enable_ntlm,
+            fallback_self_signed_certificate: config.gateway_config.fallback_self_signed_certificate,
+            ssl_protocols: config.gateway_config.ssl_protocols.clone(),
+            ssl_ciphers: config.gateway_config.ssl_ciphers.clone(),
+            header_operations: config
+                .gateway_config
+                .header_operations
+                .iter()
+                .map(HeaderOperationPayload::from_config)
+                .collect(),
+            group_management_enabled: config.gateway_config.group_management_enabled,
         }
     }
 }
@@ -342,6 +438,7 @@ impl SettingsUpdateRequest {
         current.gateway_config = GatewayConfig {
             https_listen_addr,
             default_certificate_id: self.default_certificate_id,
+            ..current.gateway_config
         };
         current.tcp_upstream_addr = non_empty_string(self.upstream_endpoint);
         current.api_bind = self.api_endpoint.trim().to_string();
@@ -350,6 +447,68 @@ impl SettingsUpdateRequest {
         current.console_settings.retain_days = self.retain_days;
         current.console_settings.notes = self.notes;
         current.integrations.safeline = self.safeline.into_config();
+
+        Ok(current.normalized())
+    }
+}
+
+impl GlobalSettingsUpdateRequest {
+    pub(super) fn into_config(self, mut current: Config) -> Result<Config, String> {
+        let http_listen_addr = normalize_https_listen_addr_input(&self.http_port)?;
+        if http_listen_addr.is_empty() {
+            return Err("HTTP 入口端口不能为空".to_string());
+        }
+        let https_listen_addr = normalize_https_listen_addr_input(&self.https_port)?;
+        let mut listen_addrs = vec![http_listen_addr];
+        if self.listen_ipv6 {
+            let port = listen_addrs[0]
+                .parse::<SocketAddr>()
+                .map_err(|err| format!("HTTP 入口地址无效: {}", err))?
+                .port();
+            listen_addrs.push(format!("[::]:{port}"));
+        }
+
+        let source_ip_strategy = match self.source_ip_strategy.trim().to_ascii_lowercase().as_str() {
+            "connection" => SourceIpStrategy::Connection,
+            "x_forwarded_for_first" => SourceIpStrategy::XForwardedForFirst,
+            "x_forwarded_for_last" => SourceIpStrategy::XForwardedForLast,
+            "x_forwarded_for_last_but_one" => SourceIpStrategy::XForwardedForLastButOne,
+            "x_forwarded_for_last_but_two" => SourceIpStrategy::XForwardedForLastButTwo,
+            "x_forwarded_for_any" => SourceIpStrategy::XForwardedForAny,
+            "header" => SourceIpStrategy::Header,
+            "proxy_protocol" => SourceIpStrategy::ProxyProtocol,
+            other => return Err(format!("源 IP 获取方式不支持 '{}'", other)),
+        };
+
+        let header_operations = self
+            .header_operations
+            .into_iter()
+            .map(HeaderOperationPayload::into_config)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        current.listen_addrs = listen_addrs;
+        current.gateway_config.https_listen_addr = https_listen_addr;
+        current.gateway_config.listen_ipv6 = self.listen_ipv6;
+        current.gateway_config.enable_http1_0 = self.enable_http1_0;
+        current.gateway_config.source_ip_strategy = source_ip_strategy;
+        current.gateway_config.custom_source_ip_header = self.custom_source_ip_header;
+        current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
+        current.gateway_config.http_to_https_redirect = self.http_to_https_redirect;
+        current.gateway_config.enable_hsts = self.enable_hsts;
+        current.gateway_config.rewrite_host_enabled = self.rewrite_host_enabled;
+        current.gateway_config.rewrite_host_value = self.rewrite_host_value;
+        current.gateway_config.add_x_forwarded_headers = self.add_x_forwarded_headers;
+        current.gateway_config.rewrite_x_forwarded_for = self.rewrite_x_forwarded_for;
+        current.gateway_config.support_gzip = self.support_gzip;
+        current.gateway_config.support_brotli = self.support_brotli;
+        current.gateway_config.support_sse = self.support_sse;
+        current.gateway_config.enable_ntlm = self.enable_ntlm;
+        current.gateway_config.fallback_self_signed_certificate = self.fallback_self_signed_certificate;
+        current.gateway_config.ssl_protocols = self.ssl_protocols;
+        current.gateway_config.ssl_ciphers = self.ssl_ciphers;
+        current.gateway_config.header_operations = header_operations;
+        current.gateway_config.group_management_enabled = self.group_management_enabled;
+        current.l7_config.http2_config.enabled = self.http2_enabled;
 
         Ok(current.normalized())
     }

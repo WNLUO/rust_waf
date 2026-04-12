@@ -92,6 +92,47 @@ export interface GlobalEntryConfigPayload {
   https_port: string
 }
 
+export interface HeaderOperationItem {
+  scope: 'request' | 'response'
+  action: 'set' | 'add' | 'remove'
+  header: string
+  value: string
+}
+
+export interface GlobalSettingsPayload {
+  http_port: string
+  https_port: string
+  listen_ipv6: boolean
+  enable_http1_0: boolean
+  http2_enabled: boolean
+  source_ip_strategy:
+    | 'connection'
+    | 'x_forwarded_for_first'
+    | 'x_forwarded_for_last'
+    | 'x_forwarded_for_last_but_one'
+    | 'x_forwarded_for_last_but_two'
+    | 'x_forwarded_for_any'
+    | 'header'
+    | 'proxy_protocol'
+  custom_source_ip_header: string
+  trusted_proxy_cidrs: string[]
+  http_to_https_redirect: boolean
+  enable_hsts: boolean
+  rewrite_host_enabled: boolean
+  rewrite_host_value: string
+  add_x_forwarded_headers: boolean
+  rewrite_x_forwarded_for: boolean
+  support_gzip: boolean
+  support_brotli: boolean
+  support_sse: boolean
+  enable_ntlm: boolean
+  fallback_self_signed_certificate: boolean
+  ssl_protocols: string[]
+  ssl_ciphers: string
+  header_operations: HeaderOperationItem[]
+  group_management_enabled: boolean
+}
+
 export interface LocalSiteDraft {
   name: string
   primary_hostname: string

@@ -9,6 +9,8 @@ use std::fmt;
 /// HTTP协议版本枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HttpVersion {
+    /// HTTP/1.0
+    Http1_0,
     /// HTTP/1.1
     Http1_1,
     /// HTTP/2.0
@@ -20,6 +22,7 @@ pub enum HttpVersion {
 impl fmt::Display for HttpVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            HttpVersion::Http1_0 => write!(f, "HTTP/1.0"),
             HttpVersion::Http1_1 => write!(f, "HTTP/1.1"),
             HttpVersion::Http2_0 => write!(f, "HTTP/2.0"),
             HttpVersion::Http3_0 => write!(f, "HTTP/3.0"),

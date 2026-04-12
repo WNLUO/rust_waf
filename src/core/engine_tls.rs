@@ -1,5 +1,8 @@
 use anyhow::Result;
+use log::warn;
+use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::version::{TLS12, TLS13};
 use rustls::ServerConfig as RustlsServerConfig;
 use std::fs::File;
 use std::io::BufReader;
@@ -22,7 +25,10 @@ pub(super) fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAccep
 
     crate::tls::ensure_rustls_crypto_provider();
 
-    let mut server_config = RustlsServerConfig::builder()
+    let provider = tls_provider_from_gateway(&config.gateway_config)?;
+    let protocol_versions = tls_protocol_versions_from_gateway(&config.gateway_config);
+    let mut server_config = RustlsServerConfig::builder_with_provider(provider.into())
+        .with_protocol_versions(&protocol_versions)?
         .with_no_client_auth()
         .with_cert_resolver(cert_resolver);
     server_config.alpn_protocols = if config.l7_config.http2_config.enabled {
@@ -32,6 +38,68 @@ pub(super) fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAccep
     };
 
     Ok(Some(TlsAcceptor::from(Arc::new(server_config))))
+}
+
+fn tls_protocol_versions_from_gateway(
+    gateway: &crate::config::GatewayConfig,
+) -> Vec<&'static rustls::SupportedProtocolVersion> {
+    let mut versions = Vec::new();
+    let protocols = gateway
+        .ssl_protocols
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    if protocols
+        .iter()
+        .any(|value| matches!(value.as_str(), "tlsv1.3" | "tls1.3" | "tls13"))
+    {
+        versions.push(&TLS13);
+    }
+    if protocols.iter().any(|value| {
+        matches!(
+            value.as_str(),
+            "tlsv1" | "tls1" | "tlsv1.0" | "tls1.0" | "tlsv1.1" | "tls1.1" | "tlsv1.2" | "tls1.2"
+        )
+    }) {
+        versions.push(&TLS12);
+    }
+    if versions.is_empty() {
+        versions.push(&TLS13);
+        versions.push(&TLS12);
+    }
+    versions
+}
+
+fn tls_provider_from_gateway(
+    gateway: &crate::config::GatewayConfig,
+) -> Result<CryptoProvider> {
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+    let filter = gateway.ssl_ciphers.trim();
+    if filter.is_empty() {
+        return Ok(provider);
+    }
+
+    let requested = filter
+        .split(&[':', ',', '\n'][..])
+        .map(|value| value.trim().to_ascii_uppercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if requested.is_empty() {
+        return Ok(provider);
+    }
+
+    provider.cipher_suites.retain(|suite| {
+        let name = format!("{:?}", suite.suite()).to_ascii_uppercase();
+        requested.iter().any(|item| item == &name)
+    });
+
+    if provider.cipher_suites.is_empty() {
+        warn!("Configured SSL Ciphers filtered out all rustls cipher suites; falling back to defaults");
+        return Ok(rustls::crypto::aws_lc_rs::default_provider());
+    }
+
+    Ok(provider)
 }
 
 #[cfg(feature = "http3")]

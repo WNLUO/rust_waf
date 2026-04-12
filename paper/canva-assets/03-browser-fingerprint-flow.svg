@@ -33,11 +33,13 @@
   <text x="1210" y="286" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">4. 后端事件落库</text>
   <text x="1210" y="344" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">POST /.well-known/waf/</text>
   <text x="1210" y="378" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">browser-fingerprint-report</text>
-  <text x="1210" y="430" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">补充来源 IP 与站点元数据</text>
-  <text x="1210" y="468" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">写入 security_events</text>
-  <text x="1210" y="506" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">provider=browser_fingerprint</text>
-  <text x="1210" y="562" fill="#8D6AA2" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">控制台事件页可按来源系统筛选，</text>
-  <text x="1210" y="590" fill="#8D6AA2" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">形成“页面诱导 - 回传 - 审计”闭环</text>
+  <text x="1210" y="430" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">补充来源 IP 与</text>
+  <text x="1210" y="462" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点元数据</text>
+  <text x="1210" y="500" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">写入 security_events</text>
+  <text x="1210" y="536" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">provider =</text>
+  <text x="1210" y="562" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">browser_fingerprint</text>
+  <text x="1210" y="606" fill="#8D6AA2" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">控制台事件页可按来源系统筛选，</text>
+  <text x="1210" y="634" fill="#8D6AA2" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">形成“页面诱导 - 回传 - 审计”闭环</text>
 
   <path d="M380 480H430" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
   <path d="M750 480H800" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
@@ -46,6 +48,7 @@
   <path d="M782 480L764 468V492L782 480Z" fill="#8E8173"/>
   <path d="M1152 480L1134 468V492L1152 480Z" fill="#8E8173"/>
 
-  <rect x="100" y="790" width="1390" height="88" rx="20" fill="#F1E7DA"/>
-  <text x="132" y="840" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">答辩可直接讲这句话：该模板不是为了真正放行请求，而是把前端脚本采样、攻击者时间消耗和后端事件审计串成一条可观测的对抗链路。</text>
+  <rect x="100" y="780" width="1390" height="104" rx="20" fill="#F1E7DA"/>
+  <text x="132" y="826" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">答辩可直接讲这句话：该模板不是为了真正放行请求，</text>
+  <text x="132" y="858" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">而是把前端脚本采样、攻击者时间消耗和后端事件审计串成一条可观测的对抗链路。</text>
 </svg>

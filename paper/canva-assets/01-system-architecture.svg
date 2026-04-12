@@ -21,10 +21,12 @@
   <text x="384" y="372" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">协议识别</text>
   <text x="384" y="412" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">统一请求抽象</text>
   <text x="384" y="452" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L7 规则引擎</text>
-  <text x="384" y="492" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">respond / block / alert</text>
-  <text x="384" y="548" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责粗筛与精判协同，</text>
-  <text x="384" y="576" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">把不同协议流量</text>
-  <text x="384" y="604" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">统一送入同一套裁决逻辑</text>
+  <text x="384" y="492" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">respond / block /</text>
+  <text x="384" y="520" fill="#285B2D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">alert</text>
+  <text x="384" y="560" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责粗筛与精判协同，</text>
+  <text x="384" y="588" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">把不同协议流量</text>
+  <text x="384" y="616" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">统一送入同一套</text>
+  <text x="384" y="644" fill="#507453" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">裁决逻辑</text>
 
   <rect x="656" y="190" width="240" height="520" rx="24" fill="#FFF4DF" stroke="#E3B765" stroke-width="2"/>
   <text x="688" y="246" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">代理治理层</text>
@@ -68,6 +70,7 @@
   <path d="M926 450L910 438V462L926 450Z" fill="#8E8173"/>
   <path d="M1220 450L1204 438V462L1220 450Z" fill="#8E8173"/>
 
-  <rect x="88" y="748" width="1396" height="72" rx="18" fill="#F1E7DA"/>
-  <text x="120" y="792" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">答辩时可配合一句话说明：系统以 Rust 引擎作为数据面核心，前置 L4 粗筛，后接 L7 统一规则裁决，再通过 SQLite、Axum 和 Vue 完成运维闭环。</text>
+  <rect x="88" y="736" width="1396" height="96" rx="18" fill="#F1E7DA"/>
+  <text x="120" y="780" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">答辩时可配合一句话说明：系统以 Rust 引擎作为数据面核心，前置 L4 粗筛，</text>
+  <text x="120" y="812" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">后接 L7 统一规则裁决，再通过 SQLite、Axum 和 Vue 完成运维闭环。</text>
 </svg>

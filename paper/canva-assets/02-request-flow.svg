@@ -21,13 +21,17 @@
     <text x="800" y="628" text-anchor="middle" fill="#234A72" font-size="28" font-weight="700">协议识别</text>
     <text x="800" y="662" text-anchor="middle" fill="#486989" font-size="20">HTTP/1.1 · HTTP/2 · HTTP/3</text>
 
-    <rect x="620" y="724" width="360" height="96" rx="24" fill="#F4EAF8" stroke="#B888D6" stroke-width="2"/>
-    <text x="800" y="772" text-anchor="middle" fill="#6E3D88" font-size="28" font-weight="700">统一请求抽象 + L7 检测</text>
-    <text x="800" y="806" text-anchor="middle" fill="#7F5A97" font-size="20">规则匹配 / respond / alert / allow</text>
+    <rect x="620" y="724" width="360" height="148" rx="24" fill="#F4EAF8" stroke="#B888D6" stroke-width="2"/>
+    <text x="800" y="762" text-anchor="middle" fill="#6E3D88" font-size="26" font-weight="700">统一请求抽象</text>
+    <text x="800" y="794" text-anchor="middle" fill="#6E3D88" font-size="26" font-weight="700">+ L7 检测</text>
+    <text x="800" y="826" text-anchor="middle" fill="#7F5A97" font-size="18">规则匹配 / respond /</text>
+    <text x="800" y="852" text-anchor="middle" fill="#7F5A97" font-size="18">alert / allow</text>
 
-    <rect x="1100" y="724" width="340" height="96" rx="24" fill="#FBEFD8" stroke="#D8AE59" stroke-width="2"/>
-    <text x="1270" y="772" text-anchor="middle" fill="#7B5410" font-size="28" font-weight="700">网关代理与上游治理</text>
-    <text x="1270" y="806" text-anchor="middle" fill="#8A6B34" font-size="20">站点匹配 / 证书 / 健康检查 / 转发</text>
+    <rect x="1100" y="724" width="340" height="148" rx="24" fill="#FBEFD8" stroke="#D8AE59" stroke-width="2"/>
+    <text x="1270" y="770" text-anchor="middle" fill="#7B5410" font-size="26" font-weight="700">网关代理与</text>
+    <text x="1270" y="802" text-anchor="middle" fill="#7B5410" font-size="26" font-weight="700">上游治理</text>
+    <text x="1270" y="832" text-anchor="middle" fill="#8A6B34" font-size="18">站点匹配 / 证书 /</text>
+    <text x="1270" y="858" text-anchor="middle" fill="#8A6B34" font-size="18">健康检查 / 转发</text>
   </g>
 
   <path d="M800 256V304" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
@@ -43,5 +47,6 @@
   <path d="M800 702L788 684H812L800 702Z" fill="#7D8C99"/>
   <path d="M1078 772L1060 760V784L1078 772Z" fill="#7D8C99"/>
 
-  <text x="116" y="892" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">建议配套讲解：L4 负责“先粗筛”，L7 负责“再精判”，若未被阻断则继续进入多站点网关转发与持久化审计链路。</text>
+  <text x="116" y="892" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">建议配套讲解：L4 负责“先粗筛”，L7 负责“再精判”，</text>
+  <text x="116" y="924" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">若未被阻断则继续进入多站点网关转发与持久化审计链路。</text>
 </svg>

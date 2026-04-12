@@ -44,6 +44,48 @@ impl L4ConfigResponse {
             max_blocked_ips: config.l4_config.max_blocked_ips,
             state_ttl_secs: config.l4_config.state_ttl_secs,
             bloom_filter_scale: config.l4_config.bloom_filter_scale,
+            behavior_event_channel_capacity: config.l4_config.behavior_event_channel_capacity,
+            behavior_drop_critical_threshold: config.l4_config.behavior_drop_critical_threshold,
+            behavior_fallback_ratio_percent: config.l4_config.behavior_fallback_ratio_percent,
+            behavior_overload_blocked_connections_threshold: config
+                .l4_config
+                .behavior_overload_blocked_connections_threshold,
+            behavior_overload_active_connections_threshold: config
+                .l4_config
+                .behavior_overload_active_connections_threshold,
+            behavior_normal_connection_budget_per_minute: config
+                .l4_config
+                .behavior_normal_connection_budget_per_minute,
+            behavior_suspicious_connection_budget_per_minute: config
+                .l4_config
+                .behavior_suspicious_connection_budget_per_minute,
+            behavior_high_risk_connection_budget_per_minute: config
+                .l4_config
+                .behavior_high_risk_connection_budget_per_minute,
+            behavior_high_overload_budget_scale_percent: config
+                .l4_config
+                .behavior_high_overload_budget_scale_percent,
+            behavior_critical_overload_budget_scale_percent: config
+                .l4_config
+                .behavior_critical_overload_budget_scale_percent,
+            behavior_high_overload_delay_ms: config.l4_config.behavior_high_overload_delay_ms,
+            behavior_critical_overload_delay_ms: config
+                .l4_config
+                .behavior_critical_overload_delay_ms,
+            behavior_soft_delay_threshold_percent: config
+                .l4_config
+                .behavior_soft_delay_threshold_percent,
+            behavior_hard_delay_threshold_percent: config
+                .l4_config
+                .behavior_hard_delay_threshold_percent,
+            behavior_soft_delay_ms: config.l4_config.behavior_soft_delay_ms,
+            behavior_hard_delay_ms: config.l4_config.behavior_hard_delay_ms,
+            behavior_reject_threshold_percent: config
+                .l4_config
+                .behavior_reject_threshold_percent,
+            behavior_critical_reject_threshold_percent: config
+                .l4_config
+                .behavior_critical_reject_threshold_percent,
             runtime_enabled,
             bloom_enabled: config.bloom_enabled,
             bloom_false_positive_verification: config.l4_bloom_false_positive_verification,
@@ -252,6 +294,32 @@ impl L4ConfigUpdateRequest {
             max_blocked_ips: self.max_blocked_ips,
             state_ttl_secs: self.state_ttl_secs,
             bloom_filter_scale: self.bloom_filter_scale,
+            behavior_event_channel_capacity: self.behavior_event_channel_capacity,
+            behavior_drop_critical_threshold: self.behavior_drop_critical_threshold,
+            behavior_fallback_ratio_percent: self.behavior_fallback_ratio_percent,
+            behavior_overload_blocked_connections_threshold: self
+                .behavior_overload_blocked_connections_threshold,
+            behavior_overload_active_connections_threshold: self
+                .behavior_overload_active_connections_threshold,
+            behavior_normal_connection_budget_per_minute: self
+                .behavior_normal_connection_budget_per_minute,
+            behavior_suspicious_connection_budget_per_minute: self
+                .behavior_suspicious_connection_budget_per_minute,
+            behavior_high_risk_connection_budget_per_minute: self
+                .behavior_high_risk_connection_budget_per_minute,
+            behavior_high_overload_budget_scale_percent: self
+                .behavior_high_overload_budget_scale_percent,
+            behavior_critical_overload_budget_scale_percent: self
+                .behavior_critical_overload_budget_scale_percent,
+            behavior_high_overload_delay_ms: self.behavior_high_overload_delay_ms,
+            behavior_critical_overload_delay_ms: self.behavior_critical_overload_delay_ms,
+            behavior_soft_delay_threshold_percent: self.behavior_soft_delay_threshold_percent,
+            behavior_hard_delay_threshold_percent: self.behavior_hard_delay_threshold_percent,
+            behavior_soft_delay_ms: self.behavior_soft_delay_ms,
+            behavior_hard_delay_ms: self.behavior_hard_delay_ms,
+            behavior_reject_threshold_percent: self.behavior_reject_threshold_percent,
+            behavior_critical_reject_threshold_percent: self
+                .behavior_critical_reject_threshold_percent,
             ..current.l4_config.clone()
         };
 

@@ -21,7 +21,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 <template>
   <CyberCard
     title="L4 防护配置"
-    sub-title="保存到数据库后，重启服务即可让新配置接管运行时实例。"
+    sub-title="保存到数据库后，后端会立即刷新运行中的 L4 实例。"
   >
     <div class="grid gap-3 md:grid-cols-2">
       <label
@@ -195,6 +195,353 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           影响四层 Bloom Filter 的容量规模，实际值会按运行档位归一化。
         </p>
       </label>
+    </div>
+
+    <div class="mt-6 space-y-4">
+      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
+        <p class="mt-1 text-xs leading-6 text-slate-500">
+          这些参数决定 L4 分桶在正常、可疑和高风险状态下的连接预算与事件承压上限。
+        </p>
+      </div>
+
+      <div class="grid gap-3 md:grid-cols-2">
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">事件通道容量</span>
+          <input
+            :value="form.behavior_event_channel_capacity"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_event_channel_capacity: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">事件丢弃告警阈值</span>
+          <input
+            :value="form.behavior_drop_critical_threshold"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_drop_critical_threshold: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">分桶降级比例 (%)</span>
+          <input
+            :value="form.behavior_fallback_ratio_percent"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_fallback_ratio_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">过载封禁阈值</span>
+          <input
+            :value="form.behavior_overload_blocked_connections_threshold"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_overload_blocked_connections_threshold: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">过载活跃连接阈值</span>
+          <input
+            :value="form.behavior_overload_active_connections_threshold"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_overload_active_connections_threshold: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">正常桶预算 (rpm)</span>
+          <input
+            :value="form.behavior_normal_connection_budget_per_minute"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_normal_connection_budget_per_minute: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">可疑桶预算 (rpm)</span>
+          <input
+            :value="form.behavior_suspicious_connection_budget_per_minute"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_suspicious_connection_budget_per_minute: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">高风险桶预算 (rpm)</span>
+          <input
+            :value="form.behavior_high_risk_connection_budget_per_minute"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_high_risk_connection_budget_per_minute: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+      </div>
+
+      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p class="text-sm font-medium text-stone-900">过载缩放与延迟</p>
+        <p class="mt-1 text-xs leading-6 text-slate-500">
+          用于控制高负载下预算缩放、软延迟、硬延迟和拒绝新连接的切换边界。
+        </p>
+      </div>
+
+      <div class="grid gap-3 md:grid-cols-2">
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">高过载预算缩放 (%)</span>
+          <input
+            :value="form.behavior_high_overload_budget_scale_percent"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_high_overload_budget_scale_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">临界过载预算缩放 (%)</span>
+          <input
+            :value="form.behavior_critical_overload_budget_scale_percent"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_critical_overload_budget_scale_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">高过载建议延迟 (ms)</span>
+          <input
+            :value="form.behavior_high_overload_delay_ms"
+            type="number"
+            min="0"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_high_overload_delay_ms: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">临界过载建议延迟 (ms)</span>
+          <input
+            :value="form.behavior_critical_overload_delay_ms"
+            type="number"
+            min="0"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_critical_overload_delay_ms: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">软延迟阈值 (%)</span>
+          <input
+            :value="form.behavior_soft_delay_threshold_percent"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_soft_delay_threshold_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">硬延迟阈值 (%)</span>
+          <input
+            :value="form.behavior_hard_delay_threshold_percent"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_hard_delay_threshold_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">软延迟时长 (ms)</span>
+          <input
+            :value="form.behavior_soft_delay_ms"
+            type="number"
+            min="0"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_soft_delay_ms: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">硬延迟时长 (ms)</span>
+          <input
+            :value="form.behavior_hard_delay_ms"
+            type="number"
+            min="0"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_hard_delay_ms: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">拒绝阈值 (%)</span>
+          <input
+            :value="form.behavior_reject_threshold_percent"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_reject_threshold_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+
+        <label class="text-sm text-stone-700">
+          <span class="font-medium text-stone-900">临界拒绝阈值 (%)</span>
+          <input
+            :value="form.behavior_critical_reject_threshold_percent"
+            type="number"
+            min="1"
+            step="1"
+            :class="numberInputClass"
+            @input="
+              patchForm({
+                behavior_critical_reject_threshold_percent: Number(
+                  ($event.target as HTMLInputElement).value,
+                ),
+              })
+            "
+          />
+        </label>
+      </div>
     </div>
   </CyberCard>
 </template>

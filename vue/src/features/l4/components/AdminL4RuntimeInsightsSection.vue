@@ -51,7 +51,7 @@ defineProps<{
           </div>
           <p class="mt-3 leading-6 text-slate-500">
             运行时统计来自内存中的 L4
-            Inspector，保存配置后如果不重启，这里的统计仍然对应旧参数。
+            Inspector，保存配置后后端会立即刷新运行参数，这里的统计会切换到新实例。
           </p>
         </div>
 
@@ -76,7 +76,7 @@ defineProps<{
           </div>
           <div class="rounded-xl border border-slate-200 p-4">
             <p class="text-xs tracking-wide text-slate-500">配置生效方式</p>
-            <p class="mt-2 text-lg font-semibold text-stone-900">保存后重启</p>
+            <p class="mt-2 text-lg font-semibold text-stone-900">保存后立即刷新</p>
           </div>
         </div>
       </div>

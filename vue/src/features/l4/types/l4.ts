@@ -7,6 +7,24 @@ export interface L4ConfigPayload {
   max_blocked_ips: number
   state_ttl_secs: number
   bloom_filter_scale: number
+  behavior_event_channel_capacity: number
+  behavior_drop_critical_threshold: number
+  behavior_fallback_ratio_percent: number
+  behavior_overload_blocked_connections_threshold: number
+  behavior_overload_active_connections_threshold: number
+  behavior_normal_connection_budget_per_minute: number
+  behavior_suspicious_connection_budget_per_minute: number
+  behavior_high_risk_connection_budget_per_minute: number
+  behavior_high_overload_budget_scale_percent: number
+  behavior_critical_overload_budget_scale_percent: number
+  behavior_high_overload_delay_ms: number
+  behavior_critical_overload_delay_ms: number
+  behavior_soft_delay_threshold_percent: number
+  behavior_hard_delay_threshold_percent: number
+  behavior_soft_delay_ms: number
+  behavior_hard_delay_ms: number
+  behavior_reject_threshold_percent: number
+  behavior_critical_reject_threshold_percent: number
   runtime_enabled: boolean
   bloom_enabled: boolean
   bloom_false_positive_verification: boolean

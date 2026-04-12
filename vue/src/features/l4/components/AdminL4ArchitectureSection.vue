@@ -5,7 +5,7 @@ import StatusBadge from '@/shared/ui/StatusBadge.vue'
 const capabilityRows = [
   {
     area: '纯 L4 连接层',
-    can: '识别连接暴涨、短连接、连接复用下降、慢连接压力和系统资源占用。',
+    can: '识别连接暴涨、连接复用变化、连接密度异常，并据此做连接级资源控制。',
     cannot: '不能在同一条连接里精确识别哪个具体请求恶意。',
   },
   {
@@ -28,7 +28,7 @@ const strategyRows = [
   },
   {
     title: '可疑',
-    detail: '连接增长、请求密度或联动反馈异常，缩短复用、优先早关连接。',
+    detail: '连接增长、请求密度或联动反馈异常，优先缩短复用并对请求施加轻量延迟。',
     tone: 'warning' as const,
   },
   {
@@ -48,13 +48,13 @@ const strategyRows = [
       <div class="space-y-4 text-sm leading-7 text-stone-700">
         <div class="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
           CDN 会隐藏最终用户身份，但不会隐藏回源流量结构异常。这个页面展示的是
-          CDN 到 Rust 这一跳的连接群行为，不是最终浏览器个体画像。
+          CDN 到 Rust 这一跳的连接群行为，不是最终浏览器个体画像；页面中的风险分和策略也主要来自连接与反馈信号，而不是业务内容解析。
         </div>
         <div class="grid gap-3 md:grid-cols-3">
           <div class="rounded-[18px] bg-[#f5f9ff] p-4">
             <p class="text-xs tracking-wide text-blue-700">HTTP 回源</p>
             <p class="mt-2 text-sm text-stone-700">
-              基于 Host、协议版本和回源 IP 做分桶，聚焦连接复用与请求密度。
+              基于 Host、协议版本和回源 IP 做分桶，聚焦连接复用、请求密度和后续准入策略。
             </p>
           </div>
           <div class="rounded-[18px] bg-[#f8f7ef] p-4">
@@ -66,7 +66,7 @@ const strategyRows = [
           <div class="rounded-[18px] bg-[#f4faf4] p-4">
             <p class="text-xs tracking-wide text-emerald-700">联动闭环</p>
             <p class="mt-2 text-sm text-stone-700">
-              雷池和 L7 负责判断，L4 负责把后续连接策略收紧并降低异常成本。
+              雷池和 L7 负责给出反馈，L4 负责把这些反馈回写到分桶并收紧后续连接策略。
             </p>
           </div>
         </div>

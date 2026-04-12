@@ -14,6 +14,9 @@ defineProps<{
   topPorts: L4StatsPayload['per_port_stats']
   totalProcessedBytes: number
 }>()
+
+const hasMeasuredPortBytes = (items: L4StatsPayload['per_port_stats']) =>
+  items.some((item) => item.bytes_processed > 0)
 </script>
 
 <template>
@@ -47,7 +50,11 @@ defineProps<{
             <td class="px-4 py-3">{{ formatNumber(item.blocks) }}</td>
             <td class="px-4 py-3">{{ formatNumber(item.ddos_events) }}</td>
             <td class="px-4 py-3">
-              {{ formatNumber(item.bytes_processed) }}
+              {{
+                item.bytes_processed > 0
+                  ? formatNumber(item.bytes_processed)
+                  : '未接入'
+              }}
             </td>
             <td class="px-4 py-3">
               <StatusBadge
@@ -152,8 +159,14 @@ defineProps<{
           class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
         >
           <span>端口画像累计流量</span>
-          <span class="font-mono font-semibold text-stone-900">
+          <span
+            v-if="hasMeasuredPortBytes(topPorts)"
+            class="font-mono font-semibold text-stone-900"
+          >
             {{ formatBytes(totalProcessedBytes) }}
+          </span>
+          <span v-else class="text-xs text-slate-500">
+            当前后端尚未累计该指标
           </span>
         </div>
       </div>

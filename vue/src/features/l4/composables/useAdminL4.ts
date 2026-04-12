@@ -51,6 +51,36 @@ export function useAdminL4() {
       max_blocked_ips: payload.max_blocked_ips,
       state_ttl_secs: payload.state_ttl_secs,
       bloom_filter_scale: payload.bloom_filter_scale,
+      behavior_event_channel_capacity: payload.behavior_event_channel_capacity,
+      behavior_drop_critical_threshold: payload.behavior_drop_critical_threshold,
+      behavior_fallback_ratio_percent: payload.behavior_fallback_ratio_percent,
+      behavior_overload_blocked_connections_threshold:
+        payload.behavior_overload_blocked_connections_threshold,
+      behavior_overload_active_connections_threshold:
+        payload.behavior_overload_active_connections_threshold,
+      behavior_normal_connection_budget_per_minute:
+        payload.behavior_normal_connection_budget_per_minute,
+      behavior_suspicious_connection_budget_per_minute:
+        payload.behavior_suspicious_connection_budget_per_minute,
+      behavior_high_risk_connection_budget_per_minute:
+        payload.behavior_high_risk_connection_budget_per_minute,
+      behavior_high_overload_budget_scale_percent:
+        payload.behavior_high_overload_budget_scale_percent,
+      behavior_critical_overload_budget_scale_percent:
+        payload.behavior_critical_overload_budget_scale_percent,
+      behavior_high_overload_delay_ms: payload.behavior_high_overload_delay_ms,
+      behavior_critical_overload_delay_ms:
+        payload.behavior_critical_overload_delay_ms,
+      behavior_soft_delay_threshold_percent:
+        payload.behavior_soft_delay_threshold_percent,
+      behavior_hard_delay_threshold_percent:
+        payload.behavior_hard_delay_threshold_percent,
+      behavior_soft_delay_ms: payload.behavior_soft_delay_ms,
+      behavior_hard_delay_ms: payload.behavior_hard_delay_ms,
+      behavior_reject_threshold_percent:
+        payload.behavior_reject_threshold_percent,
+      behavior_critical_reject_threshold_percent:
+        payload.behavior_critical_reject_threshold_percent,
     })
 
     meta.value = {
@@ -134,6 +164,114 @@ export function useAdminL4() {
         0.1,
         4,
         1,
+      )
+      configForm.behavior_event_channel_capacity = clampInteger(
+        configForm.behavior_event_channel_capacity,
+        1,
+        1_000_000,
+        4096,
+      )
+      configForm.behavior_drop_critical_threshold = clampInteger(
+        configForm.behavior_drop_critical_threshold,
+        1,
+        1_000_000,
+        128,
+      )
+      configForm.behavior_fallback_ratio_percent = clampInteger(
+        configForm.behavior_fallback_ratio_percent,
+        1,
+        100,
+        80,
+      )
+      configForm.behavior_overload_blocked_connections_threshold = clampInteger(
+        configForm.behavior_overload_blocked_connections_threshold,
+        1,
+        10_000_000,
+        512,
+      )
+      configForm.behavior_overload_active_connections_threshold = clampInteger(
+        configForm.behavior_overload_active_connections_threshold,
+        1,
+        10_000_000,
+        2048,
+      )
+      configForm.behavior_normal_connection_budget_per_minute = clampInteger(
+        configForm.behavior_normal_connection_budget_per_minute,
+        1,
+        1_000_000,
+        120,
+      )
+      configForm.behavior_suspicious_connection_budget_per_minute = clampInteger(
+        configForm.behavior_suspicious_connection_budget_per_minute,
+        1,
+        1_000_000,
+        60,
+      )
+      configForm.behavior_high_risk_connection_budget_per_minute = clampInteger(
+        configForm.behavior_high_risk_connection_budget_per_minute,
+        1,
+        1_000_000,
+        20,
+      )
+      configForm.behavior_high_overload_budget_scale_percent = clampInteger(
+        configForm.behavior_high_overload_budget_scale_percent,
+        1,
+        100,
+        80,
+      )
+      configForm.behavior_critical_overload_budget_scale_percent = clampInteger(
+        configForm.behavior_critical_overload_budget_scale_percent,
+        1,
+        100,
+        50,
+      )
+      configForm.behavior_high_overload_delay_ms = clampInteger(
+        configForm.behavior_high_overload_delay_ms,
+        0,
+        60_000,
+        15,
+      )
+      configForm.behavior_critical_overload_delay_ms = clampInteger(
+        configForm.behavior_critical_overload_delay_ms,
+        0,
+        60_000,
+        40,
+      )
+      configForm.behavior_soft_delay_threshold_percent = clampInteger(
+        configForm.behavior_soft_delay_threshold_percent,
+        1,
+        10_000,
+        100,
+      )
+      configForm.behavior_hard_delay_threshold_percent = clampInteger(
+        configForm.behavior_hard_delay_threshold_percent,
+        1,
+        10_000,
+        200,
+      )
+      configForm.behavior_soft_delay_ms = clampInteger(
+        configForm.behavior_soft_delay_ms,
+        0,
+        60_000,
+        25,
+      )
+      configForm.behavior_hard_delay_ms = clampInteger(
+        configForm.behavior_hard_delay_ms,
+        0,
+        60_000,
+        60,
+      )
+      configForm.behavior_reject_threshold_percent = clampInteger(
+        configForm.behavior_reject_threshold_percent,
+        1,
+        10_000,
+        300,
+      )
+      configForm.behavior_critical_reject_threshold_percent = clampInteger(
+        configForm.behavior_critical_reject_threshold_percent,
+        1,
+        10_000,
+        200,
       )
 
       const response = await updateL4Config({ ...configForm })

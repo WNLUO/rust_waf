@@ -73,7 +73,11 @@ defineProps<{
     <MetricWidget
       label="端口观测数"
       :value="formatNumber(topPortsCount)"
-      :hint="`协议异常 ${formatNumber(stats?.protocol_anomalies || 0)} / 流量计数 ${formatNumber(stats?.traffic || 0)}`"
+      :hint="
+        (stats?.protocol_anomalies || 0) > 0 || (stats?.traffic || 0) > 0
+          ? `协议异常 ${formatNumber(stats?.protocol_anomalies || 0)} / 流量计数 ${formatNumber(stats?.traffic || 0)}`
+          : '协议异常与总流量统计当前仍以预留字段返回'
+      "
       :icon="Database"
     />
   </section>

@@ -68,6 +68,83 @@ const http3PrivateKeyPath = fieldModel('http3_private_key_path')
 const http3ConnectionMigration = fieldModel('http3_enable_connection_migration')
 const http3Tls13Enabled = fieldModel('http3_enable_tls13')
 
+function updateCcDefense(patch: Partial<L7ConfigForm['cc_defense']>) {
+  updateForm('cc_defense', {
+    ...props.form.cc_defense,
+    ...patch,
+  })
+}
+
+const ccDefenseEnabled = computed({
+  get: () => props.form.cc_defense.enabled,
+  set: (value: boolean) => updateCcDefense({ enabled: value }),
+})
+
+const ccRequestWindow = computed({
+  get: () => props.form.cc_defense.request_window_secs,
+  set: (value: number) => updateCcDefense({ request_window_secs: value }),
+})
+
+const ccIpChallengeThreshold = computed({
+  get: () => props.form.cc_defense.ip_challenge_threshold,
+  set: (value: number) => updateCcDefense({ ip_challenge_threshold: value }),
+})
+
+const ccIpBlockThreshold = computed({
+  get: () => props.form.cc_defense.ip_block_threshold,
+  set: (value: number) => updateCcDefense({ ip_block_threshold: value }),
+})
+
+const ccHostChallengeThreshold = computed({
+  get: () => props.form.cc_defense.host_challenge_threshold,
+  set: (value: number) => updateCcDefense({ host_challenge_threshold: value }),
+})
+
+const ccHostBlockThreshold = computed({
+  get: () => props.form.cc_defense.host_block_threshold,
+  set: (value: number) => updateCcDefense({ host_block_threshold: value }),
+})
+
+const ccRouteChallengeThreshold = computed({
+  get: () => props.form.cc_defense.route_challenge_threshold,
+  set: (value: number) => updateCcDefense({ route_challenge_threshold: value }),
+})
+
+const ccRouteBlockThreshold = computed({
+  get: () => props.form.cc_defense.route_block_threshold,
+  set: (value: number) => updateCcDefense({ route_block_threshold: value }),
+})
+
+const ccHotPathChallengeThreshold = computed({
+  get: () => props.form.cc_defense.hot_path_challenge_threshold,
+  set: (value: number) => updateCcDefense({ hot_path_challenge_threshold: value }),
+})
+
+const ccHotPathBlockThreshold = computed({
+  get: () => props.form.cc_defense.hot_path_block_threshold,
+  set: (value: number) => updateCcDefense({ hot_path_block_threshold: value }),
+})
+
+const ccDelayThresholdPercent = computed({
+  get: () => props.form.cc_defense.delay_threshold_percent,
+  set: (value: number) => updateCcDefense({ delay_threshold_percent: value }),
+})
+
+const ccDelayMs = computed({
+  get: () => props.form.cc_defense.delay_ms,
+  set: (value: number) => updateCcDefense({ delay_ms: value }),
+})
+
+const ccChallengeTtl = computed({
+  get: () => props.form.cc_defense.challenge_ttl_secs,
+  set: (value: number) => updateCcDefense({ challenge_ttl_secs: value }),
+})
+
+const ccChallengeCookieName = computed({
+  get: () => props.form.cc_defense.challenge_cookie_name,
+  set: (value: string) => updateCcDefense({ challenge_cookie_name: value }),
+})
+
 function updateSafelineIntercept(
   patch: Partial<L7ConfigForm['safeline_intercept']>,
 ) {
@@ -458,6 +535,143 @@ const safelineResponseHeadersText = computed({
           "
         />
       </label>
+    </div>
+
+    <div class="mt-3 border-t border-slate-200 pt-6">
+      <div
+        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+      >
+        <div>
+          <p class="text-sm tracking-wider text-blue-700">L7 CC 防护</p>
+          <h4 class="mt-2 text-xl font-semibold text-stone-900">
+            基于真实来源 IP 的滑窗与 Challenge
+          </h4>
+        </div>
+        <div class="flex flex-wrap gap-3">
+          <StatusBadge
+            :text="form.cc_defense.enabled ? 'CC 守卫已启用' : 'CC 守卫已关闭'"
+            :type="form.cc_defense.enabled ? 'success' : 'warning'"
+          />
+          <StatusBadge
+            :text="`窗口 ${form.cc_defense.request_window_secs}s`"
+            type="info"
+          />
+          <StatusBadge
+            :text="`Cookie ${form.cc_defense.challenge_cookie_name}`"
+            type="muted"
+          />
+        </div>
+      </div>
+
+      <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <label
+          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+        >
+          <span class="flex items-center justify-between gap-3">
+            <span class="font-medium">启用 CC 守卫</span>
+            <input
+              v-model="ccDefenseEnabled"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+            />
+          </span>
+          <span class="mt-2 block text-xs leading-6 text-slate-500"
+            >按真实客户端 IP、Host 和路由统计请求速率，并执行延迟、Challenge 或 429。</span
+          >
+        </label>
+        <label class="text-sm text-stone-700"
+          >滑窗时长(s)<input
+            v-model.number="ccRequestWindow"
+            type="number"
+            min="3"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >延迟触发比例(%)<input
+            v-model.number="ccDelayThresholdPercent"
+            type="number"
+            min="25"
+            max="95"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >延迟时长(ms)<input
+            v-model.number="ccDelayMs"
+            type="number"
+            min="0"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >IP Challenge 阈值<input
+            v-model.number="ccIpChallengeThreshold"
+            type="number"
+            min="10"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >IP 429 阈值<input
+            v-model.number="ccIpBlockThreshold"
+            type="number"
+            min="10"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >Host Challenge 阈值<input
+            v-model.number="ccHostChallengeThreshold"
+            type="number"
+            min="5"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >Host 429 阈值<input
+            v-model.number="ccHostBlockThreshold"
+            type="number"
+            min="5"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >路由 Challenge 阈值<input
+            v-model.number="ccRouteChallengeThreshold"
+            type="number"
+            min="3"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >路由 429 阈值<input
+            v-model.number="ccRouteBlockThreshold"
+            type="number"
+            min="3"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >热点路径 Challenge 阈值<input
+            v-model.number="ccHotPathChallengeThreshold"
+            type="number"
+            min="32"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >热点路径 429 阈值<input
+            v-model.number="ccHotPathBlockThreshold"
+            type="number"
+            min="32"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >Challenge TTL(s)<input
+            v-model.number="ccChallengeTtl"
+            type="number"
+            min="30"
+            :class="numberInputClass"
+        /></label>
+        <label class="text-sm text-stone-700"
+          >Challenge Cookie 名称<input
+            v-model="ccChallengeCookieName"
+            type="text"
+            placeholder="例如 rwaf_cc"
+            :class="numberInputClass"
+        /></label>
+      </div>
     </div>
 
     <div class="mt-3 border-t border-slate-200 pt-6">

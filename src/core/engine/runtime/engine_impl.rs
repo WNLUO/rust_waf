@@ -1,0 +1,331 @@
+use super::*;
+use crate::core::engine_maintenance;
+
+pub struct WafEngine {
+    context: Arc<WafContext>,
+    _shutdown_tx: mpsc::Sender<()>,
+    shutdown_rx: mpsc::Receiver<()>,
+    connection_semaphore: Arc<Semaphore>,
+}
+
+impl WafEngine {
+    pub async fn new(config: Config) -> Result<Self> {
+        info!("Initializing WAF engine...");
+
+        let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+        let concurrency_limit = config.max_concurrent_tasks.max(1);
+        let context = Arc::new(WafContext::new(config).await?);
+
+        Ok(Self {
+            context,
+            _shutdown_tx: shutdown_tx,
+            shutdown_rx,
+            connection_semaphore: Arc::new(Semaphore::new(concurrency_limit)),
+        })
+    }
+
+    pub async fn start(&mut self) -> Result<()> {
+        let startup_config = self.context.config_snapshot();
+        info!("WAF engine started");
+        info!(
+            "Concurrency limit set to {} inflight connections",
+            startup_config.max_concurrent_tasks
+        );
+
+        if let Some(l4_inspector) = self.context.l4_inspector() {
+            l4_inspector.start(self.context.as_ref()).await?;
+        }
+
+        self.context
+            .http_processor
+            .start(self.context.as_ref())
+            .await?;
+
+        #[cfg(feature = "api")]
+        if startup_config.api_enabled {
+            let addr = startup_config.api_bind.parse()?;
+            let context = Arc::clone(&self.context);
+            tokio::spawn(async move {
+                if let Err(err) = crate::api::ApiServer::new(addr, context).start().await {
+                    warn!("API server exited with error: {}", err);
+                }
+            });
+        }
+
+        #[cfg(not(feature = "api"))]
+        if startup_config.api_enabled {
+            warn!("API support was requested but the binary was built without the 'api' feature");
+        }
+
+        let context = Arc::clone(&self.context);
+        tokio::spawn(async move {
+            engine_maintenance::run_upstream_healthcheck_loop(context).await;
+        });
+
+        if let Some(store) = self.context.sqlite_store.as_ref().cloned() {
+            let fallback_config = startup_config.clone();
+            tokio::spawn(async move {
+                engine_maintenance::run_safeline_auto_sync_loop(store, fallback_config)
+                    .await;
+            });
+        }
+
+        let maintenance_interval = startup_config.maintenance_interval_secs.max(5);
+        let mut maintenance =
+            tokio::time::interval(tokio::time::Duration::from_secs(maintenance_interval));
+
+        let mut shutdown_senders = Vec::new();
+        let mut udp_listener_addresses = Vec::new();
+        #[cfg(feature = "http3")]
+        let mut quic_listener = None;
+
+        for addr in &startup_config.listen_addrs {
+            match UdpSocket::bind(addr).await {
+                Ok(socket) => {
+                    let addr = socket.local_addr()?;
+                    udp_listener_addresses.push((addr, Arc::new(socket)));
+                }
+                Err(err) => {
+                    warn!("Failed to bind UDP listener on {}: {}", addr, err);
+                }
+            }
+        }
+
+        #[cfg(feature = "http3")]
+        {
+            if let Some(endpoint) = build_http3_endpoint(&startup_config.http3_config)? {
+                let addr = endpoint.local_addr()?;
+                self.context
+                    .set_http3_runtime("running", true, Some(addr.to_string()), None);
+                quic_listener = Some((addr, endpoint));
+            } else {
+                let config = &startup_config.http3_config;
+                let (status, last_error) = if !config.enabled {
+                    ("disabled".to_string(), None)
+                } else if !config.enable_tls13 {
+                    (
+                        "degraded".to_string(),
+                        Some("HTTP/3 requires TLS 1.3".to_string()),
+                    )
+                } else if config.certificate_path.is_none() || config.private_key_path.is_none() {
+                    (
+                        "degraded".to_string(),
+                        Some("certificate_path/private_key_path are missing".to_string()),
+                    )
+                } else {
+                    (
+                        "pending".to_string(),
+                        Some("HTTP/3 listener was not started".to_string()),
+                    )
+                };
+                self.context
+                    .set_http3_runtime(status, false, None, last_error);
+            }
+        }
+
+        #[cfg(not(feature = "http3"))]
+        if startup_config.http3_config.enabled {
+            self.context.set_http3_runtime(
+                "unsupported",
+                false,
+                None,
+                Some("Binary was built without the 'http3' feature".to_string()),
+            );
+            warn!(
+                "HTTP/3 support was requested but the binary was built without the 'http3' feature"
+            );
+        } else {
+            self.context
+                .set_http3_runtime("disabled", false, None, None);
+        }
+
+        #[cfg(feature = "http3")]
+        let _has_quic_listener = quic_listener.is_some();
+        #[cfg(not(feature = "http3"))]
+        let _has_quic_listener = false;
+
+        for (addr, socket) in udp_listener_addresses {
+            info!("UDP inspection listener started on {}", addr);
+            let context = Arc::clone(&self.context);
+            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+            let connection_semaphore = Arc::clone(&self.connection_semaphore);
+
+            let task = tokio::spawn(async move {
+                let mut buffer = vec![0u8; 65_535];
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            info!("UDP listener shutdown signal received for {}", addr);
+                            break;
+                        }
+                        recv_result = socket.recv_from(&mut buffer) => {
+                            match recv_result {
+                                Ok((bytes_read, peer_addr)) => {
+                                    match connection_semaphore.clone().try_acquire_owned() {
+                                        Ok(permit) => {
+                                            let ctx = Arc::clone(&context);
+                                            let listener_socket = Arc::clone(&socket);
+                                            let payload = buffer[..bytes_read].to_vec();
+                                            tokio::spawn(async move {
+                                                if let Err(err) = handle_udp_datagram(
+                                                    ctx,
+                                                    listener_socket,
+                                                    peer_addr,
+                                                    addr,
+                                                    payload,
+                                                    permit,
+                                                ).await {
+                                                    warn!("UDP datagram handling failed: {}", err);
+                                                }
+                                            });
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Dropping UDP datagram from {} due to concurrency limit",
+                                                peer_addr
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!("Failed to receive UDP datagram on {}: {}", addr, err);
+                                }
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Ctrl+C received, shutting down UDP listener on {}", addr);
+                            break;
+                        }
+                    }
+                }
+            });
+            shutdown_senders.push((task, shutdown_tx));
+        }
+
+        #[cfg(feature = "http3")]
+        if let Some((addr, endpoint)) = quic_listener {
+            info!("HTTP/3 listener started on {}", addr);
+            let context = Arc::clone(&self.context);
+            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+            let connection_semaphore = Arc::clone(&self.connection_semaphore);
+
+            let task = tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = shutdown_rx.recv() => {
+                            info!("HTTP/3 listener shutdown signal received for {}", addr);
+                            break;
+                        }
+                        accept_result = endpoint.accept() => {
+                            match accept_result {
+                                Some(incoming) => {
+                                    match connection_semaphore.clone().try_acquire_owned() {
+                                        Ok(permit) => {
+                                            let ctx = Arc::clone(&context);
+                                            tokio::spawn(async move {
+                                                if let Err(err) =
+                                                    handle_http3_quic_connection(ctx, incoming, addr, permit).await
+                                                {
+                                                    warn!("HTTP/3 connection handling failed: {}", err);
+                                                }
+                                            });
+                                        }
+                                        Err(_) => {
+                                            warn!(
+                                                "Dropping HTTP/3 connection on {} due to concurrency limit",
+                                                addr
+                                            );
+                                        }
+                                    }
+                                }
+                                None => break,
+                            }
+                        }
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Ctrl+C received, shutting down HTTP/3 listener on {}", addr);
+                            break;
+                        }
+                    }
+                }
+            });
+            shutdown_senders.push((task, shutdown_tx));
+        }
+
+        info!(
+            "Successfully started {} listener task(s)",
+            shutdown_senders.len()
+        );
+
+        let entry_runtime = EntryListenerRuntime::global();
+        entry_runtime
+            .sync(
+                Arc::clone(&self.context),
+                Arc::clone(&self.connection_semaphore),
+            )
+            .await?;
+
+        loop {
+            tokio::select! {
+                _ = self.shutdown_rx.recv() => {
+                    info!("Shutdown signal received");
+                    for (_, shutdown_tx) in &shutdown_senders {
+                        let _ = shutdown_tx.send(()).await;
+                    }
+                    entry_runtime.shutdown_all().await;
+                    break Ok(());
+                }
+                _ = maintenance.tick() => {
+                    self.run_maintenance().await;
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Ctrl+C received, shutting down");
+                    for (_, shutdown_tx) in &shutdown_senders {
+                        let _ = shutdown_tx.send(()).await;
+                    }
+                    entry_runtime.shutdown_all().await;
+                    break Ok(());
+                }
+            }
+        }
+    }
+
+    async fn run_maintenance(&self) {
+        if let Err(err) = self.context.refresh_rules_from_storage().await {
+            warn!("Failed to refresh rules from SQLite: {}", err);
+        }
+
+        if let Some(l4_inspector) = self.context.l4_inspector() {
+            l4_inspector.maintenance_tick();
+            if matches!(
+                self.context.config_snapshot().runtime_profile,
+                RuntimeProfile::Standard
+            ) {
+                let stats = l4_inspector.get_statistics();
+                debug!(
+                    "Maintenance tick: active_connections={}, blocked_connections={}, rate_limit_hits={}",
+                    stats.connections.active_connections,
+                    stats.connections.blocked_connections,
+                    stats.connections.rate_limit_hits
+                );
+                debug!(
+                    "L4 counters: ddos_events={}, protocol_anomalies={}, traffic={}, defense_actions={}",
+                    stats.ddos_events,
+                    stats.protocol_anomalies,
+                    stats.traffic,
+                    stats.defense_actions
+                );
+
+                if !stats.per_port_stats.is_empty() {
+                    debug!("=== Per-Port Statistics ===");
+                    for (port, port_stats) in &stats.per_port_stats {
+                        debug!(
+                            "Port {}: connections={}, blocks={}, ddos_events={}",
+                            port, port_stats.connections, port_stats.blocks, port_stats.ddos_events
+                        );
+                    }
+                    debug!("=============================");
+                }
+            }
+        }
+    }
+}

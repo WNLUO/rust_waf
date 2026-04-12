@@ -7,7 +7,7 @@ pub mod packet;
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
-use crate::l7::HttpTrafficProcessor;
+use crate::l7::{HttpTrafficProcessor, L7CcGuard};
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::SqliteStore;
@@ -47,6 +47,7 @@ pub struct WafContext {
     pub config: Config,
     runtime_config: Arc<RwLock<Config>>,
     l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
+    l7_cc_guard: RwLock<Arc<L7CcGuard>>,
     pub http_processor: HttpTrafficProcessor,
     pub rule_engine: RwLock<Option<RuleEngine>>,
     pub metrics: Option<MetricsCollector>,
@@ -95,6 +96,7 @@ impl WafContext {
                     l4_bloom_verification,
                 ))
             })),
+            l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&config.l7_config.cc_defense))),
             http_processor,
             rule_engine: RwLock::new(rule_engine),
             metrics,
@@ -141,6 +143,17 @@ impl WafContext {
                 .expect("runtime_config lock poisoned");
             *guard = config;
         }
+        let refreshed_guard = {
+            let guard = self
+                .runtime_config
+                .read()
+                .expect("runtime_config lock poisoned");
+            Arc::new(L7CcGuard::new(&guard.l7_config.cc_defense))
+        };
+        {
+            let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
+            *guard = refreshed_guard;
+        }
         self.refresh_http3_runtime_metadata();
     }
 
@@ -154,6 +167,13 @@ impl WafContext {
 
     pub fn l4_runtime_enabled(&self) -> bool {
         self.l4_inspector().as_ref().map(|_| true).unwrap_or(false)
+    }
+
+    pub fn l7_cc_guard(&self) -> Arc<L7CcGuard> {
+        self.l7_cc_guard
+            .read()
+            .expect("l7_cc_guard lock poisoned")
+            .clone()
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {

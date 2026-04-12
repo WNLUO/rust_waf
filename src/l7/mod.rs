@@ -1,6 +1,10 @@
+pub mod cc_guard;
+
 use crate::config::L7Config;
 use crate::core::WafContext;
 use log::{debug, info};
+
+pub use cc_guard::L7CcGuard;
 
 #[derive(Debug, Clone)]
 pub struct HttpTrafficProcessor {

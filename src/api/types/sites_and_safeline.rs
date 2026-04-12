@@ -1,3 +1,7 @@
+use super::core::{SafeLineInterceptConfigRequest, SafeLineInterceptConfigResponse};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize)]
 pub struct SafeLineSitesResponse {
     pub(crate) total: u32,
     pub(crate) cached_at: Option<i64>,
@@ -326,15 +330,15 @@ pub struct SafeLineSitePullRequest {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct LocalCertificateSecretDraft {
-    pub(super) certificate_pem: String,
-    pub(super) private_key_pem: String,
+pub(crate) struct LocalCertificateSecretDraft {
+    pub(crate) certificate_pem: String,
+    pub(crate) private_key_pem: String,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct GeneratedLocalCertificateDraft {
-    pub(super) certificate: crate::storage::LocalCertificateUpsert,
-    pub(super) secret: LocalCertificateSecretDraft,
+pub(crate) struct GeneratedLocalCertificateDraft {
+    pub(crate) certificate: crate::storage::LocalCertificateUpsert,
+    pub(crate) secret: LocalCertificateSecretDraft,
 }
 
 #[derive(Debug, Serialize)]
@@ -437,5 +441,3 @@ pub struct SafeLineBlocklistPullResponse {
     pub(crate) last_cursor: Option<i64>,
     pub(crate) message: String,
 }
-
-#[derive(Debug, Serialize)]

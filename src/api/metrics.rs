@@ -6,21 +6,7 @@ pub(super) fn build_metrics_response(
     storage_summary: Option<crate::storage::StorageMetricsSummary>,
     l4_behavior: Option<crate::l4::behavior::L4BehaviorOverview>,
 ) -> MetricsResponse {
-    let snapshot = metrics.unwrap_or(crate::metrics::MetricsSnapshot {
-        total_packets: 0,
-        blocked_packets: 0,
-        blocked_l4: 0,
-        blocked_l7: 0,
-        total_bytes: 0,
-        proxied_requests: 0,
-        proxy_successes: 0,
-        proxy_failures: 0,
-        proxy_fail_close_rejections: 0,
-        upstream_healthcheck_successes: 0,
-        upstream_healthcheck_failures: 0,
-        proxy_latency_micros_total: 0,
-        average_proxy_latency_micros: 0,
-    });
+    let snapshot = metrics.unwrap_or_default();
     let sqlite_enabled = storage_summary.is_some();
     let storage_summary = storage_summary.unwrap_or_default();
     let l4_behavior = l4_behavior.unwrap_or(crate::l4::behavior::L4BehaviorOverview {
@@ -43,6 +29,10 @@ pub(super) fn build_metrics_response(
         blocked_packets: snapshot.blocked_packets,
         blocked_l4: snapshot.blocked_l4,
         blocked_l7: snapshot.blocked_l7,
+        l7_cc_challenges: snapshot.l7_cc_challenges,
+        l7_cc_blocks: snapshot.l7_cc_blocks,
+        l7_cc_delays: snapshot.l7_cc_delays,
+        l7_cc_verified_passes: snapshot.l7_cc_verified_passes,
         total_bytes: snapshot.total_bytes,
         proxied_requests: snapshot.proxied_requests,
         proxy_successes: snapshot.proxy_successes,

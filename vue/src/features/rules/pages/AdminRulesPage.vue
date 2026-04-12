@@ -8,6 +8,7 @@ import {
   fetchActionIdeaPresets,
   fetchRuleActionTemplates,
 } from '@/shared/api/rules'
+import { buildActionIdeaResponseTemplate } from '@/features/actions/utils/actionIdeaPreview'
 import { fetchL7Config } from '@/shared/api/l7'
 import { fetchLocalSites } from '@/shared/api/sites'
 import type {
@@ -40,30 +41,6 @@ useFlashMessages({
   errorDuration: 5600,
   successDuration: 3200,
 })
-
-const isInlineJsIdea = (idea: ActionIdeaPreset) => idea.id === 'inline-js'
-
-const wrapInlineJsContent = (script: string, title: string) => `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title || '内嵌JS动作'}</title>
-  <style>
-    body { font-family: sans-serif; background: #f8fafc; color: #0f172a; display: grid; place-items: center; min-height: 100vh; margin: 0; }
-    .card { background: white; border-radius: 20px; padding: 32px; box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12); max-width: 560px; }
-  </style>
-</head>
-<body>
-  <main class="card">
-    <h1>请求已被动作页面接管</h1>
-    <p id="message">页面已正常返回，内嵌脚本会在这里执行。</p>
-  </main>
-  <script>
-${script}
-  <\/script>
-</body>
-</html>`
 
 function normalizeTemplateHeaders(headers: { key: string; value: string }[]) {
   return headers
@@ -100,32 +77,19 @@ const enabledActionTemplates = computed(() =>
     ...actionIdeaPresets.value
       .filter((idea) => !idea.requires_upload || idea.uploaded_file_ready)
       .map((idea) => ({
-      template_id: `${idea.plugin_id}:${idea.template_local_id}`,
-      plugin_id: idea.plugin_id,
-      name: idea.title,
-      description: `${idea.template_description}${
-        idea.has_overrides ? '（含已保存自定义内容）' : '（系统内置方案）'
-      }`,
-      layer: 'l7',
-      action: 'respond',
-      pattern: idea.pattern,
-      severity: idea.severity,
-      response_template: {
-        status_code: idea.status_code,
-        content_type: idea.content_type,
-        body_source: idea.body_source,
-        gzip: idea.gzip,
-        body_text:
-          idea.body_source === 'inline_text'
-            ? isInlineJsIdea(idea)
-              ? wrapInlineJsContent(idea.response_content, idea.title)
-              : idea.response_content
-            : '',
-        body_file_path: idea.body_source === 'file' ? idea.runtime_body_file_path : '',
-        headers: idea.headers,
-      },
-      updated_at: idea.updated_at,
-    })),
+        template_id: `${idea.plugin_id}:${idea.template_local_id}`,
+        plugin_id: idea.plugin_id,
+        name: idea.title,
+        description: `${idea.template_description}${
+          idea.has_overrides ? '（含已保存自定义内容）' : '（系统内置方案）'
+        }`,
+        layer: 'l7',
+        action: 'respond',
+        pattern: idea.pattern,
+        severity: idea.severity,
+        response_template: buildActionIdeaResponseTemplate(idea),
+        updated_at: idea.updated_at,
+      })),
   ].filter((item) => item.layer === 'l7'),
 )
 
@@ -133,8 +97,9 @@ const pendingTemplate = computed(() => {
   const templateId =
     typeof route.query.template === 'string' ? route.query.template : ''
   return (
-    enabledActionTemplates.value.find((item) => item.template_id === templateId) ??
-    null
+    enabledActionTemplates.value.find(
+      (item) => item.template_id === templateId,
+    ) ?? null
   )
 })
 
@@ -160,7 +125,10 @@ function matchedTemplateForSite(site: LocalSiteItem) {
   if (!config?.enabled) return null
   return (
     enabledActionTemplates.value.find((template) =>
-      sameResponseTemplate(template.response_template, config.response_template),
+      sameResponseTemplate(
+        template.response_template,
+        config.response_template,
+      ),
     ) ?? null
   )
 }
@@ -214,12 +182,13 @@ async function loadRulesCenter() {
   loading.value = true
   clearFeedback()
   try {
-    const [sitesResponse, templatesResponse, l7Response, ideasResponse] = await Promise.all([
-      fetchLocalSites(),
-      fetchRuleActionTemplates(),
-      fetchL7Config(),
-      fetchActionIdeaPresets(),
-    ])
+    const [sitesResponse, templatesResponse, l7Response, ideasResponse] =
+      await Promise.all([
+        fetchLocalSites(),
+        fetchRuleActionTemplates(),
+        fetchL7Config(),
+        fetchActionIdeaPresets(),
+      ])
     localSites.value = sitesResponse.sites
     actionTemplates.value = templatesResponse.templates
     actionIdeaPresets.value = ideasResponse.ideas
@@ -371,6 +340,5 @@ onMounted(loadRulesCenter)
         </div>
       </div>
     </div>
-
   </AppLayout>
 </template>

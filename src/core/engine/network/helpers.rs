@@ -1,0 +1,52 @@
+pub(crate) async fn maybe_delay_request(request: &crate::protocol::UnifiedHttpRequest) {
+    let delay_ms = request
+        .get_metadata("l4.suggested_delay_ms")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    if delay_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+    }
+}
+
+pub(crate) async fn maybe_delay_policy(policy: &crate::l4::behavior::L4AdaptivePolicy) {
+    if policy.suggested_delay_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(policy.suggested_delay_ms)).await;
+    }
+}
+
+pub(crate) fn record_l7_cc_metrics(
+    metrics: &crate::metrics::MetricsCollector,
+    request: &crate::protocol::UnifiedHttpRequest,
+) {
+    if request
+        .get_metadata("l7.cc.challenge_verified")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        metrics.record_l7_cc_verified_pass();
+    }
+
+    match request.get_metadata("l7.cc.action").map(String::as_str) {
+        Some("challenge") => metrics.record_l7_cc_challenge(),
+        Some("block") => metrics.record_l7_cc_block(),
+        Some(action) if action.starts_with("delay:") => metrics.record_l7_cc_delay(),
+        _ => {}
+    }
+}
+
+pub(crate) fn request_in_critical_overload(request: &crate::protocol::UnifiedHttpRequest) -> bool {
+    request
+        .get_metadata("l4.overload_level")
+        .map(|value| value == "critical")
+        .unwrap_or(false)
+}
+
+pub(crate) fn next_connection_id(
+    peer_addr: std::net::SocketAddr,
+    local_addr: std::net::SocketAddr,
+    transport: &str,
+) -> String {
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{transport}-{peer_addr}-{local_addr}-{id}")
+}

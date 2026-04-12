@@ -1,9 +1,14 @@
 import type {
   ActionIdeaPreset,
+  RuleResponseTemplate,
   RuleActionTemplateItem,
   RuleActionTemplatePreviewResponse,
 } from '@/shared/types'
-import { isInlineJsIdea, isRedirectIdea } from './actionIdeaPredicates'
+import {
+  isInlineJsIdea,
+  isRedirectIdea,
+  isTarpitIdea,
+} from './actionIdeaPredicates'
 
 export interface ActionIdeaCard extends ActionIdeaPreset {
   template: RuleActionTemplateItem | null
@@ -217,7 +222,8 @@ export function parseRandomStatuses(value: string) {
     .split(',')
     .map((item) => Number(item.trim()))
     .filter(
-      (item) => Number.isInteger(item) && item >= 100 && item <= 599 && item !== 200,
+      (item) =>
+        Number.isInteger(item) && item >= 100 && item <= 599 && item !== 200,
     )
 }
 
@@ -234,7 +240,10 @@ export function extractRandomErrorConfig(content: string) {
           .map((item) => Number(item))
           .filter(
             (item) =>
-              Number.isInteger(item) && item >= 100 && item <= 599 && item !== 200,
+              Number.isInteger(item) &&
+              item >= 100 &&
+              item <= 599 &&
+              item !== 200,
           )
       : []
     return {
@@ -316,6 +325,48 @@ ${script}
 </html>`
 }
 
+export function buildActionIdeaInlineResponseBody(idea: ActionIdeaPreset) {
+  if (isRedirectIdea(idea)) {
+    return wrapRedirectContent(idea.response_content, idea.title)
+  }
+  if (isInlineJsIdea(idea)) {
+    return wrapInlineJsContent(idea.response_content, idea.title)
+  }
+  if (isTarpitIdea(idea)) {
+    return extractTarpitConfig(idea.response_content).bodyText
+  }
+  return idea.response_content
+}
+
+export function buildActionIdeaPreviewBody(idea: ActionIdeaPreset) {
+  if (idea.requires_upload) {
+    return (
+      idea.uploaded_body_preview?.trim() ||
+      idea.uploaded_body_preview_notice?.trim() ||
+      `已上传文件：${idea.uploaded_file_name || '未上传 gzip 文件'}`
+    )
+  }
+  return buildActionIdeaInlineResponseBody(idea)
+}
+
+export function buildActionIdeaResponseTemplate(
+  idea: ActionIdeaPreset,
+): RuleResponseTemplate {
+  return {
+    status_code: idea.status_code,
+    content_type: idea.content_type,
+    body_source: idea.body_source,
+    gzip: idea.gzip,
+    body_text:
+      idea.body_source === 'inline_text'
+        ? buildActionIdeaInlineResponseBody(idea)
+        : '',
+    body_file_path:
+      idea.body_source === 'file' ? idea.runtime_body_file_path : '',
+    headers: idea.headers,
+  }
+}
+
 export function createActionIdeaPreviewPayload(idea: ActionIdeaPreset) {
   return {
     template_id: `${idea.plugin_id}:${idea.template_local_id}`,
@@ -324,13 +375,7 @@ export function createActionIdeaPreviewPayload(idea: ActionIdeaPreset) {
     status_code: idea.status_code,
     gzip: idea.gzip,
     body_source: idea.body_source,
-    body_preview: idea.requires_upload
-      ? `已上传文件：${idea.uploaded_file_name || '未上传 gzip 文件'}`
-      : isRedirectIdea(idea)
-        ? wrapRedirectContent(idea.response_content, idea.title)
-        : isInlineJsIdea(idea)
-          ? wrapInlineJsContent(idea.response_content, idea.title)
-          : idea.response_content,
-    truncated: false,
+    body_preview: buildActionIdeaPreviewBody(idea),
+    truncated: idea.requires_upload ? idea.uploaded_body_truncated : false,
   } satisfies RuleActionTemplatePreviewResponse
 }

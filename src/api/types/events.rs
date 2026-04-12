@@ -1,3 +1,6 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize)]
 pub struct SecurityEventsResponse {
     pub(crate) total: u64,
     pub(crate) limit: u32,
@@ -73,3 +76,15 @@ pub struct EventsQueryParams {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct BlockedIpsQueryParams {
+    pub(crate) limit: Option<u32>,
+    pub(crate) offset: Option<u32>,
+    pub(crate) source_scope: Option<String>,
+    pub(crate) provider: Option<String>,
+    pub(crate) ip: Option<String>,
+    pub(crate) keyword: Option<String>,
+    pub(crate) active_only: Option<bool>,
+    pub(crate) blocked_from: Option<i64>,
+    pub(crate) blocked_to: Option<i64>,
+    pub(crate) sort_by: Option<String>,
+    pub(crate) sort_direction: Option<String>,
+}

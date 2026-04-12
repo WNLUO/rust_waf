@@ -79,6 +79,16 @@ pub(super) async fn install_rule_action_plugin_handler(
     install_rule_action_plugin_from_url(store, &payload.package_url, payload.sha256.as_deref())
         .await
         .map_err(ApiError::bad_request)?;
+    state
+        .context
+        .refresh_rules_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -130,6 +140,16 @@ pub(super) async fn upload_rule_action_plugin_handler(
     )
     .await
     .map_err(ApiError::bad_request)?;
+    state
+        .context
+        .refresh_rules_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok((
         StatusCode::CREATED,
@@ -157,6 +177,16 @@ pub(super) async fn update_rule_action_plugin_handler(
             plugin_id
         )));
     }
+    state
+        .context
+        .refresh_rules_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
@@ -184,6 +214,16 @@ pub(super) async fn delete_rule_action_plugin_handler(
             plugin_id
         )));
     }
+    state
+        .context
+        .refresh_rules_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,

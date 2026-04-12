@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import {
-  fetchBlockedIps,
-  fetchSecurityEvents,
-} from '@/shared/api/events'
+import { fetchBlockedIps, fetchSecurityEvents } from '@/shared/api/events'
 import { fetchRulesList } from '@/shared/api/rules'
 import { fetchHealth, fetchMetrics } from '@/shared/api/system'
 import type {
@@ -25,6 +22,7 @@ import {
   RefreshCw,
   Shield,
   ArrowUpRight,
+  TimerReset,
 } from 'lucide-vue-next'
 
 const dashboard = ref<DashboardPayload | null>(null)
@@ -243,6 +241,34 @@ onBeforeUnmount(() => {
         />
       </section>
 
+      <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricWidget
+          label="CC Challenge 次数"
+          :value="formatNumber(dashboard?.metrics.l7_cc_challenges || 0)"
+          hint="已返回挑战页或挑战响应"
+          :icon="Shield"
+        />
+        <MetricWidget
+          label="CC 429 次数"
+          :value="formatNumber(dashboard?.metrics.l7_cc_blocks || 0)"
+          :hint="`HTTP 拦截 ${formatNumber(dashboard?.metrics.blocked_l7 || 0)} 中的硬阻断部分`"
+          :icon="Activity"
+          trend="up"
+        />
+        <MetricWidget
+          label="CC 延迟处置"
+          :value="formatNumber(dashboard?.metrics.l7_cc_delays || 0)"
+          hint="命中软阈值后执行延迟"
+          :icon="TimerReset"
+        />
+        <MetricWidget
+          label="Challenge 放行"
+          :value="formatNumber(dashboard?.metrics.l7_cc_verified_passes || 0)"
+          hint="已完成验证并继续放行"
+          :icon="ArrowUpRight"
+        />
+      </section>
+
       <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <CyberCard
           title="最新安全事件"
@@ -299,6 +325,50 @@ onBeforeUnmount(() => {
 
         <CyberCard title="运行摘要" sub-title="落库、代理与健康检查核心数据">
           <div class="grid gap-4">
+            <div class="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+              <div class="flex items-center justify-between">
+                <p class="text-sm text-amber-700">L7 CC 防护摘要</p>
+                <StatusBadge
+                  :text="
+                    (dashboard?.metrics.l7_cc_challenges || 0) +
+                      (dashboard?.metrics.l7_cc_blocks || 0) >
+                    0
+                      ? '近期开启动作'
+                      : '暂无处置'
+                  "
+                  :type="
+                    (dashboard?.metrics.l7_cc_challenges || 0) +
+                      (dashboard?.metrics.l7_cc_blocks || 0) >
+                    0
+                      ? 'warning'
+                      : 'muted'
+                  "
+                />
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p class="text-xs text-amber-700/80">Challenge / 429</p>
+                  <p class="mt-1 text-2xl font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.l7_cc_challenges || 0) }}
+                    /
+                    {{ formatNumber(dashboard?.metrics.l7_cc_blocks || 0) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-amber-700/80">Delay / 放行</p>
+                  <p class="mt-1 text-2xl font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.l7_cc_delays || 0) }}
+                    /
+                    {{
+                      formatNumber(
+                        dashboard?.metrics.l7_cc_verified_passes || 0,
+                      )
+                    }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div class="rounded-xl bg-slate-50 p-4">
               <div class="flex items-center justify-between">
                 <p class="text-sm text-slate-500">代理结果</p>

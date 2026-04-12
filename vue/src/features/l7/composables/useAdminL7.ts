@@ -64,6 +64,9 @@ export function useAdminL7() {
       real_ip_headers: [...payload.real_ip_headers],
       trusted_proxy_cidrs: [...payload.trusted_proxy_cidrs],
       listen_addrs: [...payload.listen_addrs],
+      cc_defense: {
+        ...payload.cc_defense,
+      },
       safeline_intercept: {
         ...payload.safeline_intercept,
         response_template: {
@@ -233,6 +236,80 @@ export function useAdminL7() {
         65536,
         4096,
       )
+      configForm.cc_defense.request_window_secs = clampInteger(
+        configForm.cc_defense.request_window_secs,
+        3,
+        120,
+        10,
+      )
+      configForm.cc_defense.ip_challenge_threshold = clampInteger(
+        configForm.cc_defense.ip_challenge_threshold,
+        10,
+        10000,
+        60,
+      )
+      configForm.cc_defense.ip_block_threshold = clampInteger(
+        configForm.cc_defense.ip_block_threshold,
+        configForm.cc_defense.ip_challenge_threshold,
+        20000,
+        120,
+      )
+      configForm.cc_defense.host_challenge_threshold = clampInteger(
+        configForm.cc_defense.host_challenge_threshold,
+        5,
+        configForm.cc_defense.ip_challenge_threshold,
+        48,
+      )
+      configForm.cc_defense.host_block_threshold = clampInteger(
+        configForm.cc_defense.host_block_threshold,
+        configForm.cc_defense.host_challenge_threshold,
+        configForm.cc_defense.ip_block_threshold,
+        96,
+      )
+      configForm.cc_defense.route_challenge_threshold = clampInteger(
+        configForm.cc_defense.route_challenge_threshold,
+        3,
+        configForm.cc_defense.host_challenge_threshold,
+        24,
+      )
+      configForm.cc_defense.route_block_threshold = clampInteger(
+        configForm.cc_defense.route_block_threshold,
+        configForm.cc_defense.route_challenge_threshold,
+        configForm.cc_defense.host_block_threshold,
+        48,
+      )
+      configForm.cc_defense.hot_path_challenge_threshold = clampInteger(
+        configForm.cc_defense.hot_path_challenge_threshold,
+        32,
+        200000,
+        800,
+      )
+      configForm.cc_defense.hot_path_block_threshold = clampInteger(
+        configForm.cc_defense.hot_path_block_threshold,
+        configForm.cc_defense.hot_path_challenge_threshold,
+        400000,
+        1600,
+      )
+      configForm.cc_defense.delay_threshold_percent = clampInteger(
+        configForm.cc_defense.delay_threshold_percent,
+        25,
+        95,
+        70,
+      )
+      configForm.cc_defense.delay_ms = clampInteger(
+        configForm.cc_defense.delay_ms,
+        0,
+        5000,
+        150,
+      )
+      configForm.cc_defense.challenge_ttl_secs = clampInteger(
+        configForm.cc_defense.challenge_ttl_secs,
+        30,
+        86400,
+        1800,
+      )
+      configForm.cc_defense.challenge_cookie_name =
+        configForm.cc_defense.challenge_cookie_name.trim().toLowerCase() || 'rwaf_cc'
       configForm.safeline_intercept.max_body_bytes = clampInteger(
         configForm.safeline_intercept.max_body_bytes,
         256,

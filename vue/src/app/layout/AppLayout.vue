@@ -79,6 +79,47 @@ const isNavItemActive = (item: NavItem) => {
   return item.children?.some((child) => isRouteActive(child.path)) ?? false
 }
 
+const createInitialNavGroupState = () =>
+  Object.fromEntries(
+    navItems
+      .filter((item) => item.children?.length)
+      .map((item) => [item.name, isNavItemActive(item)]),
+  )
+
+const navGroupExpanded = ref<Record<string, boolean>>(createInitialNavGroupState())
+
+const isNavGroupExpanded = (item: NavItem) => {
+  if (!item.children?.length) return false
+  return navGroupExpanded.value[item.name] ?? isNavItemActive(item)
+}
+
+const expandActiveNavGroups = () => {
+  const nextState = { ...navGroupExpanded.value }
+  let changed = false
+
+  for (const item of navItems) {
+    if (!item.children?.length || !isNavItemActive(item) || nextState[item.name]) {
+      continue
+    }
+
+    nextState[item.name] = true
+    changed = true
+  }
+
+  if (changed) {
+    navGroupExpanded.value = nextState
+  }
+}
+
+const toggleNavGroup = (item: NavItem) => {
+  if (!item.children?.length) return
+
+  navGroupExpanded.value = {
+    ...navGroupExpanded.value,
+    [item.name]: !isNavGroupExpanded(item),
+  }
+}
+
 const syncViewport = () => {
   const nextIsDesktop = window.innerWidth >= DESKTOP_BREAKPOINT
   isDesktop.value = nextIsDesktop
@@ -133,6 +174,7 @@ onMounted(() => {
   desktopCollapsed.value =
     window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
   adminTokenDraft.value = getAdminApiToken()
+  expandActiveNavGroups()
   syncViewport()
   window.addEventListener('resize', syncViewport)
 })
@@ -151,6 +193,7 @@ watch(
   () => {
     mobileMenuOpen.value = false
     authPanelOpen.value = false
+    expandActiveNavGroups()
   },
 )
 
@@ -236,31 +279,40 @@ const clearToken = () => {
             v-else
             class="rounded-md"
             :class="
-              isNavItemActive(item)
+              isNavItemActive(item) && isNavGroupExpanded(item)
                 ? 'bg-slate-50'
                 : ''
             "
           >
-            <div
-              class="flex items-center rounded-md transition-colors duration-150"
+            <button
+              type="button"
+              class="flex w-full items-center rounded-md transition-colors duration-150 hover:bg-slate-100 hover:text-slate-900"
+              :aria-expanded="isNavGroupExpanded(item)"
+              :aria-controls="`nav-group-${item.name}`"
               :class="[
                 sidebarExpanded ? 'gap-3 px-3 py-2' : 'justify-center p-2',
                 isNavItemActive(item)
                   ? 'text-blue-700 font-medium'
                   : 'text-slate-600',
               ]"
+              @click="toggleNavGroup(item)"
             >
               <component :is="item.icon" :size="20" class="shrink-0" />
               <template v-if="sidebarExpanded">
                 <span class="truncate text-sm">{{ item.name }}</span>
                 <ChevronDown
                   :size="16"
-                  class="ml-auto shrink-0 text-slate-400"
+                  class="ml-auto shrink-0 text-slate-400 transition-transform duration-200"
+                  :class="isNavGroupExpanded(item) ? 'rotate-180' : ''"
                 />
               </template>
-            </div>
+            </button>
 
-            <div v-if="sidebarExpanded" class="mt-1 space-y-1 px-2 pb-2">
+            <div
+              v-if="sidebarExpanded && isNavGroupExpanded(item)"
+              :id="`nav-group-${item.name}`"
+              class="mt-1 space-y-1 px-2 pb-2"
+            >
               <RouterLink
                 v-for="child in item.children"
                 :key="child.path"

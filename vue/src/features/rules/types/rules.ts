@@ -109,6 +109,9 @@ export interface ActionIdeaPreset {
   requires_upload: boolean
   uploaded_file_name?: string | null
   uploaded_file_ready: boolean
+  uploaded_body_preview?: string | null
+  uploaded_body_preview_notice?: string | null
+  uploaded_body_truncated: boolean
   has_overrides: boolean
   updated_at: number
 }

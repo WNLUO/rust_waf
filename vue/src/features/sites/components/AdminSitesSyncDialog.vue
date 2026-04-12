@@ -8,7 +8,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import type { RemoteSyncCandidate } from '@/features/sites/composables/useAdminSites'
+import type { RemoteSyncCandidate } from '@/features/sites/composables/useAdminSitesRemoteSync'
 import type { SafeLineSitePullOptions } from '@/shared/types'
 
 const props = defineProps<{

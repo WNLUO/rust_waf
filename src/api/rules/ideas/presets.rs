@@ -1,64 +1,66 @@
-use super::*;
-use axum::extract::Multipart;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
-struct BuiltinActionIdeaPreset {
-    id: &'static str,
-    title: &'static str,
-    mood: &'static str,
-    summary: &'static str,
-    mechanism: &'static str,
-    performance: &'static str,
-    fallback_path: &'static str,
-    plugin_id: &'static str,
-    file_name: &'static str,
-    response_file_path: &'static str,
-    plugin_name: &'static str,
-    plugin_description: &'static str,
-    template_local_id: &'static str,
-    template_description: &'static str,
-    pattern: &'static str,
-    severity: &'static str,
-    content_type: &'static str,
-    status_code: u16,
-    gzip: bool,
-    body_source: &'static str,
-    response_content: &'static str,
-    requires_upload: bool,
+pub(super) struct BuiltinActionIdeaPreset {
+    pub(super) id: &'static str,
+    pub(super) title: &'static str,
+    pub(super) mood: &'static str,
+    pub(super) summary: &'static str,
+    pub(super) mechanism: &'static str,
+    pub(super) performance: &'static str,
+    pub(super) fallback_path: &'static str,
+    pub(super) plugin_id: &'static str,
+    pub(super) file_name: &'static str,
+    pub(super) response_file_path: &'static str,
+    pub(super) plugin_name: &'static str,
+    pub(super) plugin_description: &'static str,
+    pub(super) template_local_id: &'static str,
+    pub(super) template_description: &'static str,
+    pub(super) pattern: &'static str,
+    pub(super) severity: &'static str,
+    pub(super) content_type: &'static str,
+    pub(super) status_code: u16,
+    pub(super) gzip: bool,
+    pub(super) body_source: &'static str,
+    pub(super) response_content: &'static str,
+    pub(super) requires_upload: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct TarpitIdeaConfig {
-    bytes_per_chunk: usize,
-    chunk_interval_ms: u64,
-    body_text: String,
+pub(super) struct TarpitIdeaConfig {
+    pub(super) bytes_per_chunk: usize,
+    pub(super) chunk_interval_ms: u64,
+    pub(super) body_text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct RandomErrorIdeaConfig {
-    failure_statuses: Vec<u16>,
-    success_rate_percent: u8,
-    success_body: String,
-    failure_body: String,
+pub(super) struct RandomErrorIdeaConfig {
+    pub(super) failure_statuses: Vec<u16>,
+    pub(super) success_rate_percent: u8,
+    pub(super) success_body: String,
+    pub(super) failure_body: String,
 }
 
-fn is_redirect_action_idea(idea_id: &str) -> bool {
+#[derive(Debug, Clone, Default)]
+pub(super) struct UploadedBodyPreview {
+    pub(super) body_preview: Option<String>,
+    pub(super) body_preview_notice: Option<String>,
+    pub(super) truncated: bool,
+}
+
+pub(super) fn is_redirect_action_idea(idea_id: &str) -> bool {
     idea_id == "redirect-302"
 }
 
-fn is_tarpit_action_idea(idea_id: &str) -> bool {
+pub(super) fn is_tarpit_action_idea(idea_id: &str) -> bool {
     idea_id == "smart-tarpit"
 }
 
-fn is_random_error_action_idea(idea_id: &str) -> bool {
+pub(super) fn is_random_error_action_idea(idea_id: &str) -> bool {
     idea_id == "random-error-system"
 }
 
-fn default_redirect_target() -> &'static str {
+pub(super) fn default_redirect_target() -> &'static str {
     "https://www.war.gov/"
 }
 
@@ -70,7 +72,7 @@ fn default_tarpit_idea_config() -> TarpitIdeaConfig {
     }
 }
 
-fn parse_tarpit_idea_config(value: &str) -> TarpitIdeaConfig {
+pub(super) fn parse_tarpit_idea_config(value: &str) -> TarpitIdeaConfig {
     let parsed = serde_json::from_str::<TarpitIdeaConfig>(value).ok();
     let default = default_tarpit_idea_config();
     let Some(parsed) = parsed else {
@@ -95,7 +97,7 @@ fn parse_tarpit_idea_config(value: &str) -> TarpitIdeaConfig {
     }
 }
 
-fn serialize_tarpit_idea_config(config: &TarpitIdeaConfig) -> String {
+pub(super) fn serialize_tarpit_idea_config(config: &TarpitIdeaConfig) -> String {
     serde_json::to_string(config).unwrap_or_else(|_| {
         serde_json::json!({
             "bytes_per_chunk": config.bytes_per_chunk,
@@ -115,7 +117,7 @@ fn default_random_error_idea_config() -> RandomErrorIdeaConfig {
     }
 }
 
-fn parse_random_error_idea_config(value: &str) -> RandomErrorIdeaConfig {
+pub(super) fn parse_random_error_idea_config(value: &str) -> RandomErrorIdeaConfig {
     let parsed = serde_json::from_str::<RandomErrorIdeaConfig>(value).ok();
     let default = default_random_error_idea_config();
     let Some(parsed) = parsed else {
@@ -155,7 +157,7 @@ fn parse_random_error_idea_config(value: &str) -> RandomErrorIdeaConfig {
     }
 }
 
-fn serialize_random_error_idea_config(config: &RandomErrorIdeaConfig) -> String {
+pub(super) fn serialize_random_error_idea_config(config: &RandomErrorIdeaConfig) -> String {
     serde_json::to_string(config).unwrap_or_else(|_| {
         serde_json::json!({
             "failure_statuses": config.failure_statuses,
@@ -167,7 +169,7 @@ fn serialize_random_error_idea_config(config: &RandomErrorIdeaConfig) -> String 
     })
 }
 
-fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
+pub(super) fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
     vec![
         BuiltinActionIdeaPreset {
             id: "json-honeypot",
@@ -946,370 +948,4 @@ fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             requires_upload: true,
         },
     ]
-}
-
-fn action_idea_headers(
-    builtin: &BuiltinActionIdeaPreset,
-    response_content: &str,
-) -> Vec<RuleResponseHeaderPayload> {
-    let mut headers = vec![RuleResponseHeaderPayload {
-        key: "cache-control".to_string(),
-        value: "no-store".to_string(),
-    }];
-    if builtin.id == "maintenance-page" {
-        headers.push(RuleResponseHeaderPayload {
-            key: "retry-after".to_string(),
-            value: "120".to_string(),
-        });
-    }
-    if builtin.id == "gzip-response" {
-        headers.push(RuleResponseHeaderPayload {
-            key: "content-encoding".to_string(),
-            value: "gzip".to_string(),
-        });
-    }
-    if is_tarpit_action_idea(builtin.id) {
-        let config = parse_tarpit_idea_config(response_content);
-        headers.push(RuleResponseHeaderPayload {
-            key: "x-rust-waf-tarpit-bytes-per-chunk".to_string(),
-            value: config.bytes_per_chunk.to_string(),
-        });
-        headers.push(RuleResponseHeaderPayload {
-            key: "x-rust-waf-tarpit-interval-ms".to_string(),
-            value: config.chunk_interval_ms.to_string(),
-        });
-    }
-    if is_random_error_action_idea(builtin.id) {
-        let config = parse_random_error_idea_config(response_content);
-        headers.push(RuleResponseHeaderPayload {
-            key: "x-rust-waf-random-statuses".to_string(),
-            value: config
-                .failure_statuses
-                .iter()
-                .map(u16::to_string)
-                .collect::<Vec<_>>()
-                .join(","),
-        });
-    }
-    if is_redirect_action_idea(builtin.id) {
-        let target = {
-            let trimmed = response_content.trim();
-            if trimmed.is_empty() {
-                default_redirect_target()
-            } else {
-                trimmed
-            }
-        };
-        headers.push(RuleResponseHeaderPayload {
-            key: "location".to_string(),
-            value: target.to_string(),
-        });
-    }
-    headers
-}
-
-fn action_idea_asset_relative_path(idea_id: &str) -> String {
-    format!("action_ideas/{}/payload.gz", idea_id)
-}
-
-fn action_idea_default_file_exists(idea_id: &str) -> bool {
-    crate::rules::resolve_response_file_path(&action_idea_asset_relative_path(idea_id))
-        .ok()
-        .and_then(|path| fs::metadata(path).ok())
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false)
-}
-
-fn build_action_idea_response(
-    builtin: &BuiltinActionIdeaPreset,
-    override_entry: Option<&crate::storage::ActionIdeaOverrideEntry>,
-) -> ActionIdeaPresetResponse {
-    let title = override_entry
-        .and_then(|entry| entry.title.clone())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| builtin.title.to_string());
-    let response_content = if builtin.requires_upload {
-        String::new()
-    } else {
-        override_entry
-            .and_then(|entry| entry.response_content.clone())
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| builtin.response_content.to_string())
-    };
-    let response_content = if is_redirect_action_idea(builtin.id) {
-        let trimmed = response_content.trim();
-        if trimmed.is_empty() {
-            default_redirect_target().to_string()
-        } else {
-            trimmed.to_string()
-        }
-    } else if is_tarpit_action_idea(builtin.id) {
-        serialize_tarpit_idea_config(&parse_tarpit_idea_config(&response_content))
-    } else if is_random_error_action_idea(builtin.id) {
-        serialize_random_error_idea_config(&parse_random_error_idea_config(&response_content))
-    } else {
-        response_content
-    };
-    let status_code = override_entry
-        .and_then(|entry| entry.status_code)
-        .and_then(|value| u16::try_from(value).ok())
-        .unwrap_or(builtin.status_code);
-    let content_type = override_entry
-        .and_then(|entry| entry.content_type.clone())
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| builtin.content_type.to_string());
-    let runtime_body_file_path = if builtin.requires_upload {
-        override_entry
-            .and_then(|entry| entry.body_file_path.clone())
-            .unwrap_or_else(|| action_idea_asset_relative_path(builtin.id))
-    } else {
-        String::new()
-    };
-    let default_file_exists =
-        builtin.requires_upload && action_idea_default_file_exists(builtin.id);
-    let uploaded_file_name = override_entry
-        .and_then(|entry| entry.uploaded_file_name.clone())
-        .or_else(|| {
-            if default_file_exists {
-                Some("payload.gz".to_string())
-            } else {
-                None
-            }
-        });
-    let uploaded_file_ready = builtin.requires_upload && default_file_exists;
-
-    ActionIdeaPresetResponse {
-        id: builtin.id.to_string(),
-        title: title.clone(),
-        mood: builtin.mood.to_string(),
-        summary: builtin.summary.to_string(),
-        mechanism: builtin.mechanism.to_string(),
-        performance: builtin.performance.to_string(),
-        fallback_path: builtin.fallback_path.to_string(),
-        plugin_id: builtin.plugin_id.to_string(),
-        file_name: builtin.file_name.to_string(),
-        response_file_path: builtin.response_file_path.to_string(),
-        plugin_name: builtin.plugin_name.to_string(),
-        plugin_description: builtin.plugin_description.to_string(),
-        template_local_id: builtin.template_local_id.to_string(),
-        template_name: title,
-        template_description: builtin.template_description.to_string(),
-        pattern: builtin.pattern.to_string(),
-        severity: builtin.severity.to_string(),
-        content_type,
-        status_code,
-        gzip: builtin.gzip,
-        body_source: builtin.body_source.to_string(),
-        runtime_body_file_path,
-        headers: action_idea_headers(builtin, &response_content),
-        response_content,
-        requires_upload: builtin.requires_upload,
-        uploaded_file_name,
-        uploaded_file_ready,
-        has_overrides: override_entry.is_some(),
-        updated_at: override_entry
-            .map(|entry| entry.updated_at)
-            .unwrap_or_default(),
-    }
-}
-
-pub(super) async fn list_action_idea_presets_handler(
-    State(state): State<ApiState>,
-) -> ApiResult<Json<ActionIdeaPresetsResponse>> {
-    let store = sqlite_store(&state)?;
-    let overrides = store
-        .list_action_idea_overrides()
-        .await
-        .map_err(ApiError::internal)?;
-    let overrides_by_id: HashMap<_, _> = overrides
-        .into_iter()
-        .map(|entry| (entry.idea_id.clone(), entry))
-        .collect();
-
-    let ideas: Vec<_> = builtin_action_idea_presets()
-        .into_iter()
-        .map(|builtin| build_action_idea_response(&builtin, overrides_by_id.get(builtin.id)))
-        .collect();
-
-    Ok(Json(ActionIdeaPresetsResponse {
-        total: ideas.len() as u32,
-        ideas,
-    }))
-}
-
-pub(super) async fn update_action_idea_preset_handler(
-    State(state): State<ApiState>,
-    Path(idea_id): Path<String>,
-    ExtractJson(payload): ExtractJson<UpdateActionIdeaPresetRequest>,
-) -> ApiResult<Json<ActionIdeaPresetResponse>> {
-    let builtin = builtin_action_idea_presets()
-        .into_iter()
-        .find(|item| item.id == idea_id)
-        .ok_or_else(|| ApiError::not_found(format!("Action idea '{}' not found", idea_id)))?;
-
-    let title = payload.title.trim().to_string();
-    if title.is_empty() {
-        return Err(ApiError::bad_request("动作名称不能为空".to_string()));
-    }
-    if !(100..=599).contains(&payload.status_code) {
-        return Err(ApiError::bad_request(
-            "状态码必须在 100 到 599 之间".to_string(),
-        ));
-    }
-    let content_type = payload.content_type.trim().to_string();
-    if content_type.is_empty() {
-        return Err(ApiError::bad_request("内容类型不能为空".to_string()));
-    }
-
-    let response_content = payload.response_content.trim().to_string();
-    if !builtin.requires_upload && response_content.is_empty() {
-        return Err(ApiError::bad_request("原始内容不能为空".to_string()));
-    }
-
-    let store = sqlite_store(&state)?;
-    let existing_override = store
-        .list_action_idea_overrides()
-        .await
-        .map_err(ApiError::internal)?
-        .into_iter()
-        .find(|entry| entry.idea_id == idea_id);
-    store
-        .upsert_action_idea_override(&crate::storage::ActionIdeaOverrideUpsert {
-            idea_id: idea_id.clone(),
-            title: Some(title.clone()),
-            status_code: Some(i64::from(payload.status_code)),
-            content_type: Some(content_type.clone()),
-            response_content: if builtin.requires_upload {
-                existing_override
-                    .as_ref()
-                    .and_then(|entry| entry.response_content.clone())
-            } else {
-                Some(payload.response_content)
-            },
-            body_file_path: existing_override
-                .as_ref()
-                .and_then(|entry| entry.body_file_path.clone()),
-            uploaded_file_name: existing_override
-                .as_ref()
-                .and_then(|entry| entry.uploaded_file_name.clone()),
-        })
-        .await
-        .map_err(ApiError::internal)?;
-
-    let overrides = store
-        .list_action_idea_overrides()
-        .await
-        .map_err(ApiError::internal)?;
-    let updated_entry = overrides
-        .into_iter()
-        .find(|entry| entry.idea_id == idea_id)
-        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("动作方案覆盖写入后未找到记录")))?;
-
-    Ok(Json(build_action_idea_response(
-        &builtin,
-        Some(&updated_entry),
-    )))
-}
-
-pub(super) async fn upload_action_idea_gzip_handler(
-    State(state): State<ApiState>,
-    Path(idea_id): Path<String>,
-    mut multipart: Multipart,
-) -> ApiResult<Json<ActionIdeaUploadResponse>> {
-    let builtin = builtin_action_idea_presets()
-        .into_iter()
-        .find(|item| item.id == idea_id)
-        .ok_or_else(|| ApiError::not_found(format!("Action idea '{}' not found", idea_id)))?;
-    if !builtin.requires_upload {
-        return Err(ApiError::bad_request(
-            "这个动作不支持上传 gzip 文件".to_string(),
-        ));
-    }
-
-    let mut upload_bytes = None;
-    let mut upload_name = None;
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|err| ApiError::bad_request(format!("读取上传字段失败: {}", err)))?
-    {
-        if field.name() != Some("file") {
-            continue;
-        }
-        upload_name = field.file_name().map(|value| value.to_string());
-        let bytes = field
-            .bytes()
-            .await
-            .map_err(|err| ApiError::bad_request(format!("读取上传文件失败: {}", err)))?;
-        upload_bytes = Some(bytes);
-    }
-
-    let upload_bytes =
-        upload_bytes.ok_or_else(|| ApiError::bad_request("缺少 gzip 文件".to_string()))?;
-    if upload_bytes.is_empty() {
-        return Err(ApiError::bad_request("gzip 文件不能为空".to_string()));
-    }
-    if upload_bytes.len() > 8 * 1024 * 1024 {
-        return Err(ApiError::bad_request("gzip 文件不能超过 8MB".to_string()));
-    }
-    if upload_bytes.len() < 2 || upload_bytes[0] != 0x1f || upload_bytes[1] != 0x8b {
-        return Err(ApiError::bad_request(
-            "上传文件不是有效的 gzip 文件".to_string(),
-        ));
-    }
-
-    let relative_path = action_idea_asset_relative_path(&idea_id);
-    let absolute_path = crate::rules::resolve_response_file_path(&relative_path)
-        .map_err(|err| ApiError::bad_request(err.to_string()))?;
-    let parent = absolute_path
-        .parent()
-        .map(PathBuf::from)
-        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("无法确定 gzip 资产目录")))?;
-    fs::create_dir_all(&parent).map_err(ApiError::internal)?;
-    fs::write(&absolute_path, upload_bytes.as_ref()).map_err(ApiError::internal)?;
-
-    let store = sqlite_store(&state)?;
-    let existing_override = store
-        .list_action_idea_overrides()
-        .await
-        .map_err(ApiError::internal)?
-        .into_iter()
-        .find(|entry| entry.idea_id == idea_id);
-
-    store
-        .upsert_action_idea_override(&crate::storage::ActionIdeaOverrideUpsert {
-            idea_id: idea_id.clone(),
-            title: existing_override
-                .as_ref()
-                .and_then(|entry| entry.title.clone()),
-            status_code: existing_override
-                .as_ref()
-                .and_then(|entry| entry.status_code),
-            content_type: existing_override
-                .as_ref()
-                .and_then(|entry| entry.content_type.clone()),
-            response_content: existing_override
-                .as_ref()
-                .and_then(|entry| entry.response_content.clone()),
-            body_file_path: Some(relative_path),
-            uploaded_file_name: Some(
-                upload_name
-                    .filter(|name| !name.trim().is_empty())
-                    .unwrap_or_else(|| "payload.gz".to_string()),
-            ),
-        })
-        .await
-        .map_err(ApiError::internal)?;
-
-    let updated_override = store
-        .list_action_idea_overrides()
-        .await
-        .map_err(ApiError::internal)?
-        .into_iter()
-        .find(|entry| entry.idea_id == idea_id)
-        .ok_or_else(|| ApiError::internal(anyhow::anyhow!("上传 gzip 后未找到动作方案记录")))?;
-
-    Ok(Json(ActionIdeaUploadResponse {
-        idea: build_action_idea_response(&builtin, Some(&updated_override)),
-    }))
 }

@@ -1,3 +1,11 @@
+use super::super::types::*;
+use super::super::{
+    non_empty_string, parse_blocked_ip_sort_field, parse_event_sort_field, parse_sort_direction,
+};
+use crate::config::{Rule, RuleResponseBodySource, RuleResponseHeader, RuleResponseTemplate};
+use rand::{distributions::Alphanumeric, Rng};
+use std::collections::HashSet;
+
 impl From<crate::storage::SafeLineSyncStateEntry> for SafeLineSyncStateResponse {
     fn from(value: crate::storage::SafeLineSyncStateEntry) -> Self {
         Self {
@@ -12,12 +20,12 @@ impl From<crate::storage::SafeLineSyncStateEntry> for SafeLineSyncStateResponse 
 }
 
 impl RuleUpsertRequest {
-    pub(super) fn into_rule(self) -> Result<Rule, String> {
+    pub(crate) fn into_rule(self) -> Result<Rule, String> {
         let id = self.id.clone();
         self.into_rule_with_id(id)
     }
 
-    pub(super) fn into_rule_with_id(self, id: String) -> Result<Rule, String> {
+    pub(crate) fn into_rule_with_id(self, id: String) -> Result<Rule, String> {
         let id = id.trim().to_string();
         let name = self.name.trim().to_string();
         let pattern = self.pattern.trim().to_string();
@@ -50,7 +58,7 @@ impl RuleUpsertRequest {
 }
 
 impl RuleResponseTemplatePayload {
-    pub(super) fn from_template(template: RuleResponseTemplate) -> Self {
+    pub(crate) fn from_template(template: RuleResponseTemplate) -> Self {
         Self {
             status_code: template.status_code,
             content_type: template.content_type,
@@ -193,7 +201,7 @@ impl From<crate::storage::BlockedIpEntry> for BlockedIpResponse {
 }
 
 impl EventsQueryParams {
-    pub(super) fn into_query(self) -> Result<crate::storage::SecurityEventQuery, String> {
+    pub(crate) fn into_query(self) -> Result<crate::storage::SecurityEventQuery, String> {
         Ok(crate::storage::SecurityEventQuery {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
@@ -213,7 +221,7 @@ impl EventsQueryParams {
 }
 
 impl BlockedIpsQueryParams {
-    pub(super) fn into_query(self) -> Result<crate::storage::BlockedIpQuery, String> {
+    pub(crate) fn into_query(self) -> Result<crate::storage::BlockedIpQuery, String> {
         Ok(crate::storage::BlockedIpQuery {
             limit: self.limit.unwrap_or(50),
             offset: self.offset.unwrap_or(0),
@@ -248,7 +256,7 @@ fn normalize_optional_query_value(value: Option<String>) -> Option<String> {
     })
 }
 
-fn default_generated_certificate_name(primary_domain: &str) -> String {
+pub(crate) fn default_generated_certificate_name(primary_domain: &str) -> String {
     let random_suffix: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(6)
@@ -278,7 +286,7 @@ fn sanitize_certificate_name(value: &str) -> String {
     }
 }
 
-fn normalize_string_list(values: Vec<String>) -> Vec<String> {
+pub(crate) fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized = Vec::new();
 
@@ -295,19 +303,19 @@ fn normalize_string_list(values: Vec<String>) -> Vec<String> {
     normalized
 }
 
-fn required_string(value: String, message: &str) -> Result<String, String> {
+pub(crate) fn required_string(value: String, message: &str) -> Result<String, String> {
     non_empty_string(value).ok_or_else(|| message.to_string())
 }
 
-fn parse_json_string_vec(value: &str) -> Result<Vec<String>, anyhow::Error> {
+pub(crate) fn parse_json_string_vec(value: &str) -> Result<Vec<String>, anyhow::Error> {
     Ok(serde_json::from_str::<Vec<String>>(value)?)
 }
 
-fn parse_json_value(value: &str) -> Result<serde_json::Value, anyhow::Error> {
+pub(crate) fn parse_json_value(value: &str) -> Result<serde_json::Value, anyhow::Error> {
     Ok(serde_json::from_str::<serde_json::Value>(value)?)
 }
 
-async fn ensure_local_certificate_exists(
+pub(crate) async fn ensure_local_certificate_exists(
     store: &crate::storage::SqliteStore,
     id: i64,
 ) -> Result<(), String> {
@@ -323,7 +331,7 @@ async fn ensure_local_certificate_exists(
     }
 }
 
-async fn ensure_local_site_exists(
+pub(crate) async fn ensure_local_site_exists(
     store: &crate::storage::SqliteStore,
     id: i64,
 ) -> Result<(), String> {

@@ -46,6 +46,10 @@ defineProps<{
           :type="configForm.bloom_enabled ? 'info' : 'muted'"
         />
         <StatusBadge
+          :text="configForm.cc_defense.enabled ? 'CC 守卫开启' : 'CC 守卫关闭'"
+          :type="configForm.cc_defense.enabled ? 'warning' : 'muted'"
+        />
+        <StatusBadge
           :text="
             configForm.bloom_false_positive_verification
               ? '误判校验开启'
@@ -85,6 +89,34 @@ defineProps<{
       hint="仅统计成功代理请求"
       :icon="TimerReset"
       trend="down"
+    />
+  </section>
+
+  <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <MetricWidget
+      label="CC Challenge 次数"
+      :value="formatNumber(stats?.cc_challenge_requests || 0)"
+      hint="返回挑战页或挑战响应的累计次数"
+      :icon="Shield"
+    />
+    <MetricWidget
+      label="CC 429 次数"
+      :value="formatNumber(stats?.cc_block_requests || 0)"
+      hint="达到硬阈值后直接拒绝的累计次数"
+      :icon="Activity"
+      trend="up"
+    />
+    <MetricWidget
+      label="CC 延迟处置"
+      :value="formatNumber(stats?.cc_delayed_requests || 0)"
+      hint="命中软压制并执行延迟的累计次数"
+      :icon="TimerReset"
+    />
+    <MetricWidget
+      label="Challenge 放行"
+      :value="formatNumber(stats?.cc_verified_pass_requests || 0)"
+      :hint="`Cookie ${configForm.cc_defense.challenge_cookie_name} 验证通过后继续放行`"
+      :icon="ArrowUpRight"
     />
   </section>
 

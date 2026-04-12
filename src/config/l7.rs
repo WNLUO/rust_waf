@@ -58,7 +58,41 @@ pub struct L7Config {
     #[serde(default = "default_bloom_filter_scale")]
     pub bloom_filter_scale: f64,
     #[serde(default)]
+    pub cc_defense: CcDefenseConfig,
+    #[serde(default)]
     pub safeline_intercept: SafeLineInterceptConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CcDefenseConfig {
+    #[serde(default = "default_cc_defense_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_cc_request_window_secs")]
+    pub request_window_secs: u64,
+    #[serde(default = "default_cc_ip_challenge_threshold")]
+    pub ip_challenge_threshold: u32,
+    #[serde(default = "default_cc_ip_block_threshold")]
+    pub ip_block_threshold: u32,
+    #[serde(default = "default_cc_host_challenge_threshold")]
+    pub host_challenge_threshold: u32,
+    #[serde(default = "default_cc_host_block_threshold")]
+    pub host_block_threshold: u32,
+    #[serde(default = "default_cc_route_challenge_threshold")]
+    pub route_challenge_threshold: u32,
+    #[serde(default = "default_cc_route_block_threshold")]
+    pub route_block_threshold: u32,
+    #[serde(default = "default_cc_hot_path_challenge_threshold")]
+    pub hot_path_challenge_threshold: u32,
+    #[serde(default = "default_cc_hot_path_block_threshold")]
+    pub hot_path_block_threshold: u32,
+    #[serde(default = "default_cc_delay_threshold_percent")]
+    pub delay_threshold_percent: u8,
+    #[serde(default = "default_cc_delay_ms")]
+    pub delay_ms: u64,
+    #[serde(default = "default_cc_challenge_ttl_secs")]
+    pub challenge_ttl_secs: u64,
+    #[serde(default = "default_cc_cookie_name")]
+    pub challenge_cookie_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +185,62 @@ const fn default_bloom_filter_scale() -> f64 {
     1.0
 }
 
+const fn default_cc_defense_enabled() -> bool {
+    true
+}
+
+const fn default_cc_request_window_secs() -> u64 {
+    10
+}
+
+const fn default_cc_ip_challenge_threshold() -> u32 {
+    60
+}
+
+const fn default_cc_ip_block_threshold() -> u32 {
+    120
+}
+
+const fn default_cc_host_challenge_threshold() -> u32 {
+    48
+}
+
+const fn default_cc_host_block_threshold() -> u32 {
+    96
+}
+
+const fn default_cc_route_challenge_threshold() -> u32 {
+    24
+}
+
+const fn default_cc_route_block_threshold() -> u32 {
+    48
+}
+
+const fn default_cc_hot_path_challenge_threshold() -> u32 {
+    800
+}
+
+const fn default_cc_hot_path_block_threshold() -> u32 {
+    1_600
+}
+
+const fn default_cc_delay_threshold_percent() -> u8 {
+    70
+}
+
+const fn default_cc_delay_ms() -> u64 {
+    150
+}
+
+const fn default_cc_challenge_ttl_secs() -> u64 {
+    1_800
+}
+
+fn default_cc_cookie_name() -> String {
+    "rwaf_cc".to_string()
+}
+
 const fn default_safeline_intercept_max_body_bytes() -> usize {
     32 * 1024
 }
@@ -195,6 +285,27 @@ impl Default for SafeLineInterceptConfig {
     }
 }
 
+impl Default for CcDefenseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cc_defense_enabled(),
+            request_window_secs: default_cc_request_window_secs(),
+            ip_challenge_threshold: default_cc_ip_challenge_threshold(),
+            ip_block_threshold: default_cc_ip_block_threshold(),
+            host_challenge_threshold: default_cc_host_challenge_threshold(),
+            host_block_threshold: default_cc_host_block_threshold(),
+            route_challenge_threshold: default_cc_route_challenge_threshold(),
+            route_block_threshold: default_cc_route_block_threshold(),
+            hot_path_challenge_threshold: default_cc_hot_path_challenge_threshold(),
+            hot_path_block_threshold: default_cc_hot_path_block_threshold(),
+            delay_threshold_percent: default_cc_delay_threshold_percent(),
+            delay_ms: default_cc_delay_ms(),
+            challenge_ttl_secs: default_cc_challenge_ttl_secs(),
+            challenge_cookie_name: default_cc_cookie_name(),
+        }
+    }
+}
+
 impl Default for L7Config {
     fn default() -> Self {
         Self {
@@ -214,6 +325,7 @@ impl Default for L7Config {
             upstream_healthcheck_timeout_ms: default_upstream_healthcheck_timeout_ms(),
             upstream_failure_mode: UpstreamFailureMode::default(),
             bloom_filter_scale: default_bloom_filter_scale(),
+            cc_defense: CcDefenseConfig::default(),
             safeline_intercept: SafeLineInterceptConfig::default(),
         }
     }

@@ -1,110 +1,12 @@
-impl L4StatsResponse {
-    pub(super) fn disabled() -> Self {
-        Self {
-            enabled: false,
-            behavior: crate::l4::behavior::L4BehaviorSnapshot {
-                overview: crate::l4::behavior::L4BehaviorOverview {
-                    bucket_count: 0,
-                    fine_grained_buckets: 0,
-                    coarse_buckets: 0,
-                    peer_only_buckets: 0,
-                    normal_buckets: 0,
-                    suspicious_buckets: 0,
-                    high_risk_buckets: 0,
-                    safeline_feedback_hits: 0,
-                    l7_feedback_hits: 0,
-                    dropped_events: 0,
-                    overload_level: crate::l4::behavior::L4OverloadLevel::Normal,
-                    overload_reason: None,
-                },
-                top_buckets: Vec::new(),
-            },
-            connections: crate::l4::connection::ConnectionStats {
-                total_connections: 0,
-                active_connections: 0,
-                blocked_connections: 0,
-                rate_limit_hits: 0,
-            },
-            ddos_events: 0,
-            protocol_anomalies: 0,
-            traffic: 0,
-            defense_actions: 0,
-            bloom_stats: None,
-            false_positive_stats: None,
-            per_port_stats: Vec::new(),
-        }
-    }
-
-    pub(super) fn from_stats(stats: crate::l4::inspector::L4Statistics) -> Self {
-        let mut per_port_stats = stats.per_port_stats.into_values().collect::<Vec<_>>();
-        per_port_stats.sort_by(|left, right| {
-            right
-                .blocks
-                .cmp(&left.blocks)
-                .then(right.ddos_events.cmp(&left.ddos_events))
-                .then(right.connections.cmp(&left.connections))
-                .then(left.port.cmp(&right.port))
-        });
-
-        Self {
-            enabled: true,
-            behavior: stats.behavior,
-            connections: stats.connections,
-            ddos_events: stats.ddos_events,
-            protocol_anomalies: stats.protocol_anomalies,
-            traffic: stats.traffic,
-            defense_actions: stats.defense_actions,
-            bloom_stats: stats.bloom_stats,
-            false_positive_stats: stats.false_positive_stats,
-            per_port_stats,
-        }
-    }
-}
-
-impl L7StatsResponse {
-    pub(super) fn from_context(context: &WafContext) -> Self {
-        let metrics = context.metrics_snapshot();
-        let upstream = context.upstream_health_snapshot();
-        let http3 = context.http3_runtime_snapshot();
-
-        Self {
-            enabled: true,
-            blocked_requests: metrics.as_ref().map(|value| value.blocked_l7).unwrap_or(0),
-            proxied_requests: metrics
-                .as_ref()
-                .map(|value| value.proxied_requests)
-                .unwrap_or(0),
-            proxy_successes: metrics
-                .as_ref()
-                .map(|value| value.proxy_successes)
-                .unwrap_or(0),
-            proxy_failures: metrics
-                .as_ref()
-                .map(|value| value.proxy_failures)
-                .unwrap_or(0),
-            proxy_fail_close_rejections: metrics
-                .as_ref()
-                .map(|value| value.proxy_fail_close_rejections)
-                .unwrap_or(0),
-            average_proxy_latency_micros: metrics
-                .as_ref()
-                .map(|value| value.average_proxy_latency_micros)
-                .unwrap_or(0),
-            upstream_healthy: upstream.healthy,
-            upstream_last_check_at: upstream.last_check_at,
-            upstream_last_error: upstream.last_error,
-            http3_feature_available: http3.feature_available,
-            http3_configured_enabled: http3.configured_enabled,
-            http3_tls13_enabled: http3.tls13_enabled,
-            http3_certificate_configured: http3.certificate_configured,
-            http3_private_key_configured: http3.private_key_configured,
-            http3_listener_started: http3.listener_started,
-            http3_listener_addr: http3.listener_addr,
-            http3_status: http3.status,
-            http3_last_error: http3.last_error,
-        }
-    }
-}
+use super::super::types::*;
+use super::super::{non_empty_string, unix_timestamp};
+use super::rules_and_events::{
+    default_generated_certificate_name, ensure_local_certificate_exists, ensure_local_site_exists,
+    normalize_string_list, parse_json_string_vec, parse_json_value, required_string,
+};
+use crate::integrations::safeline::{SafeLineProbeResult, SafeLineSiteSummary};
+use rcgen::{generate_simple_self_signed, CertifiedKey};
+use std::collections::HashSet;
 
 impl From<SafeLineProbeResult> for SafeLineTestResponse {
     fn from(value: SafeLineProbeResult) -> Self {
@@ -168,7 +70,7 @@ impl TryFrom<crate::storage::SafeLineCachedSiteEntry> for SafeLineSiteResponse {
 }
 
 impl crate::storage::SafeLineCachedSiteUpsert {
-    pub(super) fn from_summary(value: &SafeLineSiteSummary) -> Result<Self, anyhow::Error> {
+    pub(crate) fn from_summary(value: &SafeLineSiteSummary) -> Result<Self, anyhow::Error> {
         Ok(Self {
             remote_site_id: value.id.clone(),
             name: value.name.clone(),
@@ -207,7 +109,7 @@ impl From<crate::storage::SafeLineSiteMappingEntry> for SafeLineMappingResponse 
 }
 
 impl SafeLineMappingsUpdateRequest {
-    pub(super) fn into_storage_mappings(
+    pub(crate) fn into_storage_mappings(
         self,
     ) -> Result<Vec<crate::storage::SafeLineSiteMappingUpsert>, String> {
         let mut primary_count = 0usize;
@@ -287,7 +189,7 @@ impl TryFrom<crate::storage::LocalSiteEntry> for LocalSiteResponse {
 }
 
 impl LocalSiteUpsertRequest {
-    pub(super) async fn into_storage_site(
+    pub(crate) async fn into_storage_site(
         self,
         store: &crate::storage::SqliteStore,
     ) -> Result<crate::storage::LocalSiteUpsert, String> {
@@ -365,7 +267,7 @@ impl TryFrom<crate::storage::LocalCertificateEntry> for LocalCertificateResponse
 }
 
 impl LocalCertificateUpsertRequest {
-    pub(super) fn into_storage_certificate(
+    pub(crate) fn into_storage_certificate(
         self,
     ) -> Result<
         (
@@ -430,7 +332,7 @@ impl LocalCertificateUpsertRequest {
 }
 
 impl GeneratedLocalCertificateRequest {
-    pub(super) fn into_generated_certificate(
+    pub(crate) fn into_generated_certificate(
         self,
     ) -> Result<GeneratedLocalCertificateDraft, String> {
         let domains = normalize_string_list(self.domains);
@@ -500,7 +402,7 @@ impl From<crate::storage::SiteSyncLinkEntry> for SiteSyncLinkResponse {
 }
 
 impl SiteSyncLinkUpsertRequest {
-    pub(super) async fn into_storage_link(
+    pub(crate) async fn into_storage_link(
         self,
         store: &crate::storage::SqliteStore,
     ) -> Result<crate::storage::SiteSyncLinkUpsert, String> {

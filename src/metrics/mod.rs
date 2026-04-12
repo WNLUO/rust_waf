@@ -6,6 +6,10 @@ pub struct MetricsCollector {
     blocked_packets: AtomicU64,
     blocked_l4: AtomicU64,
     blocked_l7: AtomicU64,
+    l7_cc_challenges: AtomicU64,
+    l7_cc_blocks: AtomicU64,
+    l7_cc_delays: AtomicU64,
+    l7_cc_verified_passes: AtomicU64,
     total_bytes: AtomicU64,
     proxied_requests: AtomicU64,
     proxy_successes: AtomicU64,
@@ -23,6 +27,10 @@ impl MetricsCollector {
             blocked_packets: AtomicU64::new(0),
             blocked_l4: AtomicU64::new(0),
             blocked_l7: AtomicU64::new(0),
+            l7_cc_challenges: AtomicU64::new(0),
+            l7_cc_blocks: AtomicU64::new(0),
+            l7_cc_delays: AtomicU64::new(0),
+            l7_cc_verified_passes: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             proxied_requests: AtomicU64::new(0),
             proxy_successes: AtomicU64::new(0),
@@ -70,6 +78,22 @@ impl MetricsCollector {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_l7_cc_challenge(&self) {
+        self.l7_cc_challenges.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_block(&self) {
+        self.l7_cc_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_delay(&self) {
+        self.l7_cc_delays.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_verified_pass(&self) {
+        self.l7_cc_verified_passes.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_upstream_healthcheck(&self, healthy: bool) {
         if healthy {
             self.upstream_healthcheck_successes
@@ -88,6 +112,10 @@ impl MetricsCollector {
             blocked_packets: self.blocked_packets.load(Ordering::Relaxed),
             blocked_l4: self.blocked_l4.load(Ordering::Relaxed),
             blocked_l7: self.blocked_l7.load(Ordering::Relaxed),
+            l7_cc_challenges: self.l7_cc_challenges.load(Ordering::Relaxed),
+            l7_cc_blocks: self.l7_cc_blocks.load(Ordering::Relaxed),
+            l7_cc_delays: self.l7_cc_delays.load(Ordering::Relaxed),
+            l7_cc_verified_passes: self.l7_cc_verified_passes.load(Ordering::Relaxed),
             total_bytes: self.total_bytes.load(Ordering::Relaxed),
             proxied_requests: self.proxied_requests.load(Ordering::Relaxed),
             proxy_successes,
@@ -110,12 +138,16 @@ impl MetricsCollector {
 }
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MetricsSnapshot {
     pub total_packets: u64,
     pub blocked_packets: u64,
     pub blocked_l4: u64,
     pub blocked_l7: u64,
+    pub l7_cc_challenges: u64,
+    pub l7_cc_blocks: u64,
+    pub l7_cc_delays: u64,
+    pub l7_cc_verified_passes: u64,
     pub total_bytes: u64,
     pub proxied_requests: u64,
     pub proxy_successes: u64,
@@ -145,11 +177,19 @@ mod tests {
         metrics.record_proxy_success(std::time::Duration::from_millis(4));
         metrics.record_proxy_failure();
         metrics.record_fail_close_rejection();
+        metrics.record_l7_cc_challenge();
+        metrics.record_l7_cc_block();
+        metrics.record_l7_cc_delay();
+        metrics.record_l7_cc_verified_pass();
         metrics.record_upstream_healthcheck(true);
         metrics.record_upstream_healthcheck(false);
 
         let snapshot = metrics.get_stats();
         assert_eq!(snapshot.total_packets, 1);
+        assert_eq!(snapshot.l7_cc_challenges, 1);
+        assert_eq!(snapshot.l7_cc_blocks, 1);
+        assert_eq!(snapshot.l7_cc_delays, 1);
+        assert_eq!(snapshot.l7_cc_verified_passes, 1);
         assert_eq!(snapshot.proxied_requests, 1);
         assert_eq!(snapshot.proxy_successes, 1);
         assert_eq!(snapshot.proxy_failures, 1);

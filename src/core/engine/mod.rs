@@ -53,13 +53,30 @@ use crate::protocol::{
 };
 use crate::storage::{BlockedIpRecord, SecurityEventRecord};
 
-static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
-pub(crate) const BROWSER_FINGERPRINT_REPORT_PATH: &str =
-    "/.well-known/waf/browser-fingerprint-report";
-const MAX_BROWSER_FINGERPRINT_DETAILS_BYTES: usize = 128 * 1024;
-static ENTRY_LISTENER_RUNTIME: OnceLock<Arc<EntryListenerRuntime>> = OnceLock::new();
+mod network;
 
-include!("runtime.rs");
-include!("network.rs");
-include!("proxy.rs");
-include!("policy.rs");
+#[cfg(feature = "http3")]
+use self::network::handle_http3_quic_connection;
+use self::network::{handle_connection, handle_tls_connection, handle_udp_datagram};
+mod policy;
+mod proxy;
+mod runtime;
+
+use self::policy::{
+    apply_client_identity, apply_gateway_site_metadata, apply_response_policies,
+    body_for_request, enforce_upstream_policy, http_status_text, inspect_application_layers,
+    inspect_transport_layers, persist_http_inspection_event, persist_l4_inspection_event,
+    persist_safeline_intercept_blocked_ip, persist_safeline_intercept_event,
+    prepare_request_for_proxy, prepare_request_for_routing, redirect_to_https_location,
+    resolve_gateway_site, resolve_safeline_intercept_config, select_upstream_target,
+    should_keep_client_connection_open, should_reject_unmatched_site,
+    try_handle_browser_fingerprint_report,
+};
+use self::proxy::{
+    apply_safeline_upstream_action, proxy_http_request, proxy_http_request_with_session_affinity,
+    resolve_runtime_custom_response, write_http1_upstream_response,
+    UpstreamResponseDisposition,
+};
+use self::runtime::PrefixedStream;
+pub use self::runtime::WafEngine;
+pub(crate) use self::runtime::{sync_entry_listener_runtime, validate_entry_listener_config};

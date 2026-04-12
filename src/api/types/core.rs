@@ -1,3 +1,6 @@
+use super::rules::RuleResponseTemplatePayload;
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub(crate) status: String,
@@ -93,6 +96,7 @@ pub struct L7ConfigResponse {
     pub(crate) http3_certificate_path: String,
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
+    pub(crate) cc_defense: CcDefenseConfigResponse,
     pub(crate) safeline_intercept: SafeLineInterceptConfigResponse,
 }
 
@@ -199,7 +203,45 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
     #[serde(default)]
+    pub(crate) cc_defense: Option<CcDefenseConfigRequest>,
+    #[serde(default)]
     pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CcDefenseConfigResponse {
+    pub(crate) enabled: bool,
+    pub(crate) request_window_secs: u64,
+    pub(crate) ip_challenge_threshold: u32,
+    pub(crate) ip_block_threshold: u32,
+    pub(crate) host_challenge_threshold: u32,
+    pub(crate) host_block_threshold: u32,
+    pub(crate) route_challenge_threshold: u32,
+    pub(crate) route_block_threshold: u32,
+    pub(crate) hot_path_challenge_threshold: u32,
+    pub(crate) hot_path_block_threshold: u32,
+    pub(crate) delay_threshold_percent: u8,
+    pub(crate) delay_ms: u64,
+    pub(crate) challenge_ttl_secs: u64,
+    pub(crate) challenge_cookie_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CcDefenseConfigRequest {
+    pub(crate) enabled: bool,
+    pub(crate) request_window_secs: u64,
+    pub(crate) ip_challenge_threshold: u32,
+    pub(crate) ip_block_threshold: u32,
+    pub(crate) host_challenge_threshold: u32,
+    pub(crate) host_block_threshold: u32,
+    pub(crate) route_challenge_threshold: u32,
+    pub(crate) route_block_threshold: u32,
+    pub(crate) hot_path_challenge_threshold: u32,
+    pub(crate) hot_path_block_threshold: u32,
+    pub(crate) delay_threshold_percent: u8,
+    pub(crate) delay_ms: u64,
+    pub(crate) challenge_ttl_secs: u64,
+    pub(crate) challenge_cookie_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -260,5 +302,3 @@ pub struct SafeLineTestResponse {
     pub(crate) authenticated: bool,
     pub(crate) auth_probe_status: Option<u16>,
 }
-
-#[derive(Debug, Serialize)]

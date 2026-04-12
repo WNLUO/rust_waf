@@ -11,6 +11,8 @@ import type {
   RuleActionTemplatePreviewResponse,
 } from '@/shared/types'
 import {
+  buildActionIdeaInlineResponseBody,
+  buildActionIdeaPreviewBody,
   copyToClipboard,
   createActionIdeaPreviewPayload,
   defaultFakeSqlError,
@@ -87,55 +89,61 @@ export function useAdminActionPreview({
 
   const currentPreviewIdea = computed(() =>
     previewIdeaId.value
-      ? actionIdeasById.value.get(previewIdeaId.value) ?? null
+      ? (actionIdeasById.value.get(previewIdeaId.value) ?? null)
       : null,
   )
   const previewIsActionIdea = computed(() => Boolean(currentPreviewIdea.value))
 
   const previewRenderedBody = computed(() =>
     previewIsActionIdea.value
-      ? currentPreviewIdea.value && isInlineJsIdea(currentPreviewIdea.value)
-        ? wrapInlineJsContent(
-            previewDraftContent.value,
-            previewDraftTitle.value || previewTitle.value,
-          )
-        : currentPreviewIdea.value && isRedirectIdea(currentPreviewIdea.value)
-          ? wrapRedirectContent(
+      ? currentPreviewIdea.value?.requires_upload
+        ? previewPayload.value?.body_preview ||
+          buildActionIdeaPreviewBody(currentPreviewIdea.value)
+        : currentPreviewIdea.value && isInlineJsIdea(currentPreviewIdea.value)
+          ? wrapInlineJsContent(
               previewDraftContent.value,
               previewDraftTitle.value || previewTitle.value,
             )
-          : currentPreviewIdea.value && isFakeSqlIdea(currentPreviewIdea.value)
-            ? wrapFakeSqlContent(
-                escapeHtml(
-                  previewDraftSqlError.value.trim() || defaultFakeSqlError,
-                ),
-                escapeHtml(
-                  previewDraftSqlResult.value.trim() || defaultFakeSqlResult,
-                ),
+          : currentPreviewIdea.value && isRedirectIdea(currentPreviewIdea.value)
+            ? wrapRedirectContent(
+                previewDraftContent.value,
+                previewDraftTitle.value || previewTitle.value,
               )
-            : currentPreviewIdea.value && isFakeXssIdea(currentPreviewIdea.value)
-              ? wrapFakeXssContent(
+            : currentPreviewIdea.value &&
+                isFakeSqlIdea(currentPreviewIdea.value)
+              ? wrapFakeSqlContent(
                   escapeHtml(
-                    previewDraftXssPayload.value.trim() ||
-                      defaultFakeXssPayload,
+                    previewDraftSqlError.value.trim() || defaultFakeSqlError,
+                  ),
+                  escapeHtml(
+                    previewDraftSqlResult.value.trim() || defaultFakeSqlResult,
                   ),
                 )
-              : currentPreviewIdea.value && isTarpitIdea(currentPreviewIdea.value)
-                ? previewDraftTarpitBody.value.trim() || defaultTarpitBody
+              : currentPreviewIdea.value &&
+                  isFakeXssIdea(currentPreviewIdea.value)
+                ? wrapFakeXssContent(
+                    escapeHtml(
+                      previewDraftXssPayload.value.trim() ||
+                        defaultFakeXssPayload,
+                    ),
+                  )
                 : currentPreviewIdea.value &&
-                    isRandomErrorIdea(currentPreviewIdea.value)
-                  ? `失败状态码: ${
-                      parseRandomStatuses(
-                        previewDraftRandomStatuses.value,
-                      ).join(', ') || defaultRandomStatuses
-                    }\n成功概率: ${previewDraftRandomSuccessRate.value}%\n\n失败文案:\n${
-                      previewDraftRandomFailureBody.value.trim() ||
-                      defaultRandomFailureBody
-                    }\n\n成功文案:\n${
-                      previewDraftRandomSuccessBody.value.trim() ||
-                      defaultRandomSuccessBody
-                    }`
-                  : previewDraftContent.value
+                    isTarpitIdea(currentPreviewIdea.value)
+                  ? previewDraftTarpitBody.value.trim() || defaultTarpitBody
+                  : currentPreviewIdea.value &&
+                      isRandomErrorIdea(currentPreviewIdea.value)
+                    ? `失败状态码: ${
+                        parseRandomStatuses(
+                          previewDraftRandomStatuses.value,
+                        ).join(', ') || defaultRandomStatuses
+                      }\n成功概率: ${previewDraftRandomSuccessRate.value}%\n\n失败文案:\n${
+                        previewDraftRandomFailureBody.value.trim() ||
+                        defaultRandomFailureBody
+                      }\n\n成功文案:\n${
+                        previewDraftRandomSuccessBody.value.trim() ||
+                        defaultRandomSuccessBody
+                      }`
+                    : previewDraftContent.value
       : (previewPayload.value?.body_preview ?? ''),
   )
 
@@ -153,14 +161,17 @@ export function useAdminActionPreview({
 
   const previewCanPagePreview = computed(() => {
     const idea = currentPreviewIdea.value
-    if (idea?.requires_upload) return false
+    if (idea?.requires_upload) {
+      return (
+        previewDraftContentType.value.includes('text/html') &&
+        Boolean(idea.uploaded_body_preview?.trim())
+      )
+    }
     return (
-      (
-        previewIsActionIdea.value
-          ? previewDraftContentType.value
-          : (previewPayload.value?.content_type ?? '')
-      ).includes('text/html')
-    )
+      previewIsActionIdea.value
+        ? previewDraftContentType.value
+        : (previewPayload.value?.content_type ?? '')
+    ).includes('text/html')
   })
 
   const previewDirty = computed(() => {
@@ -370,24 +381,16 @@ export function useAdminActionPreview({
       )
       zip.file(
         `responses/${idea.response_file_path}`,
-        isRedirectIdea(idea)
-          ? wrapRedirectContent(idea.response_content, idea.title)
-          : isTarpitIdea(idea)
-            ? extractTarpitConfig(idea.response_content).bodyText
+        isFakeSqlIdea(idea)
+          ? wrapFakeSqlContent(
+              extractFakeSqlFields(idea.response_content).error,
+              extractFakeSqlFields(idea.response_content).result,
+            )
+          : isFakeXssIdea(idea)
+            ? wrapFakeXssContent(extractFakeXssPayload(idea.response_content))
             : isRandomErrorIdea(idea)
-              ? extractRandomErrorConfig(idea.response_content).failureBody
-              : isFakeSqlIdea(idea)
-                ? wrapFakeSqlContent(
-                    extractFakeSqlFields(idea.response_content).error,
-                    extractFakeSqlFields(idea.response_content).result,
-                  )
-                : isFakeXssIdea(idea)
-                  ? wrapFakeXssContent(
-                      extractFakeXssPayload(idea.response_content),
-                    )
-                  : idea.id === 'inline-js'
-                    ? wrapInlineJsContent(idea.response_content, idea.title)
-                    : idea.response_content,
+              ? idea.response_content
+              : buildActionIdeaInlineResponseBody(idea),
       )
 
       const blob = await zip.generateAsync({
@@ -496,9 +499,7 @@ export function useAdminActionPreview({
             escapeHtml(previewDraftSqlResult.value.trim()),
           )
         : isFakeXssIdea(idea)
-          ? wrapFakeXssContent(
-              escapeHtml(previewDraftXssPayload.value.trim()),
-            )
+          ? wrapFakeXssContent(escapeHtml(previewDraftXssPayload.value.trim()))
           : isTarpitIdea(idea)
             ? serializeTarpitConfig(
                 Math.max(1, Math.floor(previewDraftTarpitBytesPerChunk.value)),

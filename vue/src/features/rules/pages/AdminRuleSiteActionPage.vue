@@ -8,6 +8,10 @@ import {
   fetchRuleActionTemplatePreview,
   fetchRuleActionTemplates,
 } from '@/shared/api/rules'
+import {
+  buildActionIdeaPreviewBody,
+  buildActionIdeaResponseTemplate,
+} from '@/features/actions/utils/actionIdeaPreview'
 import { fetchL7Config } from '@/shared/api/l7'
 import { fetchLocalSites, updateLocalSite } from '@/shared/api/sites'
 import type {
@@ -68,22 +72,6 @@ useFlashMessages({
 })
 
 const siteId = computed(() => Number(route.params.id))
-
-const isInlineJsIdea = (idea: ActionIdeaPreset) => idea.id === 'inline-js'
-
-const wrapInlineJsContent = (script: string, title: string) => `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title || '内嵌JS动作'}</title>
-</head>
-<body>
-  <script>
-${script}
-  <\/script>
-</body>
-</html>`
 
 function cloneHeaders(headers: { key: string; value: string }[]) {
   return headers.map((header) => ({ ...header }))
@@ -169,39 +157,37 @@ const enabledActionTemplates = computed(() =>
         action: 'respond',
         pattern: idea.pattern,
         severity: idea.severity,
-        response_template: {
-          status_code: idea.status_code,
-          content_type: idea.content_type,
-          body_source: idea.body_source,
-          gzip: idea.gzip,
-          body_text:
-            idea.body_source === 'inline_text'
-              ? isInlineJsIdea(idea)
-                ? wrapInlineJsContent(idea.response_content, idea.title)
-                : idea.response_content
-              : '',
-          body_file_path:
-            idea.body_source === 'file' ? idea.runtime_body_file_path : '',
-          headers: idea.headers,
-        },
+        response_template: buildActionIdeaResponseTemplate(idea),
         updated_at: idea.updated_at,
       })),
   ].filter((item) => item.layer === 'l7'),
+)
+
+const actionIdeasByTemplateId = computed(
+  () =>
+    new Map(
+      actionIdeaPresets.value.map((idea) => [
+        `${idea.plugin_id}:${idea.template_local_id}`,
+        idea,
+      ]),
+    ),
 )
 
 const pendingTemplate = computed(() => {
   const templateId =
     typeof route.query.template === 'string' ? route.query.template : ''
   return (
-    enabledActionTemplates.value.find((item) => item.template_id === templateId) ??
-    null
+    enabledActionTemplates.value.find(
+      (item) => item.template_id === templateId,
+    ) ?? null
   )
 })
 
-const selectedTemplate = computed(() =>
-  enabledActionTemplates.value.find(
-    (item) => item.template_id === flowDraft.templateId,
-  ) ?? null,
+const selectedTemplate = computed(
+  () =>
+    enabledActionTemplates.value.find(
+      (item) => item.template_id === flowDraft.templateId,
+    ) ?? null,
 )
 
 const persistedTemplateIds = computed(
@@ -213,7 +199,10 @@ const matchedTemplate = computed(() => {
   if (!config?.enabled) return null
   return (
     enabledActionTemplates.value.find((template) =>
-      sameResponseTemplate(template.response_template, config.response_template),
+      sameResponseTemplate(
+        template.response_template,
+        config.response_template,
+      ),
     ) ?? null
   )
 })
@@ -368,7 +357,8 @@ const pendingPayload = computed(() => {
 const canSave = computed(() => {
   if (!site.value || !l7Config.value) return false
   if (flowDraft.responseMode === 'legacy') return false
-  if (flowDraft.responseMode === 'template' && !selectedTemplate.value) return false
+  if (flowDraft.responseMode === 'template' && !selectedTemplate.value)
+    return false
   return true
 })
 
@@ -381,15 +371,19 @@ async function loadPreview() {
   }
 
   if (!persistedTemplateIds.value.has(selectedTemplate.value.template_id)) {
-    previewBody.value =
-      selectedTemplate.value.response_template.body_source === 'inline_text'
+    const generatedIdea =
+      actionIdeasByTemplateId.value.get(selectedTemplate.value.template_id) ??
+      null
+    previewBody.value = generatedIdea
+      ? buildActionIdeaPreviewBody(generatedIdea)
+      : selectedTemplate.value.response_template.body_source === 'inline_text'
         ? selectedTemplate.value.response_template.body_text
         : selectedTemplate.value.response_template.body_file_path ||
           '文件型模板，当前页只显示文件路径。'
     previewMeta.value = {
       statusCode: selectedTemplate.value.response_template.status_code,
       contentType: selectedTemplate.value.response_template.content_type,
-      truncated: false,
+      truncated: generatedIdea?.uploaded_body_truncated ?? false,
     }
     previewError.value = ''
     return
@@ -500,20 +494,30 @@ onMounted(loadPage)
       >
         <div class="overflow-x-auto">
           <div class="min-w-[760px]">
-            <div class="grid grid-cols-[1fr_48px_1fr_48px_1fr_48px_1fr] items-center gap-2">
-              <div class="rounded-lg border border-slate-300 bg-slate-50 px-4 py-4 text-center text-sm text-slate-700">
+            <div
+              class="grid grid-cols-[1fr_48px_1fr_48px_1fr_48px_1fr] items-center gap-2"
+            >
+              <div
+                class="rounded-lg border border-slate-300 bg-slate-50 px-4 py-4 text-center text-sm text-slate-700"
+              >
                 请求命中站点
               </div>
               <div class="text-center text-slate-300">→</div>
-              <div class="rounded-lg border border-slate-300 bg-slate-50 px-4 py-4 text-center text-sm text-slate-700">
+              <div
+                class="rounded-lg border border-slate-300 bg-slate-50 px-4 py-4 text-center text-sm text-slate-700"
+              >
                 雷池拦截判定
               </div>
               <div class="text-center text-slate-300">→</div>
-              <div class="rounded-lg border border-blue-300 bg-blue-50 px-4 py-4 text-center text-sm font-medium text-blue-700">
+              <div
+                class="rounded-lg border border-blue-300 bg-blue-50 px-4 py-4 text-center text-sm font-medium text-blue-700"
+              >
                 响应动作
               </div>
               <div class="text-center text-slate-300">→</div>
-              <div class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-4 text-center text-sm font-medium text-amber-700">
+              <div
+                class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-4 text-center text-sm font-medium text-amber-700"
+              >
                 附加动作
               </div>
             </div>
@@ -521,7 +525,10 @@ onMounted(loadPage)
         </div>
       </div>
 
-      <div v-if="!loading && site" class="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+      <div
+        v-if="!loading && site"
+        class="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]"
+      >
         <section class="rounded-xl border border-slate-200 bg-white p-5">
           <h2 class="text-base font-semibold text-slate-900">响应动作</h2>
           <div class="mt-4 grid gap-3 sm:grid-cols-2">
@@ -565,7 +572,9 @@ onMounted(loadPage)
                 @click="flowDraft.templateId = template.template_id"
               >
                 <div class="flex items-center justify-between gap-3">
-                  <span class="font-medium text-slate-900">{{ template.name }}</span>
+                  <span class="font-medium text-slate-900">{{
+                    template.name
+                  }}</span>
                   <span class="text-xs text-slate-500">
                     HTTP {{ template.response_template.status_code }}
                   </span>
@@ -604,10 +613,21 @@ onMounted(loadPage)
             </p>
             <div v-else-if="previewMeta" class="mt-4 space-y-3">
               <div class="flex gap-2">
-                <StatusBadge :text="`HTTP ${previewMeta.statusCode}`" type="muted" compact />
-                <StatusBadge :text="previewMeta.contentType" type="info" compact />
+                <StatusBadge
+                  :text="`HTTP ${previewMeta.statusCode}`"
+                  type="muted"
+                  compact
+                />
+                <StatusBadge
+                  :text="previewMeta.contentType"
+                  type="info"
+                  compact
+                />
               </div>
-              <pre class="overflow-auto rounded-lg bg-slate-50 p-4 text-xs text-slate-700 whitespace-pre-wrap">{{ previewBody }}</pre>
+              <pre
+                class="overflow-auto rounded-lg bg-slate-50 p-4 text-xs text-slate-700 whitespace-pre-wrap"
+                >{{ previewBody }}</pre
+              >
             </div>
             <p v-else class="mt-4 text-sm text-slate-500">请选择模板。</p>
           </div>

@@ -22,6 +22,23 @@ export interface SafeLineInterceptConfigPayload {
   response_template: RuleResponseTemplatePayload
 }
 
+export interface CcDefenseConfigPayload {
+  enabled: boolean
+  request_window_secs: number
+  ip_challenge_threshold: number
+  ip_block_threshold: number
+  host_challenge_threshold: number
+  host_block_threshold: number
+  route_challenge_threshold: number
+  route_block_threshold: number
+  hot_path_challenge_threshold: number
+  hot_path_block_threshold: number
+  delay_threshold_percent: number
+  delay_ms: number
+  challenge_ttl_secs: number
+  challenge_cookie_name: string
+}
+
 export interface L7ConfigPayload {
   max_request_size: number
   real_ip_headers: string[]
@@ -59,12 +76,17 @@ export interface L7ConfigPayload {
   http3_certificate_path: string
   http3_private_key_path: string
   http3_enable_tls13: boolean
+  cc_defense: CcDefenseConfigPayload
   safeline_intercept: SafeLineInterceptConfigPayload
 }
 
 export interface L7StatsPayload {
   enabled: boolean
   blocked_requests: number
+  cc_challenge_requests: number
+  cc_block_requests: number
+  cc_delayed_requests: number
+  cc_verified_pass_requests: number
   proxied_requests: number
   proxy_successes: number
   proxy_failures: number

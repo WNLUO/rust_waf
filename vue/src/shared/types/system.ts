@@ -11,6 +11,10 @@ export interface MetricsResponse {
   blocked_packets: number
   blocked_l4: number
   blocked_l7: number
+  l7_cc_challenges: number
+  l7_cc_blocks: number
+  l7_cc_delays: number
+  l7_cc_verified_passes: number
   total_bytes: number
   proxied_requests: number
   proxy_successes: number

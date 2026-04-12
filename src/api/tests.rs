@@ -44,6 +44,10 @@ fn test_build_metrics_response_with_sources() {
             blocked_packets: 3,
             blocked_l4: 1,
             blocked_l7: 2,
+            l7_cc_challenges: 5,
+            l7_cc_blocks: 2,
+            l7_cc_delays: 7,
+            l7_cc_verified_passes: 4,
             total_bytes: 1024,
             proxied_requests: 10,
             proxy_successes: 8,
@@ -85,6 +89,10 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.blocked_packets, 3);
     assert_eq!(response.blocked_l4, 1);
     assert_eq!(response.blocked_l7, 2);
+    assert_eq!(response.l7_cc_challenges, 5);
+    assert_eq!(response.l7_cc_blocks, 2);
+    assert_eq!(response.l7_cc_delays, 7);
+    assert_eq!(response.l7_cc_verified_passes, 4);
     assert_eq!(response.total_bytes, 1024);
     assert_eq!(response.proxied_requests, 10);
     assert_eq!(response.proxy_successes, 8);

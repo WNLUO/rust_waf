@@ -130,14 +130,9 @@ pub(super) async fn update_global_settings_handler(
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
-    let previous = current.clone();
-    let next = payload.into_config(current).map_err(ApiError::bad_request)?;
-
-    state.context.apply_runtime_config(next.clone());
-    let validation_result =
-        crate::core::engine::validate_entry_listener_config(Arc::clone(&state.context)).await;
-    state.context.apply_runtime_config(previous.clone());
-    validation_result.map_err(|err| ApiError::bad_request(err.to_string()))?;
+    let next = payload
+        .into_config(current)
+        .map_err(ApiError::bad_request)?;
 
     store
         .upsert_app_config(&next)
@@ -149,23 +144,10 @@ pub(super) async fn update_global_settings_handler(
         .refresh_gateway_runtime_from_storage()
         .await
         .map_err(ApiError::internal)?;
-    crate::core::engine::sync_entry_listener_runtime(
-        Arc::clone(&state.context),
-        next.max_concurrent_tasks,
-    )
-    .await
-    .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message: if previous.listen_addrs != next.listen_addrs
-            || previous.gateway_config.https_listen_addr != next.gateway_config.https_listen_addr
-        {
-            "全局设置已保存，入口监听已尝试热更新；源 IP 解析、转发头与响应策略也已立即刷新。"
-                .to_string()
-        } else {
-            "全局设置已保存，并已立即刷新源 IP 解析、转发头与响应策略。".to_string()
-        },
+        message: "全局设置已保存，并已立即刷新源 IP 解析、转发头与响应策略。".to_string(),
     }))
 }
 

@@ -3,17 +3,11 @@ import { onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/client'
-import type {
-  GlobalSettingsPayload,
-  HeaderOperationItem,
-} from '@/shared/types'
+import type { GlobalSettingsPayload, HeaderOperationItem } from '@/shared/types'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
 function createDefaultSettings(): GlobalSettingsPayload {
   return {
-    http_port: '8080',
-    https_port: '',
-    listen_ipv6: false,
     enable_http1_0: false,
     http2_enabled: true,
     source_ip_strategy: 'connection',
@@ -30,10 +24,9 @@ function createDefaultSettings(): GlobalSettingsPayload {
     support_sse: true,
     enable_ntlm: false,
     fallback_self_signed_certificate: false,
-    ssl_protocols: ['TLSv1', 'TLSv1.1', 'TLSv1.2', 'TLSv1.3'],
+    ssl_protocols: ['TLSv1.2', 'TLSv1.3'],
     ssl_ciphers: '',
     header_operations: [],
-    group_management_enabled: false,
   }
 }
 
@@ -158,46 +151,9 @@ onMounted(loadPage)
       </div>
 
       <template v-else>
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-sm font-semibold text-stone-900">入口监听</p>
-          <div class="mt-4 grid gap-4 md:grid-cols-2">
-            <label class="space-y-1.5">
-              <span class="text-xs text-slate-500">HTTP 入口端口</span>
-              <input
-                v-model="settings.http_port"
-                class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-                type="text"
-                inputmode="numeric"
-              />
-            </label>
-            <label class="space-y-1.5">
-              <span class="text-xs text-slate-500">HTTPS 入口端口</span>
-              <input
-                v-model="settings.https_port"
-                class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-                type="text"
-                inputmode="numeric"
-              />
-            </label>
-          </div>
-
-          <div class="mt-4 grid gap-3 md:grid-cols-3">
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.listen_ipv6" type="checkbox" class="h-4 w-4 accent-blue-600" />
-              监听 IPv6 地址
-            </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.enable_http1_0" type="checkbox" class="h-4 w-4 accent-blue-600" />
-              启用 HTTP/1.0
-            </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.http2_enabled" type="checkbox" class="h-4 w-4 accent-blue-600" />
-              启用 HTTP/2
-            </label>
-          </div>
-        </section>
-
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section
+          class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
           <p class="text-sm font-semibold text-stone-900">源 IP 获取方式</p>
           <div class="mt-4 grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
             <label class="space-y-1.5">
@@ -207,11 +163,18 @@ onMounted(loadPage)
                 class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               >
                 <option value="connection">从网络连接中获取</option>
-                <option value="x_forwarded_for_first">取 X-Forwarded-For 中上一一级代理的地址</option>
-                <option value="x_forwarded_for_last">取 X-Forwarded-For 中上一级代理的地址</option>
-                <option value="x_forwarded_for_last_but_one">取 X-Forwarded-For 中上上一级代理的地址</option>
-                <option value="x_forwarded_for_last_but_two">取 X-Forwarded-For 中上上上一级代理的地址</option>
-                <option value="x_forwarded_for_any">从 X-Forwarded-For 中获取</option>
+                <option value="x_forwarded_for_first">
+                  取 X-Forwarded-For 中上一一级代理的地址
+                </option>
+                <option value="x_forwarded_for_last">
+                  取 X-Forwarded-For 中上一级代理的地址
+                </option>
+                <option value="x_forwarded_for_last_but_one">
+                  取 X-Forwarded-For 中上上一级代理的地址
+                </option>
+                <option value="x_forwarded_for_last_but_two">
+                  取 X-Forwarded-For 中上上上一级代理的地址
+                </option>
                 <option value="header">从 HTTP Header 中获取</option>
                 <option value="proxy_protocol">从 PROXY Protocol 中获取</option>
               </select>
@@ -239,50 +202,140 @@ onMounted(loadPage)
           </div>
         </section>
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section
+          class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <p class="text-sm font-semibold text-stone-900">协议兼容</p>
+          <div class="mt-4 grid gap-3 md:grid-cols-2">
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.enable_http1_0"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
+              启用 HTTP/1.0
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.http2_enabled"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
+              启用 HTTP/2
+            </label>
+          </div>
+        </section>
+
+        <section
+          class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
           <p class="text-sm font-semibold text-stone-900">其他高级配置</p>
           <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.http_to_https_redirect" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.http_to_https_redirect"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               HTTP 自动跳转到 HTTPS
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.enable_hsts" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.enable_hsts"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               启用 HSTS
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.add_x_forwarded_headers" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.add_x_forwarded_headers"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               为上游服务器传递 X-Forwarded-Host / Proto
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.rewrite_x_forwarded_for" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.rewrite_x_forwarded_for"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               清空并重写 X-Forwarded-For
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.support_gzip" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.support_gzip"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               支持 Gzip 压缩
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.support_brotli" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.support_brotli"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               支持 Brotli 压缩
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.support_sse" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.support_sse"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               支持 SSE 流式响应
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.enable_ntlm" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.enable_ntlm"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               启用 NTLM 认证
             </label>
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.fallback_self_signed_certificate" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.fallback_self_signed_certificate"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               应用不存在时返回自置证书
             </label>
           </div>
 
           <div class="mt-4 grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
-            <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-              <input v-model="settings.rewrite_host_enabled" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.rewrite_host_enabled"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
               代理时修改请求中的 Host 头
             </label>
             <label class="space-y-1.5">
@@ -298,11 +351,13 @@ onMounted(loadPage)
           </div>
         </section>
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section
+          class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
           <p class="text-sm font-semibold text-stone-900">SSL 合规配置</p>
           <div class="mt-4 flex flex-wrap gap-3">
             <label
-              v-for="protocol in ['TLSv1', 'TLSv1.1', 'TLSv1.2', 'TLSv1.3']"
+              v-for="protocol in ['TLSv1.2', 'TLSv1.3']"
               :key="protocol"
               class="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
@@ -310,7 +365,12 @@ onMounted(loadPage)
                 :checked="settings.ssl_protocols.includes(protocol)"
                 type="checkbox"
                 class="h-4 w-4 accent-blue-600"
-                @change="toggleSslProtocol(protocol, ($event.target as HTMLInputElement).checked)"
+                @change="
+                  toggleSslProtocol(
+                    protocol,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
               />
               {{ protocol }}
             </label>
@@ -326,7 +386,9 @@ onMounted(loadPage)
           </label>
         </section>
 
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section
+          class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
           <div class="flex items-center justify-between gap-3">
             <p class="text-sm font-semibold text-stone-900">HTTP Header 操作</p>
             <button
@@ -344,30 +406,45 @@ onMounted(loadPage)
               :key="index"
               class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[8rem_8rem_minmax(0,1fr)_minmax(0,1fr)_3rem]"
             >
-              <select v-model="item.scope" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500">
+              <select
+                v-model="item.scope"
+                class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+              >
                 <option value="request">请求头</option>
                 <option value="response">响应头</option>
               </select>
-              <select v-model="item.action" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500">
+              <select
+                v-model="item.action"
+                class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+              >
                 <option value="set">设置</option>
                 <option value="add">新增</option>
                 <option value="remove">移除</option>
               </select>
-              <input v-model="item.header" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500" type="text" placeholder="Header 名称" />
-              <input v-model="item.value" :disabled="item.action === 'remove'" class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-100" type="text" placeholder="Header 值" />
-              <button class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:text-rose-600" @click="removeHeaderOperation(index)">
+              <input
+                v-model="item.header"
+                class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+                type="text"
+                placeholder="Header 名称"
+              />
+              <input
+                v-model="item.value"
+                :disabled="item.action === 'remove'"
+                class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-100"
+                type="text"
+                placeholder="Header 值"
+              />
+              <button
+                class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:text-rose-600"
+                @click="removeHeaderOperation(index)"
+              >
                 <Trash2 :size="14" />
               </button>
             </div>
           </div>
-          <p v-else class="mt-4 text-sm text-slate-500">还没有添加 Header 操作。</p>
-        </section>
-
-        <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <label class="flex items-center gap-2 text-sm font-medium text-stone-900">
-            <input v-model="settings.group_management_enabled" type="checkbox" class="h-4 w-4 accent-blue-600" />
-            分组管理
-          </label>
+          <p v-else class="mt-4 text-sm text-slate-500">
+            还没有添加 Header 操作。
+          </p>
         </section>
       </template>
     </div>

@@ -101,7 +101,6 @@ pub async fn pull_sites(
     Ok(result)
 }
 
-
 pub async fn push_sites(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -525,4 +524,3 @@ pub async fn push_site(
         remote_site_id,
     })
 }
-

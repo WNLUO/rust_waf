@@ -15,4 +15,3 @@ pub async fn sync_events(
 
     store.import_safeline_security_events(&records).await
 }
-

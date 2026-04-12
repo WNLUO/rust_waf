@@ -45,4 +45,3 @@ pub async fn pull_blocked_ips(
 
     store.import_safeline_blocked_ips_pull(&records).await
 }
-

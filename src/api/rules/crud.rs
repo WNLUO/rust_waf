@@ -54,7 +54,6 @@ pub(super) async fn create_rule_handler(
     }
 }
 
-
 pub(super) async fn update_rule_handler(
     State(state): State<ApiState>,
     Path(id): Path<String>,

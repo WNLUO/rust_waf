@@ -9,9 +9,9 @@ use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig as RustlsClientConfig, DigitallySignedStruct, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::io::Read;
-use std::pin::Pin;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;

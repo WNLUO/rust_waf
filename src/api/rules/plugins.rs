@@ -213,4 +213,3 @@ fn read_rule_action_template_preview(
 
     Ok((preview, truncated))
 }
-

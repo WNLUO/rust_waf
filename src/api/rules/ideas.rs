@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-
 #[derive(Debug, Clone)]
 struct BuiltinActionIdeaPreset {
     id: &'static str,

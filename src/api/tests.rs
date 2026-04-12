@@ -174,7 +174,10 @@ fn test_blocked_ips_query_params_into_query() {
     assert!(query.active_only);
     assert_eq!(query.blocked_from, Some(300));
     assert_eq!(query.blocked_to, Some(400));
-    assert!(matches!(query.sort_by, crate::storage::BlockedIpSortField::Ip));
+    assert!(matches!(
+        query.sort_by,
+        crate::storage::BlockedIpSortField::Ip
+    ));
 }
 
 #[test]

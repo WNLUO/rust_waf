@@ -17,7 +17,9 @@ use anyhow::{anyhow, bail, Result};
 use sha2::{Digest, Sha256};
 
 pub use blocklist::{pull_blocked_ips, push_blocked_ips};
-pub use certificates::{preview_certificate_match, pull_certificate, pull_certificates, push_certificate};
+pub use certificates::{
+    preview_certificate_match, pull_certificate, pull_certificates, push_certificate,
+};
 pub use events::sync_events;
 pub use sites::{pull_site, pull_sites, push_site, push_sites};
 

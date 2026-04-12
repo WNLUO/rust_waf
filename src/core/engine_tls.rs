@@ -71,9 +71,7 @@ fn tls_protocol_versions_from_gateway(
     versions
 }
 
-fn tls_provider_from_gateway(
-    gateway: &crate::config::GatewayConfig,
-) -> Result<CryptoProvider> {
+fn tls_provider_from_gateway(gateway: &crate::config::GatewayConfig) -> Result<CryptoProvider> {
     let mut provider = rustls::crypto::aws_lc_rs::default_provider();
     let filter = gateway.ssl_ciphers.trim();
     if filter.is_empty() {

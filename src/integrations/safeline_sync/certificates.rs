@@ -67,7 +67,6 @@ pub async fn pull_certificate(
     Ok(sync_state.local_id)
 }
 
-
 pub async fn push_certificate(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -279,4 +278,3 @@ pub async fn preview_certificate_match(
         candidates: Vec::new(),
     })
 }
-

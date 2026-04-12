@@ -138,10 +138,5 @@ const fn default_support_sse() -> bool {
 }
 
 pub fn default_ssl_protocols() -> Vec<String> {
-    vec![
-        "TLSv1".to_string(),
-        "TLSv1.1".to_string(),
-        "TLSv1.2".to_string(),
-        "TLSv1.3".to_string(),
-    ]
+    vec!["TLSv1.2".to_string(), "TLSv1.3".to_string()]
 }

@@ -213,10 +213,8 @@ async fn build_runtime_state(
 }
 
 fn build_fallback_self_signed_cert() -> Result<CertifiedKey> {
-    let generated = generate_simple_self_signed(vec![
-        "localhost".to_string(),
-        "127.0.0.1".to_string(),
-    ])?;
+    let generated =
+        generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])?;
     let cert_der = CertificateDer::from(generated.cert.der().to_vec());
     let key_der = PrivateKeyDer::try_from(generated.key_pair.serialize_der())
         .map_err(|err| anyhow::anyhow!("failed to parse generated private key: {}", err))?;

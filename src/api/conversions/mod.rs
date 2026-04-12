@@ -196,13 +196,23 @@ impl HeaderOperationPayload {
         let scope = match self.scope.trim().to_ascii_lowercase().as_str() {
             "request" => HeaderOperationScope::Request,
             "response" => HeaderOperationScope::Response,
-            other => return Err(format!("Header 操作范围仅支持 request/response，收到 '{}'", other)),
+            other => {
+                return Err(format!(
+                    "Header 操作范围仅支持 request/response，收到 '{}'",
+                    other
+                ))
+            }
         };
         let action = match self.action.trim().to_ascii_lowercase().as_str() {
             "set" => HeaderOperationAction::Set,
             "add" => HeaderOperationAction::Add,
             "remove" => HeaderOperationAction::Remove,
-            other => return Err(format!("Header 操作仅支持 set/add/remove，收到 '{}'", other)),
+            other => {
+                return Err(format!(
+                    "Header 操作仅支持 set/add/remove，收到 '{}'",
+                    other
+                ))
+            }
         };
 
         Ok(HeaderOperation {
@@ -216,18 +226,7 @@ impl HeaderOperationPayload {
 
 impl GlobalSettingsResponse {
     pub(super) fn from_config(config: &Config) -> Self {
-        let http_port = config
-            .listen_addrs
-            .iter()
-            .find(|addr| !addr.starts_with('['))
-            .map(|addr| display_https_listen_port(addr))
-            .or_else(|| config.listen_addrs.first().map(|addr| display_https_listen_port(addr)))
-            .unwrap_or_default();
-
         Self {
-            http_port,
-            https_port: display_https_listen_port(&config.gateway_config.https_listen_addr),
-            listen_ipv6: config.gateway_config.listen_ipv6,
             enable_http1_0: config.gateway_config.enable_http1_0,
             http2_enabled: config.l7_config.http2_config.enabled,
             source_ip_strategy: match config.gateway_config.source_ip_strategy {
@@ -240,7 +239,7 @@ impl GlobalSettingsResponse {
                 SourceIpStrategy::XForwardedForLastButTwo => {
                     "x_forwarded_for_last_but_two".to_string()
                 }
-                SourceIpStrategy::XForwardedForAny => "x_forwarded_for_any".to_string(),
+                SourceIpStrategy::XForwardedForAny => "x_forwarded_for_first".to_string(),
                 SourceIpStrategy::Header => "header".to_string(),
                 SourceIpStrategy::ProxyProtocol => "proxy_protocol".to_string(),
             },
@@ -256,7 +255,9 @@ impl GlobalSettingsResponse {
             support_brotli: config.gateway_config.support_brotli,
             support_sse: config.gateway_config.support_sse,
             enable_ntlm: config.gateway_config.enable_ntlm,
-            fallback_self_signed_certificate: config.gateway_config.fallback_self_signed_certificate,
+            fallback_self_signed_certificate: config
+                .gateway_config
+                .fallback_self_signed_certificate,
             ssl_protocols: config.gateway_config.ssl_protocols.clone(),
             ssl_ciphers: config.gateway_config.ssl_ciphers.clone(),
             header_operations: config
@@ -265,7 +266,6 @@ impl GlobalSettingsResponse {
                 .iter()
                 .map(HeaderOperationPayload::from_config)
                 .collect(),
-            group_management_enabled: config.gateway_config.group_management_enabled,
         }
     }
 }
@@ -454,27 +454,13 @@ impl SettingsUpdateRequest {
 
 impl GlobalSettingsUpdateRequest {
     pub(super) fn into_config(self, mut current: Config) -> Result<Config, String> {
-        let http_listen_addr = normalize_https_listen_addr_input(&self.http_port)?;
-        if http_listen_addr.is_empty() {
-            return Err("HTTP 入口端口不能为空".to_string());
-        }
-        let https_listen_addr = normalize_https_listen_addr_input(&self.https_port)?;
-        let mut listen_addrs = vec![http_listen_addr];
-        if self.listen_ipv6 {
-            let port = listen_addrs[0]
-                .parse::<SocketAddr>()
-                .map_err(|err| format!("HTTP 入口地址无效: {}", err))?
-                .port();
-            listen_addrs.push(format!("[::]:{port}"));
-        }
-
-        let source_ip_strategy = match self.source_ip_strategy.trim().to_ascii_lowercase().as_str() {
+        let source_ip_strategy = match self.source_ip_strategy.trim().to_ascii_lowercase().as_str()
+        {
             "connection" => SourceIpStrategy::Connection,
             "x_forwarded_for_first" => SourceIpStrategy::XForwardedForFirst,
             "x_forwarded_for_last" => SourceIpStrategy::XForwardedForLast,
             "x_forwarded_for_last_but_one" => SourceIpStrategy::XForwardedForLastButOne,
             "x_forwarded_for_last_but_two" => SourceIpStrategy::XForwardedForLastButTwo,
-            "x_forwarded_for_any" => SourceIpStrategy::XForwardedForAny,
             "header" => SourceIpStrategy::Header,
             "proxy_protocol" => SourceIpStrategy::ProxyProtocol,
             other => return Err(format!("源 IP 获取方式不支持 '{}'", other)),
@@ -486,9 +472,6 @@ impl GlobalSettingsUpdateRequest {
             .map(HeaderOperationPayload::into_config)
             .collect::<Result<Vec<_>, _>>()?;
 
-        current.listen_addrs = listen_addrs;
-        current.gateway_config.https_listen_addr = https_listen_addr;
-        current.gateway_config.listen_ipv6 = self.listen_ipv6;
         current.gateway_config.enable_http1_0 = self.enable_http1_0;
         current.gateway_config.source_ip_strategy = source_ip_strategy;
         current.gateway_config.custom_source_ip_header = self.custom_source_ip_header;
@@ -503,11 +486,11 @@ impl GlobalSettingsUpdateRequest {
         current.gateway_config.support_brotli = self.support_brotli;
         current.gateway_config.support_sse = self.support_sse;
         current.gateway_config.enable_ntlm = self.enable_ntlm;
-        current.gateway_config.fallback_self_signed_certificate = self.fallback_self_signed_certificate;
+        current.gateway_config.fallback_self_signed_certificate =
+            self.fallback_self_signed_certificate;
         current.gateway_config.ssl_protocols = self.ssl_protocols;
         current.gateway_config.ssl_ciphers = self.ssl_ciphers;
         current.gateway_config.header_operations = header_operations;
-        current.gateway_config.group_management_enabled = self.group_management_enabled;
         current.l7_config.http2_config.enabled = self.http2_enabled;
 
         Ok(current.normalized())

@@ -36,12 +36,18 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(settings_handlers::get_global_settings_handler)
                 .put(settings_handlers::update_global_settings_handler),
         )
-        .route("/events", get(events_handlers::list_security_events_handler))
+        .route(
+            "/events",
+            get(events_handlers::list_security_events_handler),
+        )
         .route(
             "/events/:id",
             patch(events_handlers::update_security_event_handler),
         )
-        .route("/blocked-ips", get(events_handlers::list_blocked_ips_handler))
+        .route(
+            "/blocked-ips",
+            get(events_handlers::list_blocked_ips_handler),
+        )
         .route(
             "/blocked-ips/:id",
             delete(events_handlers::delete_blocked_ip_handler),

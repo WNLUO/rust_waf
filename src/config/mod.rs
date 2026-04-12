@@ -9,14 +9,14 @@ pub mod http3;
 pub mod l4;
 pub mod l7;
 
+use self::env::*;
+pub use self::env::{apply_env_overrides, resolve_sqlite_path};
 pub use gateway::{
     GatewayConfig, HeaderOperation, HeaderOperationAction, HeaderOperationScope, SourceIpStrategy,
 };
 pub use http3::Http3Config;
 pub use l4::L4Config;
 pub use l7::L7Config;
-pub use self::env::{apply_env_overrides, resolve_sqlite_path};
-use self::env::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -556,9 +556,13 @@ impl Config {
             .custom_source_ip_header
             .trim()
             .to_ascii_lowercase();
+        if self.gateway_config.source_ip_strategy == SourceIpStrategy::XForwardedForAny {
+            self.gateway_config.source_ip_strategy = SourceIpStrategy::XForwardedForFirst;
+        }
         self.gateway_config.rewrite_host_value =
             self.gateway_config.rewrite_host_value.trim().to_string();
-        self.gateway_config.ssl_protocols = normalize_string_list(&self.gateway_config.ssl_protocols);
+        self.gateway_config.ssl_protocols =
+            normalize_supported_ssl_protocols(&self.gateway_config.ssl_protocols);
         if self.gateway_config.ssl_protocols.is_empty() {
             self.gateway_config.ssl_protocols = gateway::default_ssl_protocols();
         }
@@ -702,6 +706,16 @@ impl Default for AdminApiAuthConfig {
     }
 }
 
+fn normalize_supported_ssl_protocols(protocols: &[String]) -> Vec<String> {
+    normalize_string_list(protocols)
+        .into_iter()
+        .filter_map(|value| match value.to_ascii_lowercase().as_str() {
+            "tlsv1.2" | "tls1.2" | "tls12" => Some("TLSv1.2".to_string()),
+            "tlsv1.3" | "tls1.3" | "tls13" => Some("TLSv1.3".to_string()),
+            _ => None,
+        })
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -798,6 +812,45 @@ mod tests {
         assert_eq!(
             config.l7_config.trusted_proxy_cidrs,
             vec!["203.0.113.0/24".to_string(), "198.51.100.10/32".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalized_rewrites_deprecated_source_ip_strategy() {
+        let config = Config {
+            gateway_config: GatewayConfig {
+                source_ip_strategy: SourceIpStrategy::XForwardedForAny,
+                ..GatewayConfig::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(
+            config.gateway_config.source_ip_strategy,
+            SourceIpStrategy::XForwardedForFirst
+        );
+    }
+
+    #[test]
+    fn normalized_keeps_only_supported_ssl_protocols() {
+        let config = Config {
+            gateway_config: GatewayConfig {
+                ssl_protocols: vec![
+                    "TLSv1".to_string(),
+                    " tlsv1.2 ".to_string(),
+                    "TLS13".to_string(),
+                    "TLSv1.1".to_string(),
+                ],
+                ..GatewayConfig::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(
+            config.gateway_config.ssl_protocols,
+            vec!["TLSv1.2".to_string(), "TLSv1.3".to_string()]
         );
     }
 }

@@ -87,9 +87,6 @@ pub struct HeaderOperationPayload {
 
 #[derive(Debug, Serialize)]
 pub struct GlobalSettingsResponse {
-    pub(crate) http_port: String,
-    pub(crate) https_port: String,
-    pub(crate) listen_ipv6: bool,
     pub(crate) enable_http1_0: bool,
     pub(crate) http2_enabled: bool,
     pub(crate) source_ip_strategy: String,
@@ -109,14 +106,10 @@ pub struct GlobalSettingsResponse {
     pub(crate) ssl_protocols: Vec<String>,
     pub(crate) ssl_ciphers: String,
     pub(crate) header_operations: Vec<HeaderOperationPayload>,
-    pub(crate) group_management_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct GlobalSettingsUpdateRequest {
-    pub(crate) http_port: String,
-    pub(crate) https_port: String,
-    pub(crate) listen_ipv6: bool,
     pub(crate) enable_http1_0: bool,
     pub(crate) http2_enabled: bool,
     pub(crate) source_ip_strategy: String,
@@ -137,7 +130,6 @@ pub struct GlobalSettingsUpdateRequest {
     pub(crate) ssl_ciphers: String,
     #[serde(default)]
     pub(crate) header_operations: Vec<HeaderOperationPayload>,
-    pub(crate) group_management_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]

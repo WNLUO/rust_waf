@@ -1,4 +1,6 @@
-use super::{schema::initialize_schema, BlockedIpEntry, BlockedIpRecord, SecurityEventRecord, StorageCommand};
+use super::{
+    schema::initialize_schema, BlockedIpEntry, BlockedIpRecord, SecurityEventRecord, StorageCommand,
+};
 use anyhow::{Context, Result};
 use log::{debug, warn};
 use sha2::{Digest, Sha256};
@@ -9,7 +11,9 @@ use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
-use super::{SqliteOpenErrorKind, SQLITE_CORRUPT_BACKUP_RETENTION, SQLITE_STARTUP_BACKUP_RETENTION};
+use super::{
+    SqliteOpenErrorKind, SQLITE_CORRUPT_BACKUP_RETENTION, SQLITE_STARTUP_BACKUP_RETENTION,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BackupKind {
@@ -76,7 +80,10 @@ async fn validate_database(pool: &SqlitePool) -> Result<()> {
 
 pub(super) fn is_sqlite_corruption_error(error: &anyhow::Error) -> bool {
     let Some(sqlx_error) = error.downcast_ref::<sqlx::Error>() else {
-        return error.to_string().to_ascii_lowercase().contains("integrity check failed");
+        return error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("integrity check failed");
     };
     if let Some(database_error) = sqlx_error.as_database_error() {
         let message = database_error.message().to_ascii_lowercase();
@@ -86,7 +93,10 @@ pub(super) fn is_sqlite_corruption_error(error: &anyhow::Error) -> bool {
         {
             return true;
         }
-        if database_error.code().is_some_and(|code| code == "11" || code == "26") {
+        if database_error
+            .code()
+            .is_some_and(|code| code == "11" || code == "26")
+        {
             return true;
         }
     }
@@ -114,24 +124,28 @@ pub(super) async fn backup_corrupted_db(path: &Path) -> Result<PathBuf> {
     }
     ensure_backup_dir(path).await?;
     let backup_path = backup_file_path(path, BackupKind::Corrupt, &timestamp_suffix());
-    tokio::fs::rename(path, &backup_path).await.with_context(|| {
-        format!(
-            "failed to move corrupted SQLite database {} to {}",
-            path.display(),
-            backup_path.display()
-        )
-    })?;
+    tokio::fs::rename(path, &backup_path)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to move corrupted SQLite database {} to {}",
+                path.display(),
+                backup_path.display()
+            )
+        })?;
     for suffix in ["-wal", "-shm"] {
         let sidecar = PathBuf::from(format!("{}{}", path.display(), suffix));
         if tokio::fs::try_exists(&sidecar).await? {
             let backup_sidecar = PathBuf::from(format!("{}{}", backup_path.display(), suffix));
-            tokio::fs::rename(&sidecar, &backup_sidecar).await.with_context(|| {
-                format!(
-                    "failed to move corrupted SQLite sidecar {} to {}",
-                    sidecar.display(),
-                    backup_sidecar.display()
-                )
-            })?;
+            tokio::fs::rename(&sidecar, &backup_sidecar)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to move corrupted SQLite sidecar {} to {}",
+                        sidecar.display(),
+                        backup_sidecar.display()
+                    )
+                })?;
         }
     }
     prune_backups(path, BackupKind::Corrupt, SQLITE_CORRUPT_BACKUP_RETENTION).await?;
@@ -158,13 +172,20 @@ pub(super) async fn create_backup_snapshot(
             )
         })?;
     if kind == BackupKind::Startup {
-        prune_backups(db_path, BackupKind::Startup, SQLITE_STARTUP_BACKUP_RETENTION).await?;
+        prune_backups(
+            db_path,
+            BackupKind::Startup,
+            SQLITE_STARTUP_BACKUP_RETENTION,
+        )
+        .await?;
     }
     Ok(backup_path)
 }
 
 async fn checkpoint_wal(pool: &SqlitePool) -> Result<()> {
-    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)").execute(pool).await?;
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -174,17 +195,26 @@ async fn ensure_backup_dir(path: &Path) -> Result<()> {
 }
 
 pub(super) fn backup_dir(path: &Path) -> PathBuf {
-    path.parent().unwrap_or_else(|| Path::new(".")).join("backups")
+    path.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("backups")
 }
 
 fn backup_file_path(path: &Path, kind: BackupKind, timestamp: &str) -> PathBuf {
-    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("sqlite");
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("sqlite");
     let ext = path
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| format!(".{ext}"))
         .unwrap_or_default();
-    backup_dir(path).join(format!("{stem}.{}.{}{ext}", backup_kind_label(kind), timestamp))
+    backup_dir(path).join(format!(
+        "{stem}.{}.{}{ext}",
+        backup_kind_label(kind),
+        timestamp
+    ))
 }
 
 fn backup_kind_label(kind: BackupKind) -> &'static str {
@@ -200,7 +230,10 @@ async fn prune_backups(path: &Path, kind: BackupKind, retain: usize) -> Result<(
     if !tokio::fs::try_exists(&dir).await? {
         return Ok(());
     }
-    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("sqlite");
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("sqlite");
     let ext = path
         .extension()
         .and_then(|value| value.to_str())
@@ -211,7 +244,9 @@ async fn prune_backups(path: &Path, kind: BackupKind, retain: usize) -> Result<(
     let mut backup_files = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else { continue; };
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
         if file_name.starts_with(&prefix) && file_name.ends_with(&ext) {
             backup_files.push(entry.path());
         }
@@ -219,9 +254,14 @@ async fn prune_backups(path: &Path, kind: BackupKind, retain: usize) -> Result<(
     backup_files.sort();
     let remove_count = backup_files.len().saturating_sub(retain);
     for backup_path in backup_files.into_iter().take(remove_count) {
-        tokio::fs::remove_file(&backup_path).await.with_context(|| {
-            format!("failed to remove old SQLite backup {}", backup_path.display())
-        })?;
+        tokio::fs::remove_file(&backup_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to remove old SQLite backup {}",
+                    backup_path.display()
+                )
+            })?;
     }
     Ok(())
 }
@@ -231,7 +271,11 @@ fn corrupted_backup_path(path: &Path, timestamp: &str) -> PathBuf {
 }
 
 fn timestamp_suffix() -> String {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_string()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .to_string()
 }
 
 pub(super) fn fingerprint_security_event(event: &SecurityEventRecord) -> String {
@@ -240,9 +284,21 @@ pub(super) fn fingerprint_security_event(event: &SecurityEventRecord) -> String 
     hasher.update([0]);
     hasher.update(event.provider.as_deref().unwrap_or_default().as_bytes());
     hasher.update([0]);
-    hasher.update(event.provider_event_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(
+        event
+            .provider_event_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     hasher.update([0]);
-    hasher.update(event.provider_site_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(
+        event
+            .provider_site_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     hasher.update([0]);
     hasher.update(event.action.as_bytes());
     hasher.update([0]);
@@ -277,7 +333,13 @@ pub(super) fn fingerprint_blocked_ip(record: &BlockedIpEntry) -> String {
     let mut hasher = Sha256::new();
     hasher.update(record.provider.as_deref().unwrap_or_default().as_bytes());
     hasher.update([0]);
-    hasher.update(record.provider_remote_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(
+        record
+            .provider_remote_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     hasher.update([0]);
     hasher.update(record.ip.as_bytes());
     hasher.update([0]);
@@ -292,7 +354,13 @@ pub(super) fn fingerprint_blocked_ip_record(record: &BlockedIpRecord) -> String 
     let mut hasher = Sha256::new();
     hasher.update(record.provider.as_deref().unwrap_or_default().as_bytes());
     hasher.update([0]);
-    hasher.update(record.provider_remote_id.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(
+        record
+            .provider_remote_id
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     hasher.update([0]);
     hasher.update(record.ip.as_bytes());
     hasher.update([0]);
@@ -376,5 +444,8 @@ pub(super) async fn ensure_parent_dir(path: &Path) -> Result<()> {
 }
 
 pub(super) fn unix_timestamp() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }

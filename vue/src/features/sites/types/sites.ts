@@ -100,9 +100,6 @@ export interface HeaderOperationItem {
 }
 
 export interface GlobalSettingsPayload {
-  http_port: string
-  https_port: string
-  listen_ipv6: boolean
   enable_http1_0: boolean
   http2_enabled: boolean
   source_ip_strategy:
@@ -111,7 +108,6 @@ export interface GlobalSettingsPayload {
     | 'x_forwarded_for_last'
     | 'x_forwarded_for_last_but_one'
     | 'x_forwarded_for_last_but_two'
-    | 'x_forwarded_for_any'
     | 'header'
     | 'proxy_protocol'
   custom_source_ip_header: string
@@ -130,7 +126,6 @@ export interface GlobalSettingsPayload {
   ssl_protocols: string[]
   ssl_ciphers: string
   header_operations: HeaderOperationItem[]
-  group_management_enabled: boolean
 }
 
 export interface LocalSiteDraft {

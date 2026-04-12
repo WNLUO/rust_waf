@@ -7,8 +7,8 @@ mod upserts;
 pub use self::models::*;
 #[cfg(any(feature = "api", test))]
 pub use self::query::*;
-pub use self::upserts::*;
 use self::support::*;
+pub use self::upserts::*;
 
 use crate::config::{Config, Rule};
 use anyhow::Result;
@@ -60,7 +60,6 @@ pub(super) enum SqliteOpenErrorKind {
     DiskFull,
     Other,
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -11,13 +11,8 @@ use tokio_rustls::TlsAcceptor;
 use crate::core::WafContext;
 
 pub(super) fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAcceptor>> {
-    if context
-        .config_snapshot()
-        .gateway_config
-        .https_listen_addr
-        .trim()
-        .is_empty()
-    {
+    let config = context.config_snapshot();
+    if config.gateway_config.https_listen_addr.trim().is_empty() {
         return Ok(None);
     }
 
@@ -30,7 +25,11 @@ pub(super) fn build_tls_acceptor(context: &WafContext) -> Result<Option<TlsAccep
     let mut server_config = RustlsServerConfig::builder()
         .with_no_client_auth()
         .with_cert_resolver(cert_resolver);
-    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    server_config.alpn_protocols = if config.l7_config.http2_config.enabled {
+        vec![b"h2".to_vec(), b"http/1.1".to_vec()]
+    } else {
+        vec![b"http/1.1".to_vec()]
+    };
 
     Ok(Some(TlsAcceptor::from(Arc::new(server_config))))
 }

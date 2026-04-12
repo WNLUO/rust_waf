@@ -1,4 +1,5 @@
 use anyhow::Result;
+use brotli::Decompressor;
 use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
@@ -10,9 +11,9 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 #[cfg(feature = "http3")]
 use std::net::SocketAddr;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Instant;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -94,9 +95,9 @@ impl EntryListenerRuntime {
             if guard.http.iter().any(|listener| listener.addr == *addr) {
                 continue;
             }
-            TcpListener::bind(addr)
-                .await
-                .map_err(|err| anyhow::anyhow!("HTTP 入口 {} 已被其他进程占用或无法监听: {}", addr, err))?;
+            TcpListener::bind(addr).await.map_err(|err| {
+                anyhow::anyhow!("HTTP 入口 {} 已被其他进程占用或无法监听: {}", addr, err)
+            })?;
         }
 
         if !requested_https.is_empty() {
@@ -122,7 +123,11 @@ impl EntryListenerRuntime {
         Ok(())
     }
 
-    async fn sync(&self, context: Arc<WafContext>, connection_semaphore: Arc<Semaphore>) -> Result<()> {
+    async fn sync(
+        &self,
+        context: Arc<WafContext>,
+        connection_semaphore: Arc<Semaphore>,
+    ) -> Result<()> {
         let config = context.config_snapshot();
         let tls_acceptor = build_tls_acceptor(context.as_ref())?;
         let requested_http = config.listen_addrs.clone();
@@ -482,7 +487,10 @@ impl WafEngine {
 
         let entry_runtime = EntryListenerRuntime::global();
         entry_runtime
-            .sync(Arc::clone(&self.context), Arc::clone(&self.connection_semaphore))
+            .sync(
+                Arc::clone(&self.context),
+                Arc::clone(&self.connection_semaphore),
+            )
             .await?;
 
         // 主循环处理维护任务
@@ -556,7 +564,9 @@ impl WafEngine {
 }
 
 pub async fn validate_entry_listener_config(context: Arc<WafContext>) -> Result<()> {
-    EntryListenerRuntime::global().validate_config(context).await
+    EntryListenerRuntime::global()
+        .validate_config(context)
+        .await
 }
 
 pub async fn sync_entry_listener_runtime(
@@ -1275,9 +1285,13 @@ async fn proxy_http_request(
         )
         .await
         .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-        let parsed =
-            proxy_raw_http1_over_stream(upstream_stream, request, write_timeout_ms, read_timeout_ms)
-                .await?;
+        let parsed = proxy_raw_http1_over_stream(
+            upstream_stream,
+            request,
+            write_timeout_ms,
+            read_timeout_ms,
+        )
+        .await?;
         context.set_upstream_health(true, None);
         return Ok(parsed);
     }
@@ -1576,9 +1590,9 @@ fn detect_safeline_block_response(
     match_mode: SafeLineInterceptMatchMode,
 ) -> Option<SafeLineInterceptMatch> {
     let body = decode_response_body_for_matching(response, max_body_bytes)?;
-    let has_signature = body
-        .to_ascii_lowercase()
-        .contains("blocked by chaitin safeline web application firewall");
+    let has_body_signature = body_has_safeline_signature(&body);
+    let has_header_signature = headers_have_safeline_signature(&response.headers);
+    let has_signature = has_body_signature || has_header_signature;
 
     if let Some(event_id) = extract_html_comment_event_id(&body) {
         return Some(SafeLineInterceptMatch {
@@ -1632,8 +1646,12 @@ fn decode_response_body_for_matching(
             let decoder = ZlibDecoder::new(response.body.as_slice());
             decoder.take(limit as u64).read_to_end(&mut decoded).ok()?;
         }
+        Some(value) if value.contains("br") => {
+            let decoder = Decompressor::new(response.body.as_slice(), 4096);
+            decoder.take(limit as u64).read_to_end(&mut decoded).ok()?;
+        }
         Some(_) => {
-            return None;
+            decoded.extend_from_slice(&response.body[..response.body.len().min(limit)]);
         }
         None => {
             decoded.extend_from_slice(&response.body[..response.body.len().min(limit)]);
@@ -1652,24 +1670,101 @@ fn upstream_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Opt
 
 fn extract_json_event_id(body: &str) -> Option<String> {
     let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
-    payload
-        .get("event_id")
-        .and_then(|value| value.as_str())
-        .map(ToOwned::to_owned)
+    extract_json_string_by_keys(
+        &payload,
+        &["event_id", "eventId", "eventID", "log_id", "logId"],
+    )
 }
 
 fn extract_html_comment_event_id(body: &str) -> Option<String> {
-    let marker = "<!-- event_id:";
-    let start = body.find(marker)? + marker.len();
-    let remainder = body.get(start..)?;
-    let end = remainder.find("-->")?;
-    let candidate = remainder.get(..end)?.trim();
-    let event_id = candidate.split_whitespace().next()?.trim();
-    (!event_id.is_empty()
-        && event_id
+    let lower = body.to_ascii_lowercase();
+    for marker in ["<!-- event_id:", "<!-- event-id:", "<!-- event id:"] {
+        let Some(start) = lower.find(marker) else {
+            continue;
+        };
+        let value_start = start + marker.len();
+        let Some(remainder) = body.get(value_start..) else {
+            continue;
+        };
+        let Some(end) = remainder.find("-->") else {
+            continue;
+        };
+        let candidate = remainder.get(..end)?.trim();
+        let event_id = candidate.split_whitespace().next()?.trim();
+        if is_valid_safeline_event_id(event_id) {
+            return Some(event_id.to_string());
+        }
+    }
+
+    None
+}
+
+fn body_has_safeline_signature(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    let mentions_safeline = lower.contains("safeline") || lower.contains("chaitin");
+    let mentions_block = lower.contains("blocked")
+        || lower.contains("forbidden")
+        || lower.contains("intercept")
+        || lower.contains("web application firewall")
+        || lower.contains("\"code\":403")
+        || lower.contains("\"status\":403");
+
+    mentions_safeline && mentions_block
+}
+
+fn headers_have_safeline_signature(headers: &[(String, String)]) -> bool {
+    headers.iter().any(|(key, value)| {
+        let key = key.to_ascii_lowercase();
+        let value = value.to_ascii_lowercase();
+        (matches!(
+            key.as_str(),
+            "server" | "x-powered-by" | "x-waf" | "x-safeline-event-id" | "x-request-id"
+        ) && (value.contains("safeline") || value.contains("chaitin")))
+            || (key == "set-cookie" && value.contains("sl-session="))
+    })
+}
+
+fn extract_json_string_by_keys(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in keys {
+                if let Some(candidate) = map
+                    .get(*key)
+                    .and_then(|item| item.as_str())
+                    .filter(|item| is_valid_safeline_event_id(item))
+                {
+                    return Some(candidate.to_string());
+                }
+            }
+
+            map.values()
+                .find_map(|item| extract_json_string_by_keys(item, keys))
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(|item| extract_json_string_by_keys(item, keys)),
+        _ => None,
+    }
+}
+
+fn is_valid_safeline_event_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
             .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-'))
-    .then(|| event_id.to_string())
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':'))
+}
+
+fn request_expects_empty_body(request: &UnifiedHttpRequest) -> bool {
+    request.method.eq_ignore_ascii_case("HEAD")
+}
+
+fn body_for_request(request: &UnifiedHttpRequest, body: &[u8]) -> Vec<u8> {
+    if request_expects_empty_body(request) {
+        Vec::new()
+    } else {
+        body.to_vec()
+    }
 }
 
 fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>> {
@@ -1799,13 +1894,14 @@ async fn handle_http1_connection(
         &request,
         matched_site.as_ref(),
     ) {
+        let body = body_for_request(&request, &response.body);
         http1_handler
             .write_response_with_headers(
                 &mut stream,
                 response.status_code,
                 http_status_text(response.status_code),
                 &response.headers,
-                &response.body,
+                &body,
             )
             .await?;
         return Ok(());
@@ -1832,6 +1928,7 @@ async fn handle_http1_connection(
         }
         if let Some(response) = inspection_result.custom_response.as_ref() {
             let response = resolve_runtime_custom_response(response);
+            let body = body_for_request(&request, &response.body);
             if let Some(tarpit) = response.tarpit.as_ref() {
                 http1_handler
                     .write_response_with_headers_tarpit(
@@ -1839,7 +1936,7 @@ async fn handle_http1_connection(
                         response.status_code,
                         http_status_text(response.status_code),
                         &response.headers,
-                        &response.body,
+                        &body,
                         tarpit,
                     )
                     .await?;
@@ -1850,7 +1947,7 @@ async fn handle_http1_connection(
                         response.status_code,
                         http_status_text(response.status_code),
                         &response.headers,
-                        &response.body,
+                        &body,
                     )
                     .await?;
             }
@@ -1912,6 +2009,7 @@ async fn handle_http1_connection(
                         }
                         UpstreamResponseDisposition::Custom(response) => {
                             let response = resolve_runtime_custom_response(&response);
+                            let body = body_for_request(&request, &response.body);
                             if let Some(tarpit) = response.tarpit.as_ref() {
                                 http1_handler
                                     .write_response_with_headers_tarpit(
@@ -1919,7 +2017,7 @@ async fn handle_http1_connection(
                                         response.status_code,
                                         http_status_text(response.status_code),
                                         &response.headers,
-                                        &response.body,
+                                        &body,
                                         tarpit,
                                     )
                                     .await?;
@@ -1930,7 +2028,7 @@ async fn handle_http1_connection(
                                         response.status_code,
                                         http_status_text(response.status_code),
                                         &response.headers,
-                                        &response.body,
+                                        &body,
                                     )
                                     .await?;
                             }
@@ -2044,10 +2142,11 @@ async fn handle_http2_connection(
                         &request,
                         matched_site.as_ref(),
                     ) {
+                        let body = body_for_request(&request, &response.body);
                         return Ok(Http2Response {
                             status_code: response.status_code,
                             headers: response.headers,
-                            body: response.body,
+                            body,
                         });
                     }
 
@@ -2080,16 +2179,20 @@ async fn handle_http2_connection(
                         }
                         if let Some(response) = inspection_result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
+                            let body = body_for_request(&request, &response.body);
                             return Ok(Http2Response {
                                 status_code: response.status_code,
                                 headers: response.headers,
-                                body: response.body,
+                                body,
                             });
                         }
                         return Ok(Http2Response {
                             status_code: 403,
                             headers: vec![],
-                            body: format!("blocked: {}", inspection_result.reason).into_bytes(),
+                            body: body_for_request(
+                                &request,
+                                format!("blocked: {}", inspection_result.reason).as_bytes(),
+                            ),
                         });
                     }
 
@@ -2144,10 +2247,11 @@ async fn handle_http2_connection(
                                     }
                                     UpstreamResponseDisposition::Custom(response) => {
                                         let response = resolve_runtime_custom_response(&response);
+                                        let body = body_for_request(&request, &response.body);
                                         Ok(Http2Response {
                                             status_code: response.status_code,
                                             headers: response.headers,
-                                            body: response.body,
+                                            body,
                                         })
                                     }
                                     UpstreamResponseDisposition::Drop => {
@@ -2684,6 +2788,7 @@ fn persist_safeline_intercept_event(
     );
     event.provider = Some("safeline".to_string());
     event.provider_event_id = matched.event_id.clone();
+    event.provider_site_id = matched_site.map(|site| site.id.to_string());
     event.provider_site_name = matched_site.map(|site| site.name.clone());
     event.provider_site_domain = request_hostname(request)
         .or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
@@ -2971,6 +3076,10 @@ fn resolve_client_ip(
 }
 
 fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> bool {
+    if peer_ip.is_loopback() {
+        return true;
+    }
+
     let config = context.config_snapshot();
     config
         .l7_config
@@ -3336,6 +3445,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn apply_client_identity_trusts_loopback_proxy_by_default() {
+        let context = WafContext::new(test_config(vec![])).await.unwrap();
+        let peer_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 443));
+
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_header(
+            "x-forwarded-for".to_string(),
+            "198.51.100.88, 127.0.0.1".to_string(),
+        );
+
+        apply_client_identity(&context, peer_addr, &mut request);
+
+        assert_eq!(request.client_ip.as_deref(), Some("198.51.100.88"));
+        assert_eq!(
+            request
+                .get_metadata("network.client_ip_source")
+                .map(String::as_str),
+            Some("forwarded_header")
+        );
+    }
+
+    #[tokio::test]
     async fn forward_udp_payload_relays_upstream_response() {
         let upstream_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let upstream_addr = upstream_socket.local_addr().unwrap();
@@ -3556,6 +3688,75 @@ mod tests {
     }
 
     #[test]
+    fn detect_safeline_block_response_matches_nested_json_event_id() {
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![("server".to_string(), "Chaitin SafeLine".to_string())],
+            body:
+                br#"{"data":{"eventId":"evt-nested-123"},"message":"request blocked by safeline"}"#
+                    .to_vec(),
+        };
+
+        let matched =
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
+                .unwrap();
+        assert_eq!(matched.event_id.as_deref(), Some("evt-nested-123"));
+        assert_eq!(matched.evidence, "json_signature");
+    }
+
+    #[test]
+    fn detect_safeline_block_response_matches_brotli_encoded_body() {
+        let mut encoded = Vec::new();
+        {
+            let mut compressor = brotli::CompressorWriter::new(&mut encoded, 4096, 5, 22);
+            std::io::Write::write_all(
+                &mut compressor,
+                br#"{"message":"blocked by Chaitin SafeLine Web Application Firewall","event_id":"evt-br-1"}"#,
+            )
+            .unwrap();
+        }
+
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![
+                ("content-type".to_string(), "application/json".to_string()),
+                ("content-encoding".to_string(), "br".to_string()),
+            ],
+            body: encoded,
+        };
+
+        let matched =
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
+                .unwrap();
+        assert_eq!(matched.event_id.as_deref(), Some("evt-br-1"));
+        assert_eq!(matched.evidence, "json_signature");
+    }
+
+    #[test]
+    fn detect_safeline_block_response_matches_head_style_cookie_signature() {
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![
+                ("content-type".to_string(), "text/plain".to_string()),
+                (
+                    "set-cookie".to_string(),
+                    "sl-session=test-token; SameSite=None; Secure; Path=/".to_string(),
+                ),
+            ],
+            body: Vec::new(),
+        };
+
+        let matched =
+            detect_safeline_block_response(&response, 4096, SafeLineInterceptMatchMode::Strict)
+                .unwrap();
+        assert_eq!(matched.event_id, None);
+        assert_eq!(matched.evidence, "status_and_signature");
+    }
+
+    #[test]
     fn detect_safeline_block_response_rejects_status_only_in_strict_mode() {
         let response = UpstreamHttpResponse {
             status_code: 403,
@@ -3631,5 +3832,87 @@ mod tests {
         let metrics = context.metrics_snapshot().unwrap();
         assert_eq!(metrics.blocked_packets, 1);
         assert_eq!(metrics.blocked_l7, 1);
+    }
+
+    #[test]
+    fn body_for_request_omits_body_for_head_requests() {
+        let request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "HEAD".to_string(), "/".to_string());
+
+        assert!(body_for_request(&request, b"blocked").is_empty());
+    }
+
+    #[tokio::test]
+    async fn replace_and_block_ip_uses_forwarded_client_ip_from_loopback_proxy() {
+        let mut config = test_config(vec![]);
+        config.sqlite_enabled = true;
+        config.sqlite_auto_migrate = true;
+        config.sqlite_path = unique_test_db_path("safeline_replace_and_block_ip");
+        config.l7_config.safeline_intercept.enabled = true;
+        config.l7_config.safeline_intercept.action = SafeLineInterceptAction::ReplaceAndBlockIp;
+
+        let context = WafContext::new(config).await.unwrap();
+        let packet = PacketInfo {
+            source_ip: "127.0.0.1".parse().unwrap(),
+            dest_ip: "198.51.100.20".parse().unwrap(),
+            source_port: 44321,
+            dest_port: 443,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+        let peer_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 44321));
+
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/blocked".to_string(),
+        );
+        request.add_header("host".to_string(), "portal.example.com".to_string());
+        request.add_header(
+            "x-forwarded-for".to_string(),
+            "198.51.100.88, 127.0.0.1".to_string(),
+        );
+        apply_client_identity(&context, peer_addr, &mut request);
+
+        let response = UpstreamHttpResponse {
+            status_code: 403,
+            status_text: Some("Forbidden".to_string()),
+            headers: vec![(
+                "content-type".to_string(),
+                "application/json".to_string(),
+            )],
+            body: br#"{"code":403,"success":false,"message":"blocked by Chaitin SafeLine Web Application Firewall","event_id":"evt-block-1"}"#.to_vec(),
+        };
+
+        let disposition = apply_safeline_upstream_action(
+            &context,
+            &packet,
+            &request,
+            None,
+            &context.config_snapshot().l7_config.safeline_intercept,
+            response,
+        );
+
+        assert!(matches!(
+            disposition,
+            UpstreamResponseDisposition::Custom(_)
+        ));
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let blocked = context
+            .sqlite_store
+            .as_ref()
+            .unwrap()
+            .list_blocked_ips(&crate::storage::BlockedIpQuery::default())
+            .await
+            .unwrap();
+
+        assert_eq!(blocked.items.len(), 1);
+        assert_eq!(blocked.items[0].ip, "198.51.100.88");
+        assert_eq!(
+            blocked.items[0].reason,
+            "safeline upstream intercept: event_id=evt-block-1"
+        );
     }
 }

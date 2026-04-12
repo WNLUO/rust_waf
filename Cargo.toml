@@ -55,4 +55,5 @@ base64 = "0.22"
 rand = "0.8"
 rcgen = "0.13"
 flate2 = "1.0"
+brotli = "6.0"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }

@@ -259,9 +259,9 @@ fn normalize_global_entry_port(value: &str, label: &str) -> Result<String, ApiEr
     if trimmed.is_empty() {
         return Err(ApiError::bad_request(format!("{} 入口端口不能为空", label)));
     }
-    let port = trimmed
-        .parse::<u16>()
-        .map_err(|err| ApiError::bad_request(format!("{} 入口端口 '{}' 无效: {}", label, trimmed, err)))?;
+    let port = trimmed.parse::<u16>().map_err(|err| {
+        ApiError::bad_request(format!("{} 入口端口 '{}' 无效: {}", label, trimmed, err))
+    })?;
     if port == 0 {
         return Err(ApiError::bad_request(format!("{} 入口端口不能为 0", label)));
     }

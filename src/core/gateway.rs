@@ -6,8 +6,8 @@ use log::warn;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
-use std::fmt;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::io::{BufReader, Cursor};
 use std::sync::{Arc, RwLock};
 

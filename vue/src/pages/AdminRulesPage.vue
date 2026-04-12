@@ -1,21 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowRight, PencilLine, RefreshCw } from 'lucide-vue-next'
+import { RouterLink, useRoute } from 'vue-router'
+import { ArrowRight, RefreshCw } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
-import AdminSiteActionFlowDialog from '../components/rules/AdminSiteActionFlowDialog.vue'
 import {
   fetchActionIdeaPresets,
   fetchL7Config,
   fetchLocalSites,
   fetchRuleActionTemplates,
-  updateLocalSite,
 } from '../lib/api'
 import type {
   ActionIdeaPreset,
   L7ConfigPayload,
-  LocalSiteDraft,
   LocalSiteItem,
   RuleActionTemplateItem,
   SafeLineInterceptConfigPayload,
@@ -24,11 +21,9 @@ import { useFormatters } from '../composables/useFormatters'
 import { useFlashMessages } from '../composables/useNotifications'
 
 const route = useRoute()
-const router = useRouter()
 const { formatTimestamp } = useFormatters()
 
 const loading = ref(true)
-const saving = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const siteKeyword = ref('')
@@ -36,8 +31,6 @@ const localSites = ref<LocalSiteItem[]>([])
 const actionTemplates = ref<RuleActionTemplateItem[]>([])
 const actionIdeaPresets = ref<ActionIdeaPreset[]>([])
 const l7Config = ref<L7ConfigPayload | null>(null)
-const editingSite = ref<LocalSiteItem | null>(null)
-const isEditorOpen = ref(false)
 
 useFlashMessages({
   error,
@@ -71,47 +64,6 @@ ${script}
   <\/script>
 </body>
 </html>`
-
-function cloneHeaders(headers: { key: string; value: string }[]) {
-  return headers.map((header) => ({ ...header }))
-}
-
-function cloneResponseTemplate(
-  template: SafeLineInterceptConfigPayload['response_template'],
-) {
-  return {
-    ...template,
-    headers: cloneHeaders(template.headers),
-  }
-}
-
-function cloneSafelineIntercept(
-  value: SafeLineInterceptConfigPayload | null | undefined,
-): SafeLineInterceptConfigPayload | null {
-  if (!value) return null
-  return {
-    ...value,
-    response_template: cloneResponseTemplate(value.response_template),
-  }
-}
-
-function siteDraftFromItem(site: LocalSiteItem): LocalSiteDraft {
-  return {
-    name: site.name,
-    primary_hostname: site.primary_hostname,
-    hostnames: [...site.hostnames],
-    listen_ports: [...site.listen_ports],
-    upstreams: [...site.upstreams],
-    safeline_intercept: cloneSafelineIntercept(site.safeline_intercept),
-    enabled: site.enabled,
-    tls_enabled: site.tls_enabled,
-    local_certificate_id: site.local_certificate_id,
-    source: site.source,
-    sync_mode: site.sync_mode,
-    notes: site.notes,
-    last_synced_at: site.last_synced_at,
-  }
-}
 
 function normalizeTemplateHeaders(headers: { key: string; value: string }[]) {
   return headers
@@ -279,44 +231,6 @@ async function loadRulesCenter() {
   }
 }
 
-async function clearPendingTemplateQuery() {
-  if (typeof route.query.template !== 'string') return
-  const nextQuery = { ...route.query }
-  delete nextQuery.template
-  await router.replace({ query: nextQuery })
-}
-
-async function openPolicyEditor(site: LocalSiteItem) {
-  editingSite.value = site
-  isEditorOpen.value = true
-  if (pendingTemplate.value) {
-    await clearPendingTemplateQuery()
-  }
-}
-
-function closePolicyEditor() {
-  isEditorOpen.value = false
-  editingSite.value = null
-}
-
-async function savePolicy(payload: SafeLineInterceptConfigPayload | null) {
-  if (!editingSite.value) return
-  saving.value = true
-  clearFeedback()
-  try {
-    const draft = siteDraftFromItem(editingSite.value)
-    draft.safeline_intercept = cloneSafelineIntercept(payload)
-    await updateLocalSite(editingSite.value.id, draft)
-    successMessage.value = `站点 ${editingSite.value.name} 的雷池接管策略已更新。`
-    closePolicyEditor()
-    await loadRulesCenter()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '保存站点策略失败'
-  } finally {
-    saving.value = false
-  }
-}
-
 onMounted(loadRulesCenter)
 </script>
 
@@ -428,13 +342,19 @@ onMounted(loadRulesCenter)
                 </td>
                 <td class="px-4 py-3">
                   <div class="flex justify-end gap-2">
-                    <button
+                    <RouterLink
+                      :to="{
+                        name: 'admin-rule-site-action',
+                        params: { id: site.id },
+                        query:
+                          pendingTemplate && pendingTemplate.template_id
+                            ? { template: pendingTemplate.template_id }
+                            : {},
+                      }"
                       class="inline-flex items-center gap-1 rounded-full border border-slate-200 px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-                      @click="openPolicyEditor(site)"
                     >
-                      <PencilLine :size="14" />
                       配置动作
-                    </button>
+                    </RouterLink>
                   </div>
                 </td>
               </tr>
@@ -452,15 +372,5 @@ onMounted(loadRulesCenter)
       </div>
     </div>
 
-    <AdminSiteActionFlowDialog
-      :open="isEditorOpen"
-      :site="editingSite"
-      :l7-config="l7Config"
-      :templates="enabledActionTemplates"
-      :pending-template="pendingTemplate"
-      :saving="saving"
-      @close="closePolicyEditor"
-      @save="savePolicy"
-    />
   </AppLayout>
 </template>

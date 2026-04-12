@@ -4,6 +4,7 @@ import AdminPage from '../pages/AdminPage.vue'
 import AdminSitesPage from '../pages/AdminSitesPage.vue'
 import AdminCertificatesPage from '../pages/AdminCertificatesPage.vue'
 import AdminRulesPage from '../pages/AdminRulesPage.vue'
+import AdminRuleSiteActionPage from '../pages/AdminRuleSiteActionPage.vue'
 import AdminActionsPage from '../pages/AdminActionsPage.vue'
 import AdminL4Page from '../pages/AdminL4Page.vue'
 import AdminL7Page from '../pages/AdminL7Page.vue'
@@ -43,6 +44,11 @@ const router = createRouter({
       path: '/admin/rules',
       name: 'admin-rules',
       component: AdminRulesPage,
+    },
+    {
+      path: '/admin/rules/sites/:id/action',
+      name: 'admin-rule-site-action',
+      component: AdminRuleSiteActionPage,
     },
     {
       path: '/admin/actions',

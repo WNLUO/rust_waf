@@ -10,6 +10,7 @@ function createDefaultSettings(): GlobalSettingsPayload {
   return {
     enable_http1_0: false,
     http2_enabled: true,
+    http3_enabled: false,
     source_ip_strategy: 'connection',
     custom_source_ip_header: '',
     trusted_proxy_cidrs: [],
@@ -206,7 +207,7 @@ onMounted(loadPage)
           class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <p class="text-sm font-semibold text-stone-900">协议兼容</p>
-          <div class="mt-4 grid gap-3 md:grid-cols-2">
+          <div class="mt-4 grid gap-3 md:grid-cols-3">
             <label
               class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
             >
@@ -226,6 +227,16 @@ onMounted(loadPage)
                 class="h-4 w-4 accent-blue-600"
               />
               启用 HTTP/2
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+            >
+              <input
+                v-model="settings.http3_enabled"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
+              启用 HTTP/3
             </label>
           </div>
         </section>

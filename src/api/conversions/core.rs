@@ -202,6 +202,7 @@ impl GlobalSettingsResponse {
         Self {
             enable_http1_0: config.gateway_config.enable_http1_0,
             http2_enabled: config.l7_config.http2_config.enabled,
+            http3_enabled: config.http3_config.enabled,
             source_ip_strategy: match config.gateway_config.source_ip_strategy {
                 SourceIpStrategy::Connection => "connection".to_string(),
                 SourceIpStrategy::XForwardedForFirst => "x_forwarded_for_first".to_string(),
@@ -460,6 +461,7 @@ impl GlobalSettingsUpdateRequest {
         current.gateway_config.ssl_ciphers = self.ssl_ciphers;
         current.gateway_config.header_operations = header_operations;
         current.l7_config.http2_config.enabled = self.http2_enabled;
+        current.http3_config.enabled = self.http3_enabled;
 
         Ok(current.normalized())
     }

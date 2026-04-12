@@ -89,6 +89,7 @@ pub struct HeaderOperationPayload {
 pub struct GlobalSettingsResponse {
     pub(crate) enable_http1_0: bool,
     pub(crate) http2_enabled: bool,
+    pub(crate) http3_enabled: bool,
     pub(crate) source_ip_strategy: String,
     pub(crate) custom_source_ip_header: String,
     pub(crate) trusted_proxy_cidrs: Vec<String>,
@@ -112,6 +113,7 @@ pub struct GlobalSettingsResponse {
 pub struct GlobalSettingsUpdateRequest {
     pub(crate) enable_http1_0: bool,
     pub(crate) http2_enabled: bool,
+    pub(crate) http3_enabled: bool,
     pub(crate) source_ip_strategy: String,
     pub(crate) custom_source_ip_header: String,
     pub(crate) trusted_proxy_cidrs: Vec<String>,

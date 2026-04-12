@@ -102,6 +102,7 @@ export interface HeaderOperationItem {
 export interface GlobalSettingsPayload {
   enable_http1_0: boolean
   http2_enabled: boolean
+  http3_enabled: boolean
   source_ip_strategy:
     | 'connection'
     | 'x_forwarded_for_first'

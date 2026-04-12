@@ -9,6 +9,7 @@ pub mod http3;
 pub mod l4;
 pub mod l7;
 
+pub(crate) use self::env::default_sqlite_queue_capacity;
 use self::env::*;
 pub use self::env::{apply_env_overrides, resolve_sqlite_path};
 pub use gateway::{
@@ -46,6 +47,8 @@ pub struct Config {
     pub sqlite_path: String,
     #[serde(default = "default_sqlite_auto_migrate")]
     pub sqlite_auto_migrate: bool,
+    #[serde(default = "default_sqlite_queue_capacity")]
+    pub sqlite_queue_capacity: usize,
     #[serde(default, deserialize_with = "deserialize_boolish")]
     pub sqlite_rules_enabled: bool,
     #[serde(default)]
@@ -297,6 +300,7 @@ impl Default for Config {
             sqlite_enabled: default_sqlite_enabled(),
             sqlite_path: default_sqlite_path(),
             sqlite_auto_migrate: default_sqlite_auto_migrate(),
+            sqlite_queue_capacity: default_sqlite_queue_capacity(),
             sqlite_rules_enabled: default_sqlite_rules_enabled(),
             max_concurrent_tasks: 0,
             console_settings: ConsoleSettings::default(),
@@ -322,6 +326,12 @@ impl Config {
         } else {
             self.sqlite_auto_migrate = true;
         }
+
+        self.sqlite_queue_capacity = if self.runtime_profile.is_minimal() {
+            clamp_or_default(self.sqlite_queue_capacity, 512).clamp(128, 4_096)
+        } else {
+            clamp_or_default(self.sqlite_queue_capacity, 1024).clamp(256, 16_384)
+        };
 
         // 确保至少有一个监听地址
         if self.listen_addrs.is_empty() {

@@ -10,6 +10,9 @@ pub struct StorageMetricsSummary {
     pub latest_event_at: Option<i64>,
     pub rules: u64,
     pub latest_rule_update_at: Option<i64>,
+    pub queue_capacity: u64,
+    pub dropped_security_events: u64,
+    pub dropped_blocked_ips: u64,
 }
 
 #[cfg(any(feature = "api", test))]

@@ -32,6 +32,10 @@ pub(super) const fn default_sqlite_enabled() -> bool {
     true
 }
 
+pub(crate) const fn default_sqlite_queue_capacity() -> usize {
+    1024
+}
+
 pub(super) const fn default_sqlite_rules_enabled() -> bool {
     true
 }

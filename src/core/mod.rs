@@ -71,7 +71,12 @@ impl WafContext {
         };
         let sqlite_store = if config.sqlite_enabled {
             Some(Arc::new(
-                SqliteStore::new(config.sqlite_path.clone(), config.sqlite_auto_migrate).await?,
+                SqliteStore::new_with_queue_capacity(
+                    config.sqlite_path.clone(),
+                    config.sqlite_auto_migrate,
+                    config.sqlite_queue_capacity,
+                )
+                .await?,
             ))
         } else {
             None

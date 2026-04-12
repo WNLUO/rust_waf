@@ -61,6 +61,9 @@ fn test_build_metrics_response_with_sources() {
             latest_event_at: Some(1234567890),
             rules: 5,
             latest_rule_update_at: Some(1234567899),
+            queue_capacity: 1024,
+            dropped_security_events: 3,
+            dropped_blocked_ips: 1,
         }),
         Some(crate::l4::behavior::L4BehaviorOverview {
             bucket_count: 9,
@@ -96,6 +99,9 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.persisted_security_events, 7);
     assert_eq!(response.persisted_blocked_ips, 2);
     assert_eq!(response.persisted_rules, 5);
+    assert_eq!(response.sqlite_queue_capacity, 1024);
+    assert_eq!(response.sqlite_dropped_security_events, 3);
+    assert_eq!(response.sqlite_dropped_blocked_ips, 1);
     assert_eq!(response.last_persisted_event_at, Some(1234567890));
     assert_eq!(response.last_rule_update_at, Some(1234567899));
     assert_eq!(response.l4_bucket_count, 9);

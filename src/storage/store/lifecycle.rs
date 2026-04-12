@@ -1,5 +1,14 @@
 impl SqliteStore {
     pub async fn new(path: String, auto_migrate: bool) -> Result<Self> {
+        Self::new_with_queue_capacity(path, auto_migrate, crate::config::default_sqlite_queue_capacity())
+            .await
+    }
+
+    pub async fn new_with_queue_capacity(
+        path: String,
+        auto_migrate: bool,
+        queue_capacity: usize,
+    ) -> Result<Self> {
         let db_path = PathBuf::from(path);
         ensure_parent_dir(&db_path).await?;
         let existed_before = tokio::fs::try_exists(&db_path).await.unwrap_or(false);
@@ -52,13 +61,19 @@ impl SqliteStore {
             }
         }
 
-        let (sender, receiver) = mpsc::channel(STORAGE_QUEUE_CAPACITY);
+        let queue_capacity = queue_capacity.max(1);
+        let (sender, receiver) = mpsc::channel(queue_capacity);
         tokio::spawn(run_writer(pool.clone(), receiver));
+        let dropped_security_events = Arc::new(AtomicU64::new(0));
+        let dropped_blocked_ips = Arc::new(AtomicU64::new(0));
 
         Ok(Self {
             pool,
             db_path,
             sender,
+            queue_capacity,
+            dropped_security_events,
+            dropped_blocked_ips,
         })
     }
 
@@ -69,6 +84,7 @@ impl SqliteStore {
 
     pub fn enqueue_security_event(&self, event: SecurityEventRecord) {
         if let Err(err) = self.sender.try_send(StorageCommand::SecurityEvent(event)) {
+            self.dropped_security_events.fetch_add(1, Ordering::Relaxed);
             warn!(
                 "Failed to enqueue security event for SQLite storage: {}",
                 err
@@ -78,6 +94,7 @@ impl SqliteStore {
 
     pub fn enqueue_blocked_ip(&self, record: BlockedIpRecord) {
         if let Err(err) = self.sender.try_send(StorageCommand::BlockedIp(record)) {
+            self.dropped_blocked_ips.fetch_add(1, Ordering::Relaxed);
             warn!("Failed to enqueue blocked IP for SQLite storage: {}", err);
         }
     }
@@ -212,6 +229,9 @@ impl SqliteStore {
             latest_event_at,
             rules: rules.max(0) as u64,
             latest_rule_update_at,
+            queue_capacity: self.queue_capacity as u64,
+            dropped_security_events: self.dropped_security_events.load(Ordering::Relaxed),
+            dropped_blocked_ips: self.dropped_blocked_ips.load(Ordering::Relaxed),
         })
     }
 

@@ -18,6 +18,8 @@ use sqlx::SqlitePool;
 #[cfg(any(feature = "api", test))]
 use sqlx::{QueryBuilder, Sqlite};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use self::models::{serialize_rule_response_template, StoredAppConfigRow, StoredRuleRow};
@@ -27,7 +29,6 @@ use self::query::{
     append_security_event_filters, normalized_limit,
 };
 
-const STORAGE_QUEUE_CAPACITY: usize = 1024;
 const SQLITE_STARTUP_BACKUP_RETENTION: usize = 5;
 const SQLITE_CORRUPT_BACKUP_RETENTION: usize = 5;
 
@@ -37,6 +38,9 @@ pub struct SqliteStore {
     pool: SqlitePool,
     db_path: PathBuf,
     sender: mpsc::Sender<StorageCommand>,
+    queue_capacity: usize,
+    dropped_security_events: Arc<AtomicU64>,
+    dropped_blocked_ips: Arc<AtomicU64>,
 }
 
 enum StorageCommand {
@@ -299,6 +303,57 @@ mod tests {
         assert!(summary.latest_event_at.is_some());
         assert_eq!(summary.rules, 0);
         assert!(summary.latest_rule_update_at.is_none());
+        assert_eq!(summary.queue_capacity, 1024);
+        assert_eq!(summary.dropped_security_events, 0);
+        assert_eq!(summary.dropped_blocked_ips, 0);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_store_reports_enqueue_drops() {
+        let path = unique_test_db_path("queue_drops");
+        let store = SqliteStore::new_with_queue_capacity(path, true, 1)
+            .await
+            .unwrap();
+
+        for idx in 0..5_000 {
+            store.enqueue_security_event(SecurityEventRecord {
+                layer: "L7".to_string(),
+                provider: None,
+                provider_event_id: Some(format!("evt-drop-{idx}")),
+                provider_site_id: None,
+                provider_site_name: None,
+                provider_site_domain: None,
+                action: "block".to_string(),
+                reason: "queue pressure".to_string(),
+                details_json: None,
+                source_ip: "127.0.0.1".to_string(),
+                dest_ip: "127.0.0.1".to_string(),
+                source_port: 12345,
+                dest_port: 8080,
+                protocol: "TCP".to_string(),
+                http_method: Some("GET".to_string()),
+                uri: Some("/drop".to_string()),
+                http_version: Some("HTTP/1.1".to_string()),
+                created_at: unix_timestamp() + idx as i64,
+                handled: false,
+                handled_at: None,
+            });
+        }
+
+        for idx in 0..5_000 {
+            store.enqueue_blocked_ip(BlockedIpRecord::new(
+                format!("198.51.100.{}", idx % 255),
+                "queue pressure".to_string(),
+                unix_timestamp(),
+                unix_timestamp() + 60,
+            ));
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let summary = store.metrics_summary().await.unwrap();
+        assert_eq!(summary.queue_capacity, 1);
+        assert!(summary.dropped_security_events > 0);
+        assert!(summary.dropped_blocked_ips > 0);
     }
 
     #[tokio::test]

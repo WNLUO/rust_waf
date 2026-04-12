@@ -72,6 +72,12 @@ struct EntryListenerRuntime {
     state: Mutex<EntryListenerRuntimeState>,
 }
 
+fn is_benign_tls_disconnect(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("peer closed connection without sending TLS close_notify")
+        || message.contains("unexpected eof")
+}
+
 impl EntryListenerRuntime {
     fn global() -> Arc<Self> {
         ENTRY_LISTENER_RUNTIME
@@ -657,7 +663,14 @@ async fn spawn_https_entry_listener(
                                     let acceptor = tls_acceptor.clone();
                                     tokio::spawn(async move {
                                         if let Err(err) = handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await {
-                                            warn!("TLS connection handling failed: {}", err);
+                                            if is_benign_tls_disconnect(&err) {
+                                                debug!(
+                                                    "TLS connection closed without close_notify from {}: {}",
+                                                    peer_addr, err
+                                                );
+                                            } else {
+                                                warn!("TLS connection handling failed: {}", err);
+                                            }
                                         }
                                     });
                                 }

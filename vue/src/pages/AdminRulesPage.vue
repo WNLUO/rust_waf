@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { ArrowRight, PencilLine, RefreshCw, X } from 'lucide-vue-next'
+import { ArrowRight, PencilLine, RefreshCw } from 'lucide-vue-next'
 import AppLayout from '../components/layout/AppLayout.vue'
 import StatusBadge from '../components/ui/StatusBadge.vue'
+import AdminSiteActionFlowDialog from '../components/rules/AdminSiteActionFlowDialog.vue'
 import {
   fetchActionIdeaPresets,
   fetchL7Config,
@@ -21,18 +22,6 @@ import type {
 } from '../lib/types'
 import { useFormatters } from '../composables/useFormatters'
 import { useFlashMessages } from '../composables/useNotifications'
-
-type PolicyMode =
-  | 'inherit'
-  | 'disabled'
-  | 'pass'
-  | 'drop'
-  | 'global_replace'
-  | 'global_block'
-  | 'template_replace'
-  | 'template_block'
-  | 'legacy_replace'
-  | 'legacy_block'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,14 +46,6 @@ useFlashMessages({
   successTitle: '规则中心',
   errorDuration: 5600,
   successDuration: 3200,
-})
-
-const policyForm = reactive<{
-  mode: PolicyMode
-  templateId: string
-}>({
-  mode: 'inherit',
-  templateId: '',
 })
 
 const isInlineJsIdea = (idea: ActionIdeaPreset) => idea.id === 'inline-js'
@@ -298,70 +279,6 @@ async function loadRulesCenter() {
   }
 }
 
-function resetEditorFromSite(site: LocalSiteItem) {
-  const config = cloneSafelineIntercept(site.safeline_intercept)
-  const matchedTemplate =
-    enabledActionTemplates.value.find((template) =>
-      sameResponseTemplate(template.response_template, config?.response_template),
-    ) ?? null
-
-  policyForm.templateId = matchedTemplate?.template_id ?? ''
-
-  if (!config) {
-    policyForm.mode = pendingTemplate.value ? 'template_replace' : 'inherit'
-    if (pendingTemplate.value) {
-      policyForm.templateId = pendingTemplate.value.template_id
-    }
-    return
-  }
-
-  if (!config.enabled) {
-    policyForm.mode = 'disabled'
-    return
-  }
-
-  if (config.action === 'pass') {
-    policyForm.mode = 'pass'
-    return
-  }
-
-  if (config.action === 'drop') {
-    policyForm.mode = 'drop'
-    return
-  }
-
-  const sameAsGlobal =
-    l7Config.value &&
-    sameResponseTemplate(
-      config.response_template,
-      l7Config.value.safeline_intercept.response_template,
-    )
-
-  if (config.action === 'replace') {
-    if (sameAsGlobal) {
-      policyForm.mode = 'global_replace'
-    } else if (matchedTemplate) {
-      policyForm.mode = 'template_replace'
-    } else {
-      policyForm.mode = 'legacy_replace'
-    }
-    return
-  }
-
-  if (config.action === 'replace_and_block_ip') {
-    if (sameAsGlobal) {
-      policyForm.mode = 'global_block'
-    } else if (matchedTemplate) {
-      policyForm.mode = 'template_block'
-    } else {
-      policyForm.mode = 'legacy_block'
-    }
-    return
-  }
-
-  policyForm.mode = 'inherit'
-}
-
 async function clearPendingTemplateQuery() {
   if (typeof route.query.template !== 'string') return
   const nextQuery = { ...route.query }
@@ -371,7 +288,6 @@ async function clearPendingTemplateQuery() {
 
 async function openPolicyEditor(site: LocalSiteItem) {
   editingSite.value = site
-  resetEditorFromSite(site)
   isEditorOpen.value = true
   if (pendingTemplate.value) {
     await clearPendingTemplateQuery()
@@ -381,105 +297,16 @@ async function openPolicyEditor(site: LocalSiteItem) {
 function closePolicyEditor() {
   isEditorOpen.value = false
   editingSite.value = null
-  policyForm.mode = 'inherit'
-  policyForm.templateId = ''
 }
 
-const selectedTemplate = computed(() =>
-  enabledActionTemplates.value.find(
-    (item) => item.template_id === policyForm.templateId,
-  ) ?? null,
-)
-
-const canSavePolicy = computed(() => {
-  if (!editingSite.value || !l7Config.value) return false
-  if (policyForm.mode === 'legacy_replace' || policyForm.mode === 'legacy_block') {
-    return false
-  }
-  if (
-    (policyForm.mode === 'template_replace' ||
-      policyForm.mode === 'template_block') &&
-    !selectedTemplate.value
-  ) {
-    return false
-  }
-  return true
-})
-
-function buildInterceptOverride(): SafeLineInterceptConfigPayload | null {
-  if (!l7Config.value) return null
-  const base = cloneSafelineIntercept(l7Config.value.safeline_intercept)
-  if (!base) return null
-
-  switch (policyForm.mode) {
-    case 'inherit':
-      return null
-    case 'disabled':
-      return {
-        ...base,
-        enabled: false,
-      }
-    case 'pass':
-      return {
-        ...base,
-        enabled: true,
-        action: 'pass',
-      }
-    case 'drop':
-      return {
-        ...base,
-        enabled: true,
-        action: 'drop',
-      }
-    case 'global_replace':
-      return {
-        ...base,
-        enabled: true,
-        action: 'replace',
-        response_template: cloneResponseTemplate(base.response_template),
-      }
-    case 'global_block':
-      return {
-        ...base,
-        enabled: true,
-        action: 'replace_and_block_ip',
-        response_template: cloneResponseTemplate(base.response_template),
-      }
-    case 'template_replace':
-      return selectedTemplate.value
-        ? {
-            ...base,
-            enabled: true,
-            action: 'replace',
-            response_template: cloneResponseTemplate(
-              selectedTemplate.value.response_template,
-            ),
-          }
-        : null
-    case 'template_block':
-      return selectedTemplate.value
-        ? {
-            ...base,
-            enabled: true,
-            action: 'replace_and_block_ip',
-            response_template: cloneResponseTemplate(
-              selectedTemplate.value.response_template,
-            ),
-          }
-        : null
-    default:
-      return null
-  }
-}
-
-async function savePolicy() {
-  if (!editingSite.value || !canSavePolicy.value) return
+async function savePolicy(payload: SafeLineInterceptConfigPayload | null) {
+  if (!editingSite.value) return
   saving.value = true
   clearFeedback()
   try {
-    const payload = siteDraftFromItem(editingSite.value)
-    payload.safeline_intercept = buildInterceptOverride()
-    await updateLocalSite(editingSite.value.id, payload)
+    const draft = siteDraftFromItem(editingSite.value)
+    draft.safeline_intercept = cloneSafelineIntercept(payload)
+    await updateLocalSite(editingSite.value.id, draft)
     successMessage.value = `站点 ${editingSite.value.name} 的雷池接管策略已更新。`
     closePolicyEditor()
     await loadRulesCenter()
@@ -625,179 +452,15 @@ onMounted(loadRulesCenter)
       </div>
     </div>
 
-    <div
-      v-if="isEditorOpen && editingSite"
-      class="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6"
-    >
-      <div
-        class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
-        @click="closePolicyEditor"
-      ></div>
-      <div
-        class="relative max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-slate-200 bg-[#fffaf4] p-5 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:max-h-[calc(100vh-3rem)] md:p-6"
-      >
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm tracking-wide text-blue-700">简化规则配置</p>
-            <h3 class="mt-2 text-3xl font-semibold text-stone-900">
-              {{ editingSite.name }}
-            </h3>
-            <p class="mt-2 text-sm text-slate-500">
-              语义固定为：
-              <span class="font-medium text-stone-900">
-                当 {{ editingSite.primary_hostname }} 被雷池判定拦截后
-              </span>
-              ，rust 执行下面这个动作。
-            </p>
-          </div>
-          <button
-            class="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
-            @click="closePolicyEditor"
-          >
-            <X :size="18" />
-          </button>
-        </div>
-
-        <div class="mt-6 space-y-5">
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p class="text-sm font-medium text-stone-900">动作类型</p>
-            <p class="mt-1 text-xs leading-6 text-slate-500">
-              这里不再手工填写拦截页内容。需要页面或 JSON 响应时，请先去动作中心准备模板，再回来绑定到站点。
-            </p>
-
-            <select
-              v-model="policyForm.mode"
-              class="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-            >
-              <option value="inherit">继承全局默认接管策略</option>
-              <option value="disabled">本站点不接管雷池拦截</option>
-              <option value="pass">透传雷池原始响应</option>
-              <option value="drop">直接丢弃响应</option>
-              <option value="global_replace">使用全局默认拦截页</option>
-              <option value="global_block">使用全局默认拦截页并封禁来源 IP</option>
-              <option value="template_replace">使用动作中心模板</option>
-              <option value="template_block">使用动作中心模板并封禁来源 IP</option>
-              <option
-                v-if="policyForm.mode === 'legacy_replace'"
-                value="legacy_replace"
-              >
-                历史自定义动作（需切换为模板）
-              </option>
-              <option
-                v-if="policyForm.mode === 'legacy_block'"
-                value="legacy_block"
-              >
-                历史自定义动作并封禁 IP（需切换为模板）
-              </option>
-            </select>
-          </div>
-
-          <div
-            v-if="
-              policyForm.mode === 'template_replace' ||
-              policyForm.mode === 'template_block' ||
-              policyForm.mode === 'legacy_replace' ||
-              policyForm.mode === 'legacy_block'
-            "
-            class="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-          >
-            <div
-              class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-            >
-              <div>
-                <p class="text-sm font-medium text-stone-900">动作模板</p>
-                <p class="mt-1 text-xs leading-6 text-slate-500">
-                  模板来自动作中心，通常由插件提供，也可以复用已经安装好的响应页动作。
-                </p>
-              </div>
-              <RouterLink
-                to="/admin/actions"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              >
-                去动作中心
-                <ArrowRight :size="14" />
-              </RouterLink>
-            </div>
-
-            <div
-              v-if="
-                policyForm.mode === 'legacy_replace' ||
-                policyForm.mode === 'legacy_block'
-              "
-              class="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
-            >
-              当前站点使用的是旧的自定义响应内容，已经不在简化规则中心里直接编辑了。请选择“全局默认拦截页”或动作中心里的模板后再保存。
-            </div>
-
-            <select
-              v-model="policyForm.templateId"
-              class="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-            >
-              <option value="">请选择动作模板</option>
-              <option
-                v-for="template in enabledActionTemplates"
-                :key="template.template_id"
-                :value="template.template_id"
-              >
-                {{ template.name }} · {{ template.response_template.content_type }}
-              </option>
-            </select>
-
-            <div
-              v-if="selectedTemplate"
-              class="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-4"
-            >
-              <div class="flex flex-wrap gap-2">
-                <StatusBadge
-                  :text="selectedTemplate.layer.toUpperCase()"
-                  type="info"
-                  compact
-                />
-                <StatusBadge
-                  :text="`HTTP ${selectedTemplate.response_template.status_code}`"
-                  type="muted"
-                  compact
-                />
-                <StatusBadge
-                  :text="
-                    selectedTemplate.response_template.gzip ? 'gzip 开' : 'gzip 关'
-                  "
-                  type="muted"
-                  compact
-                />
-              </div>
-              <p class="mt-3 text-sm font-medium text-stone-900">
-                {{ selectedTemplate.name }}
-              </p>
-              <p class="mt-1 text-sm leading-6 text-slate-500">
-                {{
-                  selectedTemplate.description ||
-                  '这个动作模板会作为雷池拦截后的替换响应。'
-                }}
-              </p>
-              <p class="mt-2 font-mono text-xs text-slate-500">
-                {{ selectedTemplate.response_template.content_type }}
-              </p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              :disabled="!canSavePolicy || saving"
-              class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
-              @click="savePolicy"
-            >
-              {{ saving ? '保存中...' : '保存站点动作' }}
-            </button>
-            <button
-              class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-              @click="closePolicyEditor"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AdminSiteActionFlowDialog
+      :open="isEditorOpen"
+      :site="editingSite"
+      :l7-config="l7Config"
+      :templates="enabledActionTemplates"
+      :pending-template="pendingTemplate"
+      :saving="saving"
+      @close="closePolicyEditor"
+      @save="savePolicy"
+    />
   </AppLayout>
 </template>

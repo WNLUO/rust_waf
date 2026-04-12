@@ -1,0 +1,368 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import {
+  fetchBlockedIps,
+  fetchHealth,
+  fetchMetrics,
+  fetchRulesList,
+  fetchSecurityEvents,
+} from '@/shared/api/client'
+import type {
+  DashboardPayload,
+  SecurityEventsResponse,
+  BlockedIpsResponse,
+  SecurityEventItem,
+} from '@/shared/types'
+import AppLayout from '@/app/layout/AppLayout.vue'
+import MetricWidget from '@/shared/ui/MetricWidget.vue'
+import StatusBadge from '@/shared/ui/StatusBadge.vue'
+import CyberCard from '@/shared/ui/CyberCard.vue'
+import { useFormatters } from '@/shared/composables/useFormatters'
+import { useFlashMessages } from '@/shared/composables/useNotifications'
+import {
+  Activity,
+  Database,
+  Gauge,
+  RefreshCw,
+  Shield,
+  ArrowUpRight,
+} from 'lucide-vue-next'
+
+const dashboard = ref<DashboardPayload | null>(null)
+const loading = ref(true)
+const refreshing = ref(false)
+const error = ref('')
+const lastUpdated = ref<number | null>(null)
+const refreshTimer = ref<number | null>(null)
+
+useFlashMessages({
+  error,
+  errorTitle: '控制台',
+  errorDuration: 5600,
+})
+
+const metricsHistory = reactive({
+  totalPackets: [] as number[],
+  blockRate: [] as number[],
+  latency: [] as number[],
+})
+
+const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
+  const series = metricsHistory[key]
+  series.push(Number.isFinite(value) ? value : 0)
+  if (series.length > 12) {
+    series.shift()
+  }
+}
+
+const { formatBytes, formatNumber, formatLatency, formatTimestamp } =
+  useFormatters()
+
+const urlLikePattern =
+  /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/i
+
+const formatSiteLabel = (value: string | null | undefined): string => {
+  const raw = value?.trim()
+  if (!raw) return ''
+
+  const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
+  const looksLikeUrl = hasProtocol || urlLikePattern.test(raw)
+  if (!looksLikeUrl) return raw
+
+  try {
+    const parsed = new URL(hasProtocol ? raw : `https://${raw}`)
+    return hasProtocol
+      ? `${parsed.protocol}//${parsed.hostname}`
+      : parsed.hostname
+  } catch {
+    return raw
+      .replace(/^([a-z][a-z\d+.-]*:\/\/[^/:?#]+).*/i, '$1')
+      .replace(/^([^/:?#]+).*/i, '$1')
+  }
+}
+
+const eventSiteLabel = (event: SecurityEventItem): string =>
+  formatSiteLabel(event.provider_site_name) ||
+  formatSiteLabel(event.provider_site_domain)
+
+const emptyEventsResponse = (): SecurityEventsResponse => ({
+  total: 0,
+  limit: 0,
+  offset: 0,
+  events: [],
+})
+
+const emptyBlockedResponse = (): BlockedIpsResponse => ({
+  total: 0,
+  limit: 0,
+  offset: 0,
+  blocked_ips: [],
+})
+
+const successRate = computed(() => {
+  const metrics = dashboard.value?.metrics
+  if (!metrics) return '暂无'
+  const total = metrics.proxy_successes + metrics.proxy_failures
+  if (total === 0) return '暂无'
+  return `${((metrics.proxy_successes / total) * 100).toFixed(1)}%`
+})
+
+const requestStatus = computed(() => {
+  if (refreshing.value) return '实时同步中...'
+  if (lastUpdated.value) {
+    return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(lastUpdated.value))}`
+  }
+  return '等待首次同步'
+})
+
+const fetchData = async (showLoader = false) => {
+  if (showLoader) loading.value = true
+  refreshing.value = true
+  try {
+    const [health, metrics, rules, events, blockedIps] = await Promise.all([
+      fetchHealth(),
+      fetchMetrics(),
+      fetchRulesList(),
+      fetchSecurityEvents({
+        limit: 8,
+        sort_direction: 'desc',
+        sort_by: 'created_at',
+      }),
+      fetchBlockedIps({
+        limit: 8,
+        active_only: true,
+        sort_direction: 'desc',
+        sort_by: 'blocked_at',
+      }),
+    ])
+
+    dashboard.value = {
+      health,
+      metrics,
+      rules,
+      events: events || emptyEventsResponse(),
+      blockedIps: blockedIps || emptyBlockedResponse(),
+    }
+
+    pushHistory('totalPackets', metrics.total_packets)
+    pushHistory(
+      'blockRate',
+      metrics.total_packets
+        ? Number(
+            ((metrics.blocked_packets / metrics.total_packets) * 100).toFixed(
+              2,
+            ),
+          )
+        : 0,
+    )
+    pushHistory('latency', metrics.average_proxy_latency_micros)
+    lastUpdated.value = Date.now()
+    error.value = ''
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取控制台数据失败'
+  } finally {
+    if (showLoader) loading.value = false
+    refreshing.value = false
+  }
+}
+
+onMounted(() => {
+  fetchData(true)
+  refreshTimer.value = window.setInterval(() => fetchData(), 5000)
+})
+
+onBeforeUnmount(() => {
+  if (refreshTimer.value) {
+    clearInterval(refreshTimer.value)
+  }
+})
+</script>
+
+<template>
+  <AppLayout>
+    <template #header-extra>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-500 whitespace-nowrap">{{
+          requestStatus
+        }}</span>
+        <button
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
+          :disabled="refreshing"
+          @click="fetchData()"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
+          同步
+        </button>
+      </div>
+    </template>
+
+    <div v-if="loading" class="flex h-72 items-center justify-center">
+      <div
+        class="flex flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-6 shadow-sm"
+      >
+        <RefreshCw class="animate-spin text-blue-700" :size="30" />
+        <p class="text-sm text-slate-500">正在载入边界态势</p>
+      </div>
+    </div>
+
+    <div v-else class="space-y-4">
+      <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricWidget
+          label="累计处理报文"
+          :value="formatNumber(dashboard?.metrics.total_packets || 0)"
+          :hint="`累计流量 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
+          :icon="Activity"
+          :series="metricsHistory.totalPackets"
+        />
+        <MetricWidget
+          label="累计拦截次数"
+          :value="formatNumber(dashboard?.metrics.blocked_packets || 0)"
+          :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
+          :icon="Shield"
+          trend="up"
+          :series="metricsHistory.blockRate"
+        />
+        <MetricWidget
+          label="平均代理延迟"
+          :value="
+            formatLatency(dashboard?.metrics.average_proxy_latency_micros || 0)
+          "
+          :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"
+          :icon="Gauge"
+          trend="down"
+          :series="metricsHistory.latency"
+        />
+        <MetricWidget
+          label="启用规则"
+          :value="dashboard?.metrics.active_rules || 0"
+          :hint="`规则总数 ${formatNumber(dashboard?.rules.rules.length || 0)} / 成功率 ${successRate}`"
+          :icon="Database"
+        />
+      </section>
+
+      <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <CyberCard
+          title="最新安全事件"
+          sub-title="便于值班人员快速扫读当前威胁态势"
+        >
+          <div class="space-y-4">
+            <div
+              v-for="event in dashboard?.events.events.slice(0, 5)"
+              :key="event.id"
+              class="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-4 py-2.5"
+            >
+              <div class="flex flex-1 items-center gap-3 overflow-hidden">
+                <StatusBadge
+                  :text="event.layer.toUpperCase()"
+                  :type="event.action === 'block' ? 'error' : 'warning'"
+                  class="shrink-0"
+                />
+                <div class="flex items-center gap-3 overflow-hidden text-sm">
+                  <span class="font-medium text-stone-900 shrink-0">
+                    {{ event.reason }}
+                  </span>
+                  <span class="text-stone-300 shrink-0">|</span>
+                  <span class="text-stone-600 shrink-0"
+                    >{{ event.source_ip }}:{{ event.source_port }}</span
+                  >
+                  <template v-if="eventSiteLabel(event)">
+                    <span class="text-stone-300 shrink-0">|</span>
+                    <span
+                      class="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-600"
+                    >
+                      {{ eventSiteLabel(event) }}
+                    </span>
+                  </template>
+                  <template v-if="event.http_method || event.uri">
+                    <span class="text-stone-300 shrink-0">|</span>
+                    <span class="truncate text-stone-500">
+                      {{ event.http_method || '无' }} {{ event.uri || '' }}
+                    </span>
+                  </template>
+                </div>
+              </div>
+              <span class="shrink-0 text-xs text-slate-500">{{
+                formatTimestamp(event.created_at)
+              }}</span>
+            </div>
+            <p
+              v-if="!dashboard?.events.events.length"
+              class="text-sm text-slate-500"
+            >
+              暂无安全事件。
+            </p>
+          </div>
+        </CyberCard>
+
+        <CyberCard title="运行摘要" sub-title="落库、代理与健康检查核心数据">
+          <div class="grid gap-4">
+            <div class="rounded-xl bg-slate-50 p-4">
+              <div class="flex items-center justify-between">
+                <p class="text-sm text-slate-500">代理结果</p>
+                <ArrowUpRight :size="18" class="text-blue-700" />
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-4">
+                <div>
+                  <p class="text-xs text-slate-500">成功</p>
+                  <p class="mt-1 text-2xl font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.proxy_successes || 0) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500">失败</p>
+                  <p class="mt-1 text-2xl font-semibold text-red-600">
+                    {{ formatNumber(dashboard?.metrics.proxy_failures || 0) }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 p-4">
+                <p class="text-xs text-slate-500">健康检查成功</p>
+                <p class="mt-2 text-2xl font-semibold text-emerald-600">
+                  {{
+                    formatNumber(
+                      dashboard?.metrics.upstream_healthcheck_successes || 0,
+                    )
+                  }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-slate-200 p-4">
+                <p class="text-xs text-slate-500">健康检查失败</p>
+                <p class="mt-2 text-2xl font-semibold text-red-600">
+                  {{
+                    formatNumber(
+                      dashboard?.metrics.upstream_healthcheck_failures || 0,
+                    )
+                  }}
+                </p>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 p-4">
+              <p class="text-xs text-slate-500">本地数据库状态</p>
+              <div class="mt-3 flex items-center justify-between">
+                <p class="text-lg font-semibold text-stone-900">
+                  {{ dashboard?.metrics.sqlite_enabled ? '已启用' : '未启用' }}
+                </p>
+                <StatusBadge
+                  :text="
+                    dashboard?.metrics.sqlite_enabled ? '持久化可用' : '未连接'
+                  "
+                  :type="
+                    dashboard?.metrics.sqlite_enabled ? 'success' : 'muted'
+                  "
+                />
+              </div>
+            </div>
+          </div>
+        </CyberCard>
+      </section>
+    </div>
+  </AppLayout>
+</template>

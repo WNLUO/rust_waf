@@ -1,8 +1,10 @@
 use crate::config::L4Config;
 use crate::core::{InspectionLayer, InspectionResult, PacketInfo, WafContext};
+use crate::l4::behavior::{FeedbackSource, L4BehaviorEngine, L4BehaviorSnapshot};
 use crate::l4::bloom_filter::L4BloomFilterManager;
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::l4::connection::{ConnectionManager, RateLimitDecision};
+use crate::protocol::UnifiedHttpRequest;
 use log::{debug, info};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,6 +13,7 @@ use std::time::Duration;
 
 pub struct L4Inspector {
     connection_manager: ConnectionManager,
+    behavior_engine: L4BehaviorEngine,
     ddos_enabled: bool,
     advanced_ddos_enabled: bool,
     syn_flood_threshold: usize,
@@ -44,6 +47,7 @@ impl L4Inspector {
 
         Self {
             connection_manager: ConnectionManager::new(config.clone()),
+            behavior_engine: L4BehaviorEngine::new(&config),
             ddos_enabled: config.ddos_protection_enabled,
             advanced_ddos_enabled: config.advanced_ddos_enabled,
             syn_flood_threshold: config.syn_flood_threshold.max(1),
@@ -187,6 +191,35 @@ impl L4Inspector {
         InspectionResult::allow(InspectionLayer::L4)
     }
 
+    pub fn observe_connection_metadata(
+        &self,
+        packet: &PacketInfo,
+        authority: Option<&str>,
+        alpn: Option<&str>,
+        transport: &str,
+        protocol_hint: &str,
+    ) {
+        self.behavior_engine
+            .observe_connection(packet, authority, alpn, transport, protocol_hint);
+    }
+
+    pub fn apply_request_policy(
+        &self,
+        packet: &PacketInfo,
+        request: &mut UnifiedHttpRequest,
+    ) {
+        self.behavior_engine.apply_policy(packet, request);
+    }
+
+    pub fn record_l7_feedback(
+        &self,
+        packet: &PacketInfo,
+        request: &UnifiedHttpRequest,
+        source: FeedbackSource,
+    ) {
+        self.behavior_engine.observe_feedback(packet, request, source);
+    }
+
     fn detect_simple_ddos(&self, packet: &PacketInfo) -> bool {
         let burst_count = self
             .connection_manager
@@ -210,8 +243,13 @@ impl L4Inspector {
 
     pub fn get_statistics(&self) -> L4Statistics {
         let per_port_stats = self.port_stats.lock().unwrap().clone();
+        let connection_stats = self.connection_manager.get_stats();
         L4Statistics {
-            connections: self.connection_manager.get_stats(),
+            behavior: self.behavior_engine.snapshot(
+                connection_stats.blocked_connections,
+                connection_stats.active_connections,
+            ),
+            connections: connection_stats,
             ddos_events: self.ddos_events.load(Ordering::Relaxed),
             protocol_anomalies: 0,
             traffic: 0,
@@ -304,6 +342,7 @@ impl PortStats {
 
 #[derive(Debug, Clone)]
 pub struct L4Statistics {
+    pub behavior: L4BehaviorSnapshot,
     pub connections: crate::l4::connection::ConnectionStats,
     pub ddos_events: u64,
     pub protocol_anomalies: u64,

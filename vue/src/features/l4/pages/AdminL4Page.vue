@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { RefreshCw, Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
+import AdminL4ArchitectureSection from '@/features/l4/components/AdminL4ArchitectureSection.vue'
+import AdminL4BehaviorSection from '@/features/l4/components/AdminL4BehaviorSection.vue'
 import AdminL4ConfigSection from '@/features/l4/components/AdminL4ConfigSection.vue'
 import AdminL4OverviewSection from '@/features/l4/components/AdminL4OverviewSection.vue'
 import AdminL4StatsSection from '@/features/l4/components/AdminL4StatsSection.vue'
@@ -10,8 +12,9 @@ import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
-const { formatBytes, formatNumber } = useFormatters()
+const { formatBytes, formatNumber, formatTimestamp } = useFormatters()
 const {
+  behaviorOverview,
   blockedCapacityLabel,
   blockedCapacityTone,
   bloomPanels,
@@ -29,6 +32,7 @@ const {
   saving,
   stats,
   successMessage,
+  topBuckets,
   topPorts,
   totalProcessedBytes,
 } = useAdminL4()
@@ -98,6 +102,13 @@ const lastUpdatedLabel = computed(() => {
         :stats="stats"
         :top-ports-count="topPorts.length"
       />
+      <AdminL4BehaviorSection
+        :behavior-overview="behaviorOverview"
+        :format-bytes="formatBytes"
+        :format-number="formatNumber"
+        :format-timestamp="formatTimestamp"
+        :top-buckets="topBuckets"
+      />
       <AdminL4ConfigSection
         :bloom-panels="bloomPanels"
         :false-positive-panels="falsePositivePanels"
@@ -117,6 +128,7 @@ const lastUpdatedLabel = computed(() => {
         :top-ports="topPorts"
         :total-processed-bytes="totalProcessedBytes"
       />
+      <AdminL4ArchitectureSection />
     </div>
   </AppLayout>
 </template>

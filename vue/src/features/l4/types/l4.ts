@@ -52,6 +52,7 @@ export interface L4FalsePositiveStats {
 
 export interface L4StatsPayload {
   enabled: boolean
+  behavior: L4BehaviorSnapshot
   connections: L4ConnectionStats
   ddos_events: number
   protocol_anomalies: number
@@ -60,4 +61,48 @@ export interface L4StatsPayload {
   bloom_stats: L4BloomStats | null
   false_positive_stats: L4FalsePositiveStats | null
   per_port_stats: L4PortStatItem[]
+}
+
+export interface L4BehaviorSnapshot {
+  overview: L4BehaviorOverview
+  top_buckets: L4BucketItem[]
+}
+
+export interface L4BehaviorOverview {
+  bucket_count: number
+  normal_buckets: number
+  suspicious_buckets: number
+  high_risk_buckets: number
+  safeline_feedback_hits: number
+  l7_feedback_hits: number
+  overloaded: boolean
+  overload_reason: string | null
+}
+
+export interface L4BucketPolicy {
+  connection_budget_per_minute: number
+  shrink_idle_timeout: boolean
+  disable_keepalive: boolean
+  prefer_early_close: boolean
+  mode: string
+}
+
+export interface L4BucketItem {
+  peer_ip: string
+  authority: string
+  alpn: string
+  transport: string
+  protocol_hint: string
+  total_connections: number
+  total_requests: number
+  total_bytes: number
+  recent_connections_10s: number
+  recent_requests_10s: number
+  recent_feedback_120s: number
+  l7_block_hits: number
+  safeline_hits: number
+  risk_score: number
+  risk_level: 'normal' | 'suspicious' | 'high'
+  policy: L4BucketPolicy
+  last_seen_at: number
 }

@@ -79,8 +79,22 @@ async fn handle_tls_connection(
     if let Some(protocol) = &alpn {
         metadata.push(("tls.alpn".to_string(), protocol.clone()));
     }
-    if let Some(server_name) = tls_stream.get_ref().1.server_name() {
-        metadata.push(("tls.sni".to_string(), server_name.to_string()));
+    let server_name = tls_stream
+        .get_ref()
+        .1
+        .server_name()
+        .map(|value| value.to_string());
+    if let Some(server_name) = &server_name {
+        metadata.push(("tls.sni".to_string(), server_name.clone()));
+    }
+    if let Some(inspector) = context.l4_inspector() {
+        inspector.observe_connection_metadata(
+            &packet,
+            server_name.as_deref(),
+            alpn.as_deref(),
+            "tls",
+            alpn.as_deref().unwrap_or("tls"),
+        );
     }
 
     match alpn.as_deref() {
@@ -181,6 +195,9 @@ async fn handle_http3_request(
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);
     }
+    if let Some(inspector) = context.l4_inspector() {
+        inspector.apply_request_policy(&packet, &mut unified);
+    }
 
     if let Some(response) = try_handle_browser_fingerprint_report(
         context.as_ref(),
@@ -209,9 +226,19 @@ async fn handle_http3_request(
     let inspection_result =
         inspect_application_layers(context.as_ref(), &packet, &unified, &request_dump);
 
-    if inspection_result.should_persist_event() {
-        persist_http_inspection_event(context.as_ref(), &packet, &unified, &inspection_result);
-    }
+        if inspection_result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), &packet, &unified, &inspection_result);
+        }
+        if inspection_result.blocked && inspection_result.layer == crate::core::InspectionLayer::L7
+        {
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    &packet,
+                    &unified,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+        }
 
     if inspection_result.blocked {
         if let Some(metrics) = context.metrics.as_ref() {
@@ -646,6 +673,9 @@ async fn handle_http1_connection(
         if let Some(site) = matched_site.as_ref() {
             apply_gateway_site_metadata(&mut request, site);
         }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.apply_request_policy(packet, &mut request);
+        }
 
         if request.uri.is_empty() {
             debug!("Empty request from {}, ignoring", peer_addr);
@@ -717,6 +747,16 @@ async fn handle_http1_connection(
 
         if inspection_result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), packet, &request, &inspection_result);
+        }
+        if inspection_result.blocked && inspection_result.layer == crate::core::InspectionLayer::L7
+        {
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
         }
 
         // 写入响应
@@ -962,6 +1002,9 @@ async fn handle_http2_connection(
                     if let Some(site) = matched_site.as_ref() {
                         apply_gateway_site_metadata(&mut request, site);
                     }
+                    if let Some(inspector) = context.l4_inspector() {
+                        inspector.apply_request_policy(&packet, &mut request);
+                    }
 
                     if let Some(response) = try_handle_browser_fingerprint_report(
                         context.as_ref(),
@@ -1002,6 +1045,17 @@ async fn handle_http2_connection(
                             &request,
                             &inspection_result,
                         );
+                    }
+                    if inspection_result.blocked
+                        && inspection_result.layer == crate::core::InspectionLayer::L7
+                    {
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
                     }
 
                     if inspection_result.blocked {

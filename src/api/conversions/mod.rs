@@ -581,6 +581,19 @@ impl L4StatsResponse {
     pub(super) fn disabled() -> Self {
         Self {
             enabled: false,
+            behavior: crate::l4::behavior::L4BehaviorSnapshot {
+                overview: crate::l4::behavior::L4BehaviorOverview {
+                    bucket_count: 0,
+                    normal_buckets: 0,
+                    suspicious_buckets: 0,
+                    high_risk_buckets: 0,
+                    safeline_feedback_hits: 0,
+                    l7_feedback_hits: 0,
+                    overloaded: false,
+                    overload_reason: None,
+                },
+                top_buckets: Vec::new(),
+            },
             connections: crate::l4::connection::ConnectionStats {
                 total_connections: 0,
                 active_connections: 0,
@@ -610,6 +623,7 @@ impl L4StatsResponse {
 
         Self {
             enabled: true,
+            behavior: stats.behavior,
             connections: stats.connections,
             ddos_events: stats.ddos_events,
             protocol_anomalies: stats.protocol_anomalies,

@@ -522,6 +522,9 @@ fn apply_safeline_upstream_action(
     if let Some(metrics) = context.metrics.as_ref() {
         metrics.record_block(InspectionLayer::L7);
     }
+    if let Some(inspector) = context.l4_inspector() {
+        inspector.record_l7_feedback(packet, request, crate::l4::behavior::FeedbackSource::SafeLine);
+    }
     persist_safeline_intercept_event(
         context,
         packet,

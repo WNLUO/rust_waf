@@ -152,6 +152,20 @@ export function useAdminL4() {
   const runtimeProfileLabel = computed(() =>
     meta.value.runtime_profile === 'standard' ? 'standard' : 'minimal',
   )
+  const behaviorOverview = computed(
+    () =>
+      stats.value?.behavior.overview ?? {
+        bucket_count: 0,
+        normal_buckets: 0,
+        suspicious_buckets: 0,
+        high_risk_buckets: 0,
+        safeline_feedback_hits: 0,
+        l7_feedback_hits: 0,
+        overloaded: false,
+        overload_reason: null,
+      },
+  )
+  const topBuckets = computed(() => stats.value?.behavior.top_buckets ?? [])
   const topPorts = computed(() => stats.value?.per_port_stats ?? [])
   const bloomPanels = computed(() => {
     const bloomStats = stats.value?.bloom_stats
@@ -208,6 +222,7 @@ export function useAdminL4() {
   })
 
   return {
+    behaviorOverview,
     blockedCapacityLabel,
     blockedCapacityTone,
     bloomPanels,
@@ -225,6 +240,7 @@ export function useAdminL4() {
     saving,
     stats,
     successMessage,
+    topBuckets,
     topPorts,
     totalProcessedBytes,
   }

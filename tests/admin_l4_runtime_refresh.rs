@@ -56,6 +56,8 @@ async fn updating_l4_config_refreshes_runtime_without_restart() {
     let initial_body = to_bytes(initial_stats.into_body(), usize::MAX).await.unwrap();
     let initial_json: Value = serde_json::from_slice(&initial_body).unwrap();
     assert_eq!(initial_json["enabled"], Value::Bool(true));
+    assert!(initial_json["behavior"]["overview"]["bucket_count"].is_number());
+    assert!(initial_json["behavior"]["top_buckets"].is_array());
 
     let update_payload = serde_json::json!({
         "ddos_protection_enabled": false,
@@ -106,4 +108,5 @@ async fn updating_l4_config_refreshes_runtime_without_restart() {
         .unwrap();
     let refreshed_json: Value = serde_json::from_slice(&refreshed_body).unwrap();
     assert_eq!(refreshed_json["enabled"], Value::Bool(false));
+    assert!(refreshed_json["behavior"]["overview"]["bucket_count"].is_number());
 }

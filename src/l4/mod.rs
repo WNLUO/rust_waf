@@ -1,3 +1,4 @@
+pub mod behavior;
 pub mod bloom_filter;
 pub mod connection;
 pub mod inspector;

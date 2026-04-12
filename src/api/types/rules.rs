@@ -24,6 +24,7 @@ pub struct MetricsResponse {
 #[derive(Debug, Serialize)]
 pub struct L4StatsResponse {
     pub(crate) enabled: bool,
+    pub(crate) behavior: crate::l4::behavior::L4BehaviorSnapshot,
     pub(crate) connections: crate::l4::connection::ConnectionStats,
     pub(crate) ddos_events: u64,
     pub(crate) protocol_anomalies: u64,

@@ -556,6 +556,14 @@ fn request_looks_like_ntlm(request: &UnifiedHttpRequest) -> bool {
 }
 
 fn should_keep_client_connection_open(request: &UnifiedHttpRequest) -> bool {
+    if request
+        .get_metadata("l4.force_close")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
     let connection = request
         .get_header("connection")
         .map(|value| value.to_ascii_lowercase())

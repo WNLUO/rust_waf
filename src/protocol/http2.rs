@@ -117,9 +117,7 @@ impl Http2Handler {
         builder
             .serve_connection(io, service)
             .await
-            .map_err(|err| {
-                ProtocolError::ParseError(format!("HTTP/2 connection error: {:?}", err))
-            })
+            .map_err(|err| ProtocolError::ParseError(format!("HTTP/2 connection error: {:?}", err)))
     }
 
     async fn request_to_unified<B>(

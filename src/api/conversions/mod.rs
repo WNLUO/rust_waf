@@ -281,6 +281,7 @@ impl L4ConfigUpdateRequest {
             max_blocked_ips: self.max_blocked_ips,
             state_ttl_secs: self.state_ttl_secs,
             bloom_filter_scale: self.bloom_filter_scale,
+            ..current.l4_config.clone()
         };
 
         current.normalized()

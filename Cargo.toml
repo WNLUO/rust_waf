@@ -58,3 +58,10 @@ flate2 = "1.0"
 brotli = "6.0"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 dashmap = "6.1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "l4_behavior"
+harness = false

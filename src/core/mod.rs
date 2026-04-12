@@ -148,10 +148,7 @@ impl WafContext {
     }
 
     pub fn l4_runtime_enabled(&self) -> bool {
-        self.l4_inspector()
-            .as_ref()
-            .map(|_| true)
-            .unwrap_or(false)
+        self.l4_inspector().as_ref().map(|_| true).unwrap_or(false)
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
@@ -241,7 +238,10 @@ impl WafContext {
             inspector.start(self).await?;
         }
 
-        let mut guard = self.l4_inspector.write().expect("l4_inspector lock poisoned");
+        let mut guard = self
+            .l4_inspector
+            .write()
+            .expect("l4_inspector lock poisoned");
         *guard = next;
         Ok(())
     }

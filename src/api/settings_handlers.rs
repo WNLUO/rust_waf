@@ -52,8 +52,7 @@ pub(super) async fn update_l4_config_handler(
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message: "L4 配置已写入数据库，并已立即刷新运行中的四层检测参数。"
-            .to_string(),
+        message: "L4 配置已写入数据库，并已立即刷新运行中的四层检测参数。".to_string(),
     }))
 }
 

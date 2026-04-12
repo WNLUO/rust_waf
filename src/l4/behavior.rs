@@ -15,7 +15,6 @@ const CONNECTION_WINDOW: Duration = Duration::from_secs(10);
 const REQUEST_WINDOW: Duration = Duration::from_secs(10);
 const FEEDBACK_WINDOW: Duration = Duration::from_secs(120);
 const COOL_DOWN_SECS: i64 = 10;
-const CHANNEL_CAPACITY: usize = 8192;
 
 #[derive(Debug, Clone)]
 pub struct L4BehaviorEngine {
@@ -24,6 +23,27 @@ pub struct L4BehaviorEngine {
     dropped_events: Arc<AtomicU64>,
     max_buckets: usize,
     fallback_threshold: usize,
+    tuning: Arc<L4BehaviorTuning>,
+}
+
+#[derive(Debug, Clone)]
+struct L4BehaviorTuning {
+    event_drop_critical_threshold: u64,
+    overload_blocked_connections_threshold: u64,
+    overload_active_connections_threshold: u64,
+    normal_connection_budget_per_minute: u32,
+    suspicious_connection_budget_per_minute: u32,
+    high_risk_connection_budget_per_minute: u32,
+    high_overload_budget_scale_percent: u8,
+    critical_overload_budget_scale_percent: u8,
+    high_overload_delay_ms: u64,
+    critical_overload_delay_ms: u64,
+    soft_delay_threshold_percent: u16,
+    hard_delay_threshold_percent: u16,
+    soft_delay_ms: u64,
+    hard_delay_ms: u64,
+    reject_threshold_percent: u16,
+    critical_reject_threshold_percent: u16,
 }
 
 #[derive(Debug)]
@@ -192,13 +212,44 @@ pub enum FeedbackSource {
     SafeLine,
 }
 
+impl L4BehaviorTuning {
+    fn from_config(config: &L4Config) -> Self {
+        Self {
+            event_drop_critical_threshold: config.behavior_drop_critical_threshold,
+            overload_blocked_connections_threshold: config
+                .behavior_overload_blocked_connections_threshold,
+            overload_active_connections_threshold: config
+                .behavior_overload_active_connections_threshold,
+            normal_connection_budget_per_minute: config
+                .behavior_normal_connection_budget_per_minute,
+            suspicious_connection_budget_per_minute: config
+                .behavior_suspicious_connection_budget_per_minute,
+            high_risk_connection_budget_per_minute: config
+                .behavior_high_risk_connection_budget_per_minute,
+            high_overload_budget_scale_percent: config.behavior_high_overload_budget_scale_percent,
+            critical_overload_budget_scale_percent: config
+                .behavior_critical_overload_budget_scale_percent,
+            high_overload_delay_ms: config.behavior_high_overload_delay_ms,
+            critical_overload_delay_ms: config.behavior_critical_overload_delay_ms,
+            soft_delay_threshold_percent: config.behavior_soft_delay_threshold_percent,
+            hard_delay_threshold_percent: config.behavior_hard_delay_threshold_percent,
+            soft_delay_ms: config.behavior_soft_delay_ms,
+            hard_delay_ms: config.behavior_hard_delay_ms,
+            reject_threshold_percent: config.behavior_reject_threshold_percent,
+            critical_reject_threshold_percent: config.behavior_critical_reject_threshold_percent,
+        }
+    }
+}
+
 impl L4BehaviorEngine {
     pub fn new(config: &L4Config) -> Self {
         let buckets = Arc::new(DashMap::new());
-        let (sender, receiver) = mpsc::channel(CHANNEL_CAPACITY);
+        let tuning = Arc::new(L4BehaviorTuning::from_config(config));
+        let (sender, receiver) = mpsc::channel(config.behavior_event_channel_capacity);
         let dropped_events = Arc::new(AtomicU64::new(0));
         let max_buckets = config.max_tracked_ips.max(128);
-        let fallback_threshold = (max_buckets * 8) / 10;
+        let fallback_threshold =
+            max_buckets.saturating_mul(config.behavior_fallback_ratio_percent as usize) / 100;
 
         tokio::spawn(worker_loop(
             Arc::clone(&buckets),
@@ -213,18 +264,17 @@ impl L4BehaviorEngine {
             dropped_events,
             max_buckets,
             fallback_threshold,
+            tuning,
         }
     }
 
-    pub fn pre_admission_policy(
-        &self,
-        peer_ip: IpAddr,
-        transport: &str,
-    ) -> L4AdaptivePolicy {
+    pub fn pre_admission_policy(&self, peer_ip: IpAddr, transport: &str) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
         self.aggregate_for_peer_transport(peer_ip, canonicalize_transport(transport))
-            .map(|bucket| policy_from_runtime(&bucket, overload_level.clone()))
-            .unwrap_or_else(|| default_policy(overload_level))
+            .map(|bucket| {
+                policy_from_runtime(&bucket, overload_level.clone(), self.tuning.as_ref())
+            })
+            .unwrap_or_else(|| default_policy(overload_level, self.tuning.as_ref()))
     }
 
     pub fn observe_connection_open(
@@ -273,7 +323,7 @@ impl L4BehaviorEngine {
         let overload_level = self.current_overload_level();
         let policy = self
             .policy_for_key(&key, overload_level.clone())
-            .unwrap_or_else(|| default_policy(overload_level.clone()));
+            .unwrap_or_else(|| default_policy(overload_level.clone(), self.tuning.as_ref()));
 
         let bytes = request.to_inspection_string().len() as u64;
         self.try_send(BehaviorEvent::RequestObserved {
@@ -287,10 +337,7 @@ impl L4BehaviorEngine {
             "l4.bucket_risk".to_string(),
             risk_label(&policy.risk_level).to_string(),
         );
-        request.add_metadata(
-            "l4.bucket_score".to_string(),
-            policy.risk_score.to_string(),
-        );
+        request.add_metadata("l4.bucket_score".to_string(), policy.risk_score.to_string());
         request.add_metadata(
             "l4.overload_level".to_string(),
             match overload_level {
@@ -328,7 +375,11 @@ impl L4BehaviorEngine {
         });
     }
 
-    pub fn snapshot(&self, blocked_connections: u64, active_connections: u64) -> L4BehaviorSnapshot {
+    pub fn snapshot(
+        &self,
+        blocked_connections: u64,
+        active_connections: u64,
+    ) -> L4BehaviorSnapshot {
         let overload_level = derive_overload_level(
             self.buckets.len(),
             self.max_buckets,
@@ -336,6 +387,7 @@ impl L4BehaviorEngine {
             active_connections,
             self.fallback_threshold,
             self.dropped_events.load(Ordering::Relaxed),
+            self.tuning.as_ref(),
         );
 
         let mut normal_buckets = 0u64;
@@ -367,7 +419,8 @@ impl L4BehaviorEngine {
                     L4BucketRiskLevel::Suspicious => suspicious_buckets += 1,
                     L4BucketRiskLevel::High => high_risk_buckets += 1,
                 }
-                let policy = policy_from_runtime(bucket, overload_level.clone());
+                let policy =
+                    policy_from_runtime(bucket, overload_level.clone(), self.tuning.as_ref());
                 L4BucketSnapshot {
                     peer_ip: entry.key().peer_ip.to_string(),
                     authority: entry.key().authority.clone(),
@@ -403,7 +456,11 @@ impl L4BehaviorEngine {
                 .cmp(&left.risk_score)
                 .then(right.active_connections.cmp(&left.active_connections))
                 .then(right.recent_feedback_120s.cmp(&left.recent_feedback_120s))
-                .then(right.recent_connections_10s.cmp(&left.recent_connections_10s))
+                .then(
+                    right
+                        .recent_connections_10s
+                        .cmp(&left.recent_connections_10s),
+                )
                 .then(left.authority.cmp(&right.authority))
         });
         top_buckets.truncate(12);
@@ -421,7 +478,13 @@ impl L4BehaviorEngine {
                 l7_feedback_hits,
                 dropped_events: self.dropped_events.load(Ordering::Relaxed),
                 overload_level: overload_level.clone(),
-                overload_reason: overload_reason(overload_level, blocked_connections, active_connections, self.buckets.len(), self.max_buckets),
+                overload_reason: overload_reason(
+                    overload_level,
+                    blocked_connections,
+                    active_connections,
+                    self.buckets.len(),
+                    self.max_buckets,
+                ),
             },
             top_buckets,
         }
@@ -430,7 +493,7 @@ impl L4BehaviorEngine {
     pub fn connection_admission_for_key(&self, key: &BucketKey) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
         self.policy_for_key(key, overload_level.clone())
-            .unwrap_or_else(|| default_policy(overload_level))
+            .unwrap_or_else(|| default_policy(overload_level, self.tuning.as_ref()))
     }
 
     fn try_send(&self, event: BehaviorEvent) {
@@ -445,7 +508,7 @@ impl L4BehaviorEngine {
         overload_level: L4OverloadLevel,
     ) -> Option<L4AdaptivePolicy> {
         self.lookup_bucket(key)
-            .map(|bucket| policy_from_runtime(&bucket, overload_level))
+            .map(|bucket| policy_from_runtime(&bucket, overload_level, self.tuning.as_ref()))
     }
 
     fn lookup_bucket(&self, key: &BucketKey) -> Option<BucketRuntime> {
@@ -464,6 +527,7 @@ impl L4BehaviorEngine {
             0,
             self.fallback_threshold,
             self.dropped_events.load(Ordering::Relaxed),
+            self.tuning.as_ref(),
         )
     }
 
@@ -481,17 +545,24 @@ impl L4BehaviorEngine {
                 continue;
             }
             let bucket = entry.value();
-            let next = aggregate.get_or_insert_with(|| BucketRuntime::new(bucket.last_seen_instant, bucket.last_seen_at));
+            let next = aggregate.get_or_insert_with(|| {
+                BucketRuntime::new(bucket.last_seen_instant, bucket.last_seen_at)
+            });
             next.last_seen_at = next.last_seen_at.max(bucket.last_seen_at);
             next.last_seen_instant = next.last_seen_instant.max(bucket.last_seen_instant);
-            next.active_connections = next.active_connections.saturating_add(bucket.active_connections);
-            next.total_connections = next.total_connections.saturating_add(bucket.total_connections);
+            next.active_connections = next
+                .active_connections
+                .saturating_add(bucket.active_connections);
+            next.total_connections = next
+                .total_connections
+                .saturating_add(bucket.total_connections);
             next.total_requests = next.total_requests.saturating_add(bucket.total_requests);
             next.total_bytes = next.total_bytes.saturating_add(bucket.total_bytes);
             next.l7_block_hits = next.l7_block_hits.saturating_add(bucket.l7_block_hits);
             next.safeline_hits = next.safeline_hits.saturating_add(bucket.safeline_hits);
-            next.avg_connection_lifetime_ms =
-                next.avg_connection_lifetime_ms.max(bucket.avg_connection_lifetime_ms);
+            next.avg_connection_lifetime_ms = next
+                .avg_connection_lifetime_ms
+                .max(bucket.avg_connection_lifetime_ms);
             next.score_ewma = next.score_ewma.max(bucket.score_ewma);
             next.risk_level = max_risk_level(&next.risk_level, &bucket.risk_level);
             next.protocol_hint = transport_label(transport).to_string();
@@ -504,7 +575,12 @@ impl L4BehaviorEngine {
 }
 
 impl BucketKey {
-    pub fn from_parts(peer_ip: IpAddr, authority: Option<&str>, alpn: Option<&str>, transport: &str) -> Self {
+    pub fn from_parts(
+        peer_ip: IpAddr,
+        authority: Option<&str>,
+        alpn: Option<&str>,
+        transport: &str,
+    ) -> Self {
         Self {
             peer_ip,
             authority: canonicalize_authority(authority),
@@ -518,13 +594,16 @@ impl BucketKey {
             .get_metadata("tls.sni")
             .map(String::as_str)
             .or_else(|| request.get_header("host").map(String::as_str));
-        let alpn = request.get_metadata("tls.alpn").map(String::as_str).or_else(|| {
-            Some(match request.version {
-                HttpVersion::Http2_0 => "h2",
-                HttpVersion::Http3_0 => "h3",
-                _ => "http/1.1",
-            })
-        });
+        let alpn = request
+            .get_metadata("tls.alpn")
+            .map(String::as_str)
+            .or_else(|| {
+                Some(match request.version {
+                    HttpVersion::Http2_0 => "h2",
+                    HttpVersion::Http3_0 => "h3",
+                    _ => "http/1.1",
+                })
+            });
         let transport = request
             .get_metadata("transport")
             .map(String::as_str)
@@ -590,7 +669,9 @@ async fn worker_loop(
             BehaviorEvent::ConnectionOpened { key, .. }
             | BehaviorEvent::ConnectionClosed { key, .. }
             | BehaviorEvent::RequestObserved { key, .. }
-            | BehaviorEvent::Feedback { key, .. } => canonicalize_storage_key(key, buckets.len(), max_buckets, fallback_threshold),
+            | BehaviorEvent::Feedback { key, .. } => {
+                canonicalize_storage_key(key, buckets.len(), max_buckets, fallback_threshold)
+            }
         };
 
         {
@@ -622,7 +703,8 @@ async fn worker_loop(
                     bucket.last_seen_at = unix_now;
                     bucket.last_seen_instant = now;
                     bucket.active_connections = bucket.active_connections.saturating_sub(1);
-                    bucket.avg_connection_lifetime_ms = if bucket.avg_connection_lifetime_ms <= 0.0 {
+                    bucket.avg_connection_lifetime_ms = if bucket.avg_connection_lifetime_ms <= 0.0
+                    {
                         duration_ms as f64
                     } else {
                         (bucket.avg_connection_lifetime_ms * 0.8) + (duration_ms as f64 * 0.2)
@@ -718,13 +800,12 @@ fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) {
         bucket.total_requests as f64 / bucket.total_connections as f64
     };
     let active_connections = f64::from(bucket.active_connections);
-    let short_lifetime_penalty = if bucket.avg_connection_lifetime_ms > 0.0
-        && bucket.avg_connection_lifetime_ms < 1500.0
-    {
-        12.0
-    } else {
-        0.0
-    };
+    let short_lifetime_penalty =
+        if bucket.avg_connection_lifetime_ms > 0.0 && bucket.avg_connection_lifetime_ms < 1500.0 {
+            12.0
+        } else {
+            0.0
+        };
 
     let raw_score = (recent_connections * 1.8)
         + recent_requests
@@ -738,7 +819,9 @@ fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) {
         + short_lifetime_penalty
         + if bucket.authority_unknown() { 6.0 } else { 0.0 }
         + if bucket.l7_block_hits + bucket.safeline_hits > 0 {
-            (((bucket.l7_block_hits + bucket.safeline_hits) as f64 / bucket.total_requests.max(1) as f64) * 100.0)
+            (((bucket.l7_block_hits + bucket.safeline_hits) as f64
+                / bucket.total_requests.max(1) as f64)
+                * 100.0)
                 .min(20.0)
         } else {
             0.0
@@ -786,34 +869,53 @@ fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) {
     }
 }
 
-fn policy_from_runtime(bucket: &BucketRuntime, overload_level: L4OverloadLevel) -> L4AdaptivePolicy {
+fn policy_from_runtime(
+    bucket: &BucketRuntime,
+    overload_level: L4OverloadLevel,
+    tuning: &L4BehaviorTuning,
+) -> L4AdaptivePolicy {
     let mut budget = match bucket.risk_level {
-        L4BucketRiskLevel::Normal => 120,
-        L4BucketRiskLevel::Suspicious => 60,
-        L4BucketRiskLevel::High => 20,
+        L4BucketRiskLevel::Normal => tuning.normal_connection_budget_per_minute,
+        L4BucketRiskLevel::Suspicious => tuning.suspicious_connection_budget_per_minute,
+        L4BucketRiskLevel::High => tuning.high_risk_connection_budget_per_minute,
     };
     let mut delay_ms = 0u64;
     match overload_level {
         L4OverloadLevel::High => {
-            budget = ((budget as f64) * 0.8) as u32;
-            delay_ms = 15;
+            budget = scale_budget(budget, tuning.high_overload_budget_scale_percent);
+            delay_ms = tuning.high_overload_delay_ms;
         }
         L4OverloadLevel::Critical => {
-            budget = ((budget as f64) * 0.5) as u32;
-            delay_ms = 40;
+            budget = scale_budget(budget, tuning.critical_overload_budget_scale_percent);
+            delay_ms = tuning.critical_overload_delay_ms;
         }
         L4OverloadLevel::Normal => {}
     }
 
-    if bucket.active_connections > budget {
-        delay_ms = delay_ms.max(25);
+    if exceeds_threshold(
+        bucket.active_connections,
+        budget,
+        tuning.soft_delay_threshold_percent,
+    ) {
+        delay_ms = delay_ms.max(tuning.soft_delay_ms);
     }
-    if bucket.active_connections > budget.saturating_mul(2) {
-        delay_ms = delay_ms.max(60);
+    if exceeds_threshold(
+        bucket.active_connections,
+        budget,
+        tuning.hard_delay_threshold_percent,
+    ) {
+        delay_ms = delay_ms.max(tuning.hard_delay_ms);
     }
-    let reject_new_connections = bucket.active_connections > budget.saturating_mul(3)
-        || (matches!(overload_level, L4OverloadLevel::Critical)
-            && bucket.active_connections > budget.saturating_mul(2));
+    let reject_new_connections = exceeds_threshold(
+        bucket.active_connections,
+        budget,
+        tuning.reject_threshold_percent,
+    ) || (matches!(overload_level, L4OverloadLevel::Critical)
+        && exceeds_threshold(
+            bucket.active_connections,
+            budget,
+            tuning.critical_reject_threshold_percent,
+        ));
 
     L4AdaptivePolicy {
         risk_level: bucket.risk_level.clone(),
@@ -842,10 +944,10 @@ fn policy_snapshot(policy: &L4AdaptivePolicy) -> L4BucketPolicySnapshot {
     }
 }
 
-fn default_policy(overload_level: L4OverloadLevel) -> L4AdaptivePolicy {
+fn default_policy(overload_level: L4OverloadLevel, tuning: &L4BehaviorTuning) -> L4AdaptivePolicy {
     let suggested_delay_ms = match overload_level {
-        L4OverloadLevel::Critical => 25,
-        L4OverloadLevel::High => 10,
+        L4OverloadLevel::Critical => tuning.critical_overload_delay_ms.max(tuning.soft_delay_ms),
+        L4OverloadLevel::High => (tuning.high_overload_delay_ms / 2).max(5),
         L4OverloadLevel::Normal => 0,
     };
     L4AdaptivePolicy {
@@ -854,7 +956,7 @@ fn default_policy(overload_level: L4OverloadLevel) -> L4AdaptivePolicy {
         disable_keepalive: false,
         prefer_early_close: false,
         reject_new_connections: false,
-        connection_budget_per_minute: 120,
+        connection_budget_per_minute: tuning.normal_connection_budget_per_minute,
         suggested_delay_ms,
     }
 }
@@ -866,14 +968,27 @@ fn derive_overload_level(
     active_connections: u64,
     fallback_threshold: usize,
     dropped_events: u64,
+    tuning: &L4BehaviorTuning,
 ) -> L4OverloadLevel {
-    if bucket_count >= max_buckets || dropped_events > 0 {
+    if bucket_count >= max_buckets || dropped_events >= tuning.event_drop_critical_threshold {
         return L4OverloadLevel::Critical;
     }
-    if bucket_count >= fallback_threshold || blocked_connections > 512 || active_connections > 2048 {
+    if bucket_count >= fallback_threshold
+        || blocked_connections >= tuning.overload_blocked_connections_threshold
+        || active_connections >= tuning.overload_active_connections_threshold
+    {
         return L4OverloadLevel::High;
     }
     L4OverloadLevel::Normal
+}
+
+fn scale_budget(base: u32, scale_percent: u8) -> u32 {
+    ((u64::from(base) * u64::from(scale_percent)) / 100).max(1) as u32
+}
+
+fn exceeds_threshold(active_connections: u32, budget: u32, threshold_percent: u16) -> bool {
+    let limit = (u64::from(budget.max(1)) * u64::from(threshold_percent)) / 100;
+    u64::from(active_connections) > limit.max(1)
 }
 
 fn overload_reason(
@@ -912,7 +1027,10 @@ fn canonicalize_authority(authority: Option<&str>) -> String {
         return "*".to_string();
     }
     let without_port = if host.starts_with('[') {
-        host.split(']').next().map(|value| format!("{value}]")).unwrap_or_else(|| host.to_string())
+        host.split(']')
+            .next()
+            .map(|value| format!("{value}]"))
+            .unwrap_or_else(|| host.to_string())
     } else {
         host.split(':').next().unwrap_or(host).to_string()
     };
@@ -1027,7 +1145,10 @@ mod tests {
         let peer_ip = packet(10).source_ip;
 
         for idx in 0..160 {
-            let p = PacketInfo { timestamp: idx, ..packet(10) };
+            let p = PacketInfo {
+                timestamp: idx,
+                ..packet(10)
+            };
             let _ = engine.observe_connection_open(
                 format!("conn-{idx}"),
                 &p,
@@ -1054,8 +1175,22 @@ mod tests {
         let p2 = packet(12);
         let p3 = packet(13);
 
-        let _ = engine.observe_connection_open("a".to_string(), &p1, Some("a.example"), Some("h2"), "tls", "h2");
-        let _ = engine.observe_connection_open("b".to_string(), &p2, Some("b.example"), None, "http", "http/1.1");
+        let _ = engine.observe_connection_open(
+            "a".to_string(),
+            &p1,
+            Some("a.example"),
+            Some("h2"),
+            "tls",
+            "h2",
+        );
+        let _ = engine.observe_connection_open(
+            "b".to_string(),
+            &p2,
+            Some("b.example"),
+            None,
+            "http",
+            "http/1.1",
+        );
         let _ = engine.observe_connection_open("c".to_string(), &p3, None, None, "tcp", "unknown");
 
         sleep(Duration::from_millis(50)).await;
@@ -1081,7 +1216,10 @@ mod tests {
         for idx in 0..220 {
             key = Some(engine.observe_connection_open(
                 format!("active-{idx}"),
-                &PacketInfo { timestamp: idx, ..p.clone() },
+                &PacketInfo {
+                    timestamp: idx,
+                    ..p.clone()
+                },
                 Some("busy.example"),
                 Some("h2"),
                 "tls",
@@ -1092,5 +1230,46 @@ mod tests {
         sleep(Duration::from_millis(50)).await;
         let policy = engine.connection_admission_for_key(&key.expect("bucket key"));
         assert!(policy.suggested_delay_ms > 0 || policy.reject_new_connections);
+    }
+
+    #[tokio::test]
+    async fn default_policy_uses_configured_budget() {
+        let engine = L4BehaviorEngine::new(&L4Config {
+            behavior_normal_connection_budget_per_minute: 42,
+            ..L4Config::default()
+        });
+
+        let policy = engine.pre_admission_policy(packet(30).source_ip, "tls");
+        assert_eq!(policy.connection_budget_per_minute, 42);
+    }
+
+    #[tokio::test]
+    async fn dropped_events_remain_below_critical_until_threshold_is_hit() {
+        let engine = L4BehaviorEngine::new(&L4Config {
+            max_tracked_ips: 128,
+            behavior_event_channel_capacity: 1,
+            behavior_drop_critical_threshold: 10_000,
+            ..L4Config::default()
+        });
+        let p = packet(31);
+
+        for idx in 0..2_000 {
+            let _ = engine.observe_connection_open(
+                format!("drop-{idx}"),
+                &PacketInfo {
+                    timestamp: idx,
+                    ..p.clone()
+                },
+                Some("drop.example"),
+                Some("h2"),
+                "tls",
+                "h2",
+            );
+        }
+
+        sleep(Duration::from_millis(50)).await;
+        let snapshot = engine.snapshot(0, 0);
+        assert!(snapshot.overview.dropped_events > 0);
+        assert_ne!(snapshot.overview.overload_level, L4OverloadLevel::Critical);
     }
 }

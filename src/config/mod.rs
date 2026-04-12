@@ -411,6 +411,9 @@ impl Config {
                 clamp_scale(self.l4_config.bloom_filter_scale, 0.5, 0.1, 1.0);
             self.l7_config.bloom_filter_scale =
                 clamp_scale(self.l7_config.bloom_filter_scale, 0.5, 0.1, 1.0);
+            self.l4_config.behavior_event_channel_capacity =
+                clamp_or_default(self.l4_config.behavior_event_channel_capacity, 2048)
+                    .clamp(512, 16_384);
         } else {
             self.l4_config.max_tracked_ips = clamp_or_default(self.l4_config.max_tracked_ips, 4096);
             self.l4_config.max_blocked_ips = clamp_or_default(self.l4_config.max_blocked_ips, 1024);
@@ -441,7 +444,95 @@ impl Config {
                 clamp_scale(self.l4_config.bloom_filter_scale, 1.0, 0.25, 1.0);
             self.l7_config.bloom_filter_scale =
                 clamp_scale(self.l7_config.bloom_filter_scale, 1.0, 0.25, 1.0);
+            self.l4_config.behavior_event_channel_capacity =
+                clamp_or_default(self.l4_config.behavior_event_channel_capacity, 4096)
+                    .clamp(1024, 65_536);
         }
+
+        self.l4_config.behavior_drop_critical_threshold = self
+            .l4_config
+            .behavior_drop_critical_threshold
+            .clamp(1, self.l4_config.behavior_event_channel_capacity as u64);
+        self.l4_config.behavior_fallback_ratio_percent =
+            self.l4_config.behavior_fallback_ratio_percent.clamp(50, 95);
+        self.l4_config
+            .behavior_overload_blocked_connections_threshold = self
+            .l4_config
+            .behavior_overload_blocked_connections_threshold
+            .clamp(64, 65_536);
+        self.l4_config
+            .behavior_overload_active_connections_threshold = self
+            .l4_config
+            .behavior_overload_active_connections_threshold
+            .clamp(256, 262_144);
+        self.l4_config.behavior_normal_connection_budget_per_minute = self
+            .l4_config
+            .behavior_normal_connection_budget_per_minute
+            .clamp(16, 10_000);
+        self.l4_config
+            .behavior_suspicious_connection_budget_per_minute = self
+            .l4_config
+            .behavior_suspicious_connection_budget_per_minute
+            .clamp(
+                8,
+                self.l4_config
+                    .behavior_normal_connection_budget_per_minute
+                    .max(8),
+            );
+        self.l4_config
+            .behavior_high_risk_connection_budget_per_minute = self
+            .l4_config
+            .behavior_high_risk_connection_budget_per_minute
+            .clamp(
+                4,
+                self.l4_config
+                    .behavior_suspicious_connection_budget_per_minute
+                    .max(4),
+            );
+        self.l4_config.behavior_high_overload_budget_scale_percent = self
+            .l4_config
+            .behavior_high_overload_budget_scale_percent
+            .clamp(25, 100);
+        self.l4_config
+            .behavior_critical_overload_budget_scale_percent = self
+            .l4_config
+            .behavior_critical_overload_budget_scale_percent
+            .clamp(
+                10,
+                self.l4_config.behavior_high_overload_budget_scale_percent,
+            );
+        self.l4_config.behavior_high_overload_delay_ms =
+            clamp_u64(self.l4_config.behavior_high_overload_delay_ms, 0, 2_000, 15);
+        self.l4_config.behavior_critical_overload_delay_ms = clamp_u64(
+            self.l4_config.behavior_critical_overload_delay_ms,
+            self.l4_config.behavior_high_overload_delay_ms,
+            5_000,
+            40,
+        );
+        self.l4_config.behavior_soft_delay_threshold_percent = self
+            .l4_config
+            .behavior_soft_delay_threshold_percent
+            .clamp(50, 400);
+        self.l4_config.behavior_hard_delay_threshold_percent = self
+            .l4_config
+            .behavior_hard_delay_threshold_percent
+            .clamp(self.l4_config.behavior_soft_delay_threshold_percent, 600);
+        self.l4_config.behavior_soft_delay_ms =
+            clamp_u64(self.l4_config.behavior_soft_delay_ms, 0, 2_000, 25);
+        self.l4_config.behavior_hard_delay_ms = clamp_u64(
+            self.l4_config.behavior_hard_delay_ms,
+            self.l4_config.behavior_soft_delay_ms,
+            5_000,
+            60,
+        );
+        self.l4_config.behavior_reject_threshold_percent = self
+            .l4_config
+            .behavior_reject_threshold_percent
+            .clamp(self.l4_config.behavior_hard_delay_threshold_percent, 1_000);
+        self.l4_config.behavior_critical_reject_threshold_percent = self
+            .l4_config
+            .behavior_critical_reject_threshold_percent
+            .clamp(self.l4_config.behavior_soft_delay_threshold_percent, 1_000);
 
         self.l7_config.real_ip_headers = self
             .l7_config

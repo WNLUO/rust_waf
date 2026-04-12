@@ -53,7 +53,9 @@ async fn updating_l4_config_refreshes_runtime_without_restart() {
         .await
         .unwrap();
     assert_eq!(initial_stats.status(), StatusCode::OK);
-    let initial_body = to_bytes(initial_stats.into_body(), usize::MAX).await.unwrap();
+    let initial_body = to_bytes(initial_stats.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let initial_json: Value = serde_json::from_slice(&initial_body).unwrap();
     assert_eq!(initial_json["enabled"], Value::Bool(true));
     assert!(initial_json["behavior"]["overview"]["bucket_count"].is_number());

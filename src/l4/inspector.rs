@@ -200,15 +200,14 @@ impl L4Inspector {
         transport: &str,
         protocol_hint: &str,
     ) -> crate::l4::behavior::BucketKey {
-        self.behavior_engine
-            .observe_connection_open(
-                connection_id,
-                packet,
-                authority,
-                alpn,
-                transport,
-                protocol_hint,
-            )
+        self.behavior_engine.observe_connection_open(
+            connection_id,
+            packet,
+            authority,
+            alpn,
+            transport,
+            protocol_hint,
+        )
     }
 
     pub fn observe_connection_close(
@@ -241,7 +240,8 @@ impl L4Inspector {
         peer_ip: std::net::IpAddr,
         transport: &str,
     ) -> crate::l4::behavior::L4AdaptivePolicy {
-        self.behavior_engine.pre_admission_policy(peer_ip, transport)
+        self.behavior_engine
+            .pre_admission_policy(peer_ip, transport)
     }
 
     pub fn record_l7_feedback(
@@ -250,7 +250,8 @@ impl L4Inspector {
         request: &UnifiedHttpRequest,
         source: FeedbackSource,
     ) {
-        self.behavior_engine.observe_feedback(packet, request, source);
+        self.behavior_engine
+            .observe_feedback(packet, request, source);
     }
 
     fn detect_simple_ddos(&self, packet: &PacketInfo) -> bool {

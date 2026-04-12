@@ -96,8 +96,16 @@ impl EntryListenerRuntime {
         let tls_enabled = build_tls_acceptor(context.as_ref())?.is_some();
 
         let guard = self.state.lock().await;
+        let owned_http = guard
+            .http
+            .iter()
+            .map(|listener| listener.addr.clone())
+            .collect::<Vec<_>>();
+        let owned_https = guard.https.as_ref().map(|listener| listener.addr.clone());
+        drop(guard);
+
         for addr in &requested_http {
-            if guard.http.iter().any(|listener| listener.addr == *addr) {
+            if owned_http.iter().any(|listener| listener == addr) {
                 continue;
             }
             TcpListener::bind(addr).await.map_err(|err| {
@@ -109,10 +117,9 @@ impl EntryListenerRuntime {
             if !tls_enabled {
                 anyhow::bail!("当前没有可用证书，无法开启 HTTPS 入口端口");
             }
-            let owned = guard
-                .https
+            let owned = owned_https
                 .as_ref()
-                .map(|listener| listener.addr == requested_https)
+                .map(|listener| listener == &requested_https)
                 .unwrap_or(false);
             if !owned {
                 TcpListener::bind(&requested_https).await.map_err(|err| {

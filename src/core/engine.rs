@@ -126,40 +126,79 @@ impl EntryListenerRuntime {
         let requested_http = config.listen_addrs.clone();
         let requested_https = config.gateway_config.https_listen_addr.trim().to_string();
 
+        let mut guard = self.state.lock().await;
+        let mut previous_http = std::mem::take(&mut guard.http);
+        let previous_https = guard.https.take();
+        drop(guard);
+
         let mut prepared_http = Vec::new();
-        for addr in &requested_http {
-            prepared_http.push(spawn_http_entry_listener(
-                addr,
-                Arc::clone(&context),
-                Arc::clone(&connection_semaphore),
-            )
-            .await?);
+        let mut stale_http = Vec::new();
+        for listener in previous_http.drain(..) {
+            if requested_http.iter().any(|addr| addr == &listener.addr) {
+                prepared_http.push(listener);
+            } else {
+                stale_http.push(listener);
+            }
         }
-        let prepared_https = if requested_https.is_empty() {
-            None
-        } else if let Some(acceptor) = tls_acceptor {
-            Some(
-                spawn_https_entry_listener(
-                    &requested_https,
-                    acceptor,
+        for addr in &requested_http {
+            if prepared_http.iter().any(|listener| &listener.addr == addr) {
+                continue;
+            }
+            prepared_http.push(
+                spawn_http_entry_listener(
+                    addr,
                     Arc::clone(&context),
                     Arc::clone(&connection_semaphore),
                 )
                 .await?,
+            );
+        }
+
+        let (prepared_https, stale_https) = if requested_https.is_empty() {
+            (None, previous_https)
+        } else if let Some(existing) = previous_https {
+            if existing.addr == requested_https {
+                (Some(existing), None)
+            } else if let Some(acceptor) = tls_acceptor {
+                (
+                    Some(
+                        spawn_https_entry_listener(
+                            &requested_https,
+                            acceptor,
+                            Arc::clone(&context),
+                            Arc::clone(&connection_semaphore),
+                        )
+                        .await?,
+                    ),
+                    Some(existing),
+                )
+            } else {
+                (None, Some(existing))
+            }
+        } else if let Some(acceptor) = tls_acceptor {
+            (
+                Some(
+                    spawn_https_entry_listener(
+                        &requested_https,
+                        acceptor,
+                        Arc::clone(&context),
+                        Arc::clone(&connection_semaphore),
+                    )
+                    .await?,
+                ),
+                None,
             )
         } else {
-            None
+            (None, None)
         };
 
         let mut guard = self.state.lock().await;
-        let previous_http = std::mem::take(&mut guard.http);
-        let previous_https = guard.https.take();
         guard.http = prepared_http;
         guard.https = prepared_https;
         drop(guard);
 
-        shutdown_entry_listeners(previous_http).await;
-        if let Some(listener) = previous_https {
+        shutdown_entry_listeners(stale_http).await;
+        if let Some(listener) = stale_https {
             shutdown_entry_listener(listener).await;
         }
 

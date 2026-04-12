@@ -3,7 +3,9 @@ use flate2::read::{GzDecoder, ZlibDecoder};
 use ipnet::IpNet;
 use log::{debug, info, warn};
 use rand::Rng;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig as RustlsClientConfig, DigitallySignedStruct, SignatureScheme};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 #[cfg(feature = "http3")]
@@ -16,7 +18,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 
 #[cfg(feature = "http3")]
 use bytes::Buf;
@@ -1267,112 +1269,145 @@ async fn proxy_http_request(
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
     if matches!(upstream.scheme, UpstreamScheme::Http) {
-        let mut upstream_stream = tokio::time::timeout(
+        let upstream_stream = tokio::time::timeout(
             std::time::Duration::from_millis(connect_timeout_ms),
             TcpStream::connect(upstream.authority.as_str()),
         )
         .await
         .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-        let request_bytes = request.to_http1_bytes();
-        tokio::time::timeout(
-            std::time::Duration::from_millis(write_timeout_ms),
-            upstream_stream.write_all(&request_bytes),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
-        tokio::time::timeout(
-            std::time::Duration::from_millis(write_timeout_ms),
-            upstream_stream.shutdown(),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Upstream shutdown timed out"))??;
-
-        let mut response_bytes = Vec::new();
-        tokio::time::timeout(
-            std::time::Duration::from_millis(read_timeout_ms),
-            upstream_stream.read_to_end(&mut response_bytes),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("Upstream read timed out"))??;
-
-        let parsed = parse_http1_response(&response_bytes)?;
+        let parsed =
+            proxy_raw_http1_over_stream(upstream_stream, request, write_timeout_ms, read_timeout_ms)
+                .await?;
         context.set_upstream_health(true, None);
         return Ok(parsed);
     }
 
-    let url = format!(
-        "{}://{}{}",
-        match upstream.scheme {
-            UpstreamScheme::Http => "http",
-            UpstreamScheme::Https => "https",
-        },
-        upstream.authority,
-        request.uri
-    );
-
-    let method = reqwest::Method::from_bytes(request.method.as_bytes())
-        .map_err(|err| anyhow::anyhow!("Unsupported upstream method '{}': {}", request.method, err))?;
-    let headers = build_upstream_header_map(request)?;
-    let total_timeout_ms = write_timeout_ms.saturating_add(read_timeout_ms).max(read_timeout_ms);
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_millis(connect_timeout_ms))
-        .timeout(std::time::Duration::from_millis(total_timeout_ms))
-        .redirect(reqwest::redirect::Policy::none())
-        .danger_accept_invalid_certs(true)
-        .danger_accept_invalid_hostnames(true)
-        .build()?;
-
-    let response = client
-        .request(method, &url)
-        .headers(headers)
-        .body(request.body.clone())
-        .send()
-        .await?;
-
-    let status_code = response.status().as_u16();
-    let status_text = response.status().canonical_reason().map(ToOwned::to_owned);
-    let headers = response
-        .headers()
-        .iter()
-        .filter_map(|(name, value)| {
-            if name.as_str().eq_ignore_ascii_case("transfer-encoding")
-                || name.as_str().eq_ignore_ascii_case("connection")
-            {
-                return None;
-            }
-            Some((
-                name.as_str().to_string(),
-                value.to_str().unwrap_or_default().to_string(),
-            ))
-        })
-        .collect::<Vec<_>>();
-    let body = response.bytes().await?.to_vec();
-
-    let parsed = UpstreamHttpResponse {
-        status_code,
-        status_text,
-        headers,
-        body,
-    };
+    let upstream_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        TcpStream::connect(upstream.authority.as_str()),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+    let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
+    let server_name = ServerName::try_from(
+        authority_uri
+            .host()
+            .ok_or_else(|| anyhow::anyhow!("HTTPS upstream missing host"))?
+            .to_string(),
+    )
+    .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
+    let tls_connector = build_insecure_upstream_tls_connector();
+    let tls_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        tls_connector.connect(server_name, upstream_stream),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream TLS handshake timed out"))??;
+    let parsed =
+        proxy_raw_http1_over_stream(tls_stream, request, write_timeout_ms, read_timeout_ms).await?;
     context.set_upstream_health(true, None);
     Ok(parsed)
 }
 
-fn build_upstream_header_map(request: &UnifiedHttpRequest) -> Result<HeaderMap> {
-    let mut headers = HeaderMap::new();
-    for (key, value) in &request.headers {
-        if key.eq_ignore_ascii_case("connection") || key.eq_ignore_ascii_case("content-length") {
-            continue;
-        }
+async fn proxy_raw_http1_over_stream<S>(
+    mut upstream_stream: S,
+    request: &UnifiedHttpRequest,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
+) -> Result<UpstreamHttpResponse>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let request_bytes = request.to_http1_bytes();
+    tokio::time::timeout(
+        std::time::Duration::from_millis(write_timeout_ms),
+        upstream_stream.write_all(&request_bytes),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream write timed out"))??;
 
-        let name = HeaderName::from_bytes(key.as_bytes())
-            .map_err(|err| anyhow::anyhow!("Invalid upstream request header '{}': {}", key, err))?;
-        let value = HeaderValue::from_bytes(value.as_bytes()).map_err(|err| {
-            anyhow::anyhow!("Invalid upstream request header value for '{}': {}", key, err)
-        })?;
-        headers.append(name, value);
+    let mut response_bytes = Vec::new();
+    let mut buffer = vec![0u8; 8192];
+    loop {
+        let read_result = tokio::time::timeout(
+            std::time::Duration::from_millis(read_timeout_ms),
+            upstream_stream.read(&mut buffer),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Upstream read timed out"))?;
+        match read_result {
+            Ok(0) => break,
+            Ok(n) => response_bytes.extend_from_slice(&buffer[..n]),
+            Err(err) if !response_bytes.is_empty() => {
+                debug!(
+                    "Ignoring upstream read error after receiving response bytes: {}",
+                    err
+                );
+                break;
+            }
+            Err(err) => return Err(err.into()),
+        }
     }
-    Ok(headers)
+
+    parse_http1_response(&response_bytes)
+}
+
+fn build_insecure_upstream_tls_connector() -> TlsConnector {
+    crate::tls::ensure_rustls_crypto_provider();
+    let config = RustlsClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
+        .with_no_client_auth();
+    TlsConnector::from(Arc::new(config))
+}
+
+#[derive(Debug)]
+struct NoCertificateVerification;
+
+impl ServerCertVerifier for NoCertificateVerification {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &DigitallySignedStruct,
+    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+        ]
+    }
 }
 
 fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {

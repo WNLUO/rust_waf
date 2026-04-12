@@ -205,6 +205,10 @@ const selectedTemplate = computed(() =>
   ) ?? null,
 )
 
+const persistedTemplateIds = computed(
+  () => new Set(actionTemplates.value.map((item) => item.template_id)),
+)
+
 const matchedTemplate = computed(() => {
   const config = site.value?.safeline_intercept
   if (!config?.enabled) return null
@@ -376,6 +380,22 @@ async function loadPreview() {
     previewError.value = ''
     return
   }
+
+  if (!persistedTemplateIds.value.has(selectedTemplate.value.template_id)) {
+    previewBody.value =
+      selectedTemplate.value.response_template.body_source === 'inline_text'
+        ? selectedTemplate.value.response_template.body_text
+        : selectedTemplate.value.response_template.body_file_path ||
+          '文件型模板，当前页只显示文件路径。'
+    previewMeta.value = {
+      statusCode: selectedTemplate.value.response_template.status_code,
+      contentType: selectedTemplate.value.response_template.content_type,
+      truncated: false,
+    }
+    previewError.value = ''
+    return
+  }
+
   previewLoading.value = true
   previewError.value = ''
   try {

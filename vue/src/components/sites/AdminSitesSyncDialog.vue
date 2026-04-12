@@ -42,7 +42,6 @@ const fieldOptions: Array<{
 }> = [
   { key: 'name', label: '名称', description: '站点展示名称' },
   { key: 'hostnames', label: '附加域名', description: '附加域名列表' },
-  { key: 'listen_ports', label: '端口', description: '监听端口列表' },
   { key: 'upstreams', label: '下游地址', description: '下游地址列表' },
 ]
 
@@ -129,7 +128,7 @@ function fieldDisabled(
             当前仅同步站点字段，不会回流雷池证书。证书请在“证书管理”页单独维护。
           </p>
           <p class="text-xs text-slate-500">
-            TLS 状态会根据雷池站点的 SSL 端口和证书配置自动判断，无需单独选择。
+            雷池返回的端口信息仅作为远端入口展示；本地实际监听端口统一由“全局入口”接管。
           </p>
         </div>
       </div>
@@ -158,7 +157,7 @@ function fieldDisabled(
               <tr class="text-left text-xs font-medium text-slate-500">
                 <th class="w-[5%] px-3 py-2 text-center">选</th>
                 <th class="px-3 py-2">域名</th>
-                <th class="px-2 py-2 whitespace-nowrap">端口</th>
+                <th class="px-2 py-2 whitespace-nowrap">远端入口</th>
                 <th class="px-3 py-2">下游地址</th>
                 <th class="px-3 py-2 whitespace-nowrap">
                   <span class="inline-flex items-center gap-2">
@@ -202,6 +201,7 @@ function fieldDisabled(
                 <td class="px-2 py-2 text-xs text-slate-600 whitespace-nowrap">
                   <div class="space-y-0.5">
                     <p>
+                      HTTP:
                       {{
                         candidate.ports.filter((port) => !candidate.sslPorts.includes(port))
                           .length
@@ -211,10 +211,21 @@ function fieldDisabled(
                           : '-'
                       }}
                       <span
+                        class="text-slate-400"
+                      >
+                        / HTTPS:
+                      </span>
+                      <span
                         v-if="candidate.sslPorts.length"
                         class="text-slate-400"
                       >
-                        / SSL端口: {{ candidate.sslPorts.join(' / ') }}
+                        {{ candidate.sslPorts.join(' / ') }}
+                      </span>
+                      <span
+                        v-else
+                        class="text-slate-400"
+                      >
+                        -
                       </span>
                     </p>
                   </div>

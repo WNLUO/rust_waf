@@ -142,7 +142,7 @@ const stateModel = computed({
             v-model="keywordModel"
             class="w-full rounded-lg border border-slate-200 bg-white px-9 py-2.5 text-sm outline-none transition focus:border-blue-500"
             type="text"
-            placeholder="站点名称 / 域名 / 端口 / Upstream / 备注"
+            placeholder="站点名称 / 域名 / Upstream / 备注"
           />
         </div>
       </label>

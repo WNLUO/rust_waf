@@ -206,7 +206,6 @@ export function useAdminSites(
           item.local_site_name,
           item.local_primary_hostname,
           item.local_hostnames.join(' '),
-          item.local_listen_ports.join(' '),
           item.local_upstreams.join(' '),
           item.local_notes,
           item.local_alias,

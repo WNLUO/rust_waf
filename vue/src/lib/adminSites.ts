@@ -42,7 +42,6 @@ export interface SiteRowDraft {
   local_site_name: string
   local_primary_hostname: string
   local_hostnames: string[]
-  local_listen_ports: string[]
   local_upstreams: string[]
   local_enabled: boolean
   local_notes: string
@@ -161,7 +160,6 @@ function createSiteRow({
     local_site_name: localSite?.name ?? '',
     local_primary_hostname: localSite?.primary_hostname ?? '',
     local_hostnames: localSite?.hostnames ?? [],
-    local_listen_ports: localSite?.listen_ports ?? [],
     local_upstreams: localSite?.upstreams ?? [],
     local_enabled: localSite?.enabled ?? false,
     local_notes: localSite?.notes ?? '',

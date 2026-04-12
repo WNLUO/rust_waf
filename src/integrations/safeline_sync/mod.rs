@@ -19,15 +19,14 @@ use crate::storage::{
 use anyhow::{anyhow, bail, Result};
 
 use self::certificate_sync::{
-    certificate_fingerprint, match_remote_certificate, sync_remote_certificate,
-    update_certificate_sync_metadata, CertificateSyncMetadataUpdate, RemoteCertificateMatchResult,
-    SyncInsertState,
+    certificate_fingerprint, match_remote_certificate, normalized_domain_set,
+    sync_remote_certificate, update_certificate_sync_metadata, CertificateSyncMetadataUpdate,
 };
 use self::shared::{apply_safeline_mapping, ensure_enabled, parse_json_vec, unix_timestamp};
 use self::site_sync::{
     allows_push, find_matching_remote_site, hash_local_site_entry, hash_remote_site,
-    local_site_to_remote, match_remote_site, record_site_link_error,
-    resolve_remote_certificate_id, update_local_site_sync_metadata,
+    local_site_to_remote, match_remote_site, record_site_link_error, resolve_remote_certificate_id,
+    update_local_site_sync_metadata,
 };
 
 pub use blocklist::{pull_blocked_ips, push_blocked_ips};

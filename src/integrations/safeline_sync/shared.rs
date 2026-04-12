@@ -13,7 +13,10 @@ pub(super) fn apply_safeline_mapping(
 ) -> SecurityEventRecord {
     let mut record = SecurityEventRecord::from(event);
 
-    if let Some(mapping) = mappings.iter().find(|mapping| matches_mapping(&record, mapping)) {
+    if let Some(mapping) = mappings
+        .iter()
+        .find(|mapping| matches_mapping(&record, mapping))
+    {
         record.provider_site_id = Some(mapping.safeline_site_id.clone());
         record.provider_site_name = Some(mapping.local_alias.clone());
         record.provider_site_domain = Some(mapping.safeline_site_domain.clone());

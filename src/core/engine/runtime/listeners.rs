@@ -183,7 +183,9 @@ impl EntryListenerRuntime {
 }
 
 pub(crate) async fn validate_entry_listener_config(context: Arc<WafContext>) -> Result<()> {
-    EntryListenerRuntime::global().validate_config(context).await
+    EntryListenerRuntime::global()
+        .validate_config(context)
+        .await
 }
 
 pub(crate) async fn sync_entry_listener_runtime(

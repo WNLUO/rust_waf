@@ -770,10 +770,7 @@ async fn test_sqlite_store_manages_local_certificates() {
             valid_to: Some(1_800_000_000),
             source_type: "manual".to_string(),
             provider_remote_id: Some("31".to_string()),
-            provider_remote_domains: vec![
-                "example.com".to_string(),
-                "*.example.com".to_string(),
-            ],
+            provider_remote_domains: vec!["example.com".to_string(), "*.example.com".to_string()],
             last_remote_fingerprint: Some("fp31".to_string()),
             sync_status: "synced".to_string(),
             sync_message: "ok".to_string(),
@@ -859,7 +856,10 @@ async fn test_sqlite_store_manages_local_certificates() {
         .unwrap();
     assert!(updated_secret.certificate_pem.contains("CERT-V2"));
 
-    let deleted = store.delete_local_certificate(certificate_id).await.unwrap();
+    let deleted = store
+        .delete_local_certificate(certificate_id)
+        .await
+        .unwrap();
     assert!(deleted);
     assert!(store
         .load_local_certificate(certificate_id)
@@ -1150,7 +1150,10 @@ async fn test_sqlite_store_blocked_ip_pull_dedup_is_isolated_from_push_dedup() {
         .unwrap();
     assert_eq!(push_result.synced, 1);
 
-    let pull_result = store.import_safeline_blocked_ips_pull(&[pulled]).await.unwrap();
+    let pull_result = store
+        .import_safeline_blocked_ips_pull(&[pulled])
+        .await
+        .unwrap();
     assert_eq!(pull_result.imported, 1);
     assert_eq!(pull_result.skipped, 0);
 }

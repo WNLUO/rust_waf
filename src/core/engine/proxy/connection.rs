@@ -38,9 +38,7 @@ pub(crate) enum UpstreamClientConnection {
     },
 }
 
-pub(crate) fn resolve_runtime_custom_response(
-    response: &CustomHttpResponse,
-) -> CustomHttpResponse {
+pub(crate) fn resolve_runtime_custom_response(response: &CustomHttpResponse) -> CustomHttpResponse {
     let mut resolved = response.clone();
     if let Some(random_status) = response.random_status.as_ref() {
         let roll = rand::thread_rng().gen_range(0..100);
@@ -133,9 +131,8 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
         *reusable_connection = None;
     }
     if reusable_connection.is_none() {
-        *reusable_connection = Some(
-            connect_upstream_client(&upstream, connect_timeout_ms, skip_verify).await?,
-        );
+        *reusable_connection =
+            Some(connect_upstream_client(&upstream, connect_timeout_ms, skip_verify).await?);
     }
 
     let response = match reusable_connection.as_mut() {

@@ -79,7 +79,11 @@ pub(crate) fn apply_safeline_upstream_action(
         metrics.record_block(InspectionLayer::L7);
     }
     if let Some(inspector) = context.l4_inspector() {
-        inspector.record_l7_feedback(packet, request, crate::l4::behavior::FeedbackSource::SafeLine);
+        inspector.record_l7_feedback(
+            packet,
+            request,
+            crate::l4::behavior::FeedbackSource::SafeLine,
+        );
     }
     persist_safeline_intercept_event(
         context,
@@ -169,10 +173,7 @@ fn decode_response_body_for_matching(
     Some(String::from_utf8_lossy(&decoded).into_owned())
 }
 
-fn upstream_header_value<'a>(
-    headers: &'a [(String, String)],
-    name: &str,
-) -> Option<&'a str> {
+fn upstream_header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
         .find(|(key, _)| key.eq_ignore_ascii_case(name))

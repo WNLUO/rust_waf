@@ -57,10 +57,7 @@ pub(super) fn pick_array_strings(
     None
 }
 
-pub(super) fn pick_i64(
-    object: &serde_json::Map<String, Value>,
-    keys: &[&str],
-) -> Option<i64> {
+pub(super) fn pick_i64(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
     for key in keys {
         let Some(value) = object.get(*key) else {
             continue;
@@ -80,10 +77,7 @@ pub(super) fn pick_i64(
     None
 }
 
-pub(super) fn pick_bool(
-    object: &serde_json::Map<String, Value>,
-    keys: &[&str],
-) -> Option<bool> {
+pub(super) fn pick_bool(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<bool> {
     for key in keys {
         let Some(value) = object.get(*key) else {
             continue;

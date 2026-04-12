@@ -28,21 +28,18 @@ pub(crate) fn apply_client_identity(
     );
 }
 
-pub(crate) fn prepare_request_for_routing(
-    context: &WafContext,
-    request: &mut UnifiedHttpRequest,
-) {
+pub(crate) fn prepare_request_for_routing(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
     if context.config_snapshot().gateway_config.enable_ntlm && request_looks_like_ntlm(request) {
-        request.add_metadata("proxy_connection_mode".to_string(), "keep-alive".to_string());
+        request.add_metadata(
+            "proxy_connection_mode".to_string(),
+            "keep-alive".to_string(),
+        );
     }
     apply_standard_forwarding_headers(context, request);
 }
 
-pub(crate) fn prepare_request_for_proxy(
-    context: &WafContext,
-    request: &mut UnifiedHttpRequest,
-) {
+pub(crate) fn prepare_request_for_proxy(context: &WafContext, request: &mut UnifiedHttpRequest) {
     apply_request_rewrite_policy(context, request);
     apply_request_header_operations(context, request);
 }
@@ -87,9 +84,15 @@ fn apply_proxy_headers(
 ) {
     request.add_header("x-real-ip".to_string(), resolved_client_ip.to_string());
 
-    let preserve_forwarded_chain =
-        preserve_forwarded_chain && !context.config_snapshot().gateway_config.rewrite_x_forwarded_for;
-    let forwarded_for = match (preserve_forwarded_chain, request.get_header("x-forwarded-for")) {
+    let preserve_forwarded_chain = preserve_forwarded_chain
+        && !context
+            .config_snapshot()
+            .gateway_config
+            .rewrite_x_forwarded_for;
+    let forwarded_for = match (
+        preserve_forwarded_chain,
+        request.get_header("x-forwarded-for"),
+    ) {
         (true, Some(existing)) if !existing.trim().is_empty() => {
             let existing = existing.trim();
             let peer_ip = peer_addr.ip().to_string();
@@ -122,7 +125,11 @@ fn ensure_request_id(request: &mut UnifiedHttpRequest) {
 }
 
 fn apply_standard_forwarding_headers(context: &WafContext, request: &mut UnifiedHttpRequest) {
-    if !context.config_snapshot().gateway_config.add_x_forwarded_headers {
+    if !context
+        .config_snapshot()
+        .gateway_config
+        .add_x_forwarded_headers
+    {
         return;
     }
     let forwarded_proto = request
@@ -185,10 +192,7 @@ fn apply_request_rewrite_policy(context: &WafContext, request: &mut UnifiedHttpR
     }
 }
 
-pub(crate) fn expand_request_template(
-    template: &str,
-    request: &UnifiedHttpRequest,
-) -> String {
+pub(crate) fn expand_request_template(template: &str, request: &UnifiedHttpRequest) -> String {
     let original_host = request
         .get_header("host")
         .or_else(|| request.get_metadata("authority"))

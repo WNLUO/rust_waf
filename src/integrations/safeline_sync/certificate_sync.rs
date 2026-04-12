@@ -116,7 +116,7 @@ pub(super) async fn sync_remote_certificate(
     Ok(SyncInsertState { inserted, local_id })
 }
 
-fn normalized_domain_set(domains: &[String]) -> Vec<String> {
+pub(super) fn normalized_domain_set(domains: &[String]) -> Vec<String> {
     let mut items = domains
         .iter()
         .map(|item| item.trim().to_ascii_lowercase())

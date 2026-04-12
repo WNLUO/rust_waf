@@ -65,8 +65,7 @@ impl WafEngine {
         if let Some(store) = self.context.sqlite_store.as_ref().cloned() {
             let fallback_config = startup_config.clone();
             tokio::spawn(async move {
-                engine_maintenance::run_safeline_auto_sync_loop(store, fallback_config)
-                    .await;
+                engine_maintenance::run_safeline_auto_sync_loop(store, fallback_config).await;
             });
         }
 

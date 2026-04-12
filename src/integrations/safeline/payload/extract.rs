@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn extract_sites(payload: &Value) -> Result<Vec<SafeLineSiteSummary>> {
+pub(crate) fn extract_sites(payload: &Value) -> Result<Vec<SafeLineSiteSummary>> {
     let candidates = find_array_candidates(payload);
     for candidate in candidates {
         let sites = candidate
@@ -17,7 +17,7 @@ pub(super) fn extract_sites(payload: &Value) -> Result<Vec<SafeLineSiteSummary>>
     ))
 }
 
-pub(super) fn extract_security_events(
+pub(crate) fn extract_security_events(
     payload: &Value,
 ) -> Result<Vec<SafeLineSecurityEventSummary>> {
     let candidates = find_array_candidates(payload);
@@ -36,7 +36,7 @@ pub(super) fn extract_security_events(
     ))
 }
 
-pub(super) fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlockedIpSummary>> {
+pub(crate) fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlockedIpSummary>> {
     let candidates = find_array_candidates(payload);
     for candidate in candidates {
         let recognized_candidate = candidate.iter().any(looks_like_blocked_ip_summary);
@@ -54,7 +54,7 @@ pub(super) fn extract_blocked_ips(payload: &Value) -> Result<Vec<SafeLineBlocked
     ))
 }
 
-pub(super) fn extract_certificates(payload: &Value) -> Result<Vec<SafeLineCertificateSummary>> {
+pub(crate) fn extract_certificates(payload: &Value) -> Result<Vec<SafeLineCertificateSummary>> {
     let candidates = find_array_candidates(payload);
     for candidate in candidates {
         let certificates = candidate
@@ -71,7 +71,7 @@ pub(super) fn extract_certificates(payload: &Value) -> Result<Vec<SafeLineCertif
     ))
 }
 
-pub(super) fn parse_certificate_detail(payload: &Value) -> Option<SafeLineCertificateDetail> {
+pub(crate) fn parse_certificate_detail(payload: &Value) -> Option<SafeLineCertificateDetail> {
     let object = find_object_candidates(payload)
         .into_iter()
         .find(|candidate| candidate.contains_key("manual") || candidate.contains_key("acme"))?;

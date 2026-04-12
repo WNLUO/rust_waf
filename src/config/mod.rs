@@ -279,7 +279,7 @@ impl Default for Config {
             udp_upstream_addr: None,
             runtime_profile: RuntimeProfile::Minimal,
             api_enabled: false,
-            api_bind: "127.0.0.1:3000".to_string(),
+            api_bind: "127.0.0.1:3740".to_string(),
             bloom_enabled: false,
             l4_bloom_false_positive_verification: false,
             l7_bloom_false_positive_verification: false,

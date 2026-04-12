@@ -9,7 +9,7 @@ export function createDefaultSystemSettings(): SystemSettingsForm {
     https_listen_addr: '',
     default_certificate_id: null,
     upstream_endpoint: '',
-    api_endpoint: '127.0.0.1:3000',
+    api_endpoint: '127.0.0.1:3740',
     notification_level: 'critical',
     retain_days: 30,
     notes: '',

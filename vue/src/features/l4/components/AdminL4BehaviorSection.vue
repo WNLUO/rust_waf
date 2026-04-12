@@ -37,7 +37,7 @@ const modeText = (mode: string) => {
     <MetricWidget
       label="L4.5 分桶数"
       :value="formatNumber(behaviorOverview.bucket_count)"
-      :hint="`正常 ${formatNumber(behaviorOverview.normal_buckets)} / 可疑 ${formatNumber(behaviorOverview.suspicious_buckets)} / 高风险 ${formatNumber(behaviorOverview.high_risk_buckets)}`"
+      :hint="`细粒度 ${formatNumber(behaviorOverview.fine_grained_buckets)} / coarse ${formatNumber(behaviorOverview.coarse_buckets)} / peer-only ${formatNumber(behaviorOverview.peer_only_buckets)}`"
       :icon="Layers3"
     />
     <MetricWidget
@@ -50,16 +50,29 @@ const modeText = (mode: string) => {
     <MetricWidget
       label="高风险分桶"
       :value="formatNumber(behaviorOverview.high_risk_buckets)"
-      :hint="behaviorOverview.overloaded ? '当前处于过载保护态' : '当前未触发过载保护'"
+      :hint="
+        behaviorOverview.overload_level !== 'normal'
+          ? `当前处于 ${behaviorOverview.overload_level} 过载态`
+          : '当前未触发过载保护'
+      "
       :icon="AlertTriangle"
       :trend="behaviorOverview.high_risk_buckets ? 'up' : undefined"
     />
     <MetricWidget
       label="系统负载态"
-      :value="behaviorOverview.overloaded ? '保护中' : '平稳'"
-      :hint="behaviorOverview.overload_reason || '根据分桶压力、跟踪表和封禁表动态判断'"
+      :value="
+        behaviorOverview.overload_level === 'critical'
+          ? 'Critical'
+          : behaviorOverview.overload_level === 'high'
+            ? 'High'
+            : 'Normal'
+      "
+      :hint="
+        behaviorOverview.overload_reason ||
+        `丢弃事件 ${formatNumber(behaviorOverview.dropped_events)}`
+      "
       :icon="RadioTower"
-      :trend="behaviorOverview.overloaded ? 'up' : 'down'"
+      :trend="behaviorOverview.overload_level !== 'normal' ? 'up' : 'down'"
     />
   </section>
 
@@ -133,6 +146,18 @@ const modeText = (mode: string) => {
                       ? '已收紧 keepalive'
                       : '保持连接复用'
                   }}
+                </span>
+                <span
+                  v-if="bucket.policy.reject_new_connections"
+                  class="text-xs text-red-600"
+                >
+                  新连接将被拒绝
+                </span>
+                <span
+                  v-if="bucket.policy.suggested_delay_ms"
+                  class="text-xs text-slate-500"
+                >
+                  建议延迟 {{ formatNumber(bucket.policy.suggested_delay_ms) }} ms
                 </span>
               </div>
             </td>

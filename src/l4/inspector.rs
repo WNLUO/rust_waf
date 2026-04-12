@@ -191,24 +191,57 @@ impl L4Inspector {
         InspectionResult::allow(InspectionLayer::L4)
     }
 
-    pub fn observe_connection_metadata(
+    pub fn observe_connection_open(
         &self,
+        connection_id: String,
         packet: &PacketInfo,
         authority: Option<&str>,
         alpn: Option<&str>,
         transport: &str,
         protocol_hint: &str,
+    ) -> crate::l4::behavior::BucketKey {
+        self.behavior_engine
+            .observe_connection_open(
+                connection_id,
+                packet,
+                authority,
+                alpn,
+                transport,
+                protocol_hint,
+            )
+    }
+
+    pub fn observe_connection_close(
+        &self,
+        key: &crate::l4::behavior::BucketKey,
+        connection_id: &str,
+        opened_at: std::time::Instant,
     ) {
         self.behavior_engine
-            .observe_connection(packet, authority, alpn, transport, protocol_hint);
+            .observe_connection_close(key, connection_id, opened_at);
     }
 
     pub fn apply_request_policy(
         &self,
         packet: &PacketInfo,
         request: &mut UnifiedHttpRequest,
-    ) {
-        self.behavior_engine.apply_policy(packet, request);
+    ) -> crate::l4::behavior::L4AdaptivePolicy {
+        self.behavior_engine.apply_request_policy(packet, request)
+    }
+
+    pub fn connection_admission_policy(
+        &self,
+        key: &crate::l4::behavior::BucketKey,
+    ) -> crate::l4::behavior::L4AdaptivePolicy {
+        self.behavior_engine.connection_admission_for_key(key)
+    }
+
+    pub fn coarse_connection_admission_policy(
+        &self,
+        peer_ip: std::net::IpAddr,
+        transport: &str,
+    ) -> crate::l4::behavior::L4AdaptivePolicy {
+        self.behavior_engine.pre_admission_policy(peer_ip, transport)
     }
 
     pub fn record_l7_feedback(

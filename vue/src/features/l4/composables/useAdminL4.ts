@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/client'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
-import type { L4ConfigPayload, L4StatsPayload } from '@/shared/types'
+import type { L4BehaviorOverview, L4ConfigPayload, L4StatsPayload } from '@/shared/types'
 
 const clampInteger = (
   value: number,
@@ -154,16 +154,20 @@ export function useAdminL4() {
   )
   const behaviorOverview = computed(
     () =>
-      stats.value?.behavior.overview ?? {
+      stats.value?.behavior.overview ?? ({
         bucket_count: 0,
+        fine_grained_buckets: 0,
+        coarse_buckets: 0,
+        peer_only_buckets: 0,
         normal_buckets: 0,
         suspicious_buckets: 0,
         high_risk_buckets: 0,
         safeline_feedback_hits: 0,
         l7_feedback_hits: 0,
-        overloaded: false,
+        dropped_events: 0,
+        overload_level: 'normal',
         overload_reason: null,
-      },
+      } satisfies L4BehaviorOverview),
   )
   const topBuckets = computed(() => stats.value?.behavior.top_buckets ?? [])
   const topPorts = computed(() => stats.value?.per_port_stats ?? [])

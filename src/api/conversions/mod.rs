@@ -584,12 +584,16 @@ impl L4StatsResponse {
             behavior: crate::l4::behavior::L4BehaviorSnapshot {
                 overview: crate::l4::behavior::L4BehaviorOverview {
                     bucket_count: 0,
+                    fine_grained_buckets: 0,
+                    coarse_buckets: 0,
+                    peer_only_buckets: 0,
                     normal_buckets: 0,
                     suspicious_buckets: 0,
                     high_risk_buckets: 0,
                     safeline_feedback_hits: 0,
                     l7_feedback_hits: 0,
-                    overloaded: false,
+                    dropped_events: 0,
+                    overload_level: crate::l4::behavior::L4OverloadLevel::Normal,
                     overload_reason: None,
                 },
                 top_buckets: Vec::new(),

@@ -22,8 +22,22 @@ async fn handle_connection(
         return Ok(());
     }
 
-    let (stream, metadata) =
+    if let Some(inspector) = context.l4_inspector() {
+        let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "http");
+        maybe_delay_policy(&policy).await;
+        if policy.reject_new_connections {
+            debug!(
+                "Rejecting TCP connection from {} due to coarse admission pressure",
+                peer_addr
+            );
+            return Ok(());
+        }
+    }
+
+    let connection_id = next_connection_id(peer_addr, local_addr, "tcp");
+    let (stream, mut metadata) =
         parse_proxy_protocol_stream(context.as_ref(), stream, peer_addr).await?;
+    metadata.push(("network.connection_id".to_string(), connection_id));
 
     // 协议检测和路由
     match detect_and_handle_protocol(context, stream, peer_addr, &packet, metadata).await {
@@ -61,8 +75,22 @@ async fn handle_tls_connection(
         return Ok(());
     }
 
+    if let Some(inspector) = context.l4_inspector() {
+        let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "tls");
+        maybe_delay_policy(&policy).await;
+        if policy.reject_new_connections {
+            debug!(
+                "Rejecting TLS connection from {} before handshake due to coarse admission pressure",
+                peer_addr
+            );
+            return Ok(());
+        }
+    }
+
     let (stream, mut metadata) =
         parse_proxy_protocol_stream(context.as_ref(), stream, peer_addr).await?;
+    let connection_id = next_connection_id(peer_addr, local_addr, "tls");
+    metadata.push(("network.connection_id".to_string(), connection_id.clone()));
 
     let tls_stream = tokio::time::timeout(
         std::time::Duration::from_millis(config.l7_config.tls_handshake_timeout_ms),
@@ -87,22 +115,40 @@ async fn handle_tls_connection(
     if let Some(server_name) = &server_name {
         metadata.push(("tls.sni".to_string(), server_name.clone()));
     }
-    if let Some(inspector) = context.l4_inspector() {
-        inspector.observe_connection_metadata(
+    let opened_at = std::time::Instant::now();
+    let l4_bucket = context.l4_inspector().map(|inspector| {
+        inspector.observe_connection_open(
+            connection_id.clone(),
             &packet,
             server_name.as_deref(),
             alpn.as_deref(),
             "tls",
             alpn.as_deref().unwrap_or("tls"),
-        );
+        )
+    });
+    if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), l4_bucket.as_ref()) {
+        let policy = inspector.connection_admission_policy(bucket_key);
+        maybe_delay_policy(&policy).await;
+        if policy.reject_new_connections {
+            debug!(
+                "Rejecting TLS connection from {} due to bucket admission pressure",
+                peer_addr
+            );
+            inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+            return Ok(());
+        }
     }
 
-    match alpn.as_deref() {
+    let result = match alpn.as_deref() {
         Some("h2") if config.l7_config.http2_config.enabled => {
-            handle_http2_connection(context, tls_stream, peer_addr, &packet, metadata).await
+            handle_http2_connection(context.clone(), tls_stream, peer_addr, &packet, metadata).await
         }
-        _ => handle_http1_connection(context, tls_stream, peer_addr, &packet, metadata).await,
+        _ => handle_http1_connection(context.clone(), tls_stream, peer_addr, &packet, metadata).await,
+    };
+    if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), l4_bucket.as_ref()) {
+        inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
     }
+    result
 }
 
 #[cfg(feature = "http3")]
@@ -115,6 +161,8 @@ async fn handle_http3_quic_connection(
     let connection = incoming.await?;
     let peer_addr = connection.remote_address();
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
+    let connection_id = next_connection_id(peer_addr, local_addr, "h3");
+    let opened_at = std::time::Instant::now();
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet);
     if l4_result.should_persist_event() {
@@ -131,6 +179,28 @@ async fn handle_http3_quic_connection(
         connection.close(0u32.into(), b"blocked by l4 policy");
         return Ok(());
     }
+
+    if let Some(inspector) = context.l4_inspector() {
+        let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "udp");
+        if policy.reject_new_connections {
+            debug!(
+                "Dropping UDP datagram from {} due to coarse admission pressure",
+                peer_addr
+            );
+            return Ok(());
+        }
+    }
+
+    let l4_bucket = context.l4_inspector().map(|inspector| {
+        inspector.observe_connection_open(
+            connection_id.clone(),
+            &packet,
+            None,
+            Some("h3"),
+            "udp",
+            "h3",
+        )
+    });
 
     let mut h3_connection = h3::server::builder()
         .build(H3QuinnConnection::new(connection))
@@ -156,6 +226,10 @@ async fn handle_http3_quic_connection(
                 break;
             }
         }
+    }
+
+    if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), l4_bucket.as_ref()) {
+        inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
     }
 
     Ok(())
@@ -223,8 +297,11 @@ async fn handle_http3_request(
         metrics.record_packet(request_dump.len());
     }
 
-    let inspection_result =
-        inspect_application_layers(context.as_ref(), &packet, &unified, &request_dump);
+    let inspection_result = if request_in_critical_overload(&unified) {
+        InspectionResult::allow(InspectionLayer::L7)
+    } else {
+        inspect_application_layers(context.as_ref(), &packet, &unified, &request_dump)
+    };
 
         if inspection_result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), &packet, &unified, &inspection_result);
@@ -650,6 +727,13 @@ async fn handle_http1_connection(
     let http1_handler = Http1Handler::new();
     let extra_metadata = extra_metadata;
     let mut reusable_upstream_connection = None;
+    let connection_id = extra_metadata
+        .iter()
+        .find(|(key, _)| key == "network.connection_id")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let opened_at = std::time::Instant::now();
+    let mut bucket_key = None;
 
     loop {
         // 读取HTTP/1.1请求
@@ -668,13 +752,60 @@ async fn handle_http1_connection(
         for (key, value) in &extra_metadata {
             request.add_metadata(key.clone(), value.clone());
         }
+        if bucket_key.is_none() {
+            if let Some(inspector) = context.l4_inspector() {
+                let transport = request
+                    .get_metadata("transport")
+                    .map(String::as_str)
+                    .unwrap_or("http");
+                bucket_key = Some(inspector.observe_connection_open(
+                    connection_id.clone(),
+                    packet,
+                    request.get_header("host").map(String::as_str),
+                    None,
+                    transport,
+                    "http/1.1",
+                ));
+            }
+        }
+        if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), bucket_key.as_ref()) {
+            let policy = inspector.connection_admission_policy(bucket_key);
+            maybe_delay_policy(&policy).await;
+            if policy.reject_new_connections {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        429,
+                        "Too Many Requests",
+                        b"bucket connection budget exceeded",
+                    )
+                    .await?;
+                inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                return Ok(());
+            }
+        }
         prepare_request_for_routing(context.as_ref(), &mut request);
         let matched_site = resolve_gateway_site(context.as_ref(), &request);
         if let Some(site) = matched_site.as_ref() {
             apply_gateway_site_metadata(&mut request, site);
         }
         if let Some(inspector) = context.l4_inspector() {
-            inspector.apply_request_policy(packet, &mut request);
+            let policy = inspector.apply_request_policy(packet, &mut request);
+            maybe_delay_request(&request).await;
+            if policy.reject_new_connections {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        429,
+                        "Too Many Requests",
+                        b"bucket request budget exceeded",
+                    )
+                    .await?;
+                if let Some(bucket_key) = bucket_key.as_ref() {
+                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                }
+                return Ok(());
+            }
         }
 
         if request.uri.is_empty() {
@@ -742,8 +873,11 @@ async fn handle_http1_connection(
             metrics.record_packet(request_dump.len());
         }
 
-        let inspection_result =
-            inspect_application_layers(context.as_ref(), packet, &request, &request_dump);
+        let inspection_result = if request_in_critical_overload(&request) {
+            InspectionResult::allow(InspectionLayer::L7)
+        } else {
+            inspect_application_layers(context.as_ref(), packet, &request, &request_dump)
+        };
 
         if inspection_result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), packet, &request, &inspection_result);
@@ -952,6 +1086,9 @@ async fn handle_http1_connection(
         }
 
         if !should_keep_client_connection_open(&request) {
+            if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), bucket_key.as_ref()) {
+                inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+            }
             return Ok(());
         }
     }
@@ -978,6 +1115,16 @@ async fn handle_http2_connection(
     let peer_ip = peer_addr.ip().to_string();
     let max_request_size = config.l7_config.max_request_size;
     let request_metadata = extra_metadata.clone();
+    let connection_id = extra_metadata
+        .iter()
+        .find(|(key, _)| key == "network.connection_id")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let connection_id_for_callback = connection_id.clone();
+    let registered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let bucket_key = Arc::new(std::sync::Mutex::new(None));
+    let bucket_key_for_callback = Arc::clone(&bucket_key);
+    let opened_at = std::time::Instant::now();
 
     http2_handler
         .serve_connection(
@@ -989,6 +1136,9 @@ async fn handle_http2_connection(
                 let context = Arc::clone(&context_for_service);
                 let packet = packet.clone();
                 let request_metadata = request_metadata.clone();
+                let connection_id = connection_id_for_callback.clone();
+                let registered = Arc::clone(&registered);
+                let bucket_key = Arc::clone(&bucket_key_for_callback);
 
                 async move {
                     let config = context.config_snapshot();
@@ -997,13 +1147,60 @@ async fn handle_http2_connection(
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);
                     }
+                    let mut first_registration = false;
+                    if !registered.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        first_registration = true;
+                        if let Some(inspector) = context.l4_inspector() {
+                            let key = inspector.observe_connection_open(
+                                connection_id.clone(),
+                                &packet,
+                                request.get_header("host").map(String::as_str),
+                                request.get_metadata("tls.alpn").map(String::as_str),
+                                request
+                                    .get_metadata("transport")
+                                    .map(String::as_str)
+                                    .unwrap_or("http"),
+                                "h2",
+                            );
+                            bucket_key.lock().expect("bucket key mutex poisoned").replace(key);
+                        }
+                    }
+                    if first_registration {
+                        if let Some(inspector) = context.l4_inspector() {
+                            let current_bucket_key = {
+                                bucket_key
+                                    .lock()
+                                    .expect("bucket key mutex poisoned")
+                                    .clone()
+                            };
+                            if let Some(bucket_key) = current_bucket_key {
+                                let policy = inspector.connection_admission_policy(&bucket_key);
+                                maybe_delay_policy(&policy).await;
+                                if policy.reject_new_connections {
+                                    return Ok(Http2Response {
+                                        status_code: 429,
+                                        headers: vec![],
+                                        body: b"bucket connection budget exceeded".to_vec(),
+                                    });
+                                }
+                            }
+                        }
+                    }
                     prepare_request_for_routing(context.as_ref(), &mut request);
                     let matched_site = resolve_gateway_site(context.as_ref(), &request);
                     if let Some(site) = matched_site.as_ref() {
                         apply_gateway_site_metadata(&mut request, site);
                     }
                     if let Some(inspector) = context.l4_inspector() {
-                        inspector.apply_request_policy(&packet, &mut request);
+                        let policy = inspector.apply_request_policy(&packet, &mut request);
+                        maybe_delay_request(&request).await;
+                        if policy.reject_new_connections {
+                            return Ok(Http2Response {
+                                status_code: 429,
+                                headers: vec![],
+                                body: b"bucket request budget exceeded".to_vec(),
+                            });
+                        }
                     }
 
                     if let Some(response) = try_handle_browser_fingerprint_report(
@@ -1031,12 +1228,16 @@ async fn handle_http2_connection(
                         metrics.record_packet(request_dump.len());
                     }
 
-                    let inspection_result = inspect_application_layers(
-                        context.as_ref(),
-                        &packet,
-                        &request,
-                        &request_dump,
-                    );
+                    let inspection_result = if request_in_critical_overload(&request) {
+                        InspectionResult::allow(InspectionLayer::L7)
+                    } else {
+                        inspect_application_layers(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &request_dump,
+                        )
+                    };
 
                     if inspection_result.should_persist_event() {
                         persist_http_inspection_event(
@@ -1221,5 +1422,45 @@ async fn handle_http2_connection(
         )
         .await?;
 
+    if let (Some(inspector), Some(bucket_key)) = (
+        context.l4_inspector(),
+        bucket_key.lock().expect("bucket key mutex poisoned").clone(),
+    ) {
+        inspector.observe_connection_close(&bucket_key, &connection_id, opened_at);
+    }
+
     Ok(())
+}
+
+async fn maybe_delay_request(request: &crate::protocol::UnifiedHttpRequest) {
+    let delay_ms = request
+        .get_metadata("l4.suggested_delay_ms")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
+    if delay_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+    }
+}
+
+async fn maybe_delay_policy(policy: &crate::l4::behavior::L4AdaptivePolicy) {
+    if policy.suggested_delay_ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(policy.suggested_delay_ms)).await;
+    }
+}
+
+fn request_in_critical_overload(request: &crate::protocol::UnifiedHttpRequest) -> bool {
+    request
+        .get_metadata("l4.overload_level")
+        .map(|value| value == "critical")
+        .unwrap_or(false)
+}
+
+fn next_connection_id(
+    peer_addr: std::net::SocketAddr,
+    local_addr: std::net::SocketAddr,
+    transport: &str,
+) -> String {
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{transport}-{peer_addr}-{local_addr}-{id}")
 }

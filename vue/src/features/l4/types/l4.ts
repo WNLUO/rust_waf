@@ -70,12 +70,16 @@ export interface L4BehaviorSnapshot {
 
 export interface L4BehaviorOverview {
   bucket_count: number
+  fine_grained_buckets: number
+  coarse_buckets: number
+  peer_only_buckets: number
   normal_buckets: number
   suspicious_buckets: number
   high_risk_buckets: number
   safeline_feedback_hits: number
   l7_feedback_hits: number
-  overloaded: boolean
+  dropped_events: number
+  overload_level: 'normal' | 'high' | 'critical'
   overload_reason: string | null
 }
 
@@ -84,7 +88,9 @@ export interface L4BucketPolicy {
   shrink_idle_timeout: boolean
   disable_keepalive: boolean
   prefer_early_close: boolean
+  reject_new_connections: boolean
   mode: string
+  suggested_delay_ms: number
 }
 
 export interface L4BucketItem {

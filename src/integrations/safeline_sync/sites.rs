@@ -1,5 +1,28 @@
 use super::*;
 
+fn cached_site_from_remote(
+    value: &crate::integrations::safeline::SafeLineSiteSummary,
+) -> Result<crate::storage::SafeLineCachedSiteUpsert> {
+    Ok(crate::storage::SafeLineCachedSiteUpsert {
+        remote_site_id: value.id.clone(),
+        name: value.name.clone(),
+        domain: value.domain.clone(),
+        status: value.status.clone(),
+        enabled: value.enabled,
+        server_names: value.server_names.clone(),
+        ports: value.ports.clone(),
+        ssl_ports: value.ssl_ports.clone(),
+        upstreams: value.upstreams.clone(),
+        ssl_enabled: value.ssl_enabled,
+        cert_id: value.cert_id,
+        cert_type: value.cert_type,
+        cert_filename: value.cert_filename.clone(),
+        key_filename: value.key_filename.clone(),
+        health_check: value.health_check,
+        raw_json: serde_json::to_string(&value.raw)?,
+    })
+}
+
 pub async fn pull_sites(
     store: &SqliteStore,
     config: &SafeLineConfig,
@@ -8,95 +31,33 @@ pub async fn pull_sites(
 
     let now = unix_timestamp();
     let remote_sites = crate::integrations::safeline::list_sites(config).await?;
+    let cached_sites = remote_sites
+        .iter()
+        .map(cached_site_from_remote)
+        .collect::<Result<Vec<_>, _>>()?;
+    let existing_cache = store.list_safeline_cached_sites().await?;
+
     let mut result = SafeLineSitesPullResult::default();
-    let mut local_sites = store.list_local_sites().await?;
-    let existing_links = store.list_site_sync_links().await?;
-
     for remote_site in &remote_sites {
-        let existing_link = existing_links
+        if existing_cache
             .iter()
-            .find(|item| item.provider == "safeline" && item.remote_site_id == remote_site.id);
-        let sync_mode = existing_link
-            .map(|item| item.sync_mode.as_str())
-            .unwrap_or("remote_to_local");
-        if !allows_pull(sync_mode) {
-            result.skipped_sites += 1;
-            continue;
-        }
-
-        let site_upsert = local_site_upsert_from_remote(remote_site, None, sync_mode, now);
-        let existing_site = existing_link.and_then(|link| {
-            local_sites
-                .iter()
-                .find(|item| item.id == link.local_site_id)
-                .cloned()
-        });
-
-        let local_site_id = if let Some(existing_site) = existing_site {
-            store
-                .update_local_site(existing_site.id, &site_upsert)
-                .await?;
-            replace_local_site(&mut local_sites, existing_site.id, &site_upsert, now);
+            .any(|item| item.remote_site_id == remote_site.id)
+        {
             result.updated_sites += 1;
-            existing_site.id
         } else {
-            let local_site_id = store.insert_local_site(&site_upsert).await?;
-            local_sites.push(LocalSiteEntry {
-                id: local_site_id,
-                name: site_upsert.name.clone(),
-                primary_hostname: site_upsert.primary_hostname.clone(),
-                hostnames_json: serde_json::to_string(&site_upsert.hostnames)?,
-                listen_ports_json: serde_json::to_string(&site_upsert.listen_ports)?,
-                upstreams_json: serde_json::to_string(&site_upsert.upstreams)?,
-                safeline_intercept_json: site_upsert
-                    .safeline_intercept
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()?,
-                enabled: site_upsert.enabled,
-                tls_enabled: site_upsert.tls_enabled,
-                local_certificate_id: site_upsert.local_certificate_id,
-                source: site_upsert.source.clone(),
-                sync_mode: site_upsert.sync_mode.clone(),
-                notes: site_upsert.notes.clone(),
-                last_synced_at: site_upsert.last_synced_at,
-                created_at: now,
-                updated_at: now,
-            });
             result.imported_sites += 1;
-            local_site_id
-        };
-
-        store
-            .upsert_site_sync_link(&SiteSyncLinkUpsert {
-                local_site_id,
-                provider: "safeline".to_string(),
-                remote_site_id: remote_site.id.clone(),
-                remote_site_name: remote_site.name.clone(),
-                remote_cert_id: remote_site.cert_id.map(|id| id.to_string()),
-                sync_mode: sync_mode.to_string(),
-                last_local_hash: Some(hash_local_site_upsert(
-                    &site_upsert,
-                    remote_site.cert_id.map(|id| id.to_string()).as_deref(),
-                )),
-                last_remote_hash: Some(hash_remote_site(remote_site)),
-                last_error: None,
-                last_synced_at: Some(now),
-            })
-            .await?;
-        result.linked_sites += 1;
+        }
     }
 
-    if result.updated_sites > 0 || result.imported_sites > 0 {
-        store
-            .upsert_safeline_sync_state(
-                "sites_pull",
-                Some(now),
-                result.imported_sites + result.updated_sites,
-                result.skipped_sites,
-            )
-            .await?;
-    }
+    store.replace_safeline_cached_sites(&cached_sites).await?;
+    store
+        .upsert_safeline_sync_state(
+            "sites_pull",
+            Some(now),
+            result.imported_sites + result.updated_sites,
+            0,
+        )
+        .await?;
 
     Ok(result)
 }
@@ -269,7 +230,7 @@ pub async fn pull_site(
     store: &SqliteStore,
     config: &SafeLineConfig,
     remote_site_id: &str,
-    options: SafeLineSitePullOptions,
+    _options: SafeLineSitePullOptions,
 ) -> Result<SafeLineSingleSitePullResult> {
     ensure_enabled(config)?;
 
@@ -280,101 +241,25 @@ pub async fn pull_site(
 
     let now = unix_timestamp();
     let remote_sites = crate::integrations::safeline::list_sites(config).await?;
+    let existing_cache = store.list_safeline_cached_sites().await?;
     let remote_site = remote_sites
-        .into_iter()
+        .iter()
         .find(|item| item.id == remote_site_id)
         .ok_or_else(|| anyhow!("雷池站点 '{}' 不存在或当前账号不可见", remote_site_id))?;
-
-    let existing_links = store.list_site_sync_links().await?;
-    let existing_link = existing_links
+    let action = if existing_cache
         .iter()
-        .find(|item| item.provider == "safeline" && item.remote_site_id == remote_site.id)
-        .cloned();
-    let sync_mode = existing_link
-        .as_ref()
-        .map(|item| item.sync_mode.as_str())
-        .unwrap_or("remote_to_local");
-
-    if !allows_pull(sync_mode) {
-        bail!("站点 '{}' 当前链路配置不允许从雷池回流", remote_site.id);
-    }
-
-    let mut local_sites = store.list_local_sites().await?;
-    let linked_local_id = existing_link.as_ref().map(|item| item.local_site_id);
-
-    if let Some(conflict) = find_matching_local_site(&remote_site, &local_sites, linked_local_id) {
-        bail!(
-            "发现疑似重复的本地站点 #{}（{}），为避免覆盖现有配置，请先确认链路后再同步。",
-            conflict.id,
-            conflict.primary_hostname
-        );
-    }
-
-    let existing_local_site = existing_link.as_ref().and_then(|link| {
-        local_sites
-            .iter()
-            .find(|item| item.id == link.local_site_id)
-            .cloned()
-    });
-    let site_upsert = merge_local_site_upsert_from_remote(
-        &remote_site,
-        None,
-        sync_mode,
-        now,
-        existing_local_site.as_ref(),
-        options,
-    );
-
-    let (local_site_id, action) = if let Some(existing_site) = existing_local_site {
-        store
-            .update_local_site(existing_site.id, &site_upsert)
-            .await?;
-        replace_local_site(&mut local_sites, existing_site.id, &site_upsert, now);
-        (existing_site.id, SingleSiteSyncAction::Updated)
+        .any(|item| item.remote_site_id == remote_site.id)
+    {
+        SingleSiteSyncAction::Updated
     } else {
-        let local_site_id = store.insert_local_site(&site_upsert).await?;
-        local_sites.push(LocalSiteEntry {
-            id: local_site_id,
-            name: site_upsert.name.clone(),
-            primary_hostname: site_upsert.primary_hostname.clone(),
-            hostnames_json: serde_json::to_string(&site_upsert.hostnames)?,
-            listen_ports_json: serde_json::to_string(&site_upsert.listen_ports)?,
-            upstreams_json: serde_json::to_string(&site_upsert.upstreams)?,
-            safeline_intercept_json: site_upsert
-                .safeline_intercept
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?,
-            enabled: site_upsert.enabled,
-            tls_enabled: site_upsert.tls_enabled,
-            local_certificate_id: site_upsert.local_certificate_id,
-            source: site_upsert.source.clone(),
-            sync_mode: site_upsert.sync_mode.clone(),
-            notes: site_upsert.notes.clone(),
-            last_synced_at: site_upsert.last_synced_at,
-            created_at: now,
-            updated_at: now,
-        });
-        (local_site_id, SingleSiteSyncAction::Created)
+        SingleSiteSyncAction::Created
     };
 
-    store
-        .upsert_site_sync_link(&SiteSyncLinkUpsert {
-            local_site_id,
-            provider: "safeline".to_string(),
-            remote_site_id: remote_site.id.clone(),
-            remote_site_name: remote_site.name.clone(),
-            remote_cert_id: remote_site.cert_id.map(|id| id.to_string()),
-            sync_mode: sync_mode.to_string(),
-            last_local_hash: Some(hash_local_site_upsert(
-                &site_upsert,
-                remote_site.cert_id.map(|id| id.to_string()).as_deref(),
-            )),
-            last_remote_hash: Some(hash_remote_site(&remote_site)),
-            last_error: None,
-            last_synced_at: Some(now),
-        })
-        .await?;
+    let cached_sites = remote_sites
+        .iter()
+        .map(cached_site_from_remote)
+        .collect::<Result<Vec<_>, _>>()?;
+    store.replace_safeline_cached_sites(&cached_sites).await?;
 
     store
         .upsert_safeline_sync_state("sites_pull", Some(now), 1, 0)
@@ -382,8 +267,7 @@ pub async fn pull_site(
 
     Ok(SafeLineSingleSitePullResult {
         action,
-        local_site_id,
-        remote_site_id: remote_site.id,
+        remote_site_id: remote_site.id.clone(),
     })
 }
 

@@ -189,7 +189,7 @@ pub(super) async fn pull_safeline_sites_handler(
         linked_sites: result.linked_sites as u32,
         skipped_sites: result.skipped_sites as u32,
         message: format!(
-            "雷池站点回流完成，新增站点 {} 个、更新站点 {} 个。证书请在本地证书管理中单独维护。",
+            "雷池站点缓存刷新完成，新增缓存 {} 条、更新缓存 {} 条。本次不会覆盖本地站点配置。",
             result.imported_sites, result.updated_sites,
         ),
     }))
@@ -230,12 +230,12 @@ pub(super) async fn pull_safeline_site_handler(
         success: true,
         message: match result.action {
             crate::integrations::safeline_sync::SingleSiteSyncAction::Created => format!(
-                "雷池站点 {} 已导入到本地站点 #{}。",
-                result.remote_site_id, result.local_site_id
+                "雷池站点 {} 已写入本地缓存，本次不会覆盖本地站点配置。",
+                result.remote_site_id
             ),
             crate::integrations::safeline_sync::SingleSiteSyncAction::Updated => format!(
-                "雷池站点 {} 已回流更新到本地站点 #{}。",
-                result.remote_site_id, result.local_site_id
+                "雷池站点 {} 的本地缓存已刷新，本次不会覆盖本地站点配置。",
+                result.remote_site_id
             ),
         },
     }))

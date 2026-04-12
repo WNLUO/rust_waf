@@ -82,7 +82,6 @@ impl Default for SafeLineSitePullOptions {
 #[derive(Debug, Clone)]
 pub struct SafeLineSingleSitePullResult {
     pub action: SingleSiteSyncAction,
-    pub local_site_id: i64,
     pub remote_site_id: String,
 }
 
@@ -266,149 +265,6 @@ async fn sync_remote_certificate(
     Ok(SyncInsertState { inserted, local_id })
 }
 
-fn local_site_upsert_from_remote(
-    remote_site: &SafeLineSiteSummary,
-    local_certificate_id: Option<i64>,
-    sync_mode: &str,
-    now: i64,
-) -> LocalSiteUpsert {
-    let primary_hostname = remote_site
-        .server_names
-        .first()
-        .cloned()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| remote_site.domain.clone());
-    let mut hostnames = remote_site.server_names.clone();
-    if !hostnames.iter().any(|item| item == &primary_hostname) {
-        hostnames.insert(0, primary_hostname.clone());
-    }
-
-    LocalSiteUpsert {
-        name: if !remote_site.name.trim().is_empty() {
-            remote_site.name.clone()
-        } else {
-            primary_hostname.clone()
-        },
-        primary_hostname,
-        hostnames,
-        listen_ports: remote_site.ports.clone(),
-        upstreams: remote_site.upstreams.clone(),
-        safeline_intercept: None,
-        enabled: remote_site
-            .enabled
-            .unwrap_or_else(|| !remote_site.status.contains("disabled")),
-        tls_enabled: remote_site.ssl_enabled,
-        local_certificate_id,
-        source: "safeline".to_string(),
-        sync_mode: sync_mode.to_string(),
-        notes: format!("Imported from SafeLine site {}", remote_site.id),
-        last_synced_at: Some(now),
-    }
-}
-
-fn merge_local_site_upsert_from_remote(
-    remote_site: &SafeLineSiteSummary,
-    local_certificate_id: Option<i64>,
-    sync_mode: &str,
-    now: i64,
-    existing_site: Option<&LocalSiteEntry>,
-    options: SafeLineSitePullOptions,
-) -> LocalSiteUpsert {
-    let remote_upsert =
-        local_site_upsert_from_remote(remote_site, local_certificate_id, sync_mode, now);
-
-    let mut merged = if let Some(existing_site) = existing_site {
-        let mut hostnames = if options.hostnames {
-            remote_upsert.hostnames.clone()
-        } else {
-            parse_json_vec(&existing_site.hostnames_json)
-                .unwrap_or_else(|_| vec![existing_site.primary_hostname.clone()])
-        };
-
-        let primary_hostname = if options.primary_hostname {
-            remote_upsert.primary_hostname.clone()
-        } else {
-            existing_site.primary_hostname.clone()
-        };
-
-        if !hostnames.iter().any(|item| item == &primary_hostname) {
-            hostnames.insert(0, primary_hostname.clone());
-        }
-
-        LocalSiteUpsert {
-            name: if options.name {
-                remote_upsert.name.clone()
-            } else {
-                existing_site.name.clone()
-            },
-            primary_hostname,
-            hostnames,
-            listen_ports: if options.listen_ports {
-                remote_upsert.listen_ports.clone()
-            } else {
-                parse_json_vec(&existing_site.listen_ports_json).unwrap_or_default()
-            },
-            upstreams: if options.upstreams {
-                remote_upsert.upstreams.clone()
-            } else {
-                parse_json_vec(&existing_site.upstreams_json).unwrap_or_default()
-            },
-            safeline_intercept: existing_site
-                .safeline_intercept_json
-                .as_ref()
-                .and_then(|value| serde_json::from_str(value).ok()),
-            enabled: if options.enabled {
-                remote_upsert.enabled
-            } else {
-                existing_site.enabled
-            },
-            tls_enabled: remote_upsert.tls_enabled,
-            local_certificate_id: existing_site.local_certificate_id,
-            source: existing_site.source.clone(),
-            sync_mode: sync_mode.to_string(),
-            notes: existing_site.notes.clone(),
-            last_synced_at: Some(now),
-        }
-    } else {
-        let mut created = remote_upsert;
-        created.hostnames = if options.hostnames {
-            created.hostnames
-        } else {
-            vec![created.primary_hostname.clone()]
-        };
-        if !created
-            .hostnames
-            .iter()
-            .any(|item| item == &created.primary_hostname)
-        {
-            created
-                .hostnames
-                .insert(0, created.primary_hostname.clone());
-        }
-        if !options.listen_ports {
-            created.listen_ports = Vec::new();
-        }
-        if !options.upstreams {
-            created.upstreams = Vec::new();
-        }
-        if !options.enabled {
-            created.enabled = true;
-        }
-        created.local_certificate_id = None;
-        created
-    };
-
-    if !merged
-        .hostnames
-        .iter()
-        .any(|item| item == &merged.primary_hostname)
-    {
-        merged.hostnames.insert(0, merged.primary_hostname.clone());
-    }
-
-    merged
-}
-
 fn normalized_domain_set(domains: &[String]) -> Vec<String> {
     let mut items = domains
         .iter()
@@ -545,42 +401,6 @@ fn replace_local_certificate(
     }
 }
 
-fn replace_local_site(
-    local_sites: &mut Vec<LocalSiteEntry>,
-    id: i64,
-    upsert: &LocalSiteUpsert,
-    now: i64,
-) {
-    if let Some(item) = local_sites.iter_mut().find(|item| item.id == id) {
-        item.name = upsert.name.clone();
-        item.primary_hostname = upsert.primary_hostname.clone();
-        item.hostnames_json =
-            serde_json::to_string(&upsert.hostnames).unwrap_or_else(|_| "[]".to_string());
-        item.listen_ports_json =
-            serde_json::to_string(&upsert.listen_ports).unwrap_or_else(|_| "[]".to_string());
-        item.upstreams_json =
-            serde_json::to_string(&upsert.upstreams).unwrap_or_else(|_| "[]".to_string());
-        item.safeline_intercept_json = upsert
-            .safeline_intercept
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .unwrap_or(None);
-        item.enabled = upsert.enabled;
-        item.tls_enabled = upsert.tls_enabled;
-        item.local_certificate_id = upsert.local_certificate_id;
-        item.source = upsert.source.clone();
-        item.sync_mode = upsert.sync_mode.clone();
-        item.notes = upsert.notes.clone();
-        item.last_synced_at = upsert.last_synced_at;
-        item.updated_at = now;
-    }
-}
-
-fn allows_pull(sync_mode: &str) -> bool {
-    !matches!(sync_mode.trim(), "local_to_remote" | "push_only")
-}
-
 fn allows_push(sync_mode: &str) -> bool {
     !matches!(sync_mode.trim(), "remote_to_local" | "pull_only")
 }
@@ -611,22 +431,6 @@ fn match_remote_site(
     remote_sites
         .iter()
         .find(|remote| site_matches_remote(local_site, remote))
-        .cloned()
-}
-
-fn find_matching_local_site(
-    remote_site: &SafeLineSiteSummary,
-    local_sites: &[LocalSiteEntry],
-    exclude_local_id: Option<i64>,
-) -> Option<LocalSiteEntry> {
-    local_sites
-        .iter()
-        .find(|local_site| {
-            if Some(local_site.id) == exclude_local_id {
-                return false;
-            }
-            site_matches_remote(local_site, remote_site)
-        })
         .cloned()
 }
 

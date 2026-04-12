@@ -3183,6 +3183,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower",
+ "webpki-roots 0.26.11",
  "zip",
 ]
 

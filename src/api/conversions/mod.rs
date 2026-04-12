@@ -97,9 +97,7 @@ impl L4ConfigResponse {
                 .behavior_hard_delay_threshold_percent,
             behavior_soft_delay_ms: config.l4_config.behavior_soft_delay_ms,
             behavior_hard_delay_ms: config.l4_config.behavior_hard_delay_ms,
-            behavior_reject_threshold_percent: config
-                .l4_config
-                .behavior_reject_threshold_percent,
+            behavior_reject_threshold_percent: config.l4_config.behavior_reject_threshold_percent,
             behavior_critical_reject_threshold_percent: config
                 .l4_config
                 .behavior_critical_reject_threshold_percent,

@@ -82,6 +82,7 @@ async fn proxy_http_request(
     read_timeout_ms: u64,
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
+    let skip_verify = should_skip_upstream_tls_verification(context, &upstream);
     if matches!(upstream.scheme, UpstreamScheme::Http) {
         let upstream_stream = tokio::time::timeout(
             std::time::Duration::from_millis(connect_timeout_ms),
@@ -114,7 +115,7 @@ async fn proxy_http_request(
             .to_string(),
     )
     .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
-    let tls_connector = build_insecure_upstream_tls_connector();
+    let tls_connector = build_upstream_tls_connector(skip_verify)?;
     let tls_stream = tokio::time::timeout(
         std::time::Duration::from_millis(connect_timeout_ms),
         tls_connector.connect(server_name, upstream_stream),
@@ -137,6 +138,7 @@ async fn proxy_http_request_with_session_affinity(
     reusable_connection: &mut Option<UpstreamClientConnection>,
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
+    let skip_verify = should_skip_upstream_tls_verification(context, &upstream);
     let same_authority = reusable_connection
         .as_ref()
         .map(|connection| match connection {
@@ -149,7 +151,7 @@ async fn proxy_http_request_with_session_affinity(
     }
     if reusable_connection.is_none() {
         *reusable_connection = Some(
-            connect_upstream_client(&upstream, connect_timeout_ms).await?,
+            connect_upstream_client(&upstream, connect_timeout_ms, skip_verify).await?,
         );
     }
 
@@ -188,6 +190,7 @@ async fn proxy_http_request_with_session_affinity(
 async fn connect_upstream_client(
     upstream: &crate::core::gateway::UpstreamEndpoint,
     connect_timeout_ms: u64,
+    skip_certificate_verification: bool,
 ) -> Result<UpstreamClientConnection> {
     match upstream.scheme {
         UpstreamScheme::Http => {
@@ -217,7 +220,7 @@ async fn connect_upstream_client(
                     .to_string(),
             )
             .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
-            let tls_connector = build_insecure_upstream_tls_connector();
+            let tls_connector = build_upstream_tls_connector(skip_certificate_verification)?;
             let stream = tokio::time::timeout(
                 std::time::Duration::from_millis(connect_timeout_ms),
                 tls_connector.connect(server_name, upstream_stream),
@@ -317,6 +320,24 @@ where
     parse_http1_response(&response_bytes)
 }
 
+fn build_upstream_tls_connector(skip_certificate_verification: bool) -> Result<TlsConnector> {
+    if skip_certificate_verification {
+        return Ok(build_insecure_upstream_tls_connector());
+    }
+
+    build_verified_upstream_tls_connector()
+}
+
+fn build_verified_upstream_tls_connector() -> Result<TlsConnector> {
+    crate::tls::ensure_rustls_crypto_provider();
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = RustlsClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
 fn build_insecure_upstream_tls_connector() -> TlsConnector {
     crate::tls::ensure_rustls_crypto_provider();
     let config = RustlsClientConfig::builder()
@@ -324,6 +345,56 @@ fn build_insecure_upstream_tls_connector() -> TlsConnector {
         .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
         .with_no_client_auth();
     TlsConnector::from(Arc::new(config))
+}
+
+fn should_skip_upstream_tls_verification(
+    context: &WafContext,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> bool {
+    if !matches!(upstream.scheme, UpstreamScheme::Https) {
+        return false;
+    }
+
+    let config = context.config_snapshot();
+    let safeline_base_url = config.integrations.safeline.base_url.trim();
+    if safeline_base_url.is_empty() {
+        return false;
+    }
+
+    let safeline_uri = match safeline_base_url.parse::<http::Uri>() {
+        Ok(uri) => uri,
+        Err(_) => return false,
+    };
+    if !safeline_uri
+        .scheme_str()
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https"))
+    {
+        return false;
+    }
+
+    let Some(safeline_authority) = safeline_uri.authority().map(|value| value.as_str()) else {
+        return false;
+    };
+
+    authorities_match_https(safeline_authority, &upstream.authority)
+}
+
+fn authorities_match_https(left: &str, right: &str) -> bool {
+    let Some((left_host, left_port)) = parse_https_authority(left) else {
+        return false;
+    };
+    let Some((right_host, right_port)) = parse_https_authority(right) else {
+        return false;
+    };
+
+    left_host.eq_ignore_ascii_case(&right_host) && left_port == right_port
+}
+
+fn parse_https_authority(authority: &str) -> Option<(String, u16)> {
+    let uri = format!("https://{}", authority).parse::<http::Uri>().ok()?;
+    let host = uri.host()?.to_string();
+    let port = uri.port_u16().unwrap_or(443);
+    Some((host, port))
 }
 
 #[derive(Debug)]

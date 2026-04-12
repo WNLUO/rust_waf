@@ -61,6 +61,8 @@ impl L4Inspector {
     pub async fn start(&self, _context: &WafContext) -> anyhow::Result<()> {
         info!("Starting L4 Inspector with all subsystems");
 
+        self.behavior_engine.start();
+
         // Start all subsystems
         self.connection_manager.start().await?;
 

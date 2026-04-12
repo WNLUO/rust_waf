@@ -8,6 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
@@ -16,10 +17,11 @@ const REQUEST_WINDOW: Duration = Duration::from_secs(10);
 const FEEDBACK_WINDOW: Duration = Duration::from_secs(120);
 const COOL_DOWN_SECS: i64 = 10;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct L4BehaviorEngine {
     buckets: Arc<DashMap<BucketKey, BucketRuntime>>,
     sender: mpsc::Sender<BehaviorEvent>,
+    worker_receiver: Mutex<Option<mpsc::Receiver<BehaviorEvent>>>,
     dropped_events: Arc<AtomicU64>,
     max_buckets: usize,
     fallback_threshold: usize,
@@ -251,20 +253,33 @@ impl L4BehaviorEngine {
         let fallback_threshold =
             max_buckets.saturating_mul(config.behavior_fallback_ratio_percent as usize) / 100;
 
-        tokio::spawn(worker_loop(
-            Arc::clone(&buckets),
-            receiver,
-            max_buckets,
-            fallback_threshold,
-        ));
-
         Self {
             buckets,
             sender,
+            worker_receiver: Mutex::new(Some(receiver)),
             dropped_events,
             max_buckets,
             fallback_threshold,
             tuning,
+        }
+    }
+
+    pub fn start(&self) {
+        let receiver = {
+            let mut guard = self
+                .worker_receiver
+                .lock()
+                .expect("behavior worker receiver lock poisoned");
+            guard.take()
+        };
+
+        if let Some(receiver) = receiver {
+            tokio::spawn(worker_loop(
+                Arc::clone(&self.buckets),
+                receiver,
+                self.max_buckets,
+                self.fallback_threshold,
+            ));
         }
     }
 
@@ -1142,6 +1157,7 @@ mod tests {
             max_tracked_ips: 4,
             ..L4Config::default()
         });
+        engine.start();
         let peer_ip = packet(10).source_ip;
 
         for idx in 0..160 {
@@ -1170,6 +1186,7 @@ mod tests {
             max_tracked_ips: 3,
             ..L4Config::default()
         });
+        engine.start();
 
         let p1 = packet(11);
         let p2 = packet(12);
@@ -1210,6 +1227,7 @@ mod tests {
             max_tracked_ips: 16,
             ..L4Config::default()
         });
+        engine.start();
         let p = packet(21);
         let mut key = None;
 
@@ -1238,6 +1256,7 @@ mod tests {
             behavior_normal_connection_budget_per_minute: 42,
             ..L4Config::default()
         });
+        engine.start();
 
         let policy = engine.pre_admission_policy(packet(30).source_ip, "tls");
         assert_eq!(policy.connection_budget_per_minute, 42);
@@ -1251,6 +1270,7 @@ mod tests {
             behavior_drop_critical_threshold: 10_000,
             ..L4Config::default()
         });
+        engine.start();
         let p = packet(31);
 
         for idx in 0..2_000 {

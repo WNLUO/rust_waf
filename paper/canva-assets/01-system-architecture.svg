@@ -42,10 +42,10 @@
   <rect x="940" y="190" width="250" height="520" rx="24" fill="#F6EBFA" stroke="#BB8AD9" stroke-width="2"/>
   <text x="972" y="246" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">持久化层</text>
   <text x="972" y="292" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">SQLite 配置</text>
-  <text x="972" y="332" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则与模板</text>
+  <text x="972" y="332" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则 / 覆盖配置</text>
   <text x="972" y="372" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">security_events</text>
   <text x="972" y="412" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">blocked_ips</text>
-  <text x="972" y="452" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点 / 证书 / 联动</text>
+  <text x="972" y="452" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点 / 证书 / 同步链路</text>
   <text x="972" y="520" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责统一审计、</text>
   <text x="972" y="548" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">配置保存与</text>
   <text x="972" y="576" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">诱导事件落库</text>
@@ -54,12 +54,13 @@
   <text x="1266" y="246" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">管理控制层</text>
   <text x="1266" y="292" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Axum API</text>
   <text x="1266" y="332" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Vue 控制台</text>
-  <text x="1266" y="372" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">动作中心</text>
-  <text x="1266" y="412" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">事件筛选与看板</text>
-  <text x="1266" y="452" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">SafeLine 联动</text>
-  <text x="1266" y="520" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责配置操作、</text>
-  <text x="1266" y="548" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">指标展示与</text>
-  <text x="1266" y="576" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">外部平台协同</text>
+  <text x="1266" y="372" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点 / 证书 / 设置</text>
+  <text x="1266" y="412" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">动作中心与规则</text>
+  <text x="1266" y="452" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L4 / L7 看板</text>
+  <text x="1266" y="492" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">SafeLine 联动</text>
+  <text x="1266" y="560" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责配置操作、</text>
+  <text x="1266" y="588" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">指标展示、证书同步与</text>
+  <text x="1266" y="616" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">外部平台协同</text>
 
   <path d="M308 450H352" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
   <path d="M612 450H656" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>

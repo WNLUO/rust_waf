@@ -2090,8 +2090,8 @@ fn handle_browser_fingerprint_report(
     event.provider_event_id = Some(provider_event_id.clone());
     event.provider_site_id = matched_site.map(|site| site.id.to_string());
     event.provider_site_name = matched_site.map(|site| site.name.clone());
-    event.provider_site_domain =
-        request_hostname(request).or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
+    event.provider_site_domain = request_hostname(request)
+        .or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
@@ -2952,19 +2952,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(events.total, 1);
-        assert_eq!(events.items[0].provider.as_deref(), Some("browser_fingerprint"));
-        assert_eq!(events.items[0].provider_event_id.as_deref(), Some("fp-test-123"));
+        assert_eq!(
+            events.items[0].provider.as_deref(),
+            Some("browser_fingerprint")
+        );
+        assert_eq!(
+            events.items[0].provider_event_id.as_deref(),
+            Some("fp-test-123")
+        );
         assert_eq!(
             events.items[0].uri.as_deref(),
             Some(BROWSER_FINGERPRINT_REPORT_PATH)
         );
-        assert!(
-            events.items[0]
-                .details_json
-                .as_deref()
-                .unwrap_or_default()
-                .contains("\"server\"")
-        );
+        assert!(events.items[0]
+            .details_json
+            .as_deref()
+            .unwrap_or_default()
+            .contains("\"server\""));
     }
 
     #[tokio::test]

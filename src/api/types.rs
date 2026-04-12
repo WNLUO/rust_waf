@@ -424,6 +424,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_false() -> bool {
+    false
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct SafeLineSitePullOptionsRequest {
     #[serde(default = "default_true")]
@@ -440,7 +444,7 @@ pub struct SafeLineSitePullOptionsRequest {
     pub(crate) enabled: bool,
     #[serde(default = "default_true")]
     pub(crate) tls_enabled: bool,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub(crate) local_certificate_id: bool,
 }
 
@@ -454,7 +458,7 @@ impl Default for SafeLineSitePullOptionsRequest {
             upstreams: true,
             enabled: true,
             tls_enabled: true,
-            local_certificate_id: true,
+            local_certificate_id: false,
         }
     }
 }

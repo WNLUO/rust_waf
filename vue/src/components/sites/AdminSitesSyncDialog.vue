@@ -47,7 +47,6 @@ const fieldOptions: Array<{
   { key: 'upstreams', label: 'Upstream', description: '上游地址列表' },
   { key: 'enabled', label: '启用状态', description: '是否启用该站点' },
   { key: 'tls_enabled', label: 'TLS', description: 'TLS 开关状态' },
-  { key: 'local_certificate_id', label: '证书', description: '关联远端证书' },
 ]
 
 function fieldChecked(
@@ -128,6 +127,10 @@ function fieldDisabled(
               {{ loading ? '重新读取中...' : '重新读取雷池站点' }}
             </button>
           </div>
+
+          <p class="text-xs text-slate-500">
+            当前仅同步站点字段，不会回流雷池证书。证书请在“证书管理”页单独维护。
+          </p>
         </div>
       </div>
 

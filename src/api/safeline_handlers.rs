@@ -189,11 +189,8 @@ pub(super) async fn pull_safeline_sites_handler(
         linked_sites: result.linked_sites as u32,
         skipped_sites: result.skipped_sites as u32,
         message: format!(
-            "雷池站点回流完成，新增站点 {} 个、更新站点 {} 个，新增证书 {} 个、更新证书 {} 个。",
-            result.imported_sites,
-            result.updated_sites,
-            result.imported_certificates,
-            result.updated_certificates
+            "雷池站点回流完成，新增站点 {} 个、更新站点 {} 个。证书请在本地证书管理中单独维护。",
+            result.imported_sites, result.updated_sites,
         ),
     }))
 }
@@ -212,16 +209,18 @@ pub(super) async fn pull_safeline_site_handler(
     }
 
     let options = payload
-        .map(|item| crate::integrations::safeline_sync::SafeLineSitePullOptions {
-            name: item.options.name,
-            primary_hostname: item.options.primary_hostname,
-            hostnames: item.options.hostnames,
-            listen_ports: item.options.listen_ports,
-            upstreams: item.options.upstreams,
-            enabled: item.options.enabled,
-            tls_enabled: item.options.tls_enabled,
-            local_certificate_id: item.options.local_certificate_id,
-        })
+        .map(
+            |item| crate::integrations::safeline_sync::SafeLineSitePullOptions {
+                name: item.options.name,
+                primary_hostname: item.options.primary_hostname,
+                hostnames: item.options.hostnames,
+                listen_ports: item.options.listen_ports,
+                upstreams: item.options.upstreams,
+                enabled: item.options.enabled,
+                tls_enabled: item.options.tls_enabled,
+                local_certificate_id: false,
+            },
+        )
         .unwrap_or_default();
 
     let result =

@@ -88,10 +88,9 @@ impl SqliteStore {
 
         if existed_before {
             match create_backup_snapshot(&pool, &db_path, BackupKind::Startup).await {
-                Ok(backup_path) => info!(
-                    "Created SQLite startup backup: {}",
-                    backup_path.display()
-                ),
+                Ok(backup_path) => {
+                    info!("Created SQLite startup backup: {}", backup_path.display())
+                }
                 Err(err) => warn!(
                     "Failed to create SQLite startup backup for {}: {}",
                     db_path.display(),
@@ -1728,7 +1727,11 @@ async fn backup_corrupted_db(path: &Path) -> Result<PathBuf> {
     Ok(backup_path)
 }
 
-async fn create_backup_snapshot(pool: &SqlitePool, db_path: &Path, kind: BackupKind) -> Result<PathBuf> {
+async fn create_backup_snapshot(
+    pool: &SqlitePool,
+    db_path: &Path,
+    kind: BackupKind,
+) -> Result<PathBuf> {
     ensure_backup_dir(db_path).await?;
     let backup_path = backup_file_path(db_path, kind, &timestamp_suffix());
     checkpoint_wal(pool).await?;
@@ -1776,13 +1779,20 @@ fn backup_dir(path: &Path) -> PathBuf {
 }
 
 fn backup_file_path(path: &Path, kind: BackupKind, timestamp: &str) -> PathBuf {
-    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("sqlite");
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("sqlite");
     let ext = path
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| format!(".{ext}"))
         .unwrap_or_default();
-    backup_dir(path).join(format!("{stem}.{}.{}{ext}", backup_kind_label(kind), timestamp))
+    backup_dir(path).join(format!(
+        "{stem}.{}.{}{ext}",
+        backup_kind_label(kind),
+        timestamp
+    ))
 }
 
 fn backup_kind_label(kind: BackupKind) -> &'static str {
@@ -1799,7 +1809,10 @@ async fn prune_backups(path: &Path, kind: BackupKind, retain: usize) -> Result<(
         return Ok(());
     }
 
-    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("sqlite");
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("sqlite");
     let ext = path
         .extension()
         .and_then(|value| value.to_str())
@@ -1822,9 +1835,14 @@ async fn prune_backups(path: &Path, kind: BackupKind, retain: usize) -> Result<(
     backup_files.sort();
     let remove_count = backup_files.len().saturating_sub(retain);
     for backup_path in backup_files.into_iter().take(remove_count) {
-        tokio::fs::remove_file(&backup_path).await.with_context(|| {
-            format!("failed to remove old SQLite backup {}", backup_path.display())
-        })?;
+        tokio::fs::remove_file(&backup_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to remove old SQLite backup {}",
+                    backup_path.display()
+                )
+            })?;
     }
 
     Ok(())
@@ -2231,9 +2249,10 @@ mod tests {
             .unwrap()
             .filter_map(|entry| entry.ok())
             .any(|entry| {
-                entry.file_name().to_str().is_some_and(|name| {
-                    name.starts_with(&backup_prefix) && name.ends_with(".db")
-                })
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(&backup_prefix) && name.ends_with(".db"))
             });
         assert!(backup_exists, "expected corrupted database backup to exist");
     }
@@ -2255,9 +2274,10 @@ mod tests {
             .unwrap()
             .filter_map(|entry| entry.ok())
             .any(|entry| {
-                entry.file_name().to_str().is_some_and(|name| {
-                    name.starts_with(&backup_prefix) && name.ends_with(".db")
-                })
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(&backup_prefix) && name.ends_with(".db"))
             });
         assert!(backup_exists, "expected startup database backup to exist");
     }

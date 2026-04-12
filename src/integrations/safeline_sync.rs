@@ -10,7 +10,6 @@ use crate::storage::{
 };
 use anyhow::{anyhow, bail, Result};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
 
 #[derive(Debug, Clone, Default)]
 pub struct SafeLineSitesPullResult {
@@ -60,7 +59,7 @@ impl Default for SafeLineSitePullOptions {
             upstreams: true,
             enabled: true,
             tls_enabled: true,
-            local_certificate_id: true,
+            local_certificate_id: false,
         }
     }
 }
@@ -103,37 +102,9 @@ pub async fn pull_sites(
 
     let now = unix_timestamp();
     let remote_sites = crate::integrations::safeline::list_sites(config).await?;
-    let remote_certificates = crate::integrations::safeline::list_certificates(config).await?;
-    let referenced_certificate_ids = remote_sites
-        .iter()
-        .filter_map(|item| item.cert_id.map(|id| id.to_string()))
-        .collect::<HashSet<_>>();
-
     let mut result = SafeLineSitesPullResult::default();
-    let mut local_certificates = store.list_local_certificates().await?;
     let mut local_sites = store.list_local_sites().await?;
     let existing_links = store.list_site_sync_links().await?;
-
-    for certificate in &remote_certificates {
-        let local_id = sync_remote_certificate(
-            store,
-            &mut local_certificates,
-            certificate,
-            if referenced_certificate_ids.contains(&certificate.id) {
-                Some(load_required_certificate_detail(config, certificate).await?)
-            } else {
-                None
-            },
-            now,
-        )
-        .await?;
-
-        if local_id.inserted {
-            result.imported_certificates += 1;
-        } else {
-            result.updated_certificates += 1;
-        }
-    }
 
     for remote_site in &remote_sites {
         let existing_link = existing_links
@@ -147,17 +118,7 @@ pub async fn pull_sites(
             continue;
         }
 
-        let local_certificate_id = remote_site.cert_id.and_then(|cert_id| {
-            local_certificates
-                .iter()
-                .find(|item| {
-                    item.provider_remote_id.as_deref() == Some(cert_id.to_string().as_str())
-                })
-                .map(|item| item.id)
-        });
-
-        let site_upsert =
-            local_site_upsert_from_remote(remote_site, local_certificate_id, sync_mode, now);
+        let site_upsert = local_site_upsert_from_remote(remote_site, None, sync_mode, now);
         let existing_site = existing_link.and_then(|link| {
             local_sites
                 .iter()
@@ -931,7 +892,8 @@ fn merge_local_site_upsert_from_remote(
     existing_site: Option<&LocalSiteEntry>,
     options: SafeLineSitePullOptions,
 ) -> LocalSiteUpsert {
-    let remote_upsert = local_site_upsert_from_remote(remote_site, local_certificate_id, sync_mode, now);
+    let remote_upsert =
+        local_site_upsert_from_remote(remote_site, local_certificate_id, sync_mode, now);
 
     let mut merged = if let Some(existing_site) = existing_site {
         let mut hostnames = if options.hostnames {
@@ -1000,8 +962,14 @@ fn merge_local_site_upsert_from_remote(
         } else {
             vec![created.primary_hostname.clone()]
         };
-        if !created.hostnames.iter().any(|item| item == &created.primary_hostname) {
-            created.hostnames.insert(0, created.primary_hostname.clone());
+        if !created
+            .hostnames
+            .iter()
+            .any(|item| item == &created.primary_hostname)
+        {
+            created
+                .hostnames
+                .insert(0, created.primary_hostname.clone());
         }
         if !options.listen_ports {
             created.listen_ports = Vec::new();
@@ -1021,7 +989,11 @@ fn merge_local_site_upsert_from_remote(
         created
     };
 
-    if !merged.hostnames.iter().any(|item| item == &merged.primary_hostname) {
+    if !merged
+        .hostnames
+        .iter()
+        .any(|item| item == &merged.primary_hostname)
+    {
         merged.hostnames.insert(0, merged.primary_hostname.clone());
     }
 

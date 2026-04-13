@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Settings } from 'lucide-vue-next'
 import type { LocalCertificateItem, SafeLineTestResponse } from '@/shared/types'
 import type { SystemSettingsForm } from '@/features/settings/utils/adminSettings'
 import type { GlobalEntryConfigPayload } from '@/shared/types'
@@ -153,29 +152,13 @@ function truncateCertificateName(name: string, maxLength = 18) {
 </script>
 
 <template>
-  <div
-    class="rounded-2xl border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(248,250,252,0.94))] p-5 shadow-[0_16px_36px_rgba(90,60,30,0.06)]"
-  >
-    <div class="flex items-start gap-3">
-      <div
-        class="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-blue-700"
-      >
-        <Settings :size="20" />
-      </div>
-      <div class="min-w-0">
-        <h3 class="mt-1 text-xl font-semibold text-stone-900">
-          基础运行配置
-        </h3>
-      </div>
-    </div>
-
-    <div class="mt-5 space-y-4">
+  <div class="space-y-4">
       <section class="rounded-2xl border border-slate-200/90 bg-white/90 p-4">
         <div>
           <p class="text-sm font-semibold text-stone-900">核心参数</p>
         </div>
 
-        <div class="mt-4 grid gap-3 xl:grid-cols-4">
+        <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
           <label class="flex items-center gap-2.5 px-1 py-1.5">
             <span class="shrink-0 text-xs font-medium text-slate-500"
               >统一 HTTP 入口端口</span
@@ -185,7 +168,7 @@ function truncateCertificateName(name: string, maxLength = 18) {
               type="text"
               inputmode="numeric"
               placeholder="例如 8080"
-              class="w-full max-w-[9.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
+              class="w-full max-w-[5.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-sm outline-none transition focus:border-blue-500"
             />
           </label>
           <label class="flex items-center gap-2.5 px-1 py-1.5">
@@ -197,7 +180,7 @@ function truncateCertificateName(name: string, maxLength = 18) {
               type="text"
               inputmode="numeric"
               placeholder="例如 660，可留空关闭 HTTPS 入口"
-              class="w-full max-w-[9.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
+              class="w-full max-w-[5.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-sm outline-none transition focus:border-blue-500"
             />
           </label>
           <label class="flex items-center gap-2.5 px-1 py-1.5">
@@ -207,7 +190,7 @@ function truncateCertificateName(name: string, maxLength = 18) {
             <input
               v-model="apiEndpoint"
               type="text"
-              class="w-full max-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
+              class="w-full max-w-[9rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-sm outline-none transition focus:border-blue-500"
             />
           </label>
           <label class="flex items-center gap-2.5 px-1 py-1.5">
@@ -375,7 +358,6 @@ function truncateCertificateName(name: string, maxLength = 18) {
           </div>
         </div>
       </section>
-    </div>
   </div>
 </template>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
   listFieldClass,
@@ -9,14 +9,15 @@ import {
 
 const props = defineProps<{
   form: L7ConfigForm
-  listenAddrsText: string
   trustedProxyCidrsText: string
+  dropUnmatchedRequests: boolean
+  dropUnmatchedRequestsDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:form': [value: L7ConfigForm]
-  'update:listenAddrsText': [value: string]
   'update:trustedProxyCidrsText': [value: string]
+  'update:dropUnmatchedRequests': [value: boolean]
 }>()
 
 function updateForm<K extends keyof L7ConfigForm>(
@@ -199,6 +200,33 @@ const safelineResponseContentType = computed({
     updateSafelineResponseTemplate({ content_type: value }),
 })
 
+const contentTypeDialogOpen = ref(false)
+const contentTypeDraft = ref('')
+const contentTypeOptions = [
+  'text/html; charset=utf-8',
+  'text/plain; charset=utf-8',
+  'application/json; charset=utf-8',
+  'text/xml; charset=utf-8',
+]
+
+function openContentTypeDialog() {
+  contentTypeDraft.value = safelineResponseContentType.value
+  contentTypeDialogOpen.value = true
+}
+
+function selectContentTypeOption(value: string) {
+  contentTypeDraft.value = value
+}
+
+function confirmContentTypeDialog() {
+  safelineResponseContentType.value = contentTypeDraft.value.trim()
+  contentTypeDialogOpen.value = false
+}
+
+function closeContentTypeDialog() {
+  contentTypeDialogOpen.value = false
+}
+
 const safelineResponseBodySource = computed({
   get: () => props.form.safeline_intercept.response_template.body_source,
   set: (value: string) =>
@@ -253,137 +281,117 @@ const safelineResponseHeadersText = computed({
     >
       <div>
         <p class="text-sm tracking-wider text-blue-700">HTTP 配置</p>
-        <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-          HTTP 接入与代理参数
-        </h3>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <StatusBadge
-          :text="form.http2_enabled ? 'HTTP/2 已启用' : 'HTTP/2 未启用'"
-          :type="form.http2_enabled ? 'info' : 'muted'"
-        />
       </div>
     </div>
 
-    <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <span class="flex items-center justify-between gap-3">
-          <span class="font-medium">启用 HTTP/2</span>
-          <input
-            v-model="http2Enabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </span>
-        <span class="mt-2 block text-xs leading-6 text-slate-500"
-          >启用后可处理 h2 / TLS ALPN 路由到的请求。</span
-        >
+    <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>启用 HTTP/2</span>
+        <input
+          v-model="http2Enabled"
+          type="checkbox"
+          class="ui-switch"
+        />
       </label>
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <span class="flex items-center justify-between gap-3">
-          <span class="font-medium">启用 Bloom</span>
-          <input
-            v-model="bloomEnabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </span>
-        <span class="mt-2 block text-xs leading-6 text-slate-500"
-          >控制全局 Bloom 过滤能力，关闭后误判校验也会随之失效。</span
-        >
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>未命中站点时直接断开连接</span>
+        <input
+          :checked="dropUnmatchedRequests"
+          :disabled="dropUnmatchedRequestsDisabled"
+          type="checkbox"
+          class="ui-switch"
+          @change="
+            emit(
+              'update:dropUnmatchedRequests',
+              ($event.target as HTMLInputElement).checked,
+            )
+          "
+        />
       </label>
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <span class="flex items-center justify-between gap-3">
-          <span class="font-medium">启用上游健康检查</span>
-          <input
-            v-model="healthcheckEnabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </span>
-        <span class="mt-2 block text-xs leading-6 text-slate-500"
-          >关闭后故障状态仅来自实时代理结果，不再主动探测。</span
-        >
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>启用 Bloom</span>
+        <input
+          v-model="bloomEnabled"
+          type="checkbox"
+          class="ui-switch"
+        />
       </label>
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <span class="flex items-center justify-between gap-3">
-          <span class="font-medium">启用 Bloom 误判校验</span>
-          <input
-            v-model="bloomVerifyEnabled"
-            :disabled="!form.bloom_enabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </span>
-        <span class="mt-2 block text-xs leading-6 text-slate-500"
-          >启用后会为命中结果追加精确校验，适合误判敏感场景。</span
-        >
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>启用上游健康检查</span>
+        <input
+          v-model="healthcheckEnabled"
+          type="checkbox"
+          class="ui-switch"
+        />
       </label>
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <span class="flex items-center justify-between gap-3">
-          <span class="font-medium">启用 HTTP/3</span>
-          <input
-            v-model="http3Enabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </span>
-        <span class="mt-2 block text-xs leading-6 text-slate-500"
-          >启用后会尝试监听 QUIC / HTTP/3 入口。</span
-        >
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>启用 Bloom 误判校验</span>
+        <input
+          v-model="bloomVerifyEnabled"
+          :disabled="!form.bloom_enabled"
+          type="checkbox"
+          class="ui-switch"
+        />
       </label>
-      <div
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <p class="font-medium">运行档位</p>
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>启用 HTTP/3</span>
+        <input
+          v-model="http3Enabled"
+          type="checkbox"
+          class="ui-switch"
+        />
+      </label>
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>允许使用优先级信息处理 HTTP/2 请求</span>
+        <input
+          v-model="http2EnablePriorities"
+          type="checkbox"
+          class="ui-switch"
+        />
+      </label>
+    </div>
+
+    <div class="mt-4 border-t border-slate-200 pt-4">
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <label class="text-sm text-stone-700">
+        运行档位
         <select
           v-model="runtimeProfile"
-          class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+          class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
         >
-          <option value="minimal">minimal</option>
-          <option value="standard">standard</option>
+          <option value="minimal">精简模式</option>
+          <option value="standard">标准模式</option>
         </select>
-        <p class="mt-2 text-xs leading-6 text-slate-500">
-          会影响 HTTP 接入参数的收敛范围，以及多监听场景下的运行能力。
-        </p>
-      </div>
-      <div
-        class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-      >
-        <p class="font-medium">上游失败模式</p>
+        </label>
+        <label class="text-sm text-stone-700">
+        上游失败模式
         <select
           v-model="failureMode"
-          class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+          class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
         >
-          <option value="fail_open">fail_open</option>
-          <option value="fail_close">fail_close</option>
+          <option value="fail_open">故障放行</option>
+          <option value="fail_close">故障关闭</option>
         </select>
-        <p class="mt-2 text-xs leading-6 text-slate-500">
-          上游不可用时选择放行还是拒绝请求。
-        </p>
+        </label>
+        <label class="text-sm text-stone-700 md:col-span-2 xl:col-span-4">
+          可信代理网段
+          <textarea
+            :value="trustedProxyCidrsText"
+            :class="listFieldClass"
+            placeholder="每行一个，例如 203.0.113.0/24"
+            @input="
+              emit(
+                'update:trustedProxyCidrsText',
+                ($event.target as HTMLTextAreaElement).value,
+              )
+            "
+          />
+        </label>
       </div>
     </div>
 
-    <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      <label class="text-sm text-stone-700 md:col-span-2">
-        监听地址（由站点页“全局入口”维护）
-        <textarea
-          :value="listenAddrsText"
-          :class="listFieldClass"
-          placeholder="请前往 /admin/sites 配置统一 HTTP 入口端口"
-          disabled
-        />
-      </label>
+    <div class="mt-4 border-t border-slate-200 pt-4">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
       <label class="l7-inline-field text-sm text-stone-700"
         >最大请求体大小<input
           v-model.number="maxRequestSize"
@@ -476,38 +484,7 @@ const safelineResponseHeadersText = computed({
           min="1024"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700 md:col-span-2">
-        HTTP/2 优先级支持
-        <span
-          class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
-        >
-          <input
-            v-model="http2EnablePriorities"
-            type="checkbox"
-            class="ui-switch"
-          />
-          <span class="text-sm text-stone-800"
-            >允许使用优先级信息处理 HTTP/2 请求</span
-          >
-        </span>
-      </label>
-    </div>
-
-    <div class="mt-4">
-      <label class="text-sm text-stone-700">
-        可信代理网段
-        <textarea
-          :value="trustedProxyCidrsText"
-          :class="listFieldClass"
-          placeholder="每行一个，例如 203.0.113.0/24"
-          @input="
-            emit(
-              'update:trustedProxyCidrsText',
-              ($event.target as HTMLTextAreaElement).value,
-            )
-          "
-        />
-      </label>
+      </div>
     </div>
 
     <div class="mt-3 border-t border-slate-200 pt-6">
@@ -518,37 +495,20 @@ const safelineResponseHeadersText = computed({
           <p class="text-sm tracking-wider text-blue-700">L7 CC 防护</p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <StatusBadge
-            :text="form.cc_defense.enabled ? 'CC 守卫已启用' : 'CC 守卫已关闭'"
-            :type="form.cc_defense.enabled ? 'success' : 'warning'"
-          />
-          <StatusBadge
-            :text="`窗口 ${form.cc_defense.request_window_secs}s`"
-            type="info"
-          />
-          <StatusBadge
-            :text="`Cookie ${form.cc_defense.challenge_cookie_name}`"
-            type="muted"
-          />
-        </div>
-      </div>
-
-      <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <label
-          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-        >
-          <span class="flex items-center justify-between gap-3">
-            <span class="font-medium">启用 CC 守卫</span>
+          <label
+            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+          >
+            <span>启用 CC 守卫</span>
             <input
               v-model="ccDefenseEnabled"
               type="checkbox"
               class="ui-switch"
             />
-          </span>
-          <span class="mt-2 block text-xs leading-6 text-slate-500"
-            >按真实客户端 IP、Host 和路由统计请求速率，并执行延迟、Challenge 或 429。</span
-          >
-        </label>
+          </label>
+        </div>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
         <label class="l7-inline-field text-sm text-stone-700"
           >滑窗时长(s)<input
             v-model.number="ccRequestWindow"
@@ -654,68 +614,42 @@ const safelineResponseHeadersText = computed({
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <StatusBadge
-            :text="
-              form.safeline_intercept.enabled ? '默认接管已启用' : '默认接管已关闭'
-            "
-            :type="form.safeline_intercept.enabled ? 'success' : 'warning'"
-          />
-          <StatusBadge
-            :text="`动作 ${form.safeline_intercept.action}`"
-            type="info"
-          />
-          <StatusBadge
-            :text="`匹配 ${form.safeline_intercept.match_mode}`"
-            :type="
-              form.safeline_intercept.match_mode === 'strict'
-                ? 'success'
-                : 'warning'
-            "
-          />
+          <label
+            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+          >
+            <span>启用响应接管</span>
+            <input
+              v-model="safelineInterceptEnabled"
+              type="checkbox"
+              class="ui-switch"
+            />
+          </label>
         </div>
       </div>
 
-      <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <label class="l7-toggle-field text-sm text-stone-700">
-        <span class="font-medium">启用响应接管</span>
-        <input
-          v-model="safelineInterceptEnabled"
-          type="checkbox"
-          class="ui-switch"
-        />
-      </label>
-        <div
-          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-        >
-          <p class="font-medium">默认动作</p>
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="l7-inline-field text-sm text-stone-700">
+          默认动作
           <select
             v-model="safelineInterceptAction"
-            class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            class="l7-inline-select"
           >
-            <option value="replace">replace</option>
-            <option value="pass">pass</option>
-            <option value="drop">drop</option>
-            <option value="replace_and_block_ip">replace_and_block_ip</option>
+            <option value="replace">替换响应</option>
+            <option value="pass">放行</option>
+            <option value="drop">直接丢弃</option>
+            <option value="replace_and_block_ip">替换并封禁 IP</option>
           </select>
-          <p class="mt-2 text-xs leading-6 text-slate-500">
-            推荐默认使用 replace，把雷池命中统一替换为品牌化拦截页。
-          </p>
-        </div>
-        <div
-          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-        >
-          <p class="font-medium">匹配模式</p>
+        </label>
+        <label class="l7-inline-field text-sm text-stone-700">
+          匹配模式
           <select
             v-model="safelineInterceptMatchMode"
-            class="mt-3 w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+            class="l7-inline-select"
           >
-            <option value="strict">strict</option>
-            <option value="relaxed">relaxed</option>
+            <option value="strict">严格匹配</option>
+            <option value="relaxed">宽松匹配</option>
           </select>
-          <p class="mt-2 text-xs leading-6 text-slate-500">
-            strict 只认强指纹；relaxed 才会接受状态码兜底。
-          </p>
-        </div>
+        </label>
         <label class="l7-inline-field text-sm text-stone-700"
           >识别最大响应体(bytes)<input
             v-model.number="safelineInterceptMaxBodyBytes"
@@ -739,64 +673,88 @@ const safelineResponseHeadersText = computed({
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
-          >替换 Content-Type<input
-            v-model="safelineResponseContentType"
-            type="text"
-            placeholder="text/html; charset=utf-8"
-            :class="numberInputClass"
-        /></label>
+          >替换 Content-Type<button
+            type="button"
+            :class="`${numberInputClass} l7-inline-button`"
+            @click="openContentTypeDialog"
+          >
+            {{ safelineResponseContentType || '点击选择或输入' }}
+          </button>
+        </label>
         <div class="text-sm text-stone-700">
           响应体来源
           <select
             v-model="safelineResponseBodySource"
             class="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500/40"
           >
-            <option value="inline_text">inline_text</option>
-            <option value="file">file</option>
+            <option value="inline_text">内联文本</option>
+            <option value="file">文件</option>
           </select>
         </div>
-        <label class="text-sm text-stone-700">
-          启用 gzip
-          <span
-            class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
-          >
-            <input
-              v-model="safelineResponseGzip"
-              type="checkbox"
-              class="ui-switch"
-            />
-            <span class="text-sm text-stone-800">压缩替换后的响应体</span>
-          </span>
-        </label>
       </div>
 
-      <div class="mt-4 grid gap-3 xl:grid-cols-2">
-        <label class="text-sm text-stone-700">
-          内联响应体
-          <textarea
-            v-model="safelineResponseBodyText"
-            :class="listFieldClass"
-            placeholder="在 inline_text 模式下使用"
-          />
-        </label>
-        <div class="space-y-3">
-          <label class="l7-inline-field text-sm text-stone-700">
-            响应文件路径
+      <div
+        v-if="contentTypeDialogOpen"
+        class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
+        @click.self="closeContentTypeDialog"
+      >
+        <div
+          class="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm tracking-wider text-blue-700">Content-Type</p>
+              <h3 class="mt-2 text-lg font-semibold text-stone-900">
+                选择或输入替换 Content-Type
+              </h3>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-stone-600 transition hover:border-slate-300 hover:text-stone-900"
+              @click="closeContentTypeDialog"
+            >
+              关闭
+            </button>
+          </div>
+
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button
+              v-for="option in contentTypeOptions"
+              :key="option"
+              type="button"
+              class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-300 hover:text-blue-700"
+              @click="selectContentTypeOption(option)"
+            >
+              {{ option }}
+            </button>
+          </div>
+
+          <label class="mt-4 block text-sm text-stone-700">
+            自定义输入
             <input
-              v-model="safelineResponseBodyFilePath"
+              v-model="contentTypeDraft"
               type="text"
-              placeholder="例如 plugins/brand-block/page.html"
-              :class="numberInputClass"
+              placeholder="例如 text/html; charset=utf-8"
+              class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-left outline-none transition focus:border-blue-500"
             />
           </label>
-          <label class="text-sm text-stone-700">
-            额外响应头
-            <textarea
-              v-model="safelineResponseHeadersText"
-              :class="listFieldClass"
-              placeholder="每行一个，例如 cache-control: no-store"
-            />
-          </label>
+
+          <div class="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-slate-200 px-4 py-2 text-sm text-stone-700 transition hover:border-slate-300 hover:text-stone-900"
+              @click="closeContentTypeDialog"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+              @click="confirmContentTypeDialog"
+            >
+              确定
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -809,27 +767,30 @@ const safelineResponseHeadersText = computed({
           <p class="text-sm tracking-wider text-blue-700">HTTP/3 配置</p>
         </div>
         <div class="flex flex-wrap gap-3">
-          <StatusBadge
-            :text="form.http3_enabled ? 'HTTP/3 已启用' : 'HTTP/3 未启用'"
-            :type="form.http3_enabled ? 'success' : 'muted'"
-          />
-          <StatusBadge
-            :text="form.http3_enable_tls13 ? 'TLS1.3 开启' : 'TLS1.3 关闭'"
-            :type="form.http3_enable_tls13 ? 'info' : 'warning'"
-          />
+          <label
+            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+          >
+            <span>连接迁移支持</span>
+            <input
+              v-model="http3ConnectionMigration"
+              type="checkbox"
+              class="ui-switch"
+            />
+          </label>
+          <label
+            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+          >
+            <span>TLS 1.3</span>
+            <input
+              v-model="http3Tls13Enabled"
+              type="checkbox"
+              class="ui-switch"
+            />
+          </label>
         </div>
       </div>
 
-      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <div class="text-sm text-stone-700 md:col-span-2">
-          HTTP/3 监听地址
-          <div :class="numberInputClass">
-            {{ form.http3_listen_addr || '跟随全局 HTTPS 入口' }}
-          </div>
-          <p class="mt-2 text-xs leading-5 text-slate-500">
-            QUIC 端口固定跟随“站点页 / 全局入口”的 HTTPS 入口端口，这里不再单独配置。
-          </p>
-        </div>
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
         <label class="l7-inline-field text-sm text-stone-700"
           >最大并发流<input
             v-model.number="http3MaxStreams"
@@ -880,27 +841,6 @@ const safelineResponseHeadersText = computed({
             placeholder="例如 /path/to/key.pem"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700">
-          连接迁移支持
-          <span
-            class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
-          >
-            <input
-              v-model="http3ConnectionMigration"
-              type="checkbox"
-              class="ui-switch"
-            />
-            <span class="text-sm text-stone-800">允许连接迁移</span>
-          </span>
-        </label>
-        <label class="l7-toggle-field text-sm text-stone-700">
-          <span class="font-medium">TLS 1.3</span>
-          <input
-            v-model="http3Tls13Enabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
       </div>
     </div>
   </section>
@@ -910,7 +850,7 @@ const safelineResponseHeadersText = computed({
 .l7-inline-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
   color: rgb(100 116 139);
   font-size: 0.75rem;
@@ -928,13 +868,36 @@ const safelineResponseHeadersText = computed({
   background: transparent;
   padding: 0.25rem 0.5rem;
   box-shadow: none;
-  text-align: right;
+  text-align: center;
   transition: border-color 0.2s ease;
 }
 
 .l7-inline-field :deep(input[type="text"]) {
   width: 10rem;
   text-align: left;
+}
+
+.l7-inline-field :deep(input[type='number']::-webkit-outer-spin-button),
+.l7-inline-field :deep(input[type='number']::-webkit-inner-spin-button) {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.l7-inline-field :deep(input[type='number']) {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.l7-inline-select {
+  width: auto;
+  min-width: 8.5rem;
+}
+
+.l7-inline-button {
+  width: auto;
+  min-width: 12rem;
+  text-align: center;
+  cursor: pointer;
 }
 
 .l7-inline-field :deep(input:focus),

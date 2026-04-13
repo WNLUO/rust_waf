@@ -54,7 +54,6 @@ const {
 const {
   configForm: l7ConfigForm,
   error: l7Error,
-  listenAddrsText,
   loading: l7Loading,
   refreshAll: refreshL7,
   refreshing: refreshingL7,
@@ -231,26 +230,17 @@ useFlashMessages({
           >
             正在加载 L7 配置...
           </div>
-          <label
-            v-else
-            class="mb-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-          >
-            <span class="font-medium">未命中站点时直接断开连接</span>
-            <input
-              v-model="systemSettings.drop_unmatched_requests"
-              :disabled="saving || loading"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
           <AdminL7ConfigSection
             v-if="!l7Loading"
             :form="l7ConfigForm"
-            :listen-addrs-text="listenAddrsText"
             :trusted-proxy-cidrs-text="trustedProxyCidrsText"
+            :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
+            :drop-unmatched-requests-disabled="saving || loading"
             @update:form="Object.assign(l7ConfigForm, $event)"
-              @update:listen-addrs-text="listenAddrsText = $event"
-              @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
+            @update:drop-unmatched-requests="
+              systemSettings.drop_unmatched_requests = $event
+            "
+            @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
             />
           </div>
 

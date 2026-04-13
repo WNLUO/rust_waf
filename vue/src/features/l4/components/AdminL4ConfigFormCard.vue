@@ -20,7 +20,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 
 <template>
   <section class="space-y-3">
-    <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
       <label :class="numberFieldClass">
         <span :class="numberLabelClass">每秒连接速率阈值</span>
         <input
@@ -131,7 +131,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
     <div class="space-y-2 border-t border-slate-200 pt-3">
       <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
 
-      <div class="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-8">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label :class="numberFieldClass">
           <span :class="numberLabelClass">事件通道容量</span>
           <input
@@ -282,7 +282,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
         过载缩放与延迟
       </p>
 
-      <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label :class="numberFieldClass">
           <span :class="numberLabelClass">高过载预算缩放 (%)</span>
           <input

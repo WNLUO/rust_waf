@@ -243,6 +243,29 @@ useAdminRealtimeTopic<BlockedIpsResponse>('recent_blocked_ips', (payload) => {
   }
 })
 
+useAdminRealtimeTopic<BlockedIpsResponse['blocked_ips'][number]>(
+  'blocked_ip_upsert',
+  (payload) => {
+    if (!matchesRealtimeFilters(payload)) return
+    if (canInlineRefresh.value) {
+      mergeRealtimeBlockedIps([payload])
+      pendingRealtimeCount.value = 0
+      return
+    }
+    pendingRealtimeCount.value += 1
+  },
+)
+
+useAdminRealtimeTopic<{ id: number }>('blocked_ip_deleted', ({ id }) => {
+  const existed = blockedPayload.value.blocked_ips.some((item) => item.id === id)
+  if (!existed) return
+  blockedPayload.value = {
+    ...blockedPayload.value,
+    total: Math.max(0, blockedPayload.value.total - 1),
+    blocked_ips: blockedPayload.value.blocked_ips.filter((item) => item.id !== id),
+  }
+})
+
 onMounted(async () => {
   await loadBlockedIps(true)
   filtersReady.value = true

@@ -377,13 +377,18 @@ pub(super) fn fingerprint_blocked_ip_record(record: &BlockedIpRecord) -> String 
 pub(super) async fn run_writer(
     pool: SqlitePool,
     mut receiver: mpsc::Receiver<StorageCommand>,
+    realtime_tx: tokio::sync::broadcast::Sender<crate::storage::StorageRealtimeEvent>,
     pending_writes: Arc<AtomicU64>,
     pending_write_notify: Arc<Notify>,
 ) {
     while let Some(command) = receiver.recv().await {
         let result = match command {
-            StorageCommand::SecurityEvent(event) => persist_security_event(&pool, event).await,
-            StorageCommand::BlockedIp(record) => persist_blocked_ip(&pool, record).await,
+            StorageCommand::SecurityEvent(event) => persist_security_event(&pool, event)
+                .await
+                .map(crate::storage::StorageRealtimeEvent::SecurityEvent),
+            StorageCommand::BlockedIp(record) => persist_blocked_ip(&pool, record)
+                .await
+                .map(crate::storage::StorageRealtimeEvent::BlockedIpUpsert),
             StorageCommand::Flush { ack } => {
                 if let Err(err) = checkpoint_wal(&pool).await {
                     warn!("SQLite writer flush checkpoint failed: {}", err);
@@ -399,10 +404,14 @@ pub(super) async fn run_writer(
                 break;
             }
         };
-        if let Err(err) = result {
-            warn!("SQLite writer task failed to persist record: {}", err);
-        } else {
-            debug!("SQLite writer task persisted a record");
+        match result {
+            Ok(event) => {
+                let _ = realtime_tx.send(event);
+                debug!("SQLite writer task persisted a record");
+            }
+            Err(err) => {
+                warn!("SQLite writer task failed to persist record: {}", err);
+            }
         }
         finish_pending_write(&pending_writes, &pending_write_notify);
     }
@@ -411,8 +420,8 @@ pub(super) async fn run_writer(
 pub(super) async fn persist_security_event(
     pool: &SqlitePool,
     event: SecurityEventRecord,
-) -> Result<()> {
-    sqlx::query(
+) -> Result<crate::storage::SecurityEventEntry> {
+    let result = sqlx::query(
         r#"
         INSERT INTO security_events (
             layer, provider, provider_event_id, provider_site_id, provider_site_name,
@@ -423,47 +432,80 @@ pub(super) async fn persist_security_event(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind(event.layer)
-    .bind(event.provider)
-    .bind(event.provider_event_id)
-    .bind(event.provider_site_id)
-    .bind(event.provider_site_name)
-    .bind(event.provider_site_domain)
-    .bind(event.action)
-    .bind(event.reason)
-    .bind(event.details_json)
-    .bind(event.source_ip)
-    .bind(event.dest_ip)
+    .bind(&event.layer)
+    .bind(&event.provider)
+    .bind(&event.provider_event_id)
+    .bind(&event.provider_site_id)
+    .bind(&event.provider_site_name)
+    .bind(&event.provider_site_domain)
+    .bind(&event.action)
+    .bind(&event.reason)
+    .bind(&event.details_json)
+    .bind(&event.source_ip)
+    .bind(&event.dest_ip)
     .bind(event.source_port)
     .bind(event.dest_port)
-    .bind(event.protocol)
-    .bind(event.http_method)
-    .bind(event.uri)
-    .bind(event.http_version)
+    .bind(&event.protocol)
+    .bind(&event.http_method)
+    .bind(&event.uri)
+    .bind(&event.http_version)
     .bind(event.created_at)
     .bind(if event.handled { 1 } else { 0 })
     .bind(event.handled_at)
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(crate::storage::SecurityEventEntry {
+        id: result.last_insert_rowid(),
+        layer: event.layer,
+        provider: event.provider,
+        provider_event_id: event.provider_event_id,
+        provider_site_id: event.provider_site_id,
+        provider_site_name: event.provider_site_name,
+        provider_site_domain: event.provider_site_domain,
+        action: event.action,
+        reason: event.reason,
+        details_json: event.details_json,
+        source_ip: event.source_ip,
+        dest_ip: event.dest_ip,
+        source_port: event.source_port,
+        dest_port: event.dest_port,
+        protocol: event.protocol,
+        http_method: event.http_method,
+        uri: event.uri,
+        http_version: event.http_version,
+        created_at: event.created_at,
+        handled: event.handled,
+        handled_at: event.handled_at,
+    })
 }
 
-pub(super) async fn persist_blocked_ip(pool: &SqlitePool, record: BlockedIpRecord) -> Result<()> {
-    sqlx::query(
+pub(super) async fn persist_blocked_ip(
+    pool: &SqlitePool,
+    record: BlockedIpRecord,
+) -> Result<crate::storage::BlockedIpEntry> {
+    let result = sqlx::query(
         r#"
         INSERT INTO blocked_ips (provider, provider_remote_id, ip, reason, blocked_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?)
         "#,
     )
-    .bind(record.provider)
-    .bind(record.provider_remote_id)
-    .bind(record.ip)
-    .bind(record.reason)
+    .bind(&record.provider)
+    .bind(&record.provider_remote_id)
+    .bind(&record.ip)
+    .bind(&record.reason)
     .bind(record.blocked_at)
     .bind(record.expires_at)
     .execute(pool)
     .await?;
-    Ok(())
+    Ok(crate::storage::BlockedIpEntry {
+        id: result.last_insert_rowid(),
+        provider: record.provider,
+        provider_remote_id: record.provider_remote_id,
+        ip: record.ip,
+        reason: record.reason,
+        blocked_at: record.blocked_at,
+        expires_at: record.expires_at,
+    })
 }
 
 pub(super) fn finish_pending_write(pending_writes: &AtomicU64, pending_write_notify: &Notify) {

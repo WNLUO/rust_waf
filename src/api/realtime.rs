@@ -6,6 +6,7 @@ use super::types::{
     TrafficMapResponse,
 };
 use crate::core::WafContext;
+use crate::storage::StorageRealtimeEvent;
 use crate::storage::{
     BlockedIpQuery, BlockedIpSortField, EventSortField, SecurityEventQuery, SortDirection,
 };
@@ -82,6 +83,38 @@ pub(super) fn spawn_sampler(context: Arc<WafContext>, realtime_tx: broadcast::Se
                 for message in messages {
                     let _ = realtime_tx.send(message);
                 }
+            }
+        }
+    });
+}
+
+pub(super) fn spawn_storage_bridge(
+    context: Arc<WafContext>,
+    realtime_tx: broadcast::Sender<String>,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+    let mut storage_rx = store.subscribe_realtime();
+
+    tokio::spawn(async move {
+        loop {
+            let message = match storage_rx.recv().await {
+                Ok(StorageRealtimeEvent::SecurityEvent(event)) => {
+                    serialize_message("security_event_delta", &SecurityEventResponse::from(event))
+                }
+                Ok(StorageRealtimeEvent::BlockedIpUpsert(entry)) => {
+                    serialize_message("blocked_ip_upsert", &BlockedIpResponse::from(entry))
+                }
+                Ok(StorageRealtimeEvent::BlockedIpDeleted(id)) => {
+                    serialize_message("blocked_ip_deleted", &serde_json::json!({ "id": id }))
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
+
+            if let Ok(payload) = message {
+                let _ = realtime_tx.send(payload);
             }
         }
     });

@@ -20,6 +20,8 @@ const { snapshot } = useAdminEventMap({
   trafficMap: toRef(props, 'trafficMap'),
 })
 
+const isOriginPending = () => !hasGeo(snapshot.value.originNode)
+
 type GeoNode = EventMapNode & { lat: number; lng: number }
 type LocalLinesDataItem = {
   coords: number[][]
@@ -66,7 +68,46 @@ const renderChart = () => {
   if (!chart) return
 
   const { nodes, flows, originNode } = snapshot.value
-  if (!hasGeo(originNode)) return
+  if (!hasGeo(originNode)) {
+    chart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: {
+        show: false
+      },
+      geo: {
+        map: 'china',
+        roam: false,
+        zoom: 1.75,
+        center: [104.5, 36.5],
+        emphasis: {
+          disabled: true
+        },
+        label: {
+          show: false
+        },
+        itemStyle: {
+          areaColor: '#1e293b',
+          borderColor: '#334155',
+          borderWidth: 1,
+          shadowColor: 'rgba(0, 0, 0, 0.5)',
+          shadowBlur: 10
+        },
+        regions: [
+          {
+            name: '南海诸岛',
+            itemStyle: {
+              opacity: 0
+            },
+            label: {
+              show: false
+            }
+          }
+        ]
+      },
+      series: []
+    })
+    return
+  }
 
   const geoNodes = nodes.filter(hasGeo)
 
@@ -237,6 +278,15 @@ onBeforeUnmount(() => {
     <div class="relative flex-1">
       <!-- 地图容器 -->
       <div ref="chartRef" class="w-full h-full"></div>
+
+      <div
+        v-if="isOriginPending()"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/45 backdrop-blur-[2px] pointer-events-none"
+      >
+        <div class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-4 py-3 text-sm text-slate-200 shadow-xl">
+          后端正在获取物理位置中
+        </div>
+      </div>
       
       <!-- 装饰性网格/线条 (可选，增强科技感) -->
       <div class="absolute inset-0 pointer-events-none opacity-10">

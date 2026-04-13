@@ -127,6 +127,7 @@ pub(super) async fn delete_blocked_ip_handler(
         .map_err(ApiError::internal)?;
 
     if deleted {
+        store.emit_blocked_ip_deleted(id);
         let runtime_unblocked = if entry.provider.is_none() {
             match entry.ip.parse::<std::net::IpAddr>() {
                 Ok(ip) => state

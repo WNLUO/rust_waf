@@ -335,6 +335,16 @@ useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
   }
 })
 
+useAdminRealtimeTopic<SecurityEventItem>('security_event_delta', (payload) => {
+  if (!matchesRealtimeFilters(payload)) return
+  if (canInlineRefresh.value) {
+    mergeRealtimeEvents([payload])
+    pendingRealtimeCount.value = 0
+    return
+  }
+  pendingRealtimeCount.value += 1
+})
+
 onMounted(async () => {
   await loadEvents(true)
   filtersReady.value = true

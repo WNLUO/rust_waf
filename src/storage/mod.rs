@@ -21,7 +21,7 @@ use sqlx::{QueryBuilder, Sqlite};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Mutex, Notify};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
 
 use self::models::{serialize_rule_response_template, StoredAppConfigRow, StoredRuleRow};
@@ -46,6 +46,7 @@ pub struct SqliteStore {
     writer_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     dropped_security_events: Arc<AtomicU64>,
     dropped_blocked_ips: Arc<AtomicU64>,
+    realtime_tx: broadcast::Sender<StorageRealtimeEvent>,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -54,6 +55,14 @@ enum StorageCommand {
     BlockedIp(BlockedIpRecord),
     Flush { ack: oneshot::Sender<()> },
     Shutdown { ack: oneshot::Sender<()> },
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone)]
+pub enum StorageRealtimeEvent {
+    SecurityEvent(SecurityEventEntry),
+    BlockedIpUpsert(BlockedIpEntry),
+    BlockedIpDeleted(i64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

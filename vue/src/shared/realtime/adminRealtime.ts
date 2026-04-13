@@ -8,6 +8,9 @@ type AdminRealtimeTopic =
   | 'recent_events'
   | 'recent_blocked_ips'
   | 'traffic_map'
+  | 'security_event_delta'
+  | 'blocked_ip_upsert'
+  | 'blocked_ip_deleted'
 
 interface AdminRealtimeEnvelope<T = unknown> {
   topic: AdminRealtimeTopic

@@ -63,11 +63,13 @@ impl SqliteStore {
 
         let queue_capacity = queue_capacity.max(1);
         let (sender, receiver) = mpsc::channel(queue_capacity);
+        let (realtime_tx, _) = tokio::sync::broadcast::channel(256);
         let pending_writes = Arc::new(AtomicU64::new(0));
         let pending_write_notify = Arc::new(Notify::new());
         let writer_handle = Arc::new(Mutex::new(Some(tokio::spawn(run_writer(
             pool.clone(),
             receiver,
+            realtime_tx.clone(),
             Arc::clone(&pending_writes),
             Arc::clone(&pending_write_notify),
         )))));
@@ -84,6 +86,7 @@ impl SqliteStore {
             writer_handle,
             dropped_security_events,
             dropped_blocked_ips,
+            realtime_tx,
         })
     }
 
@@ -103,11 +106,20 @@ impl SqliteStore {
                     "SQLite security event queue is unavailable, falling back to direct persistence"
                 );
                 let pool = self.pool.clone();
+                let realtime_tx = self.realtime_tx.clone();
                 let pending_writes = Arc::clone(&self.pending_writes);
                 let pending_write_notify = Arc::clone(&self.pending_write_notify);
                 tokio::spawn(async move {
-                    if let Err(err) = persist_security_event(&pool, event).await {
+                    match persist_security_event(&pool, event).await {
+                        Ok(persisted) => {
+                            let _ = realtime_tx
+                                .send(crate::storage::StorageRealtimeEvent::SecurityEvent(
+                                    persisted,
+                                ));
+                        }
+                        Err(err) => {
                         warn!("SQLite direct security event persistence failed: {}", err);
+                    }
                     }
                     finish_pending_write(&pending_writes, &pending_write_notify);
                 });
@@ -130,11 +142,20 @@ impl SqliteStore {
                     "SQLite blocked IP queue is unavailable, falling back to direct persistence"
                 );
                 let pool = self.pool.clone();
+                let realtime_tx = self.realtime_tx.clone();
                 let pending_writes = Arc::clone(&self.pending_writes);
                 let pending_write_notify = Arc::clone(&self.pending_write_notify);
                 tokio::spawn(async move {
-                    if let Err(err) = persist_blocked_ip(&pool, record).await {
-                        warn!("SQLite direct blocked IP persistence failed: {}", err);
+                    match persist_blocked_ip(&pool, record).await {
+                        Ok(persisted) => {
+                            let _ = realtime_tx
+                                .send(crate::storage::StorageRealtimeEvent::BlockedIpUpsert(
+                                    persisted,
+                                ));
+                        }
+                        Err(err) => {
+                            warn!("SQLite direct blocked IP persistence failed: {}", err);
+                        }
                     }
                     finish_pending_write(&pending_writes, &pending_write_notify);
                 });
@@ -176,6 +197,16 @@ impl SqliteStore {
                 .map_err(|err| anyhow::anyhow!("SQLite writer task join failed: {}", err))?;
         }
         Ok(())
+    }
+
+    pub fn subscribe_realtime(&self) -> tokio::sync::broadcast::Receiver<crate::storage::StorageRealtimeEvent> {
+        self.realtime_tx.subscribe()
+    }
+
+    pub fn emit_blocked_ip_deleted(&self, id: i64) {
+        let _ = self
+            .realtime_tx
+            .send(crate::storage::StorageRealtimeEvent::BlockedIpDeleted(id));
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]

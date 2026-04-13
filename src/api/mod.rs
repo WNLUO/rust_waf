@@ -51,6 +51,7 @@ impl ApiServer {
     pub async fn start(self) -> anyhow::Result<()> {
         let realtime_tx = broadcast::channel(64).0;
         realtime::spawn_sampler(Arc::clone(&self.context), realtime_tx.clone());
+        realtime::spawn_storage_bridge(Arc::clone(&self.context), realtime_tx.clone());
         let ws_tickets = Arc::new(realtime::WsTicketStore::default());
         let state = ApiState {
             context: Arc::clone(&self.context),

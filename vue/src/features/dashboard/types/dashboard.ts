@@ -77,8 +77,8 @@ export interface TrafficMapNodeResponse {
   name: string
   region: string
   role: 'cdn' | 'origin' | string
-  lat: number
-  lng: number
+  lat?: number
+  lng?: number
   traffic_weight: number
   request_count: number
   blocked_count: number

@@ -6,8 +6,10 @@ import { fetchRulesList } from '@/shared/api/rules'
 import { fetchHealth, fetchMetrics } from '@/shared/api/system'
 import type {
   BlockedIpsResponse,
+  BlockedIpItem,
   DashboardPayload,
   MetricsResponse,
+  SecurityEventItem,
   SecurityEventsResponse,
   TrafficMapResponse,
 } from '@/shared/types'
@@ -131,6 +133,43 @@ useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
 useAdminRealtimeTopic<BlockedIpsResponse>('recent_blocked_ips', (payload) => {
   if (!dashboard.value) return
   dashboard.value.blockedIps = payload
+  lastUpdated.value = Date.now()
+})
+
+useAdminRealtimeTopic<SecurityEventItem>('security_event_delta', (payload) => {
+  if (!dashboard.value) return
+  const events = [payload, ...dashboard.value.events.events].filter(
+    (event, index, items) => items.findIndex((item) => item.id === event.id) === index,
+  )
+  dashboard.value.events = {
+    ...dashboard.value.events,
+    total: dashboard.value.events.total + 1,
+    events: events.slice(0, 8),
+  }
+  lastUpdated.value = Date.now()
+})
+
+useAdminRealtimeTopic<BlockedIpItem>('blocked_ip_upsert', (payload) => {
+  if (!dashboard.value) return
+  const blockedIps = [payload, ...dashboard.value.blockedIps.blocked_ips].filter(
+    (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+  )
+  dashboard.value.blockedIps = {
+    ...dashboard.value.blockedIps,
+    total: dashboard.value.blockedIps.total + 1,
+    blocked_ips: blockedIps.slice(0, 8),
+  }
+  lastUpdated.value = Date.now()
+})
+
+useAdminRealtimeTopic<{ id: number }>('blocked_ip_deleted', ({ id }) => {
+  if (!dashboard.value) return
+  const blockedIps = dashboard.value.blockedIps.blocked_ips.filter((item) => item.id !== id)
+  dashboard.value.blockedIps = {
+    ...dashboard.value.blockedIps,
+    total: Math.max(0, dashboard.value.blockedIps.total - 1),
+    blocked_ips: blockedIps,
+  }
   lastUpdated.value = Date.now()
 })
 

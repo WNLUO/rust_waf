@@ -1,7 +1,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { pullSafeLineSite, pushSafeLineSite } from '@/shared/api/sites'
 import { useAdminSitesEditor } from './useAdminSitesEditor'
-import { useAdminSitesGlobalEntry } from './useAdminSitesGlobalEntry'
 import { useAdminSitesData } from './useAdminSitesData'
 import { useAdminSitesLocalCrud } from './useAdminSitesLocalCrud'
 import { useAdminSitesRemoteSync } from './useAdminSitesRemoteSync'
@@ -38,13 +37,6 @@ export function useAdminSites(
     data.globalL7Config,
   )
   resetEditorForm = editor.resetLocalSiteForm
-  const globalEntry = useAdminSitesGlobalEntry({
-    actions: data.actions,
-    clearFeedback,
-    error,
-    globalEntryForm: data.globalEntryForm,
-    successMessage,
-  })
   const localCrud = useAdminSitesLocalCrud({
     clearFeedback,
     data,
@@ -179,7 +171,6 @@ export function useAdminSites(
 
   return {
     actions: data.actions,
-    closeGlobalEntryModal: globalEntry.closeGlobalEntryModal,
     currentLocalSite: editor.currentLocalSite,
     defaultSafelineInterceptConfig: editor.defaultSafelineInterceptConfig,
     editorTitle: editor.editorTitle,
@@ -187,10 +178,8 @@ export function useAdminSites(
     error,
     filteredRows,
     filters,
-    globalEntryForm: data.globalEntryForm,
     hasSavedConfig,
     hostnamesText: editor.hostnamesText,
-    isGlobalEntryModalOpen: globalEntry.isGlobalEntryModalOpen,
     isRemoteSyncDialogOpen: remoteSync.isRemoteSyncDialogOpen,
     isLocalSiteModalOpen: editor.isLocalSiteModalOpen,
     loadRemoteSites: data.loadRemoteSites,
@@ -199,7 +188,6 @@ export function useAdminSites(
     localSiteForm: editor.localSiteForm,
     localSites: data.localSites,
     openCreateLocalSiteModal: editor.openCreateLocalSiteModal,
-    openGlobalEntryModal: globalEntry.openGlobalEntryModal,
     openRemoteSyncDialog: remoteSync.openRemoteSyncDialog,
     primaryDraft,
     recommendedRemoteSiteIds: remoteSync.recommendedRemoteSiteIds,
@@ -212,7 +200,6 @@ export function useAdminSites(
     rowBusy,
     rowSyncText,
     runConnectionTest: data.runConnectionTest,
-    saveGlobalEntry: globalEntry.saveGlobalEntry,
     saveLocalSite: localCrud.saveLocalSite,
     selectRecommendedRemoteSites: remoteSync.selectRecommendedRemoteSites,
     clearRemoteSiteSelection: remoteSync.clearRemoteSiteSelection,

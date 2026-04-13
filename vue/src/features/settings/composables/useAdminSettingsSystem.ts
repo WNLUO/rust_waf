@@ -1,4 +1,8 @@
-import { clearLocalSiteData } from '@/shared/api/sites'
+import {
+  clearLocalSiteData,
+  fetchGlobalEntryConfig,
+  updateGlobalEntryConfig,
+} from '@/shared/api/sites'
 import { fetchSettings, updateSettings } from '@/shared/api/settings'
 import type { AdminSettingsState } from '@/features/settings/composables/useAdminSettingsState'
 
@@ -13,6 +17,7 @@ export function useAdminSettingsSystem({
     clearingSiteData,
     clearFeedback,
     error,
+    globalEntryForm,
     loading,
     mappings,
     saving,
@@ -27,8 +32,12 @@ export function useAdminSettingsSystem({
     loading.value = true
     error.value = ''
     try {
-      const payload = await fetchSettings()
+      const [payload, globalEntryPayload] = await Promise.all([
+        fetchSettings(),
+        fetchGlobalEntryConfig(),
+      ])
       Object.assign(systemSettings, payload)
+      Object.assign(globalEntryForm, globalEntryPayload)
     } catch (e) {
       error.value = e instanceof Error ? e.message : '系统设置加载失败'
     } finally {
@@ -57,8 +66,15 @@ export function useAdminSettingsSystem({
           )
         : 300
 
-      const response = await updateSettings(toPlainSettingsPayload())
-      successMessage.value = response.message
+      const [settingsResponse, globalEntryResponse] = await Promise.all([
+        updateSettings(toPlainSettingsPayload()),
+        updateGlobalEntryConfig({
+          http_port: globalEntryForm.http_port.trim(),
+          https_port: globalEntryForm.https_port.trim(),
+        }),
+      ])
+      successMessage.value =
+        globalEntryResponse.message || settingsResponse.message
     } catch (e) {
       error.value = e instanceof Error ? e.message : '系统设置保存失败'
     } finally {

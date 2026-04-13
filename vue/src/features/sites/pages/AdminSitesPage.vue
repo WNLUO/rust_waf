@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import AdminGlobalEntryDialog from '@/features/sites/components/AdminGlobalEntryDialog.vue'
 import AdminSiteEditorDialog from '@/features/sites/components/AdminSiteEditorDialog.vue'
 import AdminSitesSyncDialog from '@/features/sites/components/AdminSitesSyncDialog.vue'
 import AdminSitesSummarySection from '@/features/sites/components/AdminSitesSummarySection.vue'
@@ -8,9 +7,6 @@ import AppLayout from '@/app/layout/AppLayout.vue'
 import { useAdminSites } from '@/features/sites/composables/useAdminSites'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
-import { useRouter } from 'vue-router'
-
-const router = useRouter()
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
@@ -23,10 +19,8 @@ const {
   error,
   filteredRows,
   filters,
-  globalEntryForm,
   hasSavedConfig,
   hostnamesText,
-  isGlobalEntryModalOpen,
   isLocalSiteModalOpen,
   isRemoteSyncDialogOpen,
   localActionLabel,
@@ -34,31 +28,22 @@ const {
   localSiteForm,
   localSites,
   openCreateLocalSiteModal,
-  openGlobalEntryModal,
   openRemoteSyncDialog,
-  primaryDraft,
   remoteSyncCandidates,
   remoteSitePullOptions,
   refreshPageData,
   removeCurrentLocalSite,
   resetLocalSiteForm,
   rowSyncText,
-  saveGlobalEntry,
   saveLocalSite,
-  sitesLoadedAt,
   selectedRemoteSiteIds,
   selectRecommendedRemoteSites,
   clearRemoteSiteSelection,
-  closeGlobalEntryModal,
   closeRemoteSyncDialog,
   successMessage,
   syncLocalSite,
   syncSelectedRemoteSites,
   syncingRemoteSelection,
-  totalLocalSites,
-  totalSyncErrors,
-  totalEnabledLocalSites,
-  totalSitesWithRemoteLink,
   toggleRemoteSitePullOption,
   toggleRemoteSiteSelection,
   closeLocalSiteModal,
@@ -66,10 +51,6 @@ const {
   loading,
   upstreamsText,
 } = useAdminSites(formatTimestamp)
-
-function openGlobalSettingsPage() {
-  router.push('/admin/global-settings')
-}
 
 useFlashMessages({
   error,
@@ -86,21 +67,11 @@ useFlashMessages({
     <div class="min-w-0 space-y-4">
       <AdminSitesSummarySection
         :actions="actions"
-        :filtered-rows-count="filteredRows.length"
-        :format-number="formatNumber"
         :has-saved-config="hasSavedConfig"
         :keyword="filters.keyword"
-        :primary-draft="primaryDraft"
-        :sites-loaded-at="sitesLoadedAt"
         :state="filters.state"
-        :total-enabled-local-sites="totalEnabledLocalSites"
-        :total-local-sites="totalLocalSites"
-        :total-sync-errors="totalSyncErrors"
-        :total-sites-with-remote-link="totalSitesWithRemoteLink"
         @create-local-site="openCreateLocalSiteModal"
         @load-remote="openRemoteSyncDialog"
-        @open-global-entry="openGlobalEntryModal"
-        @open-global-settings="openGlobalSettingsPage"
         @refresh="refreshPageData"
         @update:keyword="filters.keyword = $event"
         @update:state="filters.state = $event"
@@ -123,16 +94,6 @@ useFlashMessages({
         @sync-local-site="syncLocalSite"
       />
     </div>
-
-    <AdminGlobalEntryDialog
-      :actions="actions"
-      :form="globalEntryForm"
-      :is-open="isGlobalEntryModalOpen"
-      @close="closeGlobalEntryModal"
-      @save="saveGlobalEntry"
-      @update:form="Object.assign(globalEntryForm, $event)"
-    />
-
     <AdminSiteEditorDialog
       :actions="actions"
       :current-local-site="currentLocalSite"

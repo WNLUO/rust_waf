@@ -6,6 +6,7 @@ import {
   type SystemSettingsForm,
 } from '@/features/settings/utils/adminSettings'
 import type {
+  GlobalEntryConfigPayload,
   LocalCertificateDraft,
   LocalCertificateItem,
   SafeLineMappingItem,
@@ -36,6 +37,10 @@ export function useAdminSettingsState() {
   const mappings = ref<SafeLineMappingItem[]>([])
   const localCertificates = ref<LocalCertificateItem[]>([])
   const sitesLoadedAt = ref<number | null>(null)
+  const globalEntryForm = reactive<GlobalEntryConfigPayload>({
+    http_port: '',
+    https_port: '',
+  })
 
   const systemSettings = reactive<SystemSettingsForm>(
     createDefaultSystemSettings(),
@@ -108,6 +113,7 @@ export function useAdminSettingsState() {
     error,
     generateCertificateForm,
     generatingCertificate,
+    globalEntryForm,
     loading,
     loadingCertificates,
     loadingSites,

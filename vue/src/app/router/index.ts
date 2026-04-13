@@ -3,8 +3,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 const HomePage = () => import('@/features/home/pages/HomePage.vue')
 const AdminPage = () => import('@/features/dashboard/pages/AdminPage.vue')
 const AdminSitesPage = () => import('@/features/sites/pages/AdminSitesPage.vue')
-const AdminGlobalSettingsPage = () =>
-  import('@/features/sites/pages/AdminGlobalSettingsPage.vue')
 const AdminCertificatesPage = () =>
   import('@/features/certificates/pages/AdminCertificatesPage.vue')
 const AdminRulesPage = () => import('@/features/rules/pages/AdminRulesPage.vue')
@@ -52,7 +50,7 @@ const router = createRouter({
     {
       path: '/admin/global-settings',
       name: 'admin-global-settings',
-      component: AdminGlobalSettingsPage,
+      redirect: '/admin/settings',
     },
     {
       path: '/admin/certificates',

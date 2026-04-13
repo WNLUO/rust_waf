@@ -29,6 +29,7 @@ export function useAdminSettings() {
     generateCertificate: certificates.generateCertificate,
     generateCertificateForm: state.generateCertificateForm,
     generatingCertificate: state.generatingCertificate,
+    globalEntryForm: state.globalEntryForm,
     handleDefaultCertificateChange: certificates.handleDefaultCertificateChange,
     loadSafeLineSites: safeLine.loadSafeLineSites,
     loading: state.loading,

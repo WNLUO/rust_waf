@@ -3,7 +3,7 @@ import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminGenerateCertificateDialog from '@/features/settings/components/AdminGenerateCertificateDialog.vue'
 import AdminSettingsCertificatesSection from '@/features/settings/components/AdminSettingsCertificatesSection.vue'
-import AdminSettingsSafeLineSection from '@/features/settings/components/AdminSettingsSafeLineSection.vue'
+import AdminSettingsGlobalSection from '@/features/settings/components/AdminSettingsGlobalSection.vue'
 import AdminSettingsSystemSection from '@/features/settings/components/AdminSettingsSystemSection.vue'
 import AdminUploadCertificateDialog from '@/features/settings/components/AdminUploadCertificateDialog.vue'
 import { useAdminSettings } from '@/features/settings/composables/useAdminSettings'
@@ -17,12 +17,12 @@ const {
   generateCertificate,
   generateCertificateForm,
   handleDefaultCertificateChange,
+  globalEntryForm,
   loadSafeLineSites,
   loading,
   loadingCertificates,
   loadingSites,
   localCertificates,
-  mappingDrafts,
   openGenerateModal,
   openUploadModal,
   persistDefaultCertificate,
@@ -38,7 +38,6 @@ const {
   showGenerateModal,
   showUploadModal,
   sites,
-  sitesLoadedAt,
   successMessage,
   systemSettings,
   testResult,
@@ -68,10 +67,6 @@ async function handleClearSiteData() {
   await clearSiteData()
 }
 
-function formatTimestamp(timestamp: number | null) {
-  if (!timestamp) return '暂无'
-  return new Date(timestamp * 1000).toLocaleString('zh-CN', { hour12: false })
-}
 </script>
 
 <template>
@@ -97,11 +92,22 @@ function formatTimestamp(timestamp: number | null) {
       <div class="space-y-4">
         <AdminSettingsSystemSection
           :clearing-site-data="clearingSiteData"
+          :global-entry-form="globalEntryForm"
+          :loading="loading"
+          :loading-sites="loadingSites"
           :local-certificates="localCertificates"
           :saving-default-certificate="savingDefaultCertificate"
+          :saving-mappings="savingMappings"
+          :sites="sites"
           :system-settings="systemSettings"
+          :test-result="testResult"
+          :testing="testing"
           @clear-site-data="handleClearSiteData"
           @default-certificate-change="handleDefaultCertificateChange"
+          @load-sites="loadSafeLineSites"
+          @save-mappings="saveMappings"
+          @test="runSafeLineTest"
+          @update:global-entry-form="Object.assign(globalEntryForm, $event)"
           @update:system-settings="Object.assign(systemSettings, $event)"
         />
 
@@ -119,22 +125,7 @@ function formatTimestamp(timestamp: number | null) {
           @upload="openUploadModal"
         />
 
-        <AdminSettingsSafeLineSection
-          :format-timestamp="formatTimestamp"
-          :loading="loading"
-          :loading-sites="loadingSites"
-          :mapping-drafts="mappingDrafts"
-          :saving-mappings="savingMappings"
-          :sites="sites"
-          :sites-loaded-at="sitesLoadedAt"
-          :system-settings="systemSettings"
-          :test-result="testResult"
-          :testing="testing"
-          @load-sites="loadSafeLineSites"
-          @save-mappings="saveMappings"
-          @test="runSafeLineTest"
-          @update:system-settings="Object.assign(systemSettings, $event)"
-        />
+        <AdminSettingsGlobalSection />
       </div>
     </div>
 

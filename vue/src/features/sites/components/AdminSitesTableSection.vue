@@ -24,13 +24,7 @@ const emit = defineEmits<{
     >
       <div>
         <p class="text-sm font-semibold text-stone-900">站点列表</p>
-        <p class="mt-1 text-xs text-slate-500">
-          这里只展示本地站点配置。雷池站点的读取和批量导入已收敛到顶部“从雷池同步”入口。
-        </p>
       </div>
-      <p class="text-xs text-slate-500">
-        可在这里继续编辑本地配置，或把单个站点推送到雷池。
-      </p>
     </div>
 
     <div

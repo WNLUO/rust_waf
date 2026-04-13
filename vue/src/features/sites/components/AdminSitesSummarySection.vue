@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CloudDownload, Network, Plus, RefreshCw, Search } from 'lucide-vue-next'
-import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import type { SiteRowDraft } from '@/features/sites/utils/adminSites'
+import { CloudDownload, Plus, RefreshCw, Search } from 'lucide-vue-next'
 import type { LocalSitesStateFilter } from '@/features/sites/composables/useAdminSites'
 
 const props = defineProps<{
@@ -10,23 +8,13 @@ const props = defineProps<{
     refreshing: boolean
     loadingSites: boolean
   }
-  filteredRowsCount: number
-  formatNumber: (value?: number) => string
   hasSavedConfig: boolean
   keyword: string
-  primaryDraft: SiteRowDraft | null
-  sitesLoadedAt: number | null
   state: LocalSitesStateFilter
-  totalEnabledLocalSites: number
-  totalLocalSites: number
-  totalSitesWithRemoteLink: number
-  totalSyncErrors: number
 }>()
 
 const emit = defineEmits<{
   createLocalSite: []
-  openGlobalEntry: []
-  openGlobalSettings: []
   refresh: []
   loadRemote: []
   'update:keyword': [value: string]
@@ -49,46 +37,8 @@ const stateModel = computed({
     <div
       class="flex flex-col gap-3 border-b border-slate-200 pb-4 xl:flex-row xl:items-start xl:justify-between"
     >
-      <div class="space-y-2">
-        <div>
-          <p class="text-sm font-semibold text-stone-900">站点列表</p>
-          <p class="mt-1 text-sm text-slate-500">
-            这里默认只维护本地站点。需要从雷池批量补录时，再通过顶部入口读取远端配置并选择导入。
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <StatusBadge
-            :text="`本地站点 ${formatNumber(totalLocalSites)} 条`"
-            type="info"
-            compact
-          />
-          <StatusBadge
-            :text="`已启用 ${formatNumber(totalEnabledLocalSites)} 条`"
-            type="success"
-            compact
-          />
-          <StatusBadge
-            :text="`已关联雷池 ${formatNumber(totalSitesWithRemoteLink)} 条`"
-            type="muted"
-            compact
-          />
-          <StatusBadge
-            :text="
-              totalSyncErrors
-                ? `同步异常 ${formatNumber(totalSyncErrors)} 条`
-                : '当前没有同步异常'
-            "
-            :type="totalSyncErrors ? 'warning' : 'success'"
-            compact
-          />
-          <StatusBadge
-            :text="
-              primaryDraft ? `主站点 ${primaryDraft.local_alias}` : '未设置主站点'
-            "
-            :type="primaryDraft ? 'info' : 'muted'"
-            compact
-          />
-        </div>
+      <div>
+        <p class="text-sm font-semibold text-stone-900">站点列表</p>
       </div>
 
       <div class="flex flex-wrap gap-2">
@@ -121,20 +71,6 @@ const stateModel = computed({
           />
           {{ actions.refreshing ? '刷新中...' : '刷新列表' }}
         </button>
-        <button
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-          @click="emit('openGlobalEntry')"
-        >
-          <Network :size="14" />
-          全局入口
-        </button>
-        <button
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-          @click="emit('openGlobalSettings')"
-        >
-          <Network :size="14" />
-          全局设置
-        </button>
       </div>
     </div>
 
@@ -166,28 +102,6 @@ const stateModel = computed({
           <option value="disabled">只看停用</option>
         </select>
       </label>
-    </div>
-
-    <div class="mt-3 flex flex-wrap items-center gap-2">
-      <StatusBadge
-        :text="`当前展示 ${formatNumber(filteredRowsCount)} 条`"
-        type="info"
-        compact
-      />
-      <StatusBadge
-        :text="
-          sitesLoadedAt ? '已准备雷池同步数据' : '尚未读取雷池站点'
-        "
-        :type="sitesLoadedAt ? 'success' : 'muted'"
-        compact
-      />
-    </div>
-
-    <div
-      v-if="!hasSavedConfig"
-      class="mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
-    >
-      还没有保存雷池地址或鉴权参数，当前仍可维护本地站点；保存配置后才能从雷池读取并选择导入。
     </div>
   </section>
 </template>

@@ -9,13 +9,11 @@ import {
   testSafeLineConnection,
 } from '@/shared/api/safeline'
 import {
-  fetchGlobalEntryConfig,
   fetchLocalSites,
 } from '@/shared/api/sites'
 import { fetchSettings } from '@/shared/api/settings'
 import { mergeSiteRows, type SiteRowDraft } from '@/features/sites/utils/adminSites'
 import type {
-  GlobalEntryConfigPayload,
   LocalCertificateItem,
   LocalSiteItem,
   SafeLineMappingItem,
@@ -51,11 +49,6 @@ export function useAdminSitesData({
   const testResult = ref<SafeLineTestResponse | null>(null)
   const siteRows = ref<SiteRowDraft[]>([])
   const sitesLoadedAt = ref<number | null>(null)
-  const globalEntryForm = reactive<GlobalEntryConfigPayload>({
-    http_port: '',
-    https_port: '',
-  })
-
   const actions = reactive({
     refreshing: false,
     testing: false,
@@ -63,16 +56,11 @@ export function useAdminSitesData({
     loadingCertificates: false,
     savingLocalSite: false,
     deletingLocalSite: false,
-    savingGlobalEntry: false,
   })
 
   const hasSavedConfig = computed(() =>
     Boolean(settings.value?.safeline.base_url.trim()),
   )
-
-  function assignGlobalEntryForm(payload: GlobalEntryConfigPayload) {
-    Object.assign(globalEntryForm, payload)
-  }
 
   async function refreshCollections(remoteSource: RemoteSource) {
     const [
@@ -121,15 +109,12 @@ export function useAdminSitesData({
   }
 
   async function syncBaseData() {
-    const [settingsResponse, l7ConfigResponse, globalEntryResponse] =
-      await Promise.all([
-        fetchSettings(),
-        fetchL7Config(),
-        fetchGlobalEntryConfig(),
-      ])
+    const [settingsResponse, l7ConfigResponse] = await Promise.all([
+      fetchSettings(),
+      fetchL7Config(),
+    ])
     settings.value = settingsResponse
     globalL7Config.value = l7ConfigResponse
-    assignGlobalEntryForm(globalEntryResponse)
   }
 
   async function loadPageData() {
@@ -200,8 +185,6 @@ export function useAdminSitesData({
 
   return {
     actions,
-    assignGlobalEntryForm,
-    globalEntryForm,
     globalL7Config,
     hasSavedConfig,
     loadLocalCertificates,

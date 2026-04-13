@@ -177,6 +177,10 @@ async fn handle_http3_request(
     prepare_request_for_proxy(context.as_ref(), &mut unified);
 
     let request_dump = unified.to_inspection_string();
+    let traffic_source_ip = unified
+        .client_ip
+        .clone()
+        .unwrap_or_else(|| packet.source_ip.to_string());
     if let Some(metrics) = context.metrics.as_ref() {
         metrics.record_packet(request_dump.len());
     }
@@ -201,6 +205,9 @@ async fn handle_http3_request(
     }
 
     if inspection_result.blocked {
+        context
+            .traffic_map
+            .record_ingress(traffic_source_ip.clone(), request_dump.len(), true);
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
@@ -228,6 +235,9 @@ async fn handle_http3_request(
     }
 
     let upstream_addr = select_upstream_target(matched_site.as_ref());
+    context
+        .traffic_map
+        .record_ingress(traffic_source_ip.clone(), request_dump.len(), false);
     if let Some(upstream_addr) = upstream_addr.as_deref() {
         if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
             if let Some(metrics) = context.metrics.as_ref() {
@@ -255,6 +265,11 @@ async fn handle_http3_request(
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_proxy_success(proxy_started_at.elapsed());
                 }
+                context.traffic_map.record_egress(
+                    traffic_source_ip.clone(),
+                    response.body.len(),
+                    proxy_started_at.elapsed(),
+                );
                 send_http3_response(
                     &mut stream,
                     response.status_code,

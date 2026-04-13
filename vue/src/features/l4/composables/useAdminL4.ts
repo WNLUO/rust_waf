@@ -1,7 +1,8 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/l4'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
 import type { L4BehaviorOverview, L4ConfigPayload, L4StatsPayload } from '@/shared/types'
+import { useAdminRealtimeTopic } from '@/shared/realtime/adminRealtime'
 
 const clampInteger = (
   value: number,
@@ -30,7 +31,6 @@ export function useAdminL4() {
   const error = ref('')
   const successMessage = ref('')
   const stats = ref<L4StatsPayload | null>(null)
-  const statsTimer = ref<number | null>(null)
   const lastUpdated = ref<number | null>(null)
   const meta = ref({
     runtime_enabled: false,
@@ -111,15 +111,6 @@ export function useAdminL4() {
     } finally {
       if (showLoader) loading.value = false
       refreshing.value = false
-    }
-  }
-
-  const refreshStats = async () => {
-    try {
-      stats.value = await fetchL4Stats()
-      lastUpdated.value = Date.now()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : '刷新 L4 统计失败'
     }
   }
 
@@ -350,17 +341,13 @@ export function useAdminL4() {
     topPorts.value.reduce((sum, item) => sum + item.bytes_processed, 0),
   )
 
-  onMounted(async () => {
-    await refreshAll(true)
-    statsTimer.value = window.setInterval(() => {
-      refreshStats()
-    }, 5000)
+  useAdminRealtimeTopic<L4StatsPayload>('l4_stats', (payload) => {
+    stats.value = payload
+    lastUpdated.value = Date.now()
   })
 
-  onBeforeUnmount(() => {
-    if (statsTimer.value) {
-      clearInterval(statsTimer.value)
-    }
+  onMounted(async () => {
+    await refreshAll(true)
   })
 
   return {

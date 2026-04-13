@@ -10,6 +10,10 @@ import AppLayout from '@/app/layout/AppLayout.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
+import {
+  useAdminRealtimeState,
+  useAdminRealtimeTopic,
+} from '@/shared/realtime/adminRealtime'
 import { Eye, RefreshCw, X } from 'lucide-vue-next'
 
 const PAGE_SIZE = 30
@@ -25,6 +29,8 @@ const filtersReady = ref(false)
 const currentPage = ref(1)
 const previewTitle = ref('')
 const previewContent = ref('')
+const pendingRealtimeCount = ref(0)
+const realtimeState = useAdminRealtimeState()
 const eventsPayload = ref<SecurityEventsResponse>({
   total: 0,
   limit: 0,
@@ -71,6 +77,87 @@ const pageStart = computed(() =>
 const pageEnd = computed(
   () => eventsPayload.value.offset + eventsPayload.value.events.length,
 )
+const canInlineRefresh = computed(
+  () =>
+    currentPage.value === 1 &&
+    eventsFilters.sort_by === 'created_at' &&
+    eventsFilters.sort_direction === 'desc',
+)
+
+const matchesRealtimeFilters = (event: SecurityEventItem) => {
+  if (
+    eventsFilters.layer !== 'all' &&
+    event.layer.toLowerCase() !== eventsFilters.layer.toLowerCase()
+  ) {
+    return false
+  }
+  if (
+    eventsFilters.provider !== 'all' &&
+    (event.provider || '').toLowerCase() !== eventsFilters.provider.toLowerCase()
+  ) {
+    return false
+  }
+  if (
+    eventsFilters.provider_site_id !== 'all' &&
+    event.provider_site_id !== eventsFilters.provider_site_id
+  ) {
+    return false
+  }
+  if (
+    eventsFilters.action !== 'all' &&
+    event.action.toLowerCase() !== eventsFilters.action.toLowerCase()
+  ) {
+    return false
+  }
+  if (eventsFilters.blocked_only && event.action.toLowerCase() !== 'block') {
+    return false
+  }
+  if (
+    eventsFilters.handled === 'handled' &&
+    !event.handled
+  ) {
+    return false
+  }
+  if (
+    eventsFilters.handled === 'unhandled' &&
+    event.handled
+  ) {
+    return false
+  }
+  if (
+    eventsFilters.source_ip.trim() &&
+    event.source_ip !== eventsFilters.source_ip.trim()
+  ) {
+    return false
+  }
+  const createdFrom = toUnixTimestamp(eventsFilters.created_from)
+  if (createdFrom !== undefined && event.created_at < createdFrom) {
+    return false
+  }
+  const createdTo = toUnixTimestamp(eventsFilters.created_to)
+  if (createdTo !== undefined && event.created_at > createdTo) {
+    return false
+  }
+  return true
+}
+
+const mergeRealtimeEvents = (incoming: SecurityEventItem[]) => {
+  const matched = incoming.filter(matchesRealtimeFilters)
+  if (!matched.length) return
+
+  const existingIds = new Set(eventsPayload.value.events.map((event) => event.id))
+  const newUniqueCount = matched.filter((event) => !existingIds.has(event.id)).length
+  const merged = [...matched, ...eventsPayload.value.events]
+  const deduped = merged.filter(
+    (event, index, items) => items.findIndex((item) => item.id === event.id) === index,
+  )
+
+  eventsPayload.value = {
+    ...eventsPayload.value,
+    total: eventsPayload.value.total + newUniqueCount,
+    events: deduped.slice(0, PAGE_SIZE),
+  }
+}
 
 const loadEvents = async (showLoader = false) => {
   if (showLoader) loading.value = true
@@ -103,6 +190,7 @@ const loadEvents = async (showLoader = false) => {
     if (currentPage.value > totalPages.value) {
       currentPage.value = totalPages.value
     }
+    pendingRealtimeCount.value = 0
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取事件失败'
   } finally {
@@ -233,6 +321,20 @@ const goToPage = (page: number) => {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
 }
 
+useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
+  if (!payload.events.length) return
+  if (canInlineRefresh.value) {
+    mergeRealtimeEvents(payload.events)
+    pendingRealtimeCount.value = 0
+    return
+  }
+
+  const matchedCount = payload.events.filter(matchesRealtimeFilters).length
+  if (matchedCount > 0) {
+    pendingRealtimeCount.value = matchedCount
+  }
+})
+
 onMounted(async () => {
   await loadEvents(true)
   filtersReady.value = true
@@ -243,6 +345,7 @@ watch(
   () => {
     if (!filtersReady.value) return
     currentPage.value = 1
+    pendingRealtimeCount.value = 0
     loadEvents()
   },
   { deep: true },
@@ -250,6 +353,7 @@ watch(
 
 watch(currentPage, () => {
   if (!filtersReady.value) return
+  pendingRealtimeCount.value = 0
   loadEvents()
 })
 </script>
@@ -258,6 +362,22 @@ watch(currentPage, () => {
   <AppLayout>
     <template #header-extra>
       <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs text-slate-500">
+          {{
+            realtimeState.connected
+              ? '实时通道已连接'
+              : realtimeState.connecting
+                ? '实时通道连接中'
+                : '实时通道未连接'
+          }}
+        </span>
+        <button
+          v-if="pendingRealtimeCount > 0"
+          class="inline-flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-100"
+          @click="loadEvents()"
+        >
+          有 {{ pendingRealtimeCount }} 条新事件
+        </button>
         <button
           class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           :disabled="syncing"
@@ -461,7 +581,7 @@ watch(currentPage, () => {
                   <div class="flex items-start gap-2">
                     <div class="min-w-0 flex-1">
                       <div
-                        class="break-all text-sm text-slate-900"
+                        class="event-reason-text text-sm text-slate-900"
                         :title="eventReasonLabel(event)"
                       >
                         {{ eventReasonLabel(event) }}
@@ -563,3 +683,16 @@ watch(currentPage, () => {
     </div>
   </AppLayout>
 </template>
+
+<style scoped>
+.event-reason-text {
+  max-width: 24rem;
+  overflow: hidden;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.375rem;
+  max-height: calc(1.375rem * 2);
+}
+</style>

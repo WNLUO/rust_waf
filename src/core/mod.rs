@@ -3,6 +3,7 @@ mod engine_maintenance;
 mod engine_tls;
 pub mod gateway;
 pub mod packet;
+pub mod traffic_map;
 
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
@@ -53,6 +54,7 @@ pub struct WafContext {
     pub metrics: Option<MetricsCollector>,
     pub sqlite_store: Option<Arc<SqliteStore>>,
     pub gateway_runtime: GatewayRuntime,
+    pub traffic_map: traffic_map::TrafficMapCollector,
     upstream_health: RwLock<UpstreamHealthSnapshot>,
     http3_runtime: RwLock<Http3RuntimeSnapshot>,
     rule_count: AtomicU64,
@@ -102,6 +104,7 @@ impl WafContext {
             metrics,
             sqlite_store,
             gateway_runtime,
+            traffic_map: traffic_map::TrafficMapCollector::new(),
             upstream_health: RwLock::new(UpstreamHealthSnapshot {
                 healthy: true,
                 last_check_at: None,
@@ -178,6 +181,13 @@ impl WafContext {
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
         self.metrics.as_ref().map(MetricsCollector::get_stats)
+    }
+
+    pub async fn traffic_map_snapshot(
+        &self,
+        window_seconds: u32,
+    ) -> traffic_map::TrafficMapSnapshot {
+        self.traffic_map.snapshot(window_seconds).await
     }
 
     pub fn upstream_health_snapshot(&self) -> UpstreamHealthSnapshot {

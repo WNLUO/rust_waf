@@ -27,6 +27,9 @@ pub mod api;
 pub use config::http3::Http3Config;
 pub use config::l7::Http2Config;
 pub use config::{Config, L7Config, RuntimeProfile};
+pub use core::traffic_map::{
+    TrafficDecision, TrafficDirection, TrafficMapCollector, TrafficMapSnapshot,
+};
 pub use core::{InspectionLayer, InspectionResult, PacketInfo, Protocol, WafContext, WafEngine};
 pub use l7::HttpTrafficProcessor;
 pub use protocol::{

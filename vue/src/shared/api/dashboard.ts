@@ -8,6 +8,8 @@ import type {
   MetricsResponse,
   RulesResponse,
   SecurityEventsResponse,
+  TrafficMapQuery,
+  TrafficMapResponse,
 } from '@/shared/types'
 import { apiRequest, buildQuery, withDefaults } from './core'
 
@@ -39,4 +41,12 @@ export async function fetchDashboardPayload(
   ])
 
   return { health, metrics, events, blockedIps, rules }
+}
+
+export async function fetchTrafficMap(
+  options: TrafficMapQuery = {},
+): Promise<TrafficMapResponse> {
+  return apiRequest<TrafficMapResponse>(
+    `/dashboard/traffic-map${buildQuery(options)}`,
+  )
 }

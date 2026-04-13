@@ -56,7 +56,7 @@ pub(super) async fn admin_auth_middleware(
     response
 }
 
-fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+pub(super) fn extract_bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
     value
         .strip_prefix("Bearer ")

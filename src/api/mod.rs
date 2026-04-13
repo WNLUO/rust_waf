@@ -4,6 +4,7 @@ mod error;
 mod events_handlers;
 mod metrics;
 mod plugin_install;
+mod realtime;
 mod router;
 mod rules;
 mod safeline_handlers;
@@ -35,6 +36,7 @@ use axum::{
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -47,8 +49,13 @@ impl ApiServer {
     }
 
     pub async fn start(self) -> anyhow::Result<()> {
+        let realtime_tx = broadcast::channel(64).0;
+        realtime::spawn_sampler(Arc::clone(&self.context), realtime_tx.clone());
+        let ws_tickets = Arc::new(realtime::WsTicketStore::default());
         let state = ApiState {
             context: Arc::clone(&self.context),
+            realtime_tx,
+            ws_tickets,
         };
         let app = router::build_router(state);
 
@@ -108,5 +115,10 @@ pub(super) fn parse_blocked_ip_sort_field(
 
 #[doc(hidden)]
 pub fn build_test_router(context: Arc<WafContext>) -> Router {
-    router::build_router(ApiState { context })
+    let realtime_tx = broadcast::channel(8).0;
+    router::build_router(ApiState {
+        context,
+        realtime_tx,
+        ws_tickets: Arc::new(realtime::WsTicketStore::default()),
+    })
 }

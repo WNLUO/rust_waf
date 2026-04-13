@@ -1,12 +1,16 @@
 use super::error::{ApiError, ApiResult};
+use super::realtime::WsTicketStore;
 use crate::config::{Config, RuntimeProfile};
 use crate::core::WafContext;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub(super) struct ApiState {
     pub(super) context: Arc<WafContext>,
+    pub(super) realtime_tx: broadcast::Sender<String>,
+    pub(super) ws_tickets: Arc<WsTicketStore>,
 }
 
 pub(super) fn sqlite_store(state: &ApiState) -> ApiResult<&crate::storage::SqliteStore> {

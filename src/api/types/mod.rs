@@ -1,12 +1,14 @@
 use serde::Serialize;
 
 mod core;
+mod dashboard;
 mod events;
 mod metrics;
 mod rules;
 mod sites_and_safeline;
 
 pub(crate) use self::core::*;
+pub(crate) use self::dashboard::*;
 pub(crate) use self::events::*;
 pub(crate) use self::metrics::*;
 pub(crate) use self::rules::*;

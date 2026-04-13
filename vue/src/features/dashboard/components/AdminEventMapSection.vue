@@ -7,19 +7,17 @@ import type {
   LinesSeriesOption,
 } from 'echarts'
 import { useAdminEventMap } from '../composables/useAdminEventMap'
-import type { EventMapNode } from '@/shared/types'
+import type { EventMapNode, TrafficMapResponse } from '@/shared/types'
 
 const props = defineProps<{
-  metrics?: any
-  events?: any[]
+  trafficMap?: TrafficMapResponse | null
 }>()
 
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
 
 const { snapshot } = useAdminEventMap({
-  metrics: toRef(props, 'metrics'),
-  events: toRef(props, 'events')
+  trafficMap: toRef(props, 'trafficMap'),
 })
 
 type GeoNode = EventMapNode & { lat: number; lng: number }
@@ -198,7 +196,7 @@ const renderChart = () => {
 }
 
 // 监听数据变化更新图表
-watch(() => snapshot.value.flows, () => {
+watch(() => snapshot.value, () => {
   renderChart()
 }, { deep: true })
 

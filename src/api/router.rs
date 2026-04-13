@@ -1,5 +1,6 @@
 use super::auth::admin_auth_middleware;
 use super::events_handlers;
+use super::realtime;
 use super::safeline_handlers;
 use super::settings_handlers;
 use super::sites_handlers;
@@ -14,6 +15,11 @@ use axum::{
 pub(super) fn build_router(state: ApiState) -> Router {
     let protected = Router::new()
         .route("/metrics", get(system_handlers::metrics_handler))
+        .route("/ws/admin-ticket", axum::routing::post(realtime::issue_admin_ws_ticket_handler))
+        .route(
+            "/dashboard/traffic-map",
+            get(system_handlers::traffic_map_handler),
+        )
         .route(
             "/l4/config",
             get(settings_handlers::get_l4_config_handler)
@@ -174,6 +180,7 @@ pub(super) fn build_router(state: ApiState) -> Router {
 
     Router::new()
         .route("/health", get(system_handlers::health_handler))
+        .route("/ws/admin", get(realtime::admin_ws_handler))
         .merge(protected)
         .with_state(state)
 }

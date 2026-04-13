@@ -9,6 +9,10 @@ import type { BlockedIpsResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
+import {
+  useAdminRealtimeState,
+  useAdminRealtimeTopic,
+} from '@/shared/realtime/adminRealtime'
 import { RefreshCw } from 'lucide-vue-next'
 
 const PAGE_SIZE = 30
@@ -23,6 +27,8 @@ const filtersReady = ref(false)
 const currentPage = ref(1)
 const error = ref('')
 const successMessage = ref('')
+const pendingRealtimeCount = ref(0)
+const realtimeState = useAdminRealtimeState()
 const blockedPayload = ref<BlockedIpsResponse>({
   total: 0,
   limit: 0,
@@ -67,6 +73,77 @@ const pageStart = computed(() =>
 const pageEnd = computed(
   () => blockedPayload.value.offset + blockedPayload.value.blocked_ips.length,
 )
+const canInlineRefresh = computed(
+  () =>
+    currentPage.value === 1 &&
+    blockedFilters.sort_by === 'blocked_at' &&
+    blockedFilters.sort_direction === 'desc',
+)
+
+const matchesRealtimeFilters = (
+  item: BlockedIpsResponse['blocked_ips'][number],
+) => {
+  if (
+    blockedFilters.source_scope === 'local' &&
+    item.provider
+  ) {
+    return false
+  }
+  if (
+    blockedFilters.source_scope === 'remote' &&
+    !item.provider
+  ) {
+    return false
+  }
+  if (
+    blockedFilters.provider !== 'all' &&
+    (item.provider || '').toLowerCase() !== blockedFilters.provider.toLowerCase()
+  ) {
+    return false
+  }
+  if (blockedFilters.ip.trim() && item.ip !== blockedFilters.ip.trim()) {
+    return false
+  }
+  if (blockedFilters.keyword.trim()) {
+    const keyword = blockedFilters.keyword.trim().toLowerCase()
+    const haystack = `${item.ip} ${item.reason} ${item.provider || 'local'}`.toLowerCase()
+    if (!haystack.includes(keyword)) {
+      return false
+    }
+  }
+  if (blockedFilters.active_only && item.expires_at <= Math.floor(Date.now() / 1000)) {
+    return false
+  }
+  const blockedFrom = toUnixTimestamp(blockedFilters.blocked_from)
+  if (blockedFrom !== undefined && item.blocked_at < blockedFrom) {
+    return false
+  }
+  const blockedTo = toUnixTimestamp(blockedFilters.blocked_to)
+  if (blockedTo !== undefined && item.blocked_at > blockedTo) {
+    return false
+  }
+  return true
+}
+
+const mergeRealtimeBlockedIps = (
+  incoming: BlockedIpsResponse['blocked_ips'],
+) => {
+  const matched = incoming.filter(matchesRealtimeFilters)
+  if (!matched.length) return
+
+  const existingIds = new Set(blockedPayload.value.blocked_ips.map((item) => item.id))
+  const newUniqueCount = matched.filter((item) => !existingIds.has(item.id)).length
+  const merged = [...matched, ...blockedPayload.value.blocked_ips]
+  const deduped = merged.filter(
+    (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
+  )
+
+  blockedPayload.value = {
+    ...blockedPayload.value,
+    total: blockedPayload.value.total + newUniqueCount,
+    blocked_ips: deduped.slice(0, PAGE_SIZE),
+  }
+}
 
 const loadBlockedIps = async (showLoader = false) => {
   if (showLoader) loading.value = true
@@ -91,6 +168,7 @@ const loadBlockedIps = async (showLoader = false) => {
     if (currentPage.value > totalPages.value) {
       currentPage.value = totalPages.value
     }
+    pendingRealtimeCount.value = 0
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取封禁名单失败'
   } finally {
@@ -151,6 +229,20 @@ const goToPage = (page: number) => {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
 }
 
+useAdminRealtimeTopic<BlockedIpsResponse>('recent_blocked_ips', (payload) => {
+  if (!payload.blocked_ips.length) return
+  if (canInlineRefresh.value) {
+    mergeRealtimeBlockedIps(payload.blocked_ips)
+    pendingRealtimeCount.value = 0
+    return
+  }
+
+  const matchedCount = payload.blocked_ips.filter(matchesRealtimeFilters).length
+  if (matchedCount > 0) {
+    pendingRealtimeCount.value = matchedCount
+  }
+})
+
 onMounted(async () => {
   await loadBlockedIps(true)
   filtersReady.value = true
@@ -161,6 +253,7 @@ watch(
   () => {
     if (!filtersReady.value) return
     currentPage.value = 1
+    pendingRealtimeCount.value = 0
     loadBlockedIps()
   },
   { deep: true },
@@ -168,6 +261,7 @@ watch(
 
 watch(currentPage, () => {
   if (!filtersReady.value) return
+  pendingRealtimeCount.value = 0
   loadBlockedIps()
 })
 </script>
@@ -176,6 +270,22 @@ watch(currentPage, () => {
   <AppLayout>
     <template #header-extra>
       <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs text-slate-500">
+          {{
+            realtimeState.connected
+              ? '实时通道已连接'
+              : realtimeState.connecting
+                ? '实时通道连接中'
+                : '实时通道未连接'
+          }}
+        </span>
+        <button
+          v-if="pendingRealtimeCount > 0"
+          class="inline-flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-100"
+          @click="loadBlockedIps()"
+        >
+          有 {{ pendingRealtimeCount }} 条新封禁
+        </button>
         <button
           class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           :disabled="pulling"

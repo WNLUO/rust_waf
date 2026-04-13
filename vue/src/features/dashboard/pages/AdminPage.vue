@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { fetchTrafficMap } from '@/shared/api/dashboard'
 import { fetchBlockedIps, fetchSecurityEvents } from '@/shared/api/events'
 import { fetchRulesList } from '@/shared/api/rules'
 import { fetchHealth, fetchMetrics } from '@/shared/api/system'
 import type {
-  DashboardPayload,
-  SecurityEventsResponse,
   BlockedIpsResponse,
+  DashboardPayload,
+  MetricsResponse,
+  SecurityEventsResponse,
+  TrafficMapResponse,
 } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
@@ -15,6 +18,10 @@ import CyberCard from '@/shared/ui/CyberCard.vue'
 import AdminEventMapSection from '@/features/dashboard/components/AdminEventMapSection.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
+import {
+  useAdminRealtimeState,
+  useAdminRealtimeTopic,
+} from '@/shared/realtime/adminRealtime'
 import {
   Activity,
   Database,
@@ -26,11 +33,12 @@ import {
 } from 'lucide-vue-next'
 
 const dashboard = ref<DashboardPayload | null>(null)
+const trafficMap = ref<TrafficMapResponse | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
 const lastUpdated = ref<number | null>(null)
-const refreshTimer = ref<number | null>(null)
+const realtimeState = useAdminRealtimeState()
 
 useFlashMessages({
   error,
@@ -77,7 +85,15 @@ const successRate = computed(() => {
 })
 
 const requestStatus = computed(() => {
-  if (refreshing.value) return '实时同步中...'
+  if (refreshing.value) return '正在同步数据...'
+  if (realtimeState.connected && lastUpdated.value) {
+    return `实时通道已连接：${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(lastUpdated.value))}`
+  }
+  if (realtimeState.connecting) return '实时通道连接中...'
   if (lastUpdated.value) {
     return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
       hour: '2-digit',
@@ -86,6 +102,40 @@ const requestStatus = computed(() => {
     }).format(new Date(lastUpdated.value))}`
   }
   return '等待首次同步，当前为手动刷新'
+})
+
+const applyMetrics = (metrics: MetricsResponse) => {
+  if (!dashboard.value) return
+  dashboard.value.metrics = metrics
+  pushHistory('totalPackets', metrics.total_packets)
+  pushHistory(
+    'blockRate',
+    metrics.total_packets
+      ? Number(((metrics.blocked_packets / metrics.total_packets) * 100).toFixed(2))
+      : 0,
+  )
+  pushHistory('latency', metrics.average_proxy_latency_micros)
+  lastUpdated.value = Date.now()
+}
+
+useAdminRealtimeTopic<MetricsResponse>('metrics', (payload) => {
+  applyMetrics(payload)
+})
+
+useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
+  if (!dashboard.value) return
+  dashboard.value.events = payload
+  lastUpdated.value = Date.now()
+})
+
+useAdminRealtimeTopic<BlockedIpsResponse>('recent_blocked_ips', (payload) => {
+  if (!dashboard.value) return
+  dashboard.value.blockedIps = payload
+  lastUpdated.value = Date.now()
+})
+
+useAdminRealtimeTopic<TrafficMapResponse>('traffic_map', (payload) => {
+  trafficMap.value = payload
 })
 
 const fetchData = async (showLoader = false) => {
@@ -117,19 +167,7 @@ const fetchData = async (showLoader = false) => {
       blockedIps: blockedIps || emptyBlockedResponse(),
     }
 
-    pushHistory('totalPackets', metrics.total_packets)
-    pushHistory(
-      'blockRate',
-      metrics.total_packets
-        ? Number(
-            ((metrics.blocked_packets / metrics.total_packets) * 100).toFixed(
-              2,
-            ),
-          )
-        : 0,
-    )
-    pushHistory('latency', metrics.average_proxy_latency_micros)
-    lastUpdated.value = Date.now()
+    applyMetrics(metrics)
     error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取控制台数据失败'
@@ -139,15 +177,19 @@ const fetchData = async (showLoader = false) => {
   }
 }
 
+const fetchTrafficMapData = async () => {
+  try {
+    trafficMap.value = await fetchTrafficMap({ window_seconds: 60 })
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取实时地图失败'
+  }
+}
+
 onMounted(() => {
-  fetchData(true)
+  void fetchData(true)
+  void fetchTrafficMapData()
 })
 
-onBeforeUnmount(() => {
-  if (refreshTimer.value) {
-    clearInterval(refreshTimer.value)
-  }
-})
 </script>
 
 <template>
@@ -241,10 +283,7 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <AdminEventMapSection
-          :metrics="dashboard?.metrics"
-          :events="dashboard?.events.events || []"
-        />
+        <AdminEventMapSection :traffic-map="trafficMap" />
 
         <CyberCard title="运行摘要" sub-title="落库、代理与健康检查核心数据">
           <div class="grid gap-4">

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import {
   fetchL7Config,
   fetchL7Stats,
@@ -7,9 +7,11 @@ import {
 import { fetchRulesList } from '@/shared/api/rules'
 import { fetchSecurityEvents } from '@/shared/api/events'
 import { createDefaultL7ConfigForm, type L7ConfigForm } from '@/features/l7/utils/adminL7'
+import { useAdminRealtimeTopic } from '@/shared/realtime/adminRealtime'
 import type {
   L7ConfigPayload,
   L7StatsPayload,
+  SecurityEventsResponse,
   RuleItem,
   SecurityEventItem,
 } from '@/shared/types'
@@ -50,7 +52,6 @@ export function useAdminL7() {
   const stats = ref<L7StatsPayload | null>(null)
   const rules = ref<RuleItem[]>([])
   const events = ref<SecurityEventItem[]>([])
-  const statsTimer = ref<number | null>(null)
   const lastUpdated = ref<number | null>(null)
   const meta = ref({
     runtime_enabled: false,
@@ -110,15 +111,6 @@ export function useAdminL7() {
     } finally {
       if (showLoader) loading.value = false
       refreshing.value = false
-    }
-  }
-
-  const refreshStats = async () => {
-    try {
-      stats.value = await fetchL7Stats()
-      lastUpdated.value = Date.now()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : '刷新 L7 统计失败'
     }
   }
 
@@ -432,17 +424,20 @@ export function useAdminL7() {
     },
   ])
 
-  onMounted(async () => {
-    await refreshAll(true)
-    statsTimer.value = window.setInterval(() => {
-      refreshStats()
-    }, 5000)
+  useAdminRealtimeTopic<L7StatsPayload>('l7_stats', (payload) => {
+    stats.value = payload
+    lastUpdated.value = Date.now()
   })
 
-  onBeforeUnmount(() => {
-    if (statsTimer.value) {
-      clearInterval(statsTimer.value)
-    }
+  useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
+    events.value = payload.events
+      .filter((event) => event.layer.toLowerCase() === 'l7')
+      .slice(0, 6)
+    lastUpdated.value = Date.now()
+  })
+
+  onMounted(async () => {
+    await refreshAll(true)
   })
 
   return {

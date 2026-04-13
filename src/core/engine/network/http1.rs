@@ -211,6 +211,10 @@ pub(crate) async fn handle_http1_connection(
         debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
 
         let request_dump = request.to_inspection_string();
+        let traffic_source_ip = request
+            .client_ip
+            .clone()
+            .unwrap_or_else(|| packet.source_ip.to_string());
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_packet(request_dump.len());
         }
@@ -236,6 +240,9 @@ pub(crate) async fn handle_http1_connection(
         }
 
         if inspection_result.blocked {
+            context
+                .traffic_map
+                .record_ingress(traffic_source_ip.clone(), request_dump.len(), true);
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_block(inspection_result.layer.clone());
             }
@@ -275,6 +282,11 @@ pub(crate) async fn handle_http1_connection(
                     .await?;
             }
         } else {
+            context.traffic_map.record_ingress(
+                traffic_source_ip.clone(),
+                request_dump.len(),
+                false,
+            );
             let upstream_addr = select_upstream_target(matched_site.as_ref());
             if let Some(upstream_addr) = upstream_addr.as_deref() {
                 if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
@@ -322,6 +334,11 @@ pub(crate) async fn handle_http1_connection(
                         if let Some(metrics) = context.metrics.as_ref() {
                             metrics.record_proxy_success(proxy_started_at.elapsed());
                         }
+                        context.traffic_map.record_egress(
+                            traffic_source_ip.clone(),
+                            response.body.len(),
+                            proxy_started_at.elapsed(),
+                        );
                         match apply_safeline_upstream_action(
                             context.as_ref(),
                             packet,

@@ -7,10 +7,11 @@ import type {
   LinesSeriesOption,
 } from 'echarts'
 import { useAdminEventMap } from '../composables/useAdminEventMap'
-import type { EventMapFlow, EventMapNode, TrafficMapResponse } from '@/shared/types'
+import type { EventMapNode, TrafficEventDelta, TrafficMapResponse } from '@/shared/types'
 
 const props = defineProps<{
   trafficMap?: TrafficMapResponse | null
+  trafficEvents?: TrafficEventDelta[]
 }>()
 
 const chartRef = ref<HTMLElement | null>(null)
@@ -23,7 +24,6 @@ const { snapshot } = useAdminEventMap({
 const isOriginPending = () => !hasGeo(snapshot.value.originNode)
 
 type GeoNode = EventMapNode & { lat: number; lng: number }
-type FlowCountSnapshot = Map<string, number>
 type Projectile = {
   id: string
   coords: number[][]
@@ -33,6 +33,12 @@ type Projectile = {
   curveness: number
   createdAt: number
   durationMs: number
+}
+type PendingLaunch = {
+  key: string
+  event: TrafficEventDelta
+  count: number
+  timer: number | null
 }
 type LocalLinesDataItem = {
   coords: number[][]
@@ -56,11 +62,12 @@ type LocalLinesDataItem = {
 
 const PROJECTILE_DURATION_MS = 1000
 const PROJECTILE_CAP = 32
-const PROJECTILES_PER_TICK_CAP = 8
 const ACTIVE_TRAIL_OPACITY = 0.12
+const MERGE_WINDOW_MS = 150
 
 const activeProjectiles = ref<Projectile[]>([])
-const previousFlowCounts = new Map<string, number>()
+const processedTrafficEvents = new Set<string>()
+const pendingLaunches = new Map<string, PendingLaunch>()
 let cleanupTimer: number | null = null
 
 const resizeChart = () => chart?.resize()
@@ -69,15 +76,15 @@ function hasGeo(node: EventMapNode): node is GeoNode {
   return typeof node.lat === 'number' && typeof node.lng === 'number'
 }
 
-function projectilePalette(flow: EventMapFlow) {
-  if (flow.decision === 'block') {
+function projectilePalette(event: TrafficEventDelta) {
+  if (event.decision === 'block') {
     return {
       color: '#ff4d4f', // 鲜艳的红色
       trailColor: 'rgba(255, 77, 79, 0.15)',
       symbolSize: 4,
     }
   }
-  if (flow.direction === 'egress') {
+  if (event.direction === 'egress') {
     return {
       color: '#00f2fe', // 亮青色
       trailColor: 'rgba(0, 242, 254, 0.12)',
@@ -91,12 +98,49 @@ function projectilePalette(flow: EventMapFlow) {
   }
 }
 
-function nextFlowCounts(flows: EventMapFlow[]) {
-  const counts: FlowCountSnapshot = new Map()
-  flows.forEach((flow) => {
-    counts.set(flow.id, flow.requestCount ?? 0)
-  })
-  return counts
+function launchKey(event: TrafficEventDelta) {
+  return [event.node.id, event.direction, event.decision, event.source_ip].join(':')
+}
+
+function projectileSize(baseSize: number, count: number, decision: TrafficEventDelta['decision']) {
+  if (decision === 'block') {
+    return Math.min(baseSize + Math.min(count - 1, 1) * 0.35, baseSize + 0.35)
+  }
+  return Math.min(baseSize + Math.log2(count + 1) * 0.45, baseSize + 1.1)
+}
+
+function flushPendingLaunch(launch: PendingLaunch, originNode: GeoNode) {
+  if (typeof launch.event.node.lat !== 'number' || typeof launch.event.node.lng !== 'number') {
+    pendingLaunches.delete(launch.key)
+    return
+  }
+
+  const isIngress = launch.event.direction === 'ingress'
+  const coords = isIngress
+    ? [[launch.event.node.lng, launch.event.node.lat], [originNode.lng, originNode.lat]]
+    : [[originNode.lng, originNode.lat], [launch.event.node.lng, launch.event.node.lat]]
+  const palette = projectilePalette(launch.event)
+  const createdAt = Date.now()
+
+  activeProjectiles.value = [
+    ...activeProjectiles.value,
+    {
+      id: `${launch.key}-${createdAt}`,
+      coords,
+      color: palette.color,
+      trailColor: palette.trailColor,
+      symbolSize: projectileSize(
+        palette.symbolSize,
+        launch.count,
+        launch.event.decision,
+      ),
+      curveness: 0.15 + Math.random() * 0.3,
+      createdAt,
+      durationMs: PROJECTILE_DURATION_MS + Math.random() * 120,
+    },
+  ].slice(-PROJECTILE_CAP)
+
+  pendingLaunches.delete(launch.key)
 }
 
 function syncProjectiles() {
@@ -117,43 +161,64 @@ function ensureCleanupTimer() {
   }, 100)
 }
 
-function emitProjectiles(flows: EventMapFlow[], originNode: GeoNode, geoNodes: GeoNode[]) {
-  const flowNodeMap = new Map(geoNodes.map((node) => [node.id, node]))
-  const incoming = flows.flatMap((flow) => {
-    const currentCount = flow.requestCount ?? 0
-    const previousCount = previousFlowCounts.get(flow.id) ?? 0
-    const delta = Math.max(0, currentCount - previousCount)
-    const targetNode = flowNodeMap.get(flow.nodeId)
-    if (!targetNode || delta === 0) return []
+function trafficEventKey(event: TrafficEventDelta) {
+  return [
+    event.timestamp_ms,
+    event.direction,
+    event.decision,
+    event.source_ip,
+    event.bytes,
+    event.node.id,
+  ].join(':')
+}
 
-    const projectileCount = Math.min(delta, PROJECTILES_PER_TICK_CAP)
-    const isIngress = flow.direction === 'ingress'
-    const coords = isIngress
-      ? [[targetNode.lng, targetNode.lat], [originNode.lng, originNode.lat]]
-      : [[originNode.lng, originNode.lat], [targetNode.lng, targetNode.lat]]
-    const palette = projectilePalette(flow)
-    const createdAt = Date.now()
+function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
+  events.forEach((event) => {
+    const key = trafficEventKey(event)
+    if (processedTrafficEvents.has(key)) return
+    processedTrafficEvents.add(key)
 
-    return Array.from({ length: projectileCount }, (_, index) => ({
-      id: `${flow.id}-${createdAt}-${index}`,
-      coords,
-      color: palette.color,
-      trailColor: palette.trailColor,
-      symbolSize: palette.symbolSize,
-      curveness: 0.15 + Math.random() * 0.3, // 随机曲率
-      createdAt,
-      durationMs: PROJECTILE_DURATION_MS + index * 40 + Math.random() * 100, // 随机时长
-    }))
+    if (event.decision === 'block') {
+      flushPendingLaunch(
+        {
+          key: `${launchKey(event)}:${event.timestamp_ms}`,
+          event,
+          count: 1,
+          timer: null,
+        },
+        originNode,
+      )
+      return
+    }
+
+    const mergedKey = launchKey(event)
+    const existing = pendingLaunches.get(mergedKey)
+    if (existing) {
+      existing.count += 1
+      existing.event = event
+      return
+    }
+
+    const launch: PendingLaunch = {
+      key: mergedKey,
+      event,
+      count: 1,
+      timer: window.setTimeout(() => {
+        const pending = pendingLaunches.get(mergedKey)
+        if (!pending) return
+        flushPendingLaunch(pending, originNode)
+        renderChart()
+      }, MERGE_WINDOW_MS),
+    }
+    pendingLaunches.set(mergedKey, launch)
   })
 
-  previousFlowCounts.clear()
-  nextFlowCounts(flows).forEach((value, key) => {
-    previousFlowCounts.set(key, value)
-  })
+  if (processedTrafficEvents.size > 256) {
+    const retained = Array.from(processedTrafficEvents).slice(-128)
+    processedTrafficEvents.clear()
+    retained.forEach((value) => processedTrafficEvents.add(value))
+  }
 
-  if (incoming.length === 0) return
-
-  activeProjectiles.value = [...activeProjectiles.value, ...incoming].slice(-PROJECTILE_CAP)
 }
 
 // 加载地图并初始化
@@ -324,12 +389,21 @@ const renderChart = () => {
 watch(
   () => snapshot.value,
   (value) => {
-    if (hasGeo(value.originNode)) {
-      emitProjectiles(value.flows, value.originNode, value.nodes.filter(hasGeo))
-    } else {
-      previousFlowCounts.clear()
+    if (!hasGeo(value.originNode)) {
+      processedTrafficEvents.clear()
       activeProjectiles.value = []
     }
+    renderChart()
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.trafficEvents ?? [],
+  (events) => {
+    const originNode = snapshot.value.originNode
+    if (!hasGeo(originNode)) return
+    emitProjectiles(events, originNode)
     renderChart()
   },
   { deep: true },
@@ -352,6 +426,12 @@ onBeforeUnmount(() => {
     window.clearInterval(cleanupTimer)
     cleanupTimer = null
   }
+  pendingLaunches.forEach((launch) => {
+    if (launch.timer !== null) {
+      window.clearTimeout(launch.timer)
+    }
+  })
+  pendingLaunches.clear()
   chart?.dispose()
 })
 </script>

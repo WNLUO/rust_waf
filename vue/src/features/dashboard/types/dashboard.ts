@@ -111,3 +111,22 @@ export interface TrafficMapResponse {
   blocked_flow_count: number
   live_traffic_score: number
 }
+
+export interface TrafficEventDeltaNode {
+  id: string
+  name: string
+  region: string
+  role: 'cdn' | 'origin' | string
+  lat?: number
+  lng?: number
+}
+
+export interface TrafficEventDelta {
+  timestamp_ms: number
+  direction: 'ingress' | 'egress'
+  decision: 'allow' | 'block'
+  bytes: number
+  latency_ms?: number | null
+  source_ip: string
+  node: TrafficEventDeltaNode
+}

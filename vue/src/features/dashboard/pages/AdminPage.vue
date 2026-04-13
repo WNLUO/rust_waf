@@ -10,6 +10,7 @@ import type {
   DashboardPayload,
   MetricsResponse,
   SecurityEventItem,
+  TrafficEventDelta,
   SecurityEventsResponse,
   TrafficMapResponse,
 } from '@/shared/types'
@@ -36,6 +37,7 @@ import {
 
 const dashboard = ref<DashboardPayload | null>(null)
 const trafficMap = ref<TrafficMapResponse | null>(null)
+const trafficEvents = ref<TrafficEventDelta[]>([])
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
@@ -177,6 +179,10 @@ useAdminRealtimeTopic<TrafficMapResponse>('traffic_map', (payload) => {
   trafficMap.value = payload
 })
 
+useAdminRealtimeTopic<TrafficEventDelta>('traffic_event_delta', (payload) => {
+  trafficEvents.value = [...trafficEvents.value, payload].slice(-48)
+})
+
 const fetchData = async (showLoader = false) => {
   if (showLoader) loading.value = true
   refreshing.value = true
@@ -219,6 +225,7 @@ const fetchData = async (showLoader = false) => {
 const fetchTrafficMapData = async () => {
   try {
     trafficMap.value = await fetchTrafficMap({ window_seconds: 60 })
+    trafficEvents.value = []
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取实时地图失败'
   }
@@ -365,7 +372,7 @@ onMounted(() => {
       </section>
 
       <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <AdminEventMapSection :traffic-map="trafficMap" />
+        <AdminEventMapSection :traffic-map="trafficMap" :traffic-events="trafficEvents" />
 
         <CyberCard title="运行摘要">
           <div class="grid gap-4">

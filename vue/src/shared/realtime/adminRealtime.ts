@@ -8,6 +8,7 @@ type AdminRealtimeTopic =
   | 'recent_events'
   | 'recent_blocked_ips'
   | 'traffic_map'
+  | 'traffic_event_delta'
   | 'security_event_delta'
   | 'blocked_ip_upsert'
   | 'blocked_ip_deleted'

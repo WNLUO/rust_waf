@@ -54,7 +54,6 @@ const navItems: NavItem[] = [
   { name: 'L7管理', path: '/admin/l7', icon: Globe },
   { name: '事件记录', path: '/admin/events', icon: Activity },
   { name: '封禁名单', path: '/admin/blocked', icon: Ban },
-  { name: '雷池联动', path: '/admin/safeline', icon: Link2 },
   { name: '系统设置', path: '/admin/settings', icon: Settings },
 ]
 

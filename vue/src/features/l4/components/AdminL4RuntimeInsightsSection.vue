@@ -2,6 +2,8 @@
 import { ServerCog } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
+import type { L4ConfigForm } from '@/features/l4/utils/adminL4'
+import type { L4StatsPayload } from '@/shared/types'
 
 defineProps<{
   bloomPanels: Array<{
@@ -19,13 +21,23 @@ defineProps<{
     value: number
   }>
   formatNumber: (value?: number) => string
+  formatBytes: (value?: number) => string
   meta: {
     runtime_enabled: boolean
     bloom_enabled: boolean
     bloom_false_positive_verification: boolean
     runtime_profile: string
   }
+  configForm: L4ConfigForm
+  stats: L4StatsPayload | null
+  topPorts: L4StatsPayload['per_port_stats']
+  totalProcessedBytes: number
+  blockedCapacityLabel: string
+  blockedCapacityTone: 'success' | 'warning' | 'error'
 }>()
+
+const hasMeasuredPortBytes = (items: L4StatsPayload['per_port_stats']) =>
+  items.some((item) => item.bytes_processed > 0)
 </script>
 
 <template>
@@ -159,5 +171,100 @@ defineProps<{
         未启用，或者运行实例还没有积累到可展示的校验数据。
       </div>
     </CyberCard>
+
+    <section class="space-y-4">
+      <CyberCard title="限流阈值" sub-title="用于快速复核当前保存的关键阈值。">
+        <div class="space-y-3 text-sm text-stone-700">
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>每秒连接阈值</span>
+            <span class="font-mono font-semibold text-stone-900">{{
+              formatNumber(configForm.connection_rate_limit)
+            }}</span>
+          </div>
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>突发判定阈值</span>
+            <span class="font-mono font-semibold text-stone-900">{{
+              formatNumber(configForm.syn_flood_threshold)
+            }}</span>
+          </div>
+        </div>
+      </CyberCard>
+
+      <CyberCard title="容量上限" sub-title="帮助判断跟踪表和封禁表的容量预估。">
+        <div class="space-y-3 text-sm text-stone-700">
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>跟踪 IP 上限</span>
+            <span class="font-mono font-semibold text-stone-900">{{
+              formatNumber(configForm.max_tracked_ips)
+            }}</span>
+          </div>
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>封禁表上限</span>
+            <span class="font-mono font-semibold text-stone-900">{{
+              formatNumber(configForm.max_blocked_ips)
+            }}</span>
+          </div>
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>当前封禁占用</span>
+            <div class="flex items-center gap-2">
+              <span class="font-mono font-semibold text-stone-900">
+                {{ formatNumber(stats?.connections.blocked_connections || 0) }}
+                / {{ formatNumber(configForm.max_blocked_ips) }}
+              </span>
+              <StatusBadge
+                :text="blockedCapacityLabel"
+                :type="blockedCapacityTone"
+                compact
+              />
+            </div>
+          </div>
+        </div>
+      </CyberCard>
+
+      <CyberCard title="清理策略" sub-title="维护任务会按这个 TTL 回收过期状态。">
+        <div class="space-y-3 text-sm text-stone-700">
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>状态 TTL</span>
+            <span class="font-mono font-semibold text-stone-900"
+              >{{ formatNumber(configForm.state_ttl_secs) }} 秒</span
+            >
+          </div>
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>Bloom 缩放</span>
+            <span class="font-mono font-semibold text-stone-900">{{
+              configForm.bloom_filter_scale.toFixed(2)
+            }}</span>
+          </div>
+          <div
+            class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"
+          >
+            <span>端口画像累计流量</span>
+            <span
+              v-if="hasMeasuredPortBytes(topPorts)"
+              class="font-mono font-semibold text-stone-900"
+            >
+              {{ formatBytes(totalProcessedBytes) }}
+            </span>
+            <span v-else class="text-xs text-slate-500">
+              当前后端尚未累计该指标
+            </span>
+          </div>
+        </div>
+      </CyberCard>
+    </section>
   </div>
 </template>

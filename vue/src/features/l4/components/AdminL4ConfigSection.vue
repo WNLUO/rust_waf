@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { L4ConfigForm } from '@/features/l4/utils/adminL4'
+import type { L4StatsPayload } from '@/shared/types'
 import AdminL4ConfigFormCard from './AdminL4ConfigFormCard.vue'
 import AdminL4RuntimeInsightsSection from './AdminL4RuntimeInsightsSection.vue'
 
@@ -20,12 +21,18 @@ defineProps<{
   }>
   form: L4ConfigForm
   formatNumber: (value?: number) => string
+  formatBytes: (value?: number) => string
   meta: {
     runtime_enabled: boolean
     bloom_enabled: boolean
     bloom_false_positive_verification: boolean
     runtime_profile: string
   }
+  stats: L4StatsPayload | null
+  topPorts: L4StatsPayload['per_port_stats']
+  totalProcessedBytes: number
+  blockedCapacityLabel: string
+  blockedCapacityTone: 'success' | 'warning' | 'error'
 }>()
 
 defineEmits<{
@@ -44,7 +51,14 @@ defineEmits<{
       :bloom-panels="bloomPanels"
       :false-positive-panels="falsePositivePanels"
       :format-number="formatNumber"
+      :format-bytes="formatBytes"
       :meta="meta"
+      :config-form="form"
+      :stats="stats"
+      :top-ports="topPorts"
+      :total-processed-bytes="totalProcessedBytes"
+      :blocked-capacity-label="blockedCapacityLabel"
+      :blocked-capacity-tone="blockedCapacityTone"
     />
   </section>
 </template>

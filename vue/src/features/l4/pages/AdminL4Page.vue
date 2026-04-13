@@ -114,19 +114,21 @@ const lastUpdatedLabel = computed(() => {
         :false-positive-panels="falsePositivePanels"
         :form="configForm"
         :format-number="formatNumber"
+        :format-bytes="formatBytes"
         :meta="meta"
+        :stats="stats"
+        :top-ports="topPorts"
+        :total-processed-bytes="totalProcessedBytes"
+        :blocked-capacity-label="blockedCapacityLabel"
+        :blocked-capacity-tone="blockedCapacityTone"
         @update:form="Object.assign(configForm, $event)"
       />
 
       <AdminL4StatsSection
-        :blocked-capacity-label="blockedCapacityLabel"
-        :blocked-capacity-tone="blockedCapacityTone"
-        :config-form="configForm"
         :format-bytes="formatBytes"
         :format-number="formatNumber"
         :stats="stats"
         :top-ports="topPorts"
-        :total-processed-bytes="totalProcessedBytes"
       />
       <AdminL4ArchitectureSection />
     </div>

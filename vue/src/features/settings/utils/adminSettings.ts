@@ -14,7 +14,7 @@ export function createDefaultSystemSettings(): SystemSettingsForm {
     safeline: {
       enabled: true,
       auto_sync_events: true,
-      auto_sync_blocked_ips_push: true,
+      auto_sync_blocked_ips_push: false,
       auto_sync_blocked_ips_pull: true,
       auto_sync_interval_secs: 300,
       base_url: '',

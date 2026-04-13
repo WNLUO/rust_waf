@@ -174,7 +174,7 @@ mod tests {
         assert!(config.gateway_config.enable_ntlm);
         assert!(config.gateway_config.fallback_self_signed_certificate);
         assert!(config.integrations.safeline.auto_sync_events);
-        assert!(config.integrations.safeline.auto_sync_blocked_ips_push);
+        assert!(!config.integrations.safeline.auto_sync_blocked_ips_push);
         assert!(config.integrations.safeline.auto_sync_blocked_ips_pull);
         assert_eq!(
             config.http3_config.listen_addr,

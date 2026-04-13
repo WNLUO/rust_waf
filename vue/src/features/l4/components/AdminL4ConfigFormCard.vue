@@ -20,36 +20,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 
 <template>
   <section class="space-y-3">
-    <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-      <label class="l4-toggle-field text-sm text-stone-700">
-        <span class="font-medium">启用 DDoS 防护</span>
-        <input
-          :checked="form.ddos_protection_enabled"
-          type="checkbox"
-          class="ui-switch"
-          @change="
-            patchForm({
-              ddos_protection_enabled: ($event.target as HTMLInputElement)
-                .checked,
-            })
-          "
-        />
-      </label>
-
-      <label class="l4-toggle-field text-sm text-stone-700">
-        <span class="font-medium">高级 DDoS 判定</span>
-        <input
-          :checked="form.advanced_ddos_enabled"
-          type="checkbox"
-          class="ui-switch"
-          @change="
-            patchForm({
-              advanced_ddos_enabled: ($event.target as HTMLInputElement).checked,
-            })
-          "
-        />
-      </label>
-
+    <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <label :class="numberFieldClass">
         <span :class="numberLabelClass">每秒连接速率阈值</span>
         <input
@@ -160,7 +131,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
     <div class="space-y-2 border-t border-slate-200 pt-3">
       <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
 
-      <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      <div class="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-8">
         <label :class="numberFieldClass">
           <span :class="numberLabelClass">事件通道容量</span>
           <input
@@ -514,20 +485,30 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 }
 
 .l4-inline-input {
-  width: 5rem;
+  width: 3.6rem;
   border-radius: 0.375rem;
   border: 1px solid rgb(203 213 225);
   background: transparent;
-  padding: 0.25rem 0.5rem;
+  padding: 0.2rem 0.4rem;
   font-size: 0.875rem;
   color: rgb(41 37 36);
   outline: none;
-  text-align: left;
+  text-align: center;
   transition: border-color 0.2s ease;
 }
 
 .l4-inline-input:focus {
   border-color: rgba(59, 130, 246, 0.65);
+}
+
+.l4-inline-input[type='number']::-webkit-outer-spin-button,
+.l4-inline-input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.l4-inline-input[type='number'] {
+  -moz-appearance: textfield;
 }
 
 .l4-toggle-field {

@@ -83,7 +83,7 @@ impl Default for SafeLineConfig {
         Self {
             enabled: default_safeline_enabled(),
             auto_sync_events: true,
-            auto_sync_blocked_ips_push: true,
+            auto_sync_blocked_ips_push: false,
             auto_sync_blocked_ips_pull: true,
             auto_sync_interval_secs: default_safeline_auto_sync_interval_secs(),
             base_url: String::new(),

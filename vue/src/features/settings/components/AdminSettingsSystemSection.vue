@@ -163,9 +163,6 @@ function truncateCertificateName(name: string, maxLength = 18) {
         <Settings :size="20" />
       </div>
       <div class="min-w-0">
-        <p class="text-xs font-medium tracking-[0.24em] text-blue-700">
-          CONSOLE
-        </p>
         <h3 class="mt-1 text-xl font-semibold text-stone-900">
           基础运行配置
         </h3>

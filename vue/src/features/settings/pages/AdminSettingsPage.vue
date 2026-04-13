@@ -143,6 +143,26 @@ useFlashMessages({
               <p class="text-sm tracking-wider text-blue-700">L4 管理</p>
             </div>
             <div class="flex items-center gap-2">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+              >
+                <span>启用 DDoS 防护</span>
+                <input
+                  v-model="l4ConfigForm.ddos_protection_enabled"
+                  type="checkbox"
+                  class="ui-switch"
+                />
+              </label>
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+              >
+                <span>高级 DDoS 判定</span>
+                <input
+                  v-model="l4ConfigForm.advanced_ddos_enabled"
+                  type="checkbox"
+                  class="ui-switch"
+                />
+              </label>
               <button
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
                 :disabled="refreshingL4"

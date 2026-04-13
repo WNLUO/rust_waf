@@ -62,7 +62,6 @@ export function useAdminL7() {
   const applyConfig = (payload: L7ConfigPayload) => {
     Object.assign(configForm, {
       ...payload,
-      real_ip_headers: [...payload.real_ip_headers],
       trusted_proxy_cidrs: [...payload.trusted_proxy_cidrs],
       listen_addrs: [...payload.listen_addrs],
       cc_defense: {
@@ -342,13 +341,6 @@ export function useAdminL7() {
     }
   }
 
-  const realIpHeadersText = computed({
-    get: () => configForm.real_ip_headers.join('\n'),
-    set: (value: string) => {
-      configForm.real_ip_headers = splitTextareaList(value)
-    },
-  })
-
   const trustedProxyCidrsText = computed({
     get: () => configForm.trusted_proxy_cidrs.join('\n'),
     set: (value: string) => {
@@ -456,7 +448,6 @@ export function useAdminL7() {
     meta,
     protocolTags,
     proxySuccessRate,
-    realIpHeadersText,
     refreshAll,
     rules,
     runtimeProfileLabel,

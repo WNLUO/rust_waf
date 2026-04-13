@@ -58,7 +58,6 @@ pub struct L4ConfigResponse {
 #[derive(Debug, Serialize)]
 pub struct L7ConfigResponse {
     pub(crate) max_request_size: usize,
-    pub(crate) real_ip_headers: Vec<String>,
     pub(crate) trusted_proxy_cidrs: Vec<String>,
     pub(crate) first_byte_timeout_ms: u64,
     pub(crate) read_idle_timeout_ms: u64,
@@ -163,7 +162,6 @@ pub struct L4ConfigUpdateRequest {
 pub struct L7ConfigUpdateRequest {
     pub(crate) runtime_profile: String,
     pub(crate) max_request_size: usize,
-    pub(crate) real_ip_headers: Vec<String>,
     pub(crate) trusted_proxy_cidrs: Vec<String>,
     pub(crate) first_byte_timeout_ms: u64,
     pub(crate) read_idle_timeout_ms: u64,

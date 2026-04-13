@@ -201,17 +201,7 @@ defineProps<{
             "
           />
         </div>
-        <div class="grid gap-3 md:grid-cols-2">
-          <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <p class="text-xs tracking-wide text-slate-500">真实 IP 头优先级</p>
-            <p class="mt-3 text-sm leading-7 text-stone-800">
-              {{
-                configForm.real_ip_headers.length
-                  ? configForm.real_ip_headers.join(' -> ')
-                  : '未配置'
-              }}
-            </p>
-          </div>
+        <div>
           <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
             <p class="text-xs tracking-wide text-slate-500">可信代理网段</p>
             <p class="mt-3 text-sm leading-7 text-stone-800">

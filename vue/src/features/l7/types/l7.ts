@@ -41,7 +41,6 @@ export interface CcDefenseConfigPayload {
 
 export interface L7ConfigPayload {
   max_request_size: number
-  real_ip_headers: string[]
   trusted_proxy_cidrs: string[]
   first_byte_timeout_ms: number
   read_idle_timeout_ms: number

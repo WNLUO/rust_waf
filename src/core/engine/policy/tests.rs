@@ -54,24 +54,22 @@ async fn apply_response_policies_replaces_existing_hsts_header() {
 }
 
 #[tokio::test]
-async fn resolve_client_ip_falls_back_to_real_ip_headers_for_trusted_proxy() {
+async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
     let mut config = crate::config::Config::default();
     config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
-    config.l7_config.real_ip_headers = vec![
-        "cf-connecting-ip".to_string(),
-        "x-forwarded-for".to_string(),
-    ];
+    config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
+    config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
     let context = WafContext::new(config).await.unwrap();
     let mut request =
         UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
-    request.add_header("cf-connecting-ip".to_string(), "198.51.100.7".to_string());
+    request.add_header("x-cdn-real-ip".to_string(), "198.51.100.8".to_string());
 
-    let (resolved, source) =
-        resolve_client_ip(&context, "203.0.113.10:443".parse().unwrap(), &request);
+    apply_client_identity(&context, "203.0.113.10:443".parse().unwrap(), &mut request);
 
+    assert_eq!(request.get_header("x-cdn-real-ip").map(String::as_str), Some("198.51.100.8"));
+    assert_eq!(request.get_header("x-real-ip").map(String::as_str), Some("198.51.100.8"));
     assert_eq!(
-        resolved,
-        "198.51.100.7".parse::<std::net::IpAddr>().unwrap()
+        request.get_header("x-forwarded-for").map(String::as_str),
+        Some("198.51.100.8")
     );
-    assert_eq!(source, "real_ip_header");
 }

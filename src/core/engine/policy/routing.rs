@@ -185,9 +185,9 @@ pub(crate) fn resolve_client_ip(
     context: &WafContext,
     peer_addr: std::net::SocketAddr,
     request: &UnifiedHttpRequest,
-) -> (std::net::IpAddr, &'static str) {
+) -> (std::net::IpAddr, &'static str, Option<String>) {
     if !peer_is_trusted_proxy(context, peer_addr.ip()) {
-        return (peer_addr.ip(), "socket_peer");
+        return (peer_addr.ip(), "socket_peer", None);
     }
 
     let config = context.config_snapshot();
@@ -196,16 +196,20 @@ pub(crate) fn resolve_client_ip(
         crate::config::SourceIpStrategy::Connection => None,
         crate::config::SourceIpStrategy::XForwardedForFirst => request
             .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0)),
+            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
         crate::config::SourceIpStrategy::XForwardedForLast => request
             .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_from_right(value, 0)),
+            .and_then(|value| extract_forwarded_ip_from_right(value, 0))
+            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
         crate::config::SourceIpStrategy::XForwardedForLastButOne => request
             .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_from_right(value, 1)),
+            .and_then(|value| extract_forwarded_ip_from_right(value, 1))
+            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
         crate::config::SourceIpStrategy::XForwardedForLastButTwo => request
             .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_from_right(value, 2)),
+            .and_then(|value| extract_forwarded_ip_from_right(value, 2))
+            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
         crate::config::SourceIpStrategy::Header => {
             if gateway.custom_source_ip_header.trim().is_empty() {
                 None
@@ -213,21 +217,19 @@ pub(crate) fn resolve_client_ip(
                 request
                     .get_header(&gateway.custom_source_ip_header)
                     .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+                    .map(|ip| (ip, Some(gateway.custom_source_ip_header.clone())))
             }
         }
         crate::config::SourceIpStrategy::ProxyProtocol => request
             .get_metadata("proxy_protocol_source_ip")
-            .and_then(|value| value.parse::<std::net::IpAddr>().ok()),
+            .and_then(|value| value.parse::<std::net::IpAddr>().ok())
+            .map(|ip| (ip, None)),
     };
 
-    if let Some(ip) = resolved {
-        (ip, "forwarded_header")
-    } else if let Some(ip) =
-        resolve_ip_from_real_ip_headers(request, &config.l7_config.real_ip_headers)
-    {
-        (ip, "real_ip_header")
+    if let Some((ip, header)) = resolved {
+        (ip, "forwarded_header", header)
     } else {
-        (peer_addr.ip(), "socket_peer")
+        (peer_addr.ip(), "socket_peer", None)
     }
 }
 
@@ -261,26 +263,6 @@ fn extract_forwarded_ip_from_right(
         .rev()
         .nth(index_from_right)
         .and_then(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
-}
-
-fn resolve_ip_from_real_ip_headers(
-    request: &UnifiedHttpRequest,
-    headers: &[String],
-) -> Option<std::net::IpAddr> {
-    for header in headers {
-        let Some(value) = request.get_header(header) else {
-            continue;
-        };
-        let resolved = if header.eq_ignore_ascii_case("x-forwarded-for") {
-            extract_forwarded_ip_by_strategy(value, 0)
-        } else {
-            value.trim().parse::<std::net::IpAddr>().ok()
-        };
-        if resolved.is_some() {
-            return resolved;
-        }
-    }
-    None
 }
 
 pub(crate) fn unix_timestamp() -> i64 {

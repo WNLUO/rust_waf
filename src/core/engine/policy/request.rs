@@ -5,7 +5,8 @@ pub(crate) fn apply_client_identity(
     peer_addr: std::net::SocketAddr,
     request: &mut UnifiedHttpRequest,
 ) {
-    let (resolved_client_ip, source_label) = resolve_client_ip(context, peer_addr, request);
+    let (resolved_client_ip, source_label, source_header_name) =
+        resolve_client_ip(context, peer_addr, request);
     let used_forwarded_header = source_label != "socket_peer";
 
     request.set_client_ip(resolved_client_ip.to_string());
@@ -25,6 +26,7 @@ pub(crate) fn apply_client_identity(
         request,
         resolved_client_ip,
         used_forwarded_header,
+        source_header_name.as_deref(),
     );
 }
 
@@ -81,7 +83,16 @@ fn apply_proxy_headers(
     request: &mut UnifiedHttpRequest,
     resolved_client_ip: std::net::IpAddr,
     preserve_forwarded_chain: bool,
+    source_header_name: Option<&str>,
 ) {
+    if let Some(header_name) = source_header_name {
+        if !header_name.eq_ignore_ascii_case("x-forwarded-for")
+            && !header_name.eq_ignore_ascii_case("x-real-ip")
+        {
+            request.add_header(header_name.to_string(), resolved_client_ip.to_string());
+        }
+    }
+
     request.add_header("x-real-ip".to_string(), resolved_client_ip.to_string());
 
     let preserve_forwarded_chain = preserve_forwarded_chain

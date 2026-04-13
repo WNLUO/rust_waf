@@ -130,7 +130,6 @@ impl L7ConfigUpdateRequest {
         http3_config.validate()?;
 
         current.l7_config.max_request_size = self.max_request_size;
-        current.l7_config.real_ip_headers = self.real_ip_headers;
         current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
         current.l7_config.first_byte_timeout_ms = self.first_byte_timeout_ms;
         current.l7_config.read_idle_timeout_ms = self.read_idle_timeout_ms;

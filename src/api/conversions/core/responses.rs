@@ -99,7 +99,6 @@ impl L7ConfigResponse {
     pub(crate) fn from_config(config: &Config, runtime_enabled: bool) -> Self {
         Self {
             max_request_size: config.l7_config.max_request_size,
-            real_ip_headers: config.l7_config.real_ip_headers.clone(),
             trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
             first_byte_timeout_ms: config.l7_config.first_byte_timeout_ms,
             read_idle_timeout_ms: config.l7_config.read_idle_timeout_ms,

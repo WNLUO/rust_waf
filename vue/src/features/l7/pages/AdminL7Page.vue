@@ -29,7 +29,6 @@ const {
   loading,
   protocolTags,
   proxySuccessRate,
-  realIpHeadersText,
   refreshAll,
   runtimeProfileLabel,
   runtimeStatus,
@@ -119,11 +118,9 @@ const lastUpdatedLabel = computed(() => {
       <AdminL7ConfigSection
         :form="configForm"
         :listen-addrs-text="listenAddrsText"
-        :real-ip-headers-text="realIpHeadersText"
         :trusted-proxy-cidrs-text="trustedProxyCidrsText"
         @update:form="Object.assign(configForm, $event)"
         @update:listen-addrs-text="listenAddrsText = $event"
-        @update:real-ip-headers-text="realIpHeadersText = $event"
         @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
       />
 

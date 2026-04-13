@@ -10,14 +10,12 @@ import {
 const props = defineProps<{
   form: L7ConfigForm
   listenAddrsText: string
-  realIpHeadersText: string
   trustedProxyCidrsText: string
 }>()
 
 const emit = defineEmits<{
   'update:form': [value: L7ConfigForm]
   'update:listenAddrsText': [value: string]
-  'update:realIpHeadersText': [value: string]
   'update:trustedProxyCidrsText': [value: string]
 }>()
 
@@ -495,21 +493,7 @@ const safelineResponseHeadersText = computed({
       </label>
     </div>
 
-    <div class="mt-4 grid gap-3 xl:grid-cols-2">
-      <label class="text-sm text-stone-700">
-        真实来源 IP 头
-        <textarea
-          :value="realIpHeadersText"
-          :class="listFieldClass"
-          placeholder="每行一个，例如 x-forwarded-for"
-          @input="
-            emit(
-              'update:realIpHeadersText',
-              ($event.target as HTMLTextAreaElement).value,
-            )
-          "
-        />
-      </label>
+    <div class="mt-4">
       <label class="text-sm text-stone-700">
         可信代理网段
         <textarea

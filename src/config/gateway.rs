@@ -99,7 +99,7 @@ impl Default for GatewayConfig {
             http_to_https_redirect: true,
             enable_hsts: true,
             rewrite_host_enabled: true,
-            rewrite_host_value: String::new(),
+            rewrite_host_value: "$http_host".to_string(),
             add_x_forwarded_headers: default_add_x_forwarded_headers(),
             rewrite_x_forwarded_for: true,
             support_gzip: default_support_gzip(),

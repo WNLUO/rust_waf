@@ -83,7 +83,7 @@ const lastUpdatedLabel = computed(() => {
           @click="saveConfig"
         >
           <Save :size="14" />
-          {{ saving ? '保存中...' : '保存配置' }}
+          {{ saving ? '保存中...' : '保存 HTTP 接入配置' }}
         </button>
       </div>
     </template>

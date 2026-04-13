@@ -150,6 +150,11 @@ pub(super) fn normalize_console_and_gateway(config: &mut Config) {
         .to_ascii_lowercase();
     config.gateway_config.rewrite_host_value =
         config.gateway_config.rewrite_host_value.trim().to_string();
+    if config.gateway_config.rewrite_host_enabled
+        && config.gateway_config.rewrite_host_value.is_empty()
+    {
+        config.gateway_config.rewrite_host_value = "$http_host".to_string();
+    }
     config.gateway_config.ssl_protocols =
         normalize_supported_ssl_protocols(&config.gateway_config.ssl_protocols);
     if config.gateway_config.ssl_protocols.is_empty() {

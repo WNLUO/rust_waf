@@ -45,7 +45,7 @@ function createDefaultAdvancedSettings(): AdvancedGlobalSettingsForm {
     ssl_protocols: ['TLSv1.2', 'TLSv1.3'],
     ssl_ciphers: '',
     rewrite_host_enabled: true,
-    rewrite_host_value: '',
+    rewrite_host_value: '$http_host',
     header_operations: [],
   }
 }
@@ -178,6 +178,9 @@ onMounted(loadSettings)
         </h3>
         <p class="mt-2 text-sm leading-6 text-slate-500">
           这里集中管理源 IP、协议兼容、SSL 合规与其他影响 L7 行为的全局高级选项。
+        </p>
+        <p class="mt-2 text-xs leading-5 text-amber-700">
+          这一组开关属于全局设置，不会跟随页面右上角的“保存 HTTP 接入配置”一起提交，需要单独点击本区块的“保存高级配置”。
         </p>
       </div>
       <div class="flex items-center gap-2">

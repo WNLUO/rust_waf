@@ -17,7 +17,7 @@ function createDefaultSettings(): GlobalSettingsPayload {
     http_to_https_redirect: true,
     enable_hsts: true,
     rewrite_host_enabled: true,
-    rewrite_host_value: '',
+    rewrite_host_value: '$http_host',
     add_x_forwarded_headers: true,
     rewrite_x_forwarded_for: true,
     support_gzip: true,

@@ -22,6 +22,14 @@ fn rewrite_host_template_expands_host_without_port() {
     assert_eq!(rendered, "wnluo.com");
 }
 
+#[test]
+fn default_gateway_rewrite_host_value_uses_http_host_template() {
+    let config = crate::config::Config::default();
+
+    assert!(config.gateway_config.rewrite_host_enabled);
+    assert_eq!(config.gateway_config.rewrite_host_value, "$http_host");
+}
+
 #[tokio::test]
 async fn apply_response_policies_replaces_existing_hsts_header() {
     let mut config = crate::config::Config::default();

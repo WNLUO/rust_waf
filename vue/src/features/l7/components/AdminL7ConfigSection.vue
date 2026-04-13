@@ -958,37 +958,3 @@ const safelineResponseHeadersText = computed({
   gap: 0.5rem;
 }
 </style>
-nmax(0, 1fr);
-    align-items: center;
-    column-gap: 0.75rem;
-  }
-}
-
-.l7-inline-field :deep(input),
-.l7-inline-field :deep(select),
-.l7-inline-field :deep(textarea),
-.l7-inline-field :deep(.numberInputClass) {
-  margin-top: 0 !important;
-  border-radius: 0.72rem;
-  border-color: rgb(203 213 225);
-  background: rgb(255 255 255);
-  padding: 0.52rem 0.72rem;
-  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
-}
-
-.l7-inline-field :deep(input:focus),
-.l7-inline-field :deep(select:focus),
-.l7-inline-field :deep(textarea:focus) {
-  border-color: rgba(59, 130, 246, 0.65);
-  box-shadow:
-    0 0 0 3px rgba(59, 130, 246, 0.12),
-    inset 0 1px 0 rgba(148, 163, 184, 0.08);
-}
-</style>
-, 246, 0.12),
-    inset 0 1px 0 rgba(148, 163, 184, 0.08);
-}
-</style>
-a(148, 163, 184, 0.08);
-}
-</style>

@@ -252,184 +252,119 @@ const safeLineAutoSyncInterval = computed({
           开启断开连接后，不返回任何页面内容；关闭时，未命中站点会返回 404。
         </p>
 
-        <div class="mt-5 border-t border-slate-200 pt-5">
-          <div
-            class="flex justify-end"
-          >
-            <label
-              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
-            >
+        <div class="mt-4 border-t border-slate-100 pt-3">
+          <p class="mb-3 text-sm font-semibold text-stone-900">雷池接入参数</p>
+
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label class="space-y-1 md:col-span-2 xl:col-span-2">
+              <span class="text-xs font-medium text-slate-500">雷池地址</span>
               <input
-                v-model="safeLineVerifyTls"
-                type="checkbox"
-                class="accent-blue-600"
+                v-model="safeLineBaseUrl"
+                type="text"
+                placeholder="https://127.0.0.1:9443"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
               />
-              <span>校验证书</span>
             </label>
-          </div>
+            <label class="space-y-1 md:col-span-2 xl:col-span-2">
+              <span class="text-xs font-medium text-slate-500">API Token</span>
+              <input
+                v-model="safeLineApiToken"
+                type="password"
+                placeholder="API-TOKEN"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500">雷池账号</span>
+              <input
+                v-model="safeLineUsername"
+                type="text"
+                placeholder="用户名"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500">雷池密码</span>
+              <input
+                v-model="safeLinePassword"
+                type="password"
+                placeholder="密码"
+                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              />
+            </label>
 
-          <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(0,0.95fr)]">
-            <div class="space-y-4">
-              <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
-                <p class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                  连接参数
-                </p>
-                <div class="mt-3 grid gap-3 md:grid-cols-2">
-                  <label class="space-y-1.5 md:col-span-2">
-                    <span class="text-xs font-medium text-slate-500">雷池地址</span>
-                    <input
-                      v-model="safeLineBaseUrl"
-                      type="text"
-                      placeholder="https://127.0.0.1:9443"
-                      class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-                    />
-                  </label>
-                  <label class="space-y-1.5 md:col-span-2">
-                    <span class="text-xs font-medium text-slate-500">API Token</span>
-                    <input
-                      v-model="safeLineApiToken"
-                      type="password"
-                      placeholder="API-TOKEN"
-                      class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-                    />
-                  </label>
-                  <label class="space-y-1.5">
-                    <span class="text-xs font-medium text-slate-500">雷池账号</span>
-                    <input
-                      v-model="safeLineUsername"
-                      type="text"
-                      placeholder="用户名"
-                      class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-                    />
-                  </label>
-                  <label class="space-y-1.5">
-                    <span class="text-xs font-medium text-slate-500">雷池密码</span>
-                    <input
-                      v-model="safeLinePassword"
-                      type="password"
-                      placeholder="密码"
-                      class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5">
-                <p class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-                  同步策略
-                </p>
-                <div class="mt-3 flex flex-wrap gap-2.5">
-                  <label
-                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-stone-700"
-                  >
-                    <input
-                      v-model="safeLineAutoSyncEvents"
-                      type="checkbox"
-                      class="accent-blue-600"
-                    />
-                    <span>同步事件</span>
-                  </label>
-                  <label
-                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-stone-700"
-                  >
-                    <input
-                      v-model="safeLineAutoSyncPush"
-                      type="checkbox"
-                      class="accent-blue-600"
-                    />
-                    <span>推送封禁</span>
-                  </label>
-                  <label
-                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-stone-700"
-                  >
-                    <input
-                      v-model="safeLineAutoSyncPull"
-                      type="checkbox"
-                      class="accent-blue-600"
-                    />
-                    <span>回流封禁</span>
-                  </label>
-                  <label
-                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-stone-700"
-                  >
-                    <span>自动</span>
-                    <input
-                      v-model.number="safeLineAutoSyncInterval"
-                      type="number"
-                      min="15"
-                      max="86400"
-                      step="15"
-                      class="w-20 appearance-none border-0 bg-transparent p-0 text-center text-sm text-stone-900 outline-none"
-                    />
-                    <span>秒同步</span>
-                  </label>
-                </div>
+            <!-- 策略选项平铺 -->
+            <div class="space-y-1 md:col-span-2 xl:col-span-4">
+              <span class="text-xs font-medium text-slate-500">同步与安全策略</span>
+              <div class="flex flex-wrap items-center gap-4">
+                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
+                  <input v-model="safeLineVerifyTls" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
+                  <span>校验证书</span>
+                </label>
+                <div class="h-3 w-px bg-slate-200"></div>
+                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
+                  <input v-model="safeLineAutoSyncEvents" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
+                  <span>同步事件</span>
+                </label>
+                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
+                  <input v-model="safeLineAutoSyncPush" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
+                  <span>推送封禁</span>
+                </label>
+                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
+                  <input v-model="safeLineAutoSyncPull" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
+                  <span>回流封禁</span>
+                </label>
+                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
+                  <span>自动</span>
+                  <input
+                    v-model.number="safeLineAutoSyncInterval"
+                    type="number"
+                    min="15"
+                    max="86400"
+                    step="15"
+                    class="w-12 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-center text-xs font-bold text-stone-900 outline-none focus:border-blue-500 focus:bg-white"
+                  />
+                  <span>s 同步</span>
+                </label>
               </div>
             </div>
+          </div>
 
-            <div class="space-y-4">
-              <div
-                v-if="testResult"
-                class="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5"
+          <!-- 测试结果横向扁平化 -->
+          <div
+            v-if="testResult"
+            class="mt-4 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 md:flex-row md:items-center"
+          >
+            <div class="flex items-center gap-2">
+              <span
+                class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                :class="
+                  testResult.status === 'ok'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : testResult.status === 'warning'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-rose-100 text-rose-700'
+                "
               >
-                <div class="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-medium text-stone-900">连通性测试结果</p>
-                    <p class="mt-1 text-xs leading-5 text-slate-500">
-                      {{ testResult.message }}
-                    </p>
-                  </div>
-                  <span
-                    class="inline-flex rounded-full px-2.5 py-1 text-xs font-medium"
-                    :class="
-                      testResult.status === 'ok'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : testResult.status === 'warning'
-                          ? 'bg-amber-100 text-amber-700'
-                          : 'bg-rose-100 text-rose-700'
-                    "
-                  >
-                    {{
-                      testResult.status === 'ok'
-                        ? '通过'
-                        : testResult.status === 'warning'
-                          ? '需确认'
-                          : '失败'
-                    }}
-                  </span>
-                </div>
-
-                <div class="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div
-                    class="rounded-xl border border-slate-200 bg-white px-3.5 py-3"
-                  >
-                    <p class="text-xs text-slate-500">OpenAPI 文档</p>
-                    <p class="mt-1 text-sm font-medium text-stone-900">
-                      {{ testResult.openapi_doc_reachable ? '可访问' : '不可访问' }}
-                      <span
-                        v-if="testResult.openapi_doc_status !== null"
-                        class="text-slate-500"
-                      >
-                        （HTTP {{ testResult.openapi_doc_status }}）
-                      </span>
-                    </p>
-                  </div>
-                  <div
-                    class="rounded-xl border border-slate-200 bg-white px-3.5 py-3"
-                  >
-                    <p class="text-xs text-slate-500">鉴权探测</p>
-                    <p class="mt-1 text-sm font-medium text-stone-900">
-                      {{ testResult.authenticated ? '已通过' : '未通过' }}
-                      <span
-                        v-if="testResult.auth_probe_status !== null"
-                        class="text-slate-500"
-                      >
-                        （HTTP {{ testResult.auth_probe_status }}）
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              </div>
+                {{ testResult.status === 'ok' ? '连通正常' : testResult.status === 'warning' ? '需确认' : '连通失败' }}
+              </span>
+            </div>
+            <div class="hidden h-4 w-px bg-slate-200 md:block"></div>
+            <p class="min-w-0 flex-1 truncate text-[11px] leading-4 text-slate-500" :title="testResult.message">
+              {{ testResult.message }}
+            </p>
+            <div class="hidden h-4 w-px bg-slate-200 md:block"></div>
+            <div class="flex shrink-0 flex-wrap items-center gap-3 whitespace-nowrap text-[11px] text-slate-500">
+              <p>
+                OpenAPI:
+                <span class="font-medium text-stone-900">{{ testResult.openapi_doc_reachable ? '可访问' : '不可访问' }}</span>
+                <span v-if="testResult.openapi_doc_status !== null" class="ml-0.5 text-slate-400">({{ testResult.openapi_doc_status }})</span>
+              </p>
+              <p>
+                鉴权:
+                <span class="font-medium text-stone-900">{{ testResult.authenticated ? '通过' : '未通过' }}</span>
+                <span v-if="testResult.auth_probe_status !== null" class="ml-0.5 text-slate-400">({{ testResult.auth_probe_status }})</span>
+              </p>
             </div>
           </div>
         </div>

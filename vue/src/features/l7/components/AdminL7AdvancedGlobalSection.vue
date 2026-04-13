@@ -173,15 +173,6 @@ onMounted(loadSettings)
     >
       <div>
         <p class="text-sm tracking-wider text-blue-700">高级配置</p>
-        <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-          其他高级配置
-        </h3>
-        <p class="mt-2 text-sm leading-6 text-slate-500">
-          这里集中管理真实来源 IP Header、协议兼容、SSL 合规与其他影响 L7 行为的全局高级选项。
-        </p>
-        <p class="mt-2 text-xs leading-5 text-amber-700">
-          这一组开关属于全局设置，不会跟随页面右上角的“保存 HTTP 接入配置”一起提交，需要单独点击本区块的“保存高级配置”。
-        </p>
       </div>
       <div class="flex items-center gap-2">
         <button
@@ -264,12 +255,9 @@ onMounted(loadSettings)
 
       <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p class="text-sm font-semibold text-stone-900">协议兼容</p>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
-          控制是否接受旧版 HTTP/1.0 请求；HTTP/2 与 HTTP/3 开关仍在上方的 HTTP 接入配置区管理。
-        </p>
         <div class="mt-4 grid gap-3">
           <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-            <input v-model="form.enable_http1_0" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            <input v-model="form.enable_http1_0" type="checkbox" class="ui-switch" />
             启用 HTTP/1.0
           </label>
         </div>
@@ -315,47 +303,47 @@ onMounted(loadSettings)
 
       <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.http_to_https_redirect" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.http_to_https_redirect" type="checkbox" class="ui-switch" />
           HTTP 自动跳转到 HTTPS
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.enable_hsts" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.enable_hsts" type="checkbox" class="ui-switch" />
           启用 HSTS
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.add_x_forwarded_headers" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.add_x_forwarded_headers" type="checkbox" class="ui-switch" />
           为上游服务器传递 X-Forwarded-Host / Proto
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.rewrite_x_forwarded_for" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.rewrite_x_forwarded_for" type="checkbox" class="ui-switch" />
           清空并重写 X-Forwarded-For
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.support_gzip" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.support_gzip" type="checkbox" class="ui-switch" />
           支持 Gzip 压缩
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.support_brotli" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.support_brotli" type="checkbox" class="ui-switch" />
           支持 Brotli 压缩
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.support_sse" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.support_sse" type="checkbox" class="ui-switch" />
           支持 SSE 流式响应
         </label>
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-          <input v-model="form.enable_ntlm" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.enable_ntlm" type="checkbox" class="ui-switch" />
           启用 NTLM 认证
         </label>
         <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
           <span class="font-medium">应用不存在时返回自置证书</span>
-          <input v-model="form.fallback_self_signed_certificate" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.fallback_self_signed_certificate" type="checkbox" class="ui-switch" />
         </label>
       </div>
 
       <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
           <span class="font-medium">代理时修改请求中的 Host 头</span>
-          <input v-model="form.rewrite_host_enabled" type="checkbox" class="h-4 w-4 accent-blue-600" />
+          <input v-model="form.rewrite_host_enabled" type="checkbox" class="ui-switch" />
         </label>
         <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
           <span class="font-medium whitespace-nowrap">Host 头</span>
@@ -430,4 +418,37 @@ onMounted(loadSettings)
     </template>
   </section>
 </template>
+
+<style scoped>
+.ui-switch {
+  appearance: none;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  background: rgb(203 213 225);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.ui-switch:checked {
+  background: rgb(37 99 235);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(1rem);
+}
+</style>
 ate>

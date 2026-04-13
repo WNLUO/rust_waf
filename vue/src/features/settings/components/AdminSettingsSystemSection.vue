@@ -145,6 +145,11 @@ const safeLineAutoSyncInterval = computed({
       },
     }),
 })
+
+function truncateCertificateName(name: string, maxLength = 18) {
+  if (name.length <= maxLength) return name
+  return `${name.slice(0, maxLength)}...`
+}
 </script>
 
 <template>
@@ -224,32 +229,93 @@ const safeLineAutoSyncInterval = computed({
                 :key="certificate.id"
                 :value="certificate.id"
               >
-                #{{ certificate.id }} · {{ certificate.name }}
+                {{ truncateCertificateName(certificate.name) }}
               </option>
             </select>
           </label>
         </div>
 
         <div class="mt-4 border-t border-slate-100 pt-3">
-          <p class="mb-3 text-sm font-semibold text-stone-900">雷池接入参数</p>
+          <div class="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <p class="text-sm font-semibold text-stone-900">雷池接入参数</p>
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+                <input
+                  v-model="safeLineVerifyTls"
+                  type="checkbox"
+                  class="peer sr-only"
+                />
+                <span
+                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
+                ></span>
+                <span>校验证书</span>
+              </label>
+              <div class="h-3 w-px bg-slate-200"></div>
+              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+                <input
+                  v-model="safeLineAutoSyncEvents"
+                  type="checkbox"
+                  class="peer sr-only"
+                />
+                <span
+                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
+                ></span>
+                <span>同步事件</span>
+              </label>
+              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+                <input
+                  v-model="safeLineAutoSyncPush"
+                  type="checkbox"
+                  class="peer sr-only"
+                />
+                <span
+                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
+                ></span>
+                <span>推送封禁</span>
+              </label>
+              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+                <input
+                  v-model="safeLineAutoSyncPull"
+                  type="checkbox"
+                  class="peer sr-only"
+                />
+                <span
+                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
+                ></span>
+                <span>回流封禁</span>
+              </label>
+              <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
+                <span>自动</span>
+                <input
+                  v-model.number="safeLineAutoSyncInterval"
+                  type="number"
+                  min="15"
+                  max="86400"
+                  step="15"
+                  class="no-spinner w-12 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-center text-xs font-bold text-stone-900 outline-none focus:border-blue-500 focus:bg-white"
+                />
+                <span>s 同步</span>
+              </label>
+            </div>
+          </div>
 
-          <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-            <label class="flex items-center justify-start gap-2 text-sm text-stone-700 md:col-span-2">
+          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
               <span class="font-medium whitespace-nowrap">雷池地址</span>
               <input
                 v-model="safeLineBaseUrl"
                 type="text"
                 placeholder="https://127.0.0.1:9443"
-                class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
+                class="w-full rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
-            <label class="flex items-center justify-start gap-2 text-sm text-stone-700 md:col-span-2">
+            <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
               <span class="font-medium whitespace-nowrap">API Token</span>
               <input
                 v-model="safeLineApiToken"
                 type="password"
                 placeholder="API-TOKEN"
-                class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
+                class="w-full rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
             <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
@@ -258,7 +324,7 @@ const safeLineAutoSyncInterval = computed({
                 v-model="safeLineUsername"
                 type="text"
                 placeholder="用户名"
-                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
+                class="w-full rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
             <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
@@ -267,45 +333,10 @@ const safeLineAutoSyncInterval = computed({
                 v-model="safeLinePassword"
                 type="password"
                 placeholder="密码"
-                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
+                class="w-full rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
 
-            <!-- 策略选项平铺 -->
-            <div class="space-y-1 md:col-span-2 xl:col-span-4">
-              <span class="text-xs font-medium text-slate-500">同步与安全策略</span>
-              <div class="flex flex-wrap items-center gap-4">
-                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
-                  <input v-model="safeLineVerifyTls" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
-                  <span>校验证书</span>
-                </label>
-                <div class="h-3 w-px bg-slate-200"></div>
-                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
-                  <input v-model="safeLineAutoSyncEvents" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
-                  <span>同步事件</span>
-                </label>
-                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
-                  <input v-model="safeLineAutoSyncPush" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
-                  <span>推送封禁</span>
-                </label>
-                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
-                  <input v-model="safeLineAutoSyncPull" type="checkbox" class="h-3.5 w-3.5 accent-blue-600" />
-                  <span>回流封禁</span>
-                </label>
-                <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
-                  <span>自动</span>
-                  <input
-                    v-model.number="safeLineAutoSyncInterval"
-                    type="number"
-                    min="15"
-                    max="86400"
-                    step="15"
-                    class="w-12 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-center text-xs font-bold text-stone-900 outline-none focus:border-blue-500 focus:bg-white"
-                  />
-                  <span>s 同步</span>
-                </label>
-              </div>
-            </div>
           </div>
 
           <!-- 测试结果横向扁平化 -->
@@ -350,3 +381,15 @@ const safeLineAutoSyncInterval = computed({
     </div>
   </div>
 </template>
+
+<style scoped>
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.no-spinner {
+  -moz-appearance: textfield;
+}
+</style>

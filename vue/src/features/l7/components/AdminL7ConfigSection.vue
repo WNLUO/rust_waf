@@ -274,7 +274,7 @@ const safelineResponseHeadersText = computed({
           <input
             v-model="http2Enabled"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
         </span>
         <span class="mt-2 block text-xs leading-6 text-slate-500"
@@ -289,7 +289,7 @@ const safelineResponseHeadersText = computed({
           <input
             v-model="bloomEnabled"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
         </span>
         <span class="mt-2 block text-xs leading-6 text-slate-500"
@@ -304,7 +304,7 @@ const safelineResponseHeadersText = computed({
           <input
             v-model="healthcheckEnabled"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
         </span>
         <span class="mt-2 block text-xs leading-6 text-slate-500"
@@ -320,7 +320,7 @@ const safelineResponseHeadersText = computed({
             v-model="bloomVerifyEnabled"
             :disabled="!form.bloom_enabled"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
         </span>
         <span class="mt-2 block text-xs leading-6 text-slate-500"
@@ -335,7 +335,7 @@ const safelineResponseHeadersText = computed({
           <input
             v-model="http3Enabled"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
         </span>
         <span class="mt-2 block text-xs leading-6 text-slate-500"
@@ -484,7 +484,7 @@ const safelineResponseHeadersText = computed({
           <input
             v-model="http2EnablePriorities"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
           <span class="text-sm text-stone-800"
             >允许使用优先级信息处理 HTTP/2 请求</span
@@ -516,9 +516,6 @@ const safelineResponseHeadersText = computed({
       >
         <div>
           <p class="text-sm tracking-wider text-blue-700">L7 CC 防护</p>
-          <h4 class="mt-2 text-xl font-semibold text-stone-900">
-            基于真实来源 IP 的滑窗与 Challenge
-          </h4>
         </div>
         <div class="flex flex-wrap gap-3">
           <StatusBadge
@@ -545,7 +542,7 @@ const safelineResponseHeadersText = computed({
             <input
               v-model="ccDefenseEnabled"
               type="checkbox"
-              class="h-4 w-4 accent-blue-600"
+              class="ui-switch"
             />
           </span>
           <span class="mt-2 block text-xs leading-6 text-slate-500"
@@ -655,9 +652,6 @@ const safelineResponseHeadersText = computed({
           <p class="text-sm tracking-wider text-blue-700">
             SafeLine 响应接管
           </p>
-          <h4 class="mt-2 text-xl font-semibold text-stone-900">
-            默认接管雷池拦截响应
-          </h4>
         </div>
         <div class="flex flex-wrap gap-3">
           <StatusBadge
@@ -687,7 +681,7 @@ const safelineResponseHeadersText = computed({
         <input
           v-model="safelineInterceptEnabled"
           type="checkbox"
-          class="h-4 w-4 accent-blue-600"
+          class="ui-switch"
         />
       </label>
         <div
@@ -769,7 +763,7 @@ const safelineResponseHeadersText = computed({
             <input
               v-model="safelineResponseGzip"
               type="checkbox"
-              class="h-4 w-4 accent-blue-600"
+              class="ui-switch"
             />
             <span class="text-sm text-stone-800">压缩替换后的响应体</span>
           </span>
@@ -813,9 +807,6 @@ const safelineResponseHeadersText = computed({
       >
         <div>
           <p class="text-sm tracking-wider text-blue-700">HTTP/3 配置</p>
-          <h4 class="mt-2 text-xl font-semibold text-stone-900">
-            QUIC 与 TLS 1.3 入口参数
-          </h4>
         </div>
         <div class="flex flex-wrap gap-3">
           <StatusBadge
@@ -897,7 +888,7 @@ const safelineResponseHeadersText = computed({
             <input
               v-model="http3ConnectionMigration"
               type="checkbox"
-              class="h-4 w-4 accent-blue-600"
+              class="ui-switch"
             />
             <span class="text-sm text-stone-800">允许连接迁移</span>
           </span>
@@ -907,7 +898,7 @@ const safelineResponseHeadersText = computed({
           <input
             v-model="http3Tls13Enabled"
             type="checkbox"
-            class="h-4 w-4 accent-blue-600"
+            class="ui-switch"
           />
         </label>
       </div>
@@ -956,5 +947,41 @@ const safelineResponseHeadersText = computed({
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+}
+
+.ui-switch {
+  appearance: none;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  background: rgb(203 213 225);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.ui-switch:checked {
+  background: rgb(37 99 235);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(1rem);
+}
+
+.ui-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 </style>

@@ -26,7 +26,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
         <input
           :checked="form.ddos_protection_enabled"
           type="checkbox"
-          class="h-5 w-5 accent-blue-600"
+          class="ui-switch"
           @change="
             patchForm({
               ddos_protection_enabled: ($event.target as HTMLInputElement)
@@ -41,7 +41,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
         <input
           :checked="form.advanced_ddos_enabled"
           type="checkbox"
-          class="h-5 w-5 accent-blue-600"
+          class="ui-switch"
           @change="
             patchForm({
               advanced_ddos_enabled: ($event.target as HTMLInputElement).checked,
@@ -535,5 +535,36 @@ function patchForm(patch: Partial<L4ConfigForm>) {
   align-items: center;
   justify-content: flex-start;
   gap: 0.5rem;
+}
+
+.ui-switch {
+  appearance: none;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  background: rgb(203 213 225);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.ui-switch:checked {
+  background: rgb(37 99 235);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(1rem);
 }
 </style>

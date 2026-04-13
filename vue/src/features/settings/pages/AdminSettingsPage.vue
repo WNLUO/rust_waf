@@ -141,9 +141,6 @@ useFlashMessages({
           >
             <div>
               <p class="text-sm tracking-wider text-blue-700">L4 管理</p>
-              <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-                L4 配置项
-              </h3>
             </div>
             <div class="flex items-center gap-2">
               <button
@@ -187,9 +184,6 @@ useFlashMessages({
             >
               <div>
                 <p class="text-sm tracking-wider text-blue-700">L7 管理</p>
-                <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-                  L7 配置项
-                </h3>
               </div>
               <div class="flex items-center gap-2">
                 <button
@@ -226,7 +220,7 @@ useFlashMessages({
               v-model="systemSettings.drop_unmatched_requests"
               :disabled="saving || loading"
               type="checkbox"
-              class="h-4 w-4 accent-blue-600"
+              class="ui-switch"
             />
           </label>
           <AdminL7ConfigSection
@@ -261,3 +255,41 @@ useFlashMessages({
     />
   </AppLayout>
 </template>
+
+<style scoped>
+.ui-switch {
+  appearance: none;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  background: rgb(203 213 225);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.ui-switch:checked {
+  background: rgb(37 99 235);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(1rem);
+}
+
+.ui-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+</style>

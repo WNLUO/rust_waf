@@ -85,7 +85,7 @@ const requestStatus = computed(() => {
       second: '2-digit',
     }).format(new Date(lastUpdated.value))}`
   }
-  return '等待首次同步'
+  return '等待首次同步，当前为手动刷新'
 })
 
 const fetchData = async (showLoader = false) => {
@@ -141,7 +141,6 @@ const fetchData = async (showLoader = false) => {
 
 onMounted(() => {
   fetchData(true)
-  refreshTimer.value = window.setInterval(() => fetchData(), 5000)
 })
 
 onBeforeUnmount(() => {

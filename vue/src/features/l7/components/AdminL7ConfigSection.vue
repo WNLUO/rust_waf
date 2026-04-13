@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
   listFieldClass,
@@ -35,6 +36,8 @@ function fieldModel<K extends keyof L7ConfigForm>(key: K) {
 }
 
 const http2Enabled = fieldModel('http2_enabled')
+const http10Enabled = ref(false)
+const http10Saving = ref(false)
 const bloomEnabled = fieldModel('bloom_enabled')
 const bloomVerifyEnabled = fieldModel('bloom_false_positive_verification')
 const healthcheckEnabled = fieldModel('upstream_healthcheck_enabled')
@@ -209,6 +212,32 @@ const contentTypeOptions = [
   'text/xml; charset=utf-8',
 ]
 
+async function loadHttp10Setting() {
+  try {
+    const settings = await fetchGlobalSettings()
+    http10Enabled.value = settings.enable_http1_0
+  } catch {
+    // Keep the UI usable even if the global setting request fails.
+  }
+}
+
+async function handleHttp10Toggle(nextValue: boolean) {
+  const previous = http10Enabled.value
+  http10Enabled.value = nextValue
+  http10Saving.value = true
+  try {
+    const latest = await fetchGlobalSettings()
+    await updateGlobalSettings({
+      ...latest,
+      enable_http1_0: nextValue,
+    })
+  } catch {
+    http10Enabled.value = previous
+  } finally {
+    http10Saving.value = false
+  }
+}
+
 function openContentTypeDialog() {
   contentTypeDraft.value = safelineResponseContentType.value
   contentTypeDialogOpen.value = true
@@ -226,6 +255,10 @@ function confirmContentTypeDialog() {
 function closeContentTypeDialog() {
   contentTypeDialogOpen.value = false
 }
+
+onMounted(() => {
+  void loadHttp10Setting()
+})
 
 const safelineResponseBodySource = computed({
   get: () => props.form.safeline_intercept.response_template.body_source,
@@ -285,6 +318,20 @@ const safelineResponseHeadersText = computed({
     </div>
 
     <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+      <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+        <span>启用 HTTP/1.0</span>
+        <input
+          :checked="http10Enabled"
+          :disabled="http10Saving"
+          type="checkbox"
+          class="ui-switch"
+          @change="
+            handleHttp10Toggle(
+              ($event.target as HTMLInputElement).checked,
+            )
+          "
+        />
+      </label>
       <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
         <span>启用 HTTP/2</span>
         <input
@@ -372,20 +419,6 @@ const safelineResponseHeadersText = computed({
           <option value="fail_open">故障放行</option>
           <option value="fail_close">故障关闭</option>
         </select>
-        </label>
-        <label class="text-sm text-stone-700 md:col-span-2 xl:col-span-4">
-          可信代理网段
-          <textarea
-            :value="trustedProxyCidrsText"
-            :class="listFieldClass"
-            placeholder="每行一个，例如 203.0.113.0/24"
-            @input="
-              emit(
-                'update:trustedProxyCidrsText',
-                ($event.target as HTMLTextAreaElement).value,
-              )
-            "
-          />
         </label>
       </div>
     </div>

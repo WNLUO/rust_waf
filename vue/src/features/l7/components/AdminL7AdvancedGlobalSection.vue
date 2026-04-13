@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { Plus, RefreshCw, Save, Trash2 } from 'lucide-vue-next'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
 import type { GlobalSettingsPayload, HeaderOperationItem } from '@/shared/types'
@@ -7,7 +7,6 @@ import { useFlashMessages } from '@/shared/composables/useNotifications'
 
 type AdvancedGlobalSettingsForm = Pick<
   GlobalSettingsPayload,
-  | 'enable_http1_0'
   | 'source_ip_strategy'
   | 'custom_source_ip_header'
   | 'trusted_proxy_cidrs'
@@ -29,7 +28,6 @@ type AdvancedGlobalSettingsForm = Pick<
 
 function createDefaultAdvancedSettings(): AdvancedGlobalSettingsForm {
   return {
-    enable_http1_0: true,
     source_ip_strategy: 'connection',
     custom_source_ip_header: '',
     trusted_proxy_cidrs: [],
@@ -55,9 +53,19 @@ const saving = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const trustedProxyCidrsText = ref('')
+const trustedProxyCidrsDialogOpen = ref(false)
 const form = reactive<AdvancedGlobalSettingsForm>(
   createDefaultAdvancedSettings(),
 )
+
+const trustedProxyCidrsSummary = computed(() => {
+  const count = trustedProxyCidrsText.value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean).length
+
+  return count ? `已配置 ${count} 条` : '点击配置'
+})
 
 useFlashMessages({
   error,
@@ -69,7 +77,6 @@ useFlashMessages({
 })
 
 function assignForm(payload: GlobalSettingsPayload) {
-  form.enable_http1_0 = payload.enable_http1_0
   form.source_ip_strategy = payload.source_ip_strategy
   form.custom_source_ip_header = payload.custom_source_ip_header
   form.trusted_proxy_cidrs = [...payload.trusted_proxy_cidrs]
@@ -202,18 +209,15 @@ onMounted(loadSettings)
     </div>
 
     <template v-else>
-      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div>
         <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
-          决定网关从连接、真实来源 IP Header 或代理协议中识别真实来源。
-        </p>
 
-        <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 items-start">
-          <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2 lg:col-span-1">
+        <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
             <span class="font-medium whitespace-nowrap">获取方式</span>
             <select
               v-model="form.source_ip_strategy"
-              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
+              class="w-auto min-w-[15rem] rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
             >
               <option value="connection">从网络连接中获取</option>
               <option value="x_forwarded_for_first">
@@ -233,37 +237,29 @@ onMounted(loadSettings)
             </select>
           </label>
 
-          <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500">真实来源 IP Header</span>
+          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
+            <span class="font-medium whitespace-nowrap">真实来源 IP Header</span>
             <input
               v-model="form.custom_source_ip_header"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              class="w-[12rem] rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               type="text"
               placeholder="例如 x-cdn-real-ip"
             />
           </label>
-          <label class="space-y-1.5 md:col-span-2 lg:col-span-1">
-            <span class="text-xs font-medium text-slate-500">可信代理 CIDR</span>
-            <textarea
-              v-model="trustedProxyCidrsText"
-              class="min-h-[6rem] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-              placeholder="每行一个，如 10.0.0.0/8"
-            />
+          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
+            <span class="font-medium whitespace-nowrap">可信代理 CIDR</span>
+            <button
+              type="button"
+              class="rounded border border-slate-200 bg-transparent px-3 py-1 text-sm text-stone-700 outline-none transition hover:border-blue-500 hover:text-blue-700"
+              @click="trustedProxyCidrsDialogOpen = true"
+            >
+              {{ trustedProxyCidrsSummary }}
+            </button>
           </label>
         </div>
-      </section>
+      </div>
 
-      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p class="text-sm font-semibold text-stone-900">协议兼容</p>
-        <div class="mt-4 grid gap-3">
-          <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
-            <input v-model="form.enable_http1_0" type="checkbox" class="ui-switch" />
-            启用 HTTP/1.0
-          </label>
-        </div>
-      </section>
-
-      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div class="border-t border-slate-200 pt-4">
         <p class="text-sm font-semibold text-stone-900">SSL 合规配置</p>
         <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 items-start">
           <div class="flex items-center gap-4 text-sm text-stone-700 md:col-span-2">
@@ -299,53 +295,53 @@ onMounted(loadSettings)
             />
           </label>
         </div>
-      </section>
+      </div>
 
-      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>HTTP 自动跳转到 HTTPS</span>
           <input v-model="form.http_to_https_redirect" type="checkbox" class="ui-switch" />
-          HTTP 自动跳转到 HTTPS
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>启用 HSTS</span>
           <input v-model="form.enable_hsts" type="checkbox" class="ui-switch" />
-          启用 HSTS
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>为上游服务器传递 X-Forwarded-Host / Proto</span>
           <input v-model="form.add_x_forwarded_headers" type="checkbox" class="ui-switch" />
-          为上游服务器传递 X-Forwarded-Host / Proto
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>清空并重写 X-Forwarded-For</span>
           <input v-model="form.rewrite_x_forwarded_for" type="checkbox" class="ui-switch" />
-          清空并重写 X-Forwarded-For
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>支持 Gzip 压缩</span>
           <input v-model="form.support_gzip" type="checkbox" class="ui-switch" />
-          支持 Gzip 压缩
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>支持 Brotli 压缩</span>
           <input v-model="form.support_brotli" type="checkbox" class="ui-switch" />
-          支持 Brotli 压缩
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>支持 SSE 流式响应</span>
           <input v-model="form.support_sse" type="checkbox" class="ui-switch" />
-          支持 SSE 流式响应
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>启用 NTLM 认证</span>
           <input v-model="form.enable_ntlm" type="checkbox" class="ui-switch" />
-          启用 NTLM 认证
         </label>
-        <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
-          <span class="font-medium">应用不存在时返回自置证书</span>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>应用不存在时返回自置证书</span>
           <input v-model="form.fallback_self_signed_certificate" type="checkbox" class="ui-switch" />
         </label>
       </div>
 
-      <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
-          <span class="font-medium">代理时修改请求中的 Host 头</span>
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>代理时修改请求中的 Host 头</span>
           <input v-model="form.rewrite_host_enabled" type="checkbox" class="ui-switch" />
         </label>
-        <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+        <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
           <span class="font-medium whitespace-nowrap">Host 头</span>
           <input
             v-model="form.rewrite_host_value"
@@ -357,7 +353,7 @@ onMounted(loadSettings)
         </label>
       </div>
 
-      <section class="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div class="mt-4 border-t border-slate-200 pt-4">
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm font-semibold text-stone-900">HTTP Header 操作</p>
           <button
@@ -414,7 +410,52 @@ onMounted(loadSettings)
         <p v-else class="mt-4 text-sm text-slate-500">
           还没有添加 Header 操作。
         </p>
-      </section>
+      </div>
+
+      <div
+        v-if="trustedProxyCidrsDialogOpen"
+        class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
+        @click.self="trustedProxyCidrsDialogOpen = false"
+      >
+        <div
+          class="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm tracking-wider text-blue-700">可信代理 CIDR</p>
+              <h3 class="mt-2 text-lg font-semibold text-stone-900">
+                配置可信代理 CIDR
+              </h3>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-stone-600 transition hover:border-slate-300 hover:text-stone-900"
+              @click="trustedProxyCidrsDialogOpen = false"
+            >
+              关闭
+            </button>
+          </div>
+
+          <label class="mt-4 block text-sm text-stone-700">
+            每行一个 CIDR
+            <textarea
+              v-model="trustedProxyCidrsText"
+              class="mt-2 min-h-[14rem] w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
+              placeholder="例如 10.0.0.0/8"
+            />
+          </label>
+
+          <div class="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              class="rounded-lg border border-slate-200 px-4 py-2 text-sm text-stone-700 transition hover:border-slate-300 hover:text-stone-900"
+              @click="trustedProxyCidrsDialogOpen = false"
+            >
+              完成
+            </button>
+          </div>
+        </div>
+      </div>
     </template>
   </section>
 </template>

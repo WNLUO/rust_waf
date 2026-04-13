@@ -7,12 +7,12 @@ import type {
   DashboardPayload,
   SecurityEventsResponse,
   BlockedIpsResponse,
-  SecurityEventItem,
 } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import CyberCard from '@/shared/ui/CyberCard.vue'
+import AdminEventMapSection from '@/features/dashboard/components/AdminEventMapSection.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 import {
@@ -52,35 +52,7 @@ const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
   }
 }
 
-const { formatBytes, formatNumber, formatLatency, formatTimestamp } =
-  useFormatters()
-
-const urlLikePattern =
-  /^(localhost|\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)/i
-
-const formatSiteLabel = (value: string | null | undefined): string => {
-  const raw = value?.trim()
-  if (!raw) return ''
-
-  const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(raw)
-  const looksLikeUrl = hasProtocol || urlLikePattern.test(raw)
-  if (!looksLikeUrl) return raw
-
-  try {
-    const parsed = new URL(hasProtocol ? raw : `https://${raw}`)
-    return hasProtocol
-      ? `${parsed.protocol}//${parsed.hostname}`
-      : parsed.hostname
-  } catch {
-    return raw
-      .replace(/^([a-z][a-z\d+.-]*:\/\/[^/:?#]+).*/i, '$1')
-      .replace(/^([^/:?#]+).*/i, '$1')
-  }
-}
-
-const eventSiteLabel = (event: SecurityEventItem): string =>
-  formatSiteLabel(event.provider_site_name) ||
-  formatSiteLabel(event.provider_site_domain)
+const { formatBytes, formatNumber, formatLatency } = useFormatters()
 
 const emptyEventsResponse = (): SecurityEventsResponse => ({
   total: 0,
@@ -270,58 +242,10 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <CyberCard
-          title="最新安全事件"
-          sub-title="便于值班人员快速扫读当前威胁态势"
-        >
-          <div class="space-y-4">
-            <div
-              v-for="event in dashboard?.events.events.slice(0, 5)"
-              :key="event.id"
-              class="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white/70 px-4 py-2.5"
-            >
-              <div class="flex flex-1 items-center gap-3 overflow-hidden">
-                <StatusBadge
-                  :text="event.layer.toUpperCase()"
-                  :type="event.action === 'block' ? 'error' : 'warning'"
-                  class="shrink-0"
-                />
-                <div class="flex items-center gap-3 overflow-hidden text-sm">
-                  <span class="font-medium text-stone-900 shrink-0">
-                    {{ event.reason }}
-                  </span>
-                  <span class="text-stone-300 shrink-0">|</span>
-                  <span class="text-stone-600 shrink-0"
-                    >{{ event.source_ip }}:{{ event.source_port }}</span
-                  >
-                  <template v-if="eventSiteLabel(event)">
-                    <span class="text-stone-300 shrink-0">|</span>
-                    <span
-                      class="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-600"
-                    >
-                      {{ eventSiteLabel(event) }}
-                    </span>
-                  </template>
-                  <template v-if="event.http_method || event.uri">
-                    <span class="text-stone-300 shrink-0">|</span>
-                    <span class="truncate text-stone-500">
-                      {{ event.http_method || '无' }} {{ event.uri || '' }}
-                    </span>
-                  </template>
-                </div>
-              </div>
-              <span class="shrink-0 text-xs text-slate-500">{{
-                formatTimestamp(event.created_at)
-              }}</span>
-            </div>
-            <p
-              v-if="!dashboard?.events.events.length"
-              class="text-sm text-slate-500"
-            >
-              暂无安全事件。
-            </p>
-          </div>
-        </CyberCard>
+        <AdminEventMapSection
+          :metrics="dashboard?.metrics"
+          :events="dashboard?.events.events || []"
+        />
 
         <CyberCard title="运行摘要" sub-title="落库、代理与健康检查核心数据">
           <div class="grid gap-4">

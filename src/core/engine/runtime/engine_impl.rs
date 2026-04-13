@@ -271,6 +271,7 @@ impl WafEngine {
                         let _ = shutdown_tx.send(()).await;
                     }
                     entry_runtime.shutdown_all().await;
+                    self.context.shutdown_storage().await?;
                     break Ok(());
                 }
                 _ = maintenance.tick() => {
@@ -282,6 +283,7 @@ impl WafEngine {
                         let _ = shutdown_tx.send(()).await;
                     }
                     entry_runtime.shutdown_all().await;
+                    self.context.shutdown_storage().await?;
                     break Ok(());
                 }
             }

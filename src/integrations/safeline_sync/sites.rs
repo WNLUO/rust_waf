@@ -31,11 +31,20 @@ pub async fn pull_sites(
 
     let now = unix_timestamp();
     let remote_sites = crate::integrations::safeline::list_sites(config).await?;
+    let existing_cache = store.list_safeline_cached_sites().await?;
+    if remote_sites.is_empty() && !existing_cache.is_empty() {
+        store
+            .upsert_safeline_sync_state("sites_pull", Some(now), 0, existing_cache.len())
+            .await?;
+        return Ok(SafeLineSitesPullResult {
+            skipped_sites: existing_cache.len(),
+            ..SafeLineSitesPullResult::default()
+        });
+    }
     let cached_sites = remote_sites
         .iter()
         .map(cached_site_from_remote)
         .collect::<Result<Vec<_>, _>>()?;
-    let existing_cache = store.list_safeline_cached_sites().await?;
 
     let mut result = SafeLineSitesPullResult::default();
     for remote_site in &remote_sites {
@@ -259,11 +268,18 @@ pub async fn pull_site(
         .iter()
         .map(cached_site_from_remote)
         .collect::<Result<Vec<_>, _>>()?;
-    store.replace_safeline_cached_sites(&cached_sites).await?;
+    let existing_cache = store.list_safeline_cached_sites().await?;
+    if cached_sites.is_empty() && !existing_cache.is_empty() {
+        store
+            .upsert_safeline_sync_state("sites_pull", Some(now), 0, existing_cache.len())
+            .await?;
+    } else {
+        store.replace_safeline_cached_sites(&cached_sites).await?;
 
-    store
-        .upsert_safeline_sync_state("sites_pull", Some(now), 1, 0)
-        .await?;
+        store
+            .upsert_safeline_sync_state("sites_pull", Some(now), 1, 0)
+            .await?;
+    }
 
     Ok(SafeLineSingleSitePullResult {
         action,

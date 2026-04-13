@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct SafeLineSitesResponse {
     pub(crate) total: u32,
     pub(crate) cached_at: Option<i64>,
+    pub(crate) cache_status: String,
+    pub(crate) cache_message: Option<String>,
     pub(crate) sites: Vec<SafeLineSiteResponse>,
 }
 
@@ -50,6 +52,7 @@ pub struct SafeLineMappingResponse {
 #[derive(Debug, Deserialize)]
 pub struct SafeLineMappingsUpdateRequest {
     pub(crate) mappings: Vec<SafeLineMappingUpsertRequest>,
+    pub(crate) allow_empty_replace: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -175,6 +178,7 @@ pub struct LocalSiteUpsertRequest {
     pub(crate) sync_mode: String,
     pub(crate) notes: String,
     pub(crate) last_synced_at: Option<i64>,
+    pub(crate) expected_updated_at: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -233,6 +237,8 @@ pub struct LocalCertificateUpsertRequest {
     pub(crate) last_synced_at: Option<i64>,
     pub(crate) certificate_pem: Option<String>,
     pub(crate) private_key_pem: Option<String>,
+    pub(crate) clear_secret: Option<bool>,
+    pub(crate) expected_updated_at: Option<i64>,
 }
 
 fn default_certificate_sync_status() -> String {

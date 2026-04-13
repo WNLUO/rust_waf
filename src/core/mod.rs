@@ -306,6 +306,13 @@ impl WafContext {
         Ok(true)
     }
 
+    pub async fn shutdown_storage(&self) -> Result<()> {
+        if let Some(store) = self.sqlite_store.as_ref() {
+            store.shutdown().await?;
+        }
+        Ok(())
+    }
+
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub fn active_rule_count(&self) -> u64 {
         self.rule_count.load(Ordering::Relaxed)

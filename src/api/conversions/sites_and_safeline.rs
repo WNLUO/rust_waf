@@ -111,10 +111,11 @@ impl From<crate::storage::SafeLineSiteMappingEntry> for SafeLineMappingResponse 
 impl SafeLineMappingsUpdateRequest {
     pub(crate) fn into_storage_mappings(
         self,
-    ) -> Result<Vec<crate::storage::SafeLineSiteMappingUpsert>, String> {
+    ) -> Result<(Vec<crate::storage::SafeLineSiteMappingUpsert>, bool), String> {
         let mut primary_count = 0usize;
         let mut seen_site_ids = HashSet::new();
         let mut mappings = Vec::with_capacity(self.mappings.len());
+        let allow_empty_replace = self.allow_empty_replace.unwrap_or(false);
 
         for item in self.mappings {
             let safeline_site_id = item.safeline_site_id.trim().to_string();
@@ -154,7 +155,7 @@ impl SafeLineMappingsUpdateRequest {
             return Err("同一时间只能设置一个主站点映射".to_string());
         }
 
-        Ok(mappings)
+        Ok((mappings, allow_empty_replace))
     }
 }
 
@@ -272,7 +273,7 @@ impl LocalCertificateUpsertRequest {
     ) -> Result<
         (
             crate::storage::LocalCertificateUpsert,
-            Option<LocalCertificateSecretDraft>,
+            Option<Option<LocalCertificateSecretDraft>>,
         ),
         String,
     > {
@@ -297,11 +298,12 @@ impl LocalCertificateUpsertRequest {
         }
 
         let secret = match (certificate_pem.is_empty(), private_key_pem.is_empty()) {
+            (true, true) if self.clear_secret.unwrap_or(false) => Some(None),
             (true, true) => None,
-            (false, false) => Some(LocalCertificateSecretDraft {
+            (false, false) => Some(Some(LocalCertificateSecretDraft {
                 certificate_pem,
                 private_key_pem,
-            }),
+            })),
             _ => {
                 return Err("证书 PEM 与私钥 PEM 需要同时填写，或同时留空".to_string());
             }

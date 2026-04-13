@@ -66,6 +66,7 @@ fn test_build_metrics_response_with_sources() {
             rules: 5,
             latest_rule_update_at: Some(1234567899),
             queue_capacity: 1024,
+            queue_depth: 6,
             dropped_security_events: 3,
             dropped_blocked_ips: 1,
         }),
@@ -108,6 +109,7 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.persisted_blocked_ips, 2);
     assert_eq!(response.persisted_rules, 5);
     assert_eq!(response.sqlite_queue_capacity, 1024);
+    assert_eq!(response.sqlite_queue_depth, 6);
     assert_eq!(response.sqlite_dropped_security_events, 3);
     assert_eq!(response.sqlite_dropped_blocked_ips, 1);
     assert_eq!(response.last_persisted_event_at, Some(1234567890));
@@ -276,6 +278,7 @@ fn test_safeline_mapping_update_rejects_duplicate_site_ids() {
                 notes: "".to_string(),
             },
         ],
+        allow_empty_replace: None,
     };
 
     let error = payload.into_storage_mappings().unwrap_err();
@@ -294,6 +297,7 @@ fn test_safeline_mapping_update_rejects_disabled_primary() {
             is_primary: true,
             notes: "".to_string(),
         }],
+        allow_empty_replace: None,
     };
 
     let error = payload.into_storage_mappings().unwrap_err();
@@ -322,6 +326,7 @@ async fn test_local_site_request_normalizes_primary_hostname() {
         sync_mode: " ".to_string(),
         notes: " prod ".to_string(),
         last_synced_at: Some(123),
+        expected_updated_at: None,
     }
     .into_storage_site(&store)
     .await
@@ -362,6 +367,7 @@ async fn test_local_site_request_rejects_missing_certificate_reference() {
         sync_mode: "manual".to_string(),
         notes: String::new(),
         last_synced_at: None,
+        expected_updated_at: None,
     }
     .into_storage_site(&store)
     .await
@@ -391,6 +397,8 @@ fn test_local_certificate_request_validates_time_range() {
         last_synced_at: None,
         certificate_pem: None,
         private_key_pem: None,
+        clear_secret: None,
+        expected_updated_at: None,
     }
     .into_storage_certificate()
     .unwrap_err();

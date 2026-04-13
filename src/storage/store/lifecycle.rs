@@ -63,7 +63,14 @@ impl SqliteStore {
 
         let queue_capacity = queue_capacity.max(1);
         let (sender, receiver) = mpsc::channel(queue_capacity);
-        tokio::spawn(run_writer(pool.clone(), receiver));
+        let pending_writes = Arc::new(AtomicU64::new(0));
+        let pending_write_notify = Arc::new(Notify::new());
+        let writer_handle = Arc::new(Mutex::new(Some(tokio::spawn(run_writer(
+            pool.clone(),
+            receiver,
+            Arc::clone(&pending_writes),
+            Arc::clone(&pending_write_notify),
+        )))));
         let dropped_security_events = Arc::new(AtomicU64::new(0));
         let dropped_blocked_ips = Arc::new(AtomicU64::new(0));
 
@@ -72,6 +79,9 @@ impl SqliteStore {
             db_path,
             sender,
             queue_capacity,
+            pending_writes,
+            pending_write_notify,
+            writer_handle,
             dropped_security_events,
             dropped_blocked_ips,
         })
@@ -79,24 +89,93 @@ impl SqliteStore {
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn create_backup(&self) -> Result<PathBuf> {
+        self.flush().await?;
         create_backup_snapshot(&self.pool, &self.db_path, BackupKind::Manual).await
     }
 
     pub fn enqueue_security_event(&self, event: SecurityEventRecord) {
-        if let Err(err) = self.sender.try_send(StorageCommand::SecurityEvent(event)) {
-            self.dropped_security_events.fetch_add(1, Ordering::Relaxed);
-            warn!(
-                "Failed to enqueue security event for SQLite storage: {}",
-                err
-            );
+        self.pending_writes.fetch_add(1, Ordering::Relaxed);
+        match self.sender.try_send(StorageCommand::SecurityEvent(event.clone())) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(StorageCommand::SecurityEvent(event)))
+            | Err(mpsc::error::TrySendError::Closed(StorageCommand::SecurityEvent(event))) => {
+                warn!(
+                    "SQLite security event queue is unavailable, falling back to direct persistence"
+                );
+                let pool = self.pool.clone();
+                let pending_writes = Arc::clone(&self.pending_writes);
+                let pending_write_notify = Arc::clone(&self.pending_write_notify);
+                tokio::spawn(async move {
+                    if let Err(err) = persist_security_event(&pool, event).await {
+                        warn!("SQLite direct security event persistence failed: {}", err);
+                    }
+                    finish_pending_write(&pending_writes, &pending_write_notify);
+                });
+            }
+            Err(_) => {
+                self.dropped_security_events.fetch_add(1, Ordering::Relaxed);
+                finish_pending_write(&self.pending_writes, &self.pending_write_notify);
+                warn!("Failed to enqueue security event for SQLite storage");
+            }
         }
     }
 
     pub fn enqueue_blocked_ip(&self, record: BlockedIpRecord) {
-        if let Err(err) = self.sender.try_send(StorageCommand::BlockedIp(record)) {
-            self.dropped_blocked_ips.fetch_add(1, Ordering::Relaxed);
-            warn!("Failed to enqueue blocked IP for SQLite storage: {}", err);
+        self.pending_writes.fetch_add(1, Ordering::Relaxed);
+        match self.sender.try_send(StorageCommand::BlockedIp(record.clone())) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(StorageCommand::BlockedIp(record)))
+            | Err(mpsc::error::TrySendError::Closed(StorageCommand::BlockedIp(record))) => {
+                warn!(
+                    "SQLite blocked IP queue is unavailable, falling back to direct persistence"
+                );
+                let pool = self.pool.clone();
+                let pending_writes = Arc::clone(&self.pending_writes);
+                let pending_write_notify = Arc::clone(&self.pending_write_notify);
+                tokio::spawn(async move {
+                    if let Err(err) = persist_blocked_ip(&pool, record).await {
+                        warn!("SQLite direct blocked IP persistence failed: {}", err);
+                    }
+                    finish_pending_write(&pending_writes, &pending_write_notify);
+                });
+            }
+            Err(_) => {
+                self.dropped_blocked_ips.fetch_add(1, Ordering::Relaxed);
+                finish_pending_write(&self.pending_writes, &self.pending_write_notify);
+                warn!("Failed to enqueue blocked IP for SQLite storage");
+            }
         }
+    }
+
+    pub async fn flush(&self) -> Result<()> {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.sender
+            .send(StorageCommand::Flush { ack: ack_tx })
+            .await
+            .map_err(|_| anyhow::anyhow!("SQLite writer is unavailable during flush"))?;
+        ack_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("SQLite writer flush acknowledgement failed"))?;
+        wait_for_pending_writes(&self.pending_writes, &self.pending_write_notify).await;
+        Ok(())
+    }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        self.flush().await?;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.sender
+            .send(StorageCommand::Shutdown { ack: ack_tx })
+            .await
+            .map_err(|_| anyhow::anyhow!("SQLite writer is unavailable during shutdown"))?;
+        ack_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("SQLite writer shutdown acknowledgement failed"))?;
+        if let Some(handle) = self.writer_handle.lock().await.take() {
+            handle
+                .await
+                .map_err(|err| anyhow::anyhow!("SQLite writer task join failed: {}", err))?;
+        }
+        Ok(())
     }
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
@@ -205,6 +284,7 @@ impl SqliteStore {
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn metrics_summary(&self) -> Result<StorageMetricsSummary> {
+        let queue_depth = self.pending_writes.load(Ordering::Relaxed);
         let security_events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_events")
             .fetch_one(&self.pool)
             .await?;
@@ -230,6 +310,7 @@ impl SqliteStore {
             rules: rules.max(0) as u64,
             latest_rule_update_at,
             queue_capacity: self.queue_capacity as u64,
+            queue_depth,
             dropped_security_events: self.dropped_security_events.load(Ordering::Relaxed),
             dropped_blocked_ips: self.dropped_blocked_ips.load(Ordering::Relaxed),
         })

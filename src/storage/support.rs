@@ -8,8 +8,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::SqlitePool;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use super::{
     SqliteOpenErrorKind, SQLITE_CORRUPT_BACKUP_RETENTION, SQLITE_STARTUP_BACKUP_RETENTION,
@@ -27,7 +29,8 @@ pub(super) async fn open_pool(db_path: &Path, auto_migrate: bool) -> Result<Sqli
         SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))?
             .create_if_missing(true)
             .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
+            // FULL reduces the risk of losing committed records when the process or host crashes.
+            .synchronous(SqliteSynchronous::Full)
             .foreign_keys(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -371,59 +374,29 @@ pub(super) fn fingerprint_blocked_ip_record(record: &BlockedIpRecord) -> String 
     format!("{:x}", hasher.finalize())
 }
 
-pub(super) async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<StorageCommand>) {
+pub(super) async fn run_writer(
+    pool: SqlitePool,
+    mut receiver: mpsc::Receiver<StorageCommand>,
+    pending_writes: Arc<AtomicU64>,
+    pending_write_notify: Arc<Notify>,
+) {
     while let Some(command) = receiver.recv().await {
         let result = match command {
-            StorageCommand::SecurityEvent(event) => {
-                sqlx::query(
-                    r#"
-                    INSERT INTO security_events (
-                        layer, provider, provider_event_id, provider_site_id, provider_site_name,
-                        provider_site_domain, action, reason, details_json, source_ip, dest_ip,
-                        source_port, dest_port, protocol, http_method, uri,
-                        http_version, created_at, handled, handled_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    "#,
-                )
-                .bind(event.layer)
-                .bind(event.provider)
-                .bind(event.provider_event_id)
-                .bind(event.provider_site_id)
-                .bind(event.provider_site_name)
-                .bind(event.provider_site_domain)
-                .bind(event.action)
-                .bind(event.reason)
-                .bind(event.details_json)
-                .bind(event.source_ip)
-                .bind(event.dest_ip)
-                .bind(event.source_port)
-                .bind(event.dest_port)
-                .bind(event.protocol)
-                .bind(event.http_method)
-                .bind(event.uri)
-                .bind(event.http_version)
-                .bind(event.created_at)
-                .bind(if event.handled { 1 } else { 0 })
-                .bind(event.handled_at)
-                .execute(&pool)
-                .await
+            StorageCommand::SecurityEvent(event) => persist_security_event(&pool, event).await,
+            StorageCommand::BlockedIp(record) => persist_blocked_ip(&pool, record).await,
+            StorageCommand::Flush { ack } => {
+                if let Err(err) = checkpoint_wal(&pool).await {
+                    warn!("SQLite writer flush checkpoint failed: {}", err);
+                }
+                let _ = ack.send(());
+                continue;
             }
-            StorageCommand::BlockedIp(record) => {
-                sqlx::query(
-                    r#"
-                    INSERT INTO blocked_ips (provider, provider_remote_id, ip, reason, blocked_at, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    "#,
-                )
-                .bind(record.provider)
-                .bind(record.provider_remote_id)
-                .bind(record.ip)
-                .bind(record.reason)
-                .bind(record.blocked_at)
-                .bind(record.expires_at)
-                .execute(&pool)
-                .await
+            StorageCommand::Shutdown { ack } => {
+                if let Err(err) = checkpoint_wal(&pool).await {
+                    warn!("SQLite writer shutdown checkpoint failed: {}", err);
+                }
+                let _ = ack.send(());
+                break;
             }
         };
         if let Err(err) = result {
@@ -431,6 +404,85 @@ pub(super) async fn run_writer(pool: SqlitePool, mut receiver: mpsc::Receiver<St
         } else {
             debug!("SQLite writer task persisted a record");
         }
+        finish_pending_write(&pending_writes, &pending_write_notify);
+    }
+}
+
+pub(super) async fn persist_security_event(pool: &SqlitePool, event: SecurityEventRecord) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO security_events (
+            layer, provider, provider_event_id, provider_site_id, provider_site_name,
+            provider_site_domain, action, reason, details_json, source_ip, dest_ip,
+            source_port, dest_port, protocol, http_method, uri,
+            http_version, created_at, handled, handled_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(event.layer)
+    .bind(event.provider)
+    .bind(event.provider_event_id)
+    .bind(event.provider_site_id)
+    .bind(event.provider_site_name)
+    .bind(event.provider_site_domain)
+    .bind(event.action)
+    .bind(event.reason)
+    .bind(event.details_json)
+    .bind(event.source_ip)
+    .bind(event.dest_ip)
+    .bind(event.source_port)
+    .bind(event.dest_port)
+    .bind(event.protocol)
+    .bind(event.http_method)
+    .bind(event.uri)
+    .bind(event.http_version)
+    .bind(event.created_at)
+    .bind(if event.handled { 1 } else { 0 })
+    .bind(event.handled_at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub(super) async fn persist_blocked_ip(pool: &SqlitePool, record: BlockedIpRecord) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO blocked_ips (provider, provider_remote_id, ip, reason, blocked_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(record.provider)
+    .bind(record.provider_remote_id)
+    .bind(record.ip)
+    .bind(record.reason)
+    .bind(record.blocked_at)
+    .bind(record.expires_at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub(super) fn finish_pending_write(
+    pending_writes: &AtomicU64,
+    pending_write_notify: &Notify,
+) {
+    let previous = pending_writes.fetch_sub(1, Ordering::Relaxed);
+    if previous <= 1 {
+        pending_write_notify.notify_waiters();
+    }
+}
+
+pub(super) async fn wait_for_pending_writes(
+    pending_writes: &AtomicU64,
+    pending_write_notify: &Notify,
+) {
+    loop {
+        let notified = pending_write_notify.notified();
+        if pending_writes.load(Ordering::Relaxed) == 0 {
+            break;
+        }
+        notified.await;
     }
 }
 

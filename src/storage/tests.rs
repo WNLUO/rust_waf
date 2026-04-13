@@ -240,7 +240,7 @@ async fn test_sqlite_store_persists_records() {
 }
 
 #[tokio::test]
-async fn test_sqlite_store_reports_enqueue_drops() {
+async fn test_sqlite_store_uses_fallback_persistence_under_queue_pressure() {
     let path = unique_test_db_path("queue_drops");
     let store = SqliteStore::new_with_queue_capacity(path, true, 1)
         .await
@@ -281,10 +281,14 @@ async fn test_sqlite_store_reports_enqueue_drops() {
     }
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    store.flush().await.unwrap();
     let summary = store.metrics_summary().await.unwrap();
     assert_eq!(summary.queue_capacity, 1);
-    assert!(summary.dropped_security_events > 0);
-    assert!(summary.dropped_blocked_ips > 0);
+    assert_eq!(summary.dropped_security_events, 0);
+    assert_eq!(summary.dropped_blocked_ips, 0);
+    assert_eq!(summary.queue_depth, 0);
+    assert!(summary.security_events > 0);
+    assert!(summary.blocked_ips > 0);
 }
 
 #[tokio::test]

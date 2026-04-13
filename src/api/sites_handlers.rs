@@ -179,6 +179,19 @@ pub(super) async fn update_local_site_handler(
     ExtractJson(payload): ExtractJson<LocalSiteUpsertRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
+    let current = store
+        .load_local_site(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("本地站点 '{}' 不存在", id)))?;
+    if let Some(expected_updated_at) = payload.expected_updated_at {
+        if current.updated_at != expected_updated_at {
+            return Err(ApiError::conflict(format!(
+                "本地站点 {} 已被其他操作更新，请刷新页面后重试。",
+                id
+            )));
+        }
+    }
     let site = payload
         .into_storage_site(store)
         .await
@@ -318,14 +331,14 @@ pub(super) async fn create_local_certificate_handler(
     ExtractJson(payload): ExtractJson<LocalCertificateUpsertRequest>,
 ) -> ApiResult<(StatusCode, Json<LocalCertificateResponse>)> {
     let store = sqlite_store(&state)?;
-    let (certificate, secret) = payload
+    let (certificate, secret_update) = payload
         .into_storage_certificate()
         .map_err(ApiError::bad_request)?;
     let id = store
         .insert_local_certificate(&certificate)
         .await
         .map_err(map_storage_write_error)?;
-    if let Some(secret) = secret {
+    if let Some(Some(secret)) = secret_update {
         store
             .upsert_local_certificate_secret(id, &secret.certificate_pem, &secret.private_key_pem)
             .await
@@ -399,7 +412,20 @@ pub(super) async fn update_local_certificate_handler(
     ExtractJson(payload): ExtractJson<LocalCertificateUpsertRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let (certificate, secret) = payload
+    let current = store
+        .load_local_certificate(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("本地证书 '{}' 不存在", id)))?;
+    if let Some(expected_updated_at) = payload.expected_updated_at {
+        if current.updated_at != expected_updated_at {
+            return Err(ApiError::conflict(format!(
+                "本地证书 {} 已被其他操作更新，请刷新页面后重试。",
+                id
+            )));
+        }
+    }
+    let (certificate, secret_update) = payload
         .into_storage_certificate()
         .map_err(ApiError::bad_request)?;
     let updated = store
@@ -408,13 +434,8 @@ pub(super) async fn update_local_certificate_handler(
         .map_err(map_storage_write_error)?;
 
     if updated {
-        if let Some(secret) = secret {
-            if secret.certificate_pem.is_empty() && secret.private_key_pem.is_empty() {
-                store
-                    .delete_local_certificate_secret(id)
-                    .await
-                    .map_err(ApiError::internal)?;
-            } else {
+        if let Some(secret_update) = secret_update {
+            if let Some(secret) = secret_update {
                 store
                     .upsert_local_certificate_secret(
                         id,
@@ -423,6 +444,11 @@ pub(super) async fn update_local_certificate_handler(
                     )
                     .await
                     .map_err(map_storage_write_error)?;
+            } else {
+                store
+                    .delete_local_certificate_secret(id)
+                    .await
+                    .map_err(ApiError::internal)?;
             }
         }
         let auto_sync_message =

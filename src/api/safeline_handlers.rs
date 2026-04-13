@@ -17,27 +17,50 @@ pub(super) async fn list_safeline_sites_handler(
     let sites = crate::integrations::safeline::list_sites(&payload.into_config())
         .await
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
-    let cached_at = if let Some(store) = state.context.sqlite_store.as_deref() {
-        Some(
-            store
-                .replace_safeline_cached_sites(
-                    &sites
-                        .iter()
-                        .map(crate::storage::SafeLineCachedSiteUpsert::from_summary)
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(ApiError::internal)?,
-                )
+    let (cached_at, cache_status, cache_message) =
+        if let Some(store) = state.context.sqlite_store.as_deref() {
+            let existing_cache = store
+                .list_safeline_cached_sites()
                 .await
-                .map_err(ApiError::internal)?,
-        )
-        .flatten()
+                .map_err(ApiError::internal)?;
+            if sites.is_empty() && !existing_cache.is_empty() {
+                (
+                    existing_cache.iter().map(|site| site.updated_at).max(),
+                    "preserved".to_string(),
+                    Some("上游返回空站点列表，已保留现有本地缓存以避免误清空。".to_string()),
+                )
+            } else {
+                (
+                    Some(
+                        store
+                            .replace_safeline_cached_sites(
+                                &sites
+                                    .iter()
+                                    .map(crate::storage::SafeLineCachedSiteUpsert::from_summary)
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .map_err(ApiError::internal)?,
+                            )
+                            .await
+                            .map_err(ApiError::internal)?,
+                    )
+                    .flatten(),
+                    if sites.is_empty() {
+                        "empty".to_string()
+                    } else {
+                        "fresh".to_string()
+                    },
+                    None,
+                )
+            }
     } else {
-        None
-    };
+            (None, "disabled".to_string(), None)
+        };
 
     Ok(Json(SafeLineSitesResponse {
         total: sites.len() as u32,
         cached_at,
+        cache_status,
+        cache_message,
         sites: sites.into_iter().map(SafeLineSiteResponse::from).collect(),
     }))
 }
@@ -49,6 +72,8 @@ pub(super) async fn list_cached_safeline_sites_handler(
         return Ok(Json(SafeLineSitesResponse {
             total: 0,
             cached_at: None,
+            cache_status: "disabled".to_string(),
+            cache_message: None,
             sites: Vec::new(),
         }));
     };
@@ -66,6 +91,12 @@ pub(super) async fn list_cached_safeline_sites_handler(
     Ok(Json(SafeLineSitesResponse {
         total: sites.len() as u32,
         cached_at,
+        cache_status: if sites.is_empty() {
+            "empty".to_string()
+        } else {
+            "cached".to_string()
+        },
+        cache_message: None,
         sites,
     }))
 }
@@ -93,9 +124,15 @@ pub(super) async fn update_safeline_mappings_handler(
     ExtractJson(payload): ExtractJson<SafeLineMappingsUpdateRequest>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
-    let mappings = payload
+    let (mappings, allow_empty_replace) = payload
         .into_storage_mappings()
         .map_err(ApiError::bad_request)?;
+    if mappings.is_empty() && !allow_empty_replace {
+        return Err(ApiError::bad_request(
+            "映射更新请求为空。若确实要清空映射，请显式传入 allow_empty_replace=true。"
+                .to_string(),
+        ));
+    }
     store
         .replace_safeline_site_mappings(&mappings)
         .await

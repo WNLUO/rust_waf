@@ -3,14 +3,14 @@ use super::*;
 pub(super) async fn get_settings_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<SettingsResponse>> {
-    let config = persisted_config(&state).await?;
+    let config = state.context.config_snapshot();
     Ok(Json(SettingsResponse::from_config(&config)))
 }
 
 pub(super) async fn get_l4_config_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<L4ConfigResponse>> {
-    let config = persisted_config(&state).await?;
+    let config = state.context.config_snapshot();
     Ok(Json(L4ConfigResponse::from_config(
         &config,
         state.context.l4_runtime_enabled(),
@@ -20,14 +20,14 @@ pub(super) async fn get_l4_config_handler(
 pub(super) async fn get_l7_config_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<L7ConfigResponse>> {
-    let config = persisted_config(&state).await?;
+    let config = state.context.config_snapshot();
     Ok(Json(L7ConfigResponse::from_config(&config, true)))
 }
 
 pub(super) async fn get_global_settings_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<GlobalSettingsResponse>> {
-    let config = persisted_config(&state).await?;
+    let config = state.context.config_snapshot();
     Ok(Json(GlobalSettingsResponse::from_config(&config)))
 }
 

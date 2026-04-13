@@ -48,6 +48,7 @@ pub(super) fn build_metrics_response(
         persisted_blocked_ips: storage_summary.blocked_ips,
         persisted_rules: storage_summary.rules,
         sqlite_queue_capacity: storage_summary.queue_capacity,
+        sqlite_queue_depth: storage_summary.queue_depth,
         sqlite_dropped_security_events: storage_summary.dropped_security_events,
         sqlite_dropped_blocked_ips: storage_summary.dropped_blocked_ips,
         last_persisted_event_at: storage_summary.latest_event_at,

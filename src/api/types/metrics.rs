@@ -25,6 +25,7 @@ pub struct MetricsResponse {
     pub(crate) persisted_blocked_ips: u64,
     pub(crate) persisted_rules: u64,
     pub(crate) sqlite_queue_capacity: u64,
+    pub(crate) sqlite_queue_depth: u64,
     pub(crate) sqlite_dropped_security_events: u64,
     pub(crate) sqlite_dropped_blocked_ips: u64,
     pub(crate) last_persisted_event_at: Option<i64>,

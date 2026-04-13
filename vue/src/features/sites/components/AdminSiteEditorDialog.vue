@@ -201,50 +201,42 @@ const tlsEnabledModel = computed({
           </div>
         </section>
 
-        <section class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div class="mb-4">
-            <p class="text-sm font-medium text-stone-900">运行设置</p>
-            <p class="mt-1 text-xs text-slate-500">
-              控制这个站点是否启用，以及是否参与本地 TLS 证书匹配。
-            </p>
-          </div>
-          <div class="grid gap-3 md:grid-cols-2">
-            <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
+        <div class="flex flex-wrap items-center gap-4 px-1">
+          <label class="inline-flex cursor-pointer items-center gap-2.5">
+            <input
+              v-model="enabledModel"
+              type="checkbox"
+              class="sr-only"
+            />
+            <span
+              class="relative h-5 w-9 rounded-full transition-colors"
+              :class="enabledModel ? 'bg-blue-600' : 'bg-slate-300'"
             >
-              <input
-                v-model="enabledModel"
-                class="mt-0.5 accent-blue-600"
-                type="checkbox"
-              />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >启用站点</span
-                >
-                <span class="mt-0.5 block text-xs text-slate-500"
-                  >关闭后不会参与运行时匹配。</span
-                >
-              </span>
-            </label>
-            <label
-              class="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 p-3"
+              <span
+                class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
+                :class="enabledModel ? 'translate-x-4' : 'translate-x-0'"
+              ></span>
+            </span>
+            <span class="text-xs font-medium text-stone-800">启用站点</span>
+          </label>
+          <label class="inline-flex cursor-pointer items-center gap-2.5">
+            <input
+              v-model="tlsEnabledModel"
+              type="checkbox"
+              class="sr-only"
+            />
+            <span
+              class="relative h-5 w-9 rounded-full transition-colors"
+              :class="tlsEnabledModel ? 'bg-blue-600' : 'bg-slate-300'"
             >
-              <input
-                v-model="tlsEnabledModel"
-                class="mt-0.5 accent-blue-600"
-                type="checkbox"
-              />
-              <span>
-                <span class="block text-sm font-medium text-stone-900"
-                  >启用 TLS</span
-                >
-                <span class="mt-0.5 block text-xs text-slate-500"
-                  >启用后会参与 SNI 证书匹配。</span
-                >
-              </span>
-            </label>
-          </div>
-        </section>
+              <span
+                class="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform"
+                :class="tlsEnabledModel ? 'translate-x-4' : 'translate-x-0'"
+              ></span>
+            </span>
+            <span class="text-xs font-medium text-stone-800">启用 TLS</span>
+          </label>
+        </div>
 
         <div
           class="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white/95 px-1 pt-2 backdrop-blur"

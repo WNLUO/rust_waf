@@ -1,4 +1,7 @@
 import type {
+  BlockedIpCreatePayload,
+  BlockedIpsBatchUnblockPayload,
+  BlockedIpsBatchUnblockResponse,
   BlockedIpsQuery,
   BlockedIpsResponse,
   EventsQuery,
@@ -19,6 +22,20 @@ export function fetchSecurityEvents(query?: EventsQuery) {
 
 export function fetchBlockedIps(query?: BlockedIpsQuery) {
   return apiRequest<BlockedIpsResponse>(`/blocked-ips${buildQuery(query)}`)
+}
+
+export function createBlockedIp(payload: BlockedIpCreatePayload) {
+  return apiRequest<WriteStatusResponse>('/blocked-ips', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function unblockIpsBatch(payload: BlockedIpsBatchUnblockPayload) {
+  return apiRequest<BlockedIpsBatchUnblockResponse>('/blocked-ips/unblock-batch', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function markSecurityEventHandled(id: number, handled: boolean) {

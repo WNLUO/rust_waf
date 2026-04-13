@@ -35,31 +35,6 @@ const nameModel = computed({
   set: (value: string) => updateForm('name', value),
 })
 
-const notesModel = computed({
-  get: () => props.form.notes,
-  set: (value: string) => updateForm('notes', value),
-})
-
-const issuerModel = computed({
-  get: () => props.form.issuer,
-  set: (value: string) => updateForm('issuer', value),
-})
-
-const trustedModel = computed({
-  get: () => props.form.trusted,
-  set: (value: boolean) => updateForm('trusted', value),
-})
-
-const expiredModel = computed({
-  get: () => props.form.expired,
-  set: (value: boolean) => updateForm('expired', value),
-})
-
-const autoSyncModel = computed({
-  get: () => props.form.auto_sync_enabled,
-  set: (value: boolean) => updateForm('auto_sync_enabled', value),
-})
-
 const certificatePemModel = computed({
   get: () => props.form.certificate_pem,
   set: (value: string) => updateForm('certificate_pem', value),
@@ -93,7 +68,7 @@ const privateKeyPemModel = computed({
             {{
               mode === 'create'
                 ? '支持直接上传 PEM 证书和私钥。名称可自动生成。'
-                : '可编辑证书名称、域名和备注；如需替换证书材料，可重新填写 PEM 和私钥。留空则保留原内容。'
+                : '可编辑证书名称与域名；如需替换证书材料，可填写新的 PEM 与私钥。'
             }}
           </p>
         </div>
@@ -130,62 +105,12 @@ const privateKeyPemModel = computed({
             "
           />
         </label>
-        <label class="space-y-1.5">
-          <span class="text-xs text-slate-500">签发者</span>
-          <input
-            v-model="issuerModel"
-            type="text"
-            placeholder="可选"
-            class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-          />
-        </label>
-        <label class="space-y-1.5">
-          <span class="text-xs text-slate-500">备注</span>
-          <input
-            v-model="notesModel"
-            type="text"
-            placeholder="可选"
-            class="w-full rounded-[16px] border border-slate-200 bg-white px-3.5 py-2.5 text-sm outline-none transition focus:border-blue-500"
-          />
-        </label>
-        <label class="space-y-1.5">
-          <span class="text-xs text-slate-500">状态</span>
-          <div class="flex flex-wrap gap-4 rounded-[16px] border border-slate-200 bg-slate-50 px-3.5 py-3 text-sm">
-            <label class="inline-flex items-center gap-2">
-              <input v-model="trustedModel" type="checkbox" />
-              标记为可信
-            </label>
-            <label class="inline-flex items-center gap-2">
-              <input v-model="expiredModel" type="checkbox" />
-              标记为已过期
-            </label>
-            <label class="inline-flex items-center gap-2">
-              <input v-model="autoSyncModel" type="checkbox" />
-              变更后自动同步到雷池
-            </label>
-          </div>
-        </label>
-        <div
-          class="rounded-[16px] border border-slate-200 bg-slate-50 px-3.5 py-3 text-xs leading-5 text-slate-600"
-        >
-          <div>雷池远端 ID：{{ props.form.provider_remote_id || '未关联' }}</div>
-          <div class="mt-1">同步状态：{{ props.form.sync_status || 'idle' }}</div>
-          <div class="mt-1">
-            {{ props.form.sync_message || '保存后可手动同步到雷池。' }}
-          </div>
-        </div>
-        <div
-          v-if="mode === 'edit'"
-          class="rounded-[16px] border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs leading-5 text-amber-900"
-        >
-          编辑模式下，如果不填写新的 PEM 与私钥，将继续保留现有证书内容。
-        </div>
         <label class="space-y-1.5 md:col-span-2">
           <div class="flex items-center justify-between gap-3">
             <span class="text-xs text-slate-500">证书 PEM</span>
             <button
               type="button"
-              class="text-xs font-medium text-blue-700 transition hover:text-blue-900"
+              class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
               @click="emit('fillClipboard')"
             >
               {{ readingClipboard ? '识别中...' : '从剪切板识别' }}

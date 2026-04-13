@@ -331,6 +331,15 @@ impl L4Inspector {
         self.connection_manager.maintenance_tick();
     }
 
+    pub fn block_ip(
+        &self,
+        ip: &std::net::IpAddr,
+        reason: &str,
+        duration: std::time::Duration,
+    ) -> bool {
+        self.connection_manager.block_ip(ip, reason, duration)
+    }
+
     pub fn unblock_ip(&self, ip: &std::net::IpAddr) -> bool {
         self.connection_manager.unblock_ip(ip)
     }

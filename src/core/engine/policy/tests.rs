@@ -66,8 +66,14 @@ async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
 
     apply_client_identity(&context, "203.0.113.10:443".parse().unwrap(), &mut request);
 
-    assert_eq!(request.get_header("x-cdn-real-ip").map(String::as_str), Some("198.51.100.8"));
-    assert_eq!(request.get_header("x-real-ip").map(String::as_str), Some("198.51.100.8"));
+    assert_eq!(
+        request.get_header("x-cdn-real-ip").map(String::as_str),
+        Some("198.51.100.8")
+    );
+    assert_eq!(
+        request.get_header("x-real-ip").map(String::as_str),
+        Some("198.51.100.8")
+    );
     assert_eq!(
         request.get_header("x-forwarded-for").map(String::as_str),
         Some("198.51.100.8")

@@ -11,7 +11,6 @@ import { useFlashMessages } from '@/shared/composables/useNotifications'
 const {
   allSelected,
   autoPushableIds,
-  bindRemoteCertificate,
   bindingIds,
   certificateMatchPreviews,
   certificates,
@@ -28,24 +27,20 @@ const {
   generateCertificateForm,
   generatingCertificate,
   loadCertificateMatchPreview,
-  loadCertificates,
   loading,
   openGenerateModal,
   openCreateDialog,
   openEditDialog,
   openingEditor,
   preflightSummary,
-  preflightingAll,
   previewingIds,
   pullingSafeLine,
   pushAutoMatchedCertificates,
   pushingIds,
-  pushSelectedCertificates,
   pushSingleCertificate,
   readingClipboard,
   removeSelectedCertificates,
   removeSingleCertificate,
-  runCertificatePreflight,
   saving,
   selectedIds,
   showGenerateModal,
@@ -74,18 +69,12 @@ useFlashMessages({
   <AppLayout>
     <div class="space-y-4">
       <AdminCertificatesToolbarSection
-        :certificates-count="certificates.length"
         :deleting-ids-count="deletingIds.length"
         :generating-certificate="generatingCertificate"
-        :preflighting-all="preflightingAll"
         :pulling-safe-line="pullingSafeLine"
-        :pushing-ids-count="pushingIds.length"
         :selected-count="selectedIds.length"
         @create="openCreateDialog"
         @generate="openGenerateModal"
-        @preflight="runCertificatePreflight"
-        @push-selected="pushSelectedCertificates"
-        @refresh="loadCertificates"
         @remove-selected="removeSelectedCertificates"
         @sync="syncFromSafeLine"
       />
@@ -118,7 +107,6 @@ useFlashMessages({
         :selected-ids="selectedIds"
         :sync-status-text="syncStatusText"
         :sync-status-tone="syncStatusTone"
-        @bind-remote="bindRemoteCertificate"
         @edit="openEditDialog"
         @preview="loadCertificateMatchPreview"
         @push="pushSingleCertificate"

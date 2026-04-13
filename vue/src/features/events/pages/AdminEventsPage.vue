@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   fetchSecurityEvents,
   markSecurityEventHandled,
@@ -17,6 +18,7 @@ import {
 import { Eye, RefreshCw, X } from 'lucide-vue-next'
 
 const PAGE_SIZE = 30
+const route = useRoute()
 
 const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
 const loading = ref(true)
@@ -66,6 +68,12 @@ const toUnixTimestamp = (value: string) => {
   const parsed = new Date(value).getTime()
   if (Number.isNaN(parsed)) return undefined
   return Math.floor(parsed / 1000)
+}
+
+const toDatetimeLocalString = (unix: number) => {
+  const date = new Date(unix * 1000)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 const totalPages = computed(() =>
@@ -253,6 +261,8 @@ const safeLineAttackTypeMap: Record<string, string> = {
   '8': '代码注入',
   '10': '文件上传',
 }
+const REQUEST_URI_PREVIEW_LIMIT = 140
+const REQUEST_QUERY_PREVIEW_LIMIT = 72
 
 const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
   if (event.layer.toLowerCase() !== 'safeline') return null
@@ -303,6 +313,29 @@ const eventReasonLabel = (event: SecurityEventItem) => {
   return normalized || event.reason
 }
 
+const eventUriPreview = (uri: string | null | undefined) => {
+  if (!uri) return ''
+  if (uri.length <= REQUEST_URI_PREVIEW_LIMIT) return uri
+
+  const queryStartIndex = uri.indexOf('?')
+  if (queryStartIndex < 0) {
+    return `${uri.slice(0, REQUEST_URI_PREVIEW_LIMIT)}…`
+  }
+
+  const path = uri.slice(0, queryStartIndex)
+  const query = uri.slice(queryStartIndex + 1)
+  const previewQuery = query.slice(0, REQUEST_QUERY_PREVIEW_LIMIT)
+  const hasMoreQuery = query.length > REQUEST_QUERY_PREVIEW_LIMIT
+
+  return `${path}?${previewQuery}${hasMoreQuery ? '…' : ''} [query ${query.length} chars]`
+}
+
+const isUriTruncated = (uri: string | null | undefined) =>
+  Boolean(uri && uri.length > REQUEST_URI_PREVIEW_LIMIT)
+
+const eventRequestLine = (event: SecurityEventItem) =>
+  `${event.http_method || '-'}${event.uri ? ` ${event.uri}` : ''}`
+
 const siteOptions = computed(() => {
   const seen = new Map<string, string>()
   for (const event of eventsPayload.value.events) {
@@ -319,6 +352,52 @@ const siteOptions = computed(() => {
 
 const goToPage = (page: number) => {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
+}
+
+const applyFiltersFromRouteQuery = () => {
+  const query = route.query
+  const getValue = (key: string) => {
+    const value = query[key]
+    if (Array.isArray(value)) return value[0]
+    return value
+  }
+
+  const sourceIp = getValue('source_ip')
+  if (typeof sourceIp === 'string' && sourceIp.trim()) {
+    eventsFilters.source_ip = sourceIp.trim()
+  }
+
+  const blockedOnly = getValue('blocked_only')
+  if (typeof blockedOnly === 'string') {
+    const normalized = blockedOnly.trim().toLowerCase()
+    eventsFilters.blocked_only = ['1', 'true', 'yes', 'on'].includes(normalized)
+  }
+
+  const createdFrom = getValue('created_from')
+  if (typeof createdFrom === 'string') {
+    const unix = Number(createdFrom)
+    if (Number.isFinite(unix) && unix > 0) {
+      eventsFilters.created_from = toDatetimeLocalString(unix)
+    }
+  }
+
+  const createdTo = getValue('created_to')
+  if (typeof createdTo === 'string') {
+    const unix = Number(createdTo)
+    if (Number.isFinite(unix) && unix > 0) {
+      eventsFilters.created_to = toDatetimeLocalString(unix)
+    }
+  }
+
+  const sortBy = getValue('sort_by')
+  if (sortBy === 'created_at' || sortBy === 'source_ip' || sortBy === 'dest_port') {
+    eventsFilters.sort_by = sortBy
+  }
+
+  const sortDirection = getValue('sort_direction')
+  if (sortDirection === 'asc' || sortDirection === 'desc') {
+    eventsFilters.sort_direction = sortDirection
+  }
 }
 
 useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
@@ -346,6 +425,7 @@ useAdminRealtimeTopic<SecurityEventItem>('security_event_delta', (payload) => {
 })
 
 onMounted(async () => {
+  applyFiltersFromRouteQuery()
   await loadEvents(true)
   filtersReady.value = true
 })
@@ -581,9 +661,22 @@ watch(currentPage, () => {
                       {{ event.protocol }}
                       <span v-if="event.http_version"> / {{ event.http_version }}</span>
                     </div>
-                    <div class="font-mono text-slate-600">
-                      {{ event.http_method || '-' }}
-                      <span v-if="event.uri"> {{ event.uri }}</span>
+                    <div class="flex items-start gap-2">
+                      <div
+                        class="event-request-text font-mono text-slate-600"
+                        :title="eventRequestLine(event)"
+                      >
+                        {{ event.http_method || '-' }}
+                        <span v-if="event.uri"> {{ eventUriPreview(event.uri) }}</span>
+                      </div>
+                      <button
+                        v-if="isUriTruncated(event.uri)"
+                        class="inline-flex h-6 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50"
+                        title="查看完整请求 URI"
+                        @click="openPreview('完整请求 URI', event.uri)"
+                      >
+                        查看完整
+                      </button>
                     </div>
                   </div>
                 </td>
@@ -704,5 +797,16 @@ watch(currentPage, () => {
   -webkit-line-clamp: 2;
   line-height: 1.375rem;
   max-height: calc(1.375rem * 2);
+}
+
+.event-request-text {
+  max-width: 28rem;
+  overflow: hidden;
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.125rem;
+  max-height: calc(1.125rem * 2);
 }
 </style>

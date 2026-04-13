@@ -384,56 +384,56 @@ const safelineResponseHeadersText = computed({
           disabled
         />
       </label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >最大请求体大小<input
           v-model.number="maxRequestSize"
           type="number"
           min="1024"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >首字节超时(ms)<input
           v-model.number="firstByteTimeout"
           type="number"
           min="100"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >空闲读取超时(ms)<input
           v-model.number="readIdleTimeout"
           type="number"
           min="100"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >TLS 握手超时(ms)<input
           v-model.number="tlsHandshakeTimeout"
           type="number"
           min="500"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >代理连接超时(ms)<input
           v-model.number="proxyConnectTimeout"
           type="number"
           min="100"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >代理写超时(ms)<input
           v-model.number="proxyWriteTimeout"
           type="number"
           min="100"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >代理读超时(ms)<input
           v-model.number="proxyReadTimeout"
           type="number"
           min="100"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >Bloom 缩放系数<input
           v-model.number="bloomFilterScale"
           type="number"
@@ -441,35 +441,35 @@ const safelineResponseHeadersText = computed({
           step="0.1"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >健康检查间隔(s)<input
           v-model.number="healthcheckInterval"
           type="number"
           min="1"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >健康检查超时(ms)<input
           v-model.number="healthcheckTimeout"
           type="number"
           min="100"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >HTTP/2 最大并发流<input
           v-model.number="http2MaxStreams"
           type="number"
           min="1"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700"
+      <label class="l7-inline-field text-sm text-stone-700"
         >HTTP/2 最大帧<input
           v-model.number="http2MaxFrameSize"
           type="number"
           min="1024"
           :class="numberInputClass"
       /></label>
-      <label class="text-sm text-stone-700 md:col-span-2"
+      <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
         >HTTP/2 初始窗口<input
           v-model.number="http2InitialWindowSize"
           type="number"
@@ -552,14 +552,14 @@ const safelineResponseHeadersText = computed({
             >按真实客户端 IP、Host 和路由统计请求速率，并执行延迟、Challenge 或 429。</span
           >
         </label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >滑窗时长(s)<input
             v-model.number="ccRequestWindow"
             type="number"
             min="3"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >延迟触发比例(%)<input
             v-model.number="ccDelayThresholdPercent"
             type="number"
@@ -567,77 +567,77 @@ const safelineResponseHeadersText = computed({
             max="95"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >延迟时长(ms)<input
             v-model.number="ccDelayMs"
             type="number"
             min="0"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >IP Challenge 阈值<input
             v-model.number="ccIpChallengeThreshold"
             type="number"
             min="10"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >IP 429 阈值<input
             v-model.number="ccIpBlockThreshold"
             type="number"
             min="10"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >Host Challenge 阈值<input
             v-model.number="ccHostChallengeThreshold"
             type="number"
             min="5"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >Host 429 阈值<input
             v-model.number="ccHostBlockThreshold"
             type="number"
             min="5"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >路由 Challenge 阈值<input
             v-model.number="ccRouteChallengeThreshold"
             type="number"
             min="3"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >路由 429 阈值<input
             v-model.number="ccRouteBlockThreshold"
             type="number"
             min="3"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >热点路径 Challenge 阈值<input
             v-model.number="ccHotPathChallengeThreshold"
             type="number"
             min="32"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >热点路径 429 阈值<input
             v-model.number="ccHotPathBlockThreshold"
             type="number"
             min="32"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >Challenge TTL(s)<input
             v-model.number="ccChallengeTtl"
             type="number"
             min="30"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >Challenge Cookie 名称<input
             v-model="ccChallengeCookieName"
             type="text"
@@ -729,21 +729,21 @@ const safelineResponseHeadersText = computed({
             strict 只认强指纹；relaxed 才会接受状态码兜底。
           </p>
         </div>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >识别最大响应体(bytes)<input
             v-model.number="safelineInterceptMaxBodyBytes"
             type="number"
             min="256"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >本地封禁时长(s)<input
             v-model.number="safelineInterceptBlockDuration"
             type="number"
             min="30"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >替换状态码<input
             v-model.number="safelineResponseStatusCode"
             type="number"
@@ -751,7 +751,7 @@ const safelineResponseHeadersText = computed({
             max="599"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700 md:col-span-2"
+        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
           >替换 Content-Type<input
             v-model="safelineResponseContentType"
             type="text"
@@ -793,7 +793,7 @@ const safelineResponseHeadersText = computed({
           />
         </label>
         <div class="space-y-3">
-          <label class="text-sm text-stone-700">
+          <label class="l7-inline-field text-sm text-stone-700">
             响应文件路径
             <input
               v-model="safelineResponseBodyFilePath"
@@ -846,21 +846,21 @@ const safelineResponseHeadersText = computed({
             QUIC 端口固定跟随“站点页 / 全局入口”的 HTTPS 入口端口，这里不再单独配置。
           </p>
         </div>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >最大并发流<input
             v-model.number="http3MaxStreams"
             type="number"
             min="1"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >空闲超时(s)<input
             v-model.number="http3IdleTimeout"
             type="number"
             min="1"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >MTU<input
             v-model.number="http3Mtu"
             type="number"
@@ -868,28 +868,28 @@ const safelineResponseHeadersText = computed({
             max="1500"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >最大帧大小<input
             v-model.number="http3MaxFrameSize"
             type="number"
             min="65536"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700"
+        <label class="l7-inline-field text-sm text-stone-700"
           >QPACK 表大小<input
             v-model.number="http3QpackTableSize"
             type="number"
             min="1024"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700 md:col-span-2"
+        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
           >证书路径<input
             v-model="http3CertificatePath"
             type="text"
             placeholder="例如 /path/to/cert.pem"
             :class="numberInputClass"
         /></label>
-        <label class="text-sm text-stone-700 md:col-span-2"
+        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
           >私钥路径<input
             v-model="http3PrivateKeyPath"
             type="text"
@@ -926,3 +926,65 @@ const safelineResponseHeadersText = computed({
     </div>
   </section>
 </template>
+
+<style scoped>
+.l7-inline-field {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.62rem 0.72rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgb(226 232 240);
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0.9) 0%,
+    rgba(241, 245, 249, 0.7) 100%
+  );
+  color: rgb(100 116 139);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.l7-inline-field:hover {
+  border-color: rgb(203 213 225);
+}
+
+.l7-inline-field:focus-within {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgb(248 250 252);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+@media (min-width: 768px) {
+  .l7-inline-field {
+    grid-template-columns: minmax(0, 10.25rem) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 0.75rem;
+  }
+}
+
+.l7-inline-field :deep(input),
+.l7-inline-field :deep(select),
+.l7-inline-field :deep(textarea),
+.l7-inline-field :deep(.numberInputClass) {
+  margin-top: 0 !important;
+  border-radius: 0.72rem;
+  border-color: rgb(203 213 225);
+  background: rgb(255 255 255);
+  padding: 0.52rem 0.72rem;
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+.l7-inline-field :deep(input:focus),
+.l7-inline-field :deep(select:focus),
+.l7-inline-field :deep(textarea:focus) {
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.12),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+</style>

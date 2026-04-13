@@ -2,7 +2,6 @@
 import { ref, shallowRef, onMounted, watch, onBeforeUnmount, toRef } from 'vue'
 import * as echarts from 'echarts'
 import type {
-  EChartsOption,
   EffectScatterSeriesOption,
   LinesSeriesOption,
 } from 'echarts'
@@ -24,19 +23,14 @@ const { snapshot } = useAdminEventMap({
 const isOriginPending = () => !hasGeo(snapshot.value.originNode)
 
 type GeoNode = EventMapNode & { lat: number; lng: number }
-type Projectile = {
-  id: string
-  coords: number[][]
-  color: string
-  trailColor: string
-  symbolSize: number
-  curveness: number
-  createdAt: number
-  durationMs: number
-  glowMultiplier: number
-  trailOpacity: number
+
+type RealtimeNodeRecord = {
+  node: GeoNode
+  expireAt: number
 }
+
 type LocalLinesDataItem = {
+  name: string
   coords: number[][]
   lineStyle: {
     color: string
@@ -53,27 +47,31 @@ type LocalLinesDataItem = {
     color: string
     shadowBlur?: number
     shadowColor?: string
+    loop: boolean
   }
+  expireAt: number
 }
 
-const PROJECTILE_DURATION_MS = 1000
-const PROJECTILE_CAP = 150
+const PROJECTILE_CAP = 80 // 限制同屏最大炮弹数
 const ACTIVE_TRAIL_OPACITY = 0.12
 const NORMAL_RATE_LIMIT_MS = 800 // 正常流量频率限制：同节点同方向每800ms最多一发
 const BLOCK_RATE_LIMIT_MS = 250  // 拦截流量频率限制：同节点同方向每250ms最多一发
 
-const activeProjectiles = shallowRef<Projectile[]>([])
+// 使用基于 ID 的数组更新替代环形缓冲区，ECharts 通过 name (唯一标识) 进行 diff，不会重置旧动画
+const activeLinesData = shallowRef<LocalLinesDataItem[]>([])
+
 const processedTrafficEvents = new Set<string>()
 const lastLaunchTime = new Map<string, number>()
-let cleanupTimer: number | null = null
+const activeRealtimeNodes = new Map<string, RealtimeNodeRecord>()
 
+let cleanupTimer: number | null = null
 let renderTimeout: number | null = null
 let lastRenderTime = 0
 
 // 防抖/节流图表渲染，避免 ECharts 频繁 setOption 导致主线程阻塞
 const scheduleRender = () => {
   const now = Date.now()
-  if (now - lastRenderTime >= 100) {
+  if (now - lastRenderTime >= 150) {
     if (renderTimeout) {
       clearTimeout(renderTimeout)
       renderTimeout = null
@@ -85,7 +83,7 @@ const scheduleRender = () => {
       lastRenderTime = Date.now()
       renderTimeout = null
       renderChart()
-    }, 100 - (now - lastRenderTime))
+    }, 150 - (now - lastRenderTime))
   }
 }
 
@@ -118,27 +116,7 @@ function projectilePalette(event: TrafficEventDelta) {
 }
 
 function launchKey(event: TrafficEventDelta) {
-  // 彻底移除 IP，按 节点 + 方向 + 决策 聚合。
-  // 这样无论有多少并发请求，同节点的流量只会汇聚成一颗粗壮的炮弹，杜绝满屏乱飞和卡顿。
   return [event.node.id, event.direction, event.decision].join(':')
-}
-
-function syncProjectiles() {
-  const now = Date.now()
-  const next = activeProjectiles.value.filter(
-    (projectile) => now - projectile.createdAt < projectile.durationMs,
-  )
-  if (next.length !== activeProjectiles.value.length) {
-    activeProjectiles.value = next
-    scheduleRender()
-  }
-}
-
-function ensureCleanupTimer() {
-  if (cleanupTimer !== null) return
-  cleanupTimer = window.setInterval(() => {
-    syncProjectiles()
-  }, 100)
 }
 
 function trafficEventKey(event: TrafficEventDelta) {
@@ -152,6 +130,35 @@ function trafficEventKey(event: TrafficEventDelta) {
   ].join(':')
 }
 
+function runCleanup() {
+  const now = Date.now()
+  let changed = false
+
+  // 清理过期的线条
+  const nextLines = activeLinesData.value.filter(line => now < line.expireAt)
+  if (nextLines.length !== activeLinesData.value.length) {
+    activeLinesData.value = nextLines
+    changed = true
+  }
+
+  // 清理过期的实时节点（超过 5 秒没有新流量的节点渐渐消失）
+  for (const [id, record] of activeRealtimeNodes.entries()) {
+    if (now > record.expireAt) {
+      activeRealtimeNodes.delete(id)
+      changed = true
+    }
+  }
+
+  if (changed) {
+    scheduleRender()
+  }
+}
+
+function ensureCleanupTimer() {
+  if (cleanupTimer !== null) return
+  cleanupTimer = window.setInterval(runCleanup, 200)
+}
+
 function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
   const now = Date.now()
   let hasNew = false
@@ -161,35 +168,50 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
     if (processedTrafficEvents.has(key)) return
     processedTrafficEvents.add(key)
 
+    if (typeof event.node.lat === 'number' && typeof event.node.lng === 'number') {
+      activeRealtimeNodes.set(event.node.id, {
+        node: event.node as GeoNode,
+        expireAt: now + 5000 // 节点小圆圈 5 秒后渐渐消失
+      })
+    } else {
+      return
+    }
+
     const linkKey = launchKey(event)
     const limitMs = event.decision === 'block' ? BLOCK_RATE_LIMIT_MS : NORMAL_RATE_LIMIT_MS
     const lastTime = lastLaunchTime.get(linkKey) || 0
 
-    // 节流 (Throttle) 机制：同一节点链路在限制时间内只展示为一颗炮弹
     if (now - lastTime >= limitMs) {
-      if (typeof event.node.lat !== 'number' || typeof event.node.lng !== 'number') return
-
       const isIngress = event.direction === 'ingress'
       const coords = isIngress
         ? [[event.node.lng, event.node.lat], [originNode.lng, originNode.lat]]
         : [[originNode.lng, originNode.lat], [event.node.lng, event.node.lat]]
       const palette = projectilePalette(event)
       
-      activeProjectiles.value = [
-        ...activeProjectiles.value,
-        {
-          id: `${linkKey}-${now}`,
-          coords,
-          color: palette.color,
-          trailColor: palette.trailColor,
-          symbolSize: palette.symbolSize,
+      const durationMs = 1000 + Math.random() * 120
+
+      const lineData: LocalLinesDataItem = {
+        name: `${linkKey}-${now}`,
+        coords,
+        lineStyle: {
+          color: palette.trailColor,
+          width: 1,
+          opacity: ACTIVE_TRAIL_OPACITY + 0.15,
           curveness: 0.15 + Math.random() * 0.3,
-          createdAt: now,
-          durationMs: PROJECTILE_DURATION_MS + Math.random() * 120,
-          glowMultiplier: 2.0, // 加大发光倍率，凸显汇聚感
-          trailOpacity: ACTIVE_TRAIL_OPACITY + 0.15,
-        }
-      ].slice(-PROJECTILE_CAP)
+        },
+        effect: {
+          show: true,
+          period: Math.max(durationMs / 1000, 0.5),
+          trailLength: 0.22,
+          symbol: 'path://M5 0 L10 5 L5 10 L0 5 Z',
+          symbolSize: palette.symbolSize,
+          color: palette.color,
+          loop: false, // 动画播放一次即停止
+        },
+        expireAt: now + durationMs + 800
+      }
+
+      activeLinesData.value = [...activeLinesData.value, lineData].slice(-PROJECTILE_CAP)
 
       lastLaunchTime.set(linkKey, now)
       hasNew = true
@@ -200,7 +222,6 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
     scheduleRender()
   }
 
-  // 清理 processed 缓存，防内存泄漏
   if (processedTrafficEvents.size > 256) {
     const retained = Array.from(processedTrafficEvents).slice(-128)
     processedTrafficEvents.clear()
@@ -210,6 +231,23 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
   if (lastLaunchTime.size > 100) {
     lastLaunchTime.clear()
   }
+}
+
+const baseGeoConfig = {
+  map: 'china',
+  roam: false,
+  zoom: 1.75,
+  center: [104.5, 36.5],
+  emphasis: { disabled: true },
+  label: { show: false },
+  itemStyle: {
+    areaColor: '#1e293b',
+    borderColor: '#334155',
+    borderWidth: 1,
+    shadowColor: 'rgba(0, 0, 0, 0.5)',
+    shadowBlur: 10
+  },
+  regions: [{ name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } }]
 }
 
 // 加载地图并初始化
@@ -223,6 +261,14 @@ const initMap = async () => {
     echarts.registerMap('china', geoJson)
 
     chart = echarts.init(chartRef.value)
+    
+    chart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { show: false },
+      geo: baseGeoConfig,
+      series: []
+    })
+    
     renderChart()
   } catch (error) {
     console.error('Failed to load map data:', error)
@@ -234,56 +280,23 @@ const renderChart = () => {
 
   const { nodes, originNode } = snapshot.value
   if (!hasGeo(originNode)) {
-    chart.setOption({
-      backgroundColor: 'transparent',
-      tooltip: { show: false },
-      geo: {
-        map: 'china',
-        roam: false,
-        zoom: 1.75,
-        center: [104.5, 36.5],
-        emphasis: { disabled: true },
-        label: { show: false },
-        itemStyle: {
-          areaColor: '#1e293b',
-          borderColor: '#334155',
-          borderWidth: 1,
-        },
-        regions: [{ name: '南海诸岛', itemStyle: { opacity: 0 } }]
-      },
-      series: []
-    })
+    chart.setOption({ series: [] })
     return
   }
 
-  const geoNodes = nodes.filter(hasGeo)
-  const projectileLinesData: LocalLinesDataItem[] = activeProjectiles.value.map((projectile) => ({
-    coords: projectile.coords,
-    lineStyle: {
-      color: projectile.trailColor,
-      width: 1,
-      opacity: projectile.trailOpacity,
-      curveness: projectile.curveness,
-    },
-    effect: {
-      show: true,
-      period: Math.max(projectile.durationMs / 1000, 0.5),
-      trailLength: 0.22,
-      symbol: 'path://M5 0 L10 5 L5 10 L0 5 Z',
-      symbolSize: projectile.symbolSize,
-      color: projectile.color,
-      shadowBlur: 12 * projectile.glowMultiplier,
-      shadowColor: projectile.color,
-    },
-  }))
+  const snapshotNodeMap = new Map(nodes.filter(hasGeo).map(n => [n.id, n]))
+  activeRealtimeNodes.forEach((record, id) => {
+    if (!snapshotNodeMap.has(id)) {
+      snapshotNodeMap.set(id, { ...record.node, trafficWeight: 1 })
+    }
+  })
+  const geoNodes = Array.from(snapshotNodeMap.values())
 
   const scatterData = geoNodes.map(node => ({
     name: node.name,
     value: [node.lng, node.lat, node.trafficWeight],
     itemStyle: {
       color: node.id === snapshot.value.hottestNode?.id ? '#fbbf24' : '#60a5fa',
-      shadowBlur: 8,
-      shadowColor: node.id === snapshot.value.hottestNode?.id ? '#fbbf24' : '#60a5fa'
     }
   }))
 
@@ -292,8 +305,6 @@ const renderChart = () => {
     value: [originNode.lng, originNode.lat, 2.5],
     itemStyle: {
       color: '#10b981',
-      shadowBlur: 15,
-      shadowColor: '#10b981'
     }
   })
 
@@ -310,7 +321,7 @@ const renderChart = () => {
     lineStyle: {
       curveness: 0.2,
     },
-    data: projectileLinesData,
+    data: activeLinesData.value, 
   }
 
   const scatterSeries: EffectScatterSeriesOption = {
@@ -332,45 +343,9 @@ const renderChart = () => {
     data: scatterData
   }
 
-  const option: EChartsOption = {
-    backgroundColor: 'transparent',
-    tooltip: {
-      show: false
-    },
-    geo: {
-      map: 'china',
-      roam: false,
-      zoom: 1.75,
-      center: [104.5, 36.5],
-      emphasis: {
-        disabled: true
-      },
-      label: {
-        show: false
-      },
-      itemStyle: {
-        areaColor: '#1e293b',
-        borderColor: '#334155',
-        borderWidth: 1,
-        shadowColor: 'rgba(0, 0, 0, 0.5)',
-        shadowBlur: 10
-      },
-      regions: [
-        {
-          name: '南海诸岛',
-          itemStyle: {
-            opacity: 0
-          },
-          label: {
-            show: false
-          }
-        }
-      ]
-    },
+  chart.setOption({
     series: [linesSeries, scatterSeries]
-  }
-
-  chart.setOption(option)
+  })
 }
 
 watch(
@@ -378,7 +353,7 @@ watch(
   (value) => {
     if (!hasGeo(value.originNode)) {
       processedTrafficEvents.clear()
-      activeProjectiles.value = []
+      activeLinesData.value = []
     }
     scheduleRender()
   },
@@ -403,15 +378,16 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeChart)
-  if (cleanupTimer !== null) {
-    window.clearInterval(cleanupTimer)
-    cleanupTimer = null
-  }
   if (renderTimeout !== null) {
     window.clearTimeout(renderTimeout)
     renderTimeout = null
   }
+  if (cleanupTimer !== null) {
+    window.clearInterval(cleanupTimer)
+    cleanupTimer = null
+  }
   lastLaunchTime.clear()
+  activeRealtimeNodes.clear()
   chart?.dispose()
 })
 </script>

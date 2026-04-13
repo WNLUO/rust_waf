@@ -1,4 +1,6 @@
 use super::*;
+use std::collections::HashSet;
+use std::time::Duration;
 
 pub(super) async fn list_security_events_handler(
     State(state): State<ApiState>,
@@ -76,11 +78,113 @@ pub(super) async fn list_blocked_ips_handler(
     }))
 }
 
+pub(super) async fn create_blocked_ip_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<BlockedIpCreateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let ip_text = payload.ip.trim();
+    if ip_text.is_empty() {
+        return Err(ApiError::bad_request("IP 不能为空".to_string()));
+    }
+
+    let ip = ip_text
+        .parse::<std::net::IpAddr>()
+        .map_err(|_| ApiError::bad_request(format!("无效的 IP 地址 '{}'", ip_text)))?;
+    let reason = payload.reason.trim();
+    if reason.is_empty() {
+        return Err(ApiError::bad_request("封禁原因不能为空".to_string()));
+    }
+
+    let duration_secs = payload
+        .duration_secs
+        .unwrap_or(crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS as u64)
+        .clamp(30, 30 * 24 * 3600);
+    let blocked_at = unix_timestamp();
+    let expires_at = blocked_at
+        .checked_add(duration_secs as i64)
+        .ok_or_else(|| ApiError::bad_request("封禁时长过大".to_string()))?;
+
+    if let Some(inspector) = state.context.l4_inspector().as_ref() {
+        if !inspector.block_ip(&ip, reason, Duration::from_secs(duration_secs)) {
+            return Err(ApiError::conflict(
+                "运行时封禁池已满，无法新增封禁。请先解除部分封禁后重试。".to_string(),
+            ));
+        }
+    }
+
+    store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+        ip.to_string(),
+        reason.to_string(),
+        blocked_at,
+        expires_at,
+    ));
+    store.flush().await.map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: format!("已封禁 IP '{}'，持续 {} 秒。", ip, duration_secs),
+    }))
+}
+
 pub(super) async fn delete_blocked_ip_handler(
     State(state): State<ApiState>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<WriteStatusResponse>> {
-    let store = sqlite_store(&state)?;
+    unblock_blocked_ip(&state, id).await.map(Json)
+}
+
+pub(super) async fn batch_unblock_blocked_ips_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<BlockedIpsBatchUnblockRequest>,
+) -> ApiResult<Json<BlockedIpsBatchUnblockResponse>> {
+    if payload.ids.is_empty() {
+        return Err(ApiError::bad_request("至少提供一个待解封 ID".to_string()));
+    }
+    if payload.ids.len() > 200 {
+        return Err(ApiError::bad_request(
+            "单次最多批量解封 200 条记录".to_string(),
+        ));
+    }
+
+    let mut dedup = HashSet::new();
+    let ids: Vec<i64> = payload
+        .ids
+        .into_iter()
+        .filter(|id| dedup.insert(*id))
+        .collect();
+    let requested = ids.len() as u32;
+    let mut unblocked = 0_u32;
+    let mut failed_ids = Vec::new();
+
+    for id in ids {
+        match unblock_blocked_ip(&state, id).await {
+            Ok(_) => {
+                unblocked = unblocked.saturating_add(1);
+            }
+            Err(_) => {
+                failed_ids.push(id);
+            }
+        }
+    }
+
+    let failed = requested.saturating_sub(unblocked);
+    Ok(Json(BlockedIpsBatchUnblockResponse {
+        success: failed == 0,
+        requested,
+        unblocked,
+        failed,
+        failed_ids,
+        message: if failed == 0 {
+            format!("批量解封完成，共处理 {} 条。", requested)
+        } else {
+            format!("批量解封完成：成功 {} 条，失败 {} 条。", unblocked, failed)
+        },
+    }))
+}
+
+async fn unblock_blocked_ip(state: &ApiState, id: i64) -> ApiResult<WriteStatusResponse> {
+    let store = sqlite_store(state)?;
     let Some(entry) = store
         .load_blocked_ip(id)
         .await
@@ -149,7 +253,7 @@ pub(super) async fn delete_blocked_ip_handler(
             false
         };
 
-        Ok(Json(WriteStatusResponse {
+        Ok(WriteStatusResponse {
             success: true,
             message: if entry.provider.as_deref() == Some("safeline") {
                 format!("雷池封禁记录 '{}' 已完成远端解封并从本地缓存移除。", id)
@@ -161,7 +265,7 @@ pub(super) async fn delete_blocked_ip_handler(
             } else {
                 format!("本地封禁记录 '{}' 已从数据库移除。", id)
             },
-        }))
+        })
     } else {
         Err(ApiError::not_found(format!(
             "Blocked IP record '{}' not found",

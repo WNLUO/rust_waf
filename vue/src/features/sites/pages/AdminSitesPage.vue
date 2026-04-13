@@ -34,7 +34,6 @@ const {
   remoteSitePullOptions,
   removeCurrentLocalSite,
   resetLocalSiteForm,
-  rowSyncText,
   saveLocalSite,
   selectedRemoteSiteIds,
   selectRecommendedRemoteSites,
@@ -95,7 +94,6 @@ async function handleClearSiteData() {
         :filtered-rows="filteredRows"
         :has-saved-config="hasSavedConfig"
         :local-action-label="localActionLabel"
-        :row-sync-text="rowSyncText"
         @edit-local-site="editLocalSite"
         @sync-local-site="syncLocalSite"
       />

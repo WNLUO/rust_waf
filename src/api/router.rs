@@ -8,7 +8,7 @@ use super::state::ApiState;
 use super::system_handlers;
 use axum::{
     middleware,
-    routing::{delete, get, patch},
+    routing::{delete, get, patch, post},
     Router,
 };
 
@@ -55,7 +55,12 @@ pub(super) fn build_router(state: ApiState) -> Router {
         )
         .route(
             "/blocked-ips",
-            get(events_handlers::list_blocked_ips_handler),
+            get(events_handlers::list_blocked_ips_handler)
+                .post(events_handlers::create_blocked_ip_handler),
+        )
+        .route(
+            "/blocked-ips/unblock-batch",
+            post(events_handlers::batch_unblock_blocked_ips_handler),
         )
         .route(
             "/blocked-ips/:id",

@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchBlockedIps, unblockIp } from '@/shared/api/events'
 import {
+  createBlockedIp,
+  fetchBlockedIps,
+  unblockIp,
+  unblockIpsBatch,
+} from '@/shared/api/events'
+import {
+  fetchSafeLineSyncState,
   pullSafeLineBlockedIps,
   syncSafeLineBlockedIps,
 } from '@/shared/api/safeline'
-import type { BlockedIpsResponse } from '@/shared/types'
+import type { BlockedIpsResponse, SafeLineSyncOverviewResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
@@ -23,17 +29,27 @@ const refreshing = ref(false)
 const pulling = ref(false)
 const pushing = ref(false)
 const mutatingId = ref<number | null>(null)
+const creatingBlockedIp = ref(false)
+const batchUnblocking = ref(false)
 const filtersReady = ref(false)
 const currentPage = ref(1)
 const error = ref('')
 const successMessage = ref('')
 const pendingRealtimeCount = ref(0)
+const selectedIds = ref<number[]>([])
+const loadingSyncState = ref(false)
 const realtimeState = useAdminRealtimeState()
 const blockedPayload = ref<BlockedIpsResponse>({
   total: 0,
   limit: 0,
   offset: 0,
   blocked_ips: [],
+})
+const safeLineSyncState = ref<SafeLineSyncOverviewResponse>({
+  events: null,
+  blocked_ips_push: null,
+  blocked_ips_pull: null,
+  blocked_ips_delete: null,
 })
 
 useFlashMessages({
@@ -55,6 +71,11 @@ const blockedFilters = reactive({
   blocked_to: '',
   sort_by: 'blocked_at',
   sort_direction: 'desc' as 'asc' | 'desc',
+})
+const blockForm = reactive({
+  ip: '',
+  reason: 'manual block',
+  duration_secs: 3600,
 })
 
 const toUnixTimestamp = (value: string) => {
@@ -79,6 +100,70 @@ const canInlineRefresh = computed(
     blockedFilters.sort_by === 'blocked_at' &&
     blockedFilters.sort_direction === 'desc',
 )
+const allSelectableIds = computed(() =>
+  blockedPayload.value.blocked_ips.filter(canUnblock).map((item) => item.id),
+)
+const isAllSelected = computed(
+  () =>
+    allSelectableIds.value.length > 0 &&
+    allSelectableIds.value.every((id) => selectedIds.value.includes(id)),
+)
+
+function canUnblock(item: BlockedIpsResponse['blocked_ips'][number]) {
+  return !item.provider || item.provider === 'safeline'
+}
+
+const isSelected = (id: number) => selectedIds.value.includes(id)
+const toggleSelected = (id: number, checked: boolean) => {
+  if (checked) {
+    if (!selectedIds.value.includes(id)) {
+      selectedIds.value.push(id)
+    }
+    return
+  }
+  selectedIds.value = selectedIds.value.filter((item) => item !== id)
+}
+const toggleSelectAll = (checked: boolean) => {
+  selectedIds.value = checked ? [...allSelectableIds.value] : []
+}
+const onSelectAllChange = (event: Event) => {
+  const checked = (event.target as HTMLInputElement | null)?.checked || false
+  toggleSelectAll(checked)
+}
+const onSelectOneChange = (id: number, event: Event) => {
+  const checked = (event.target as HTMLInputElement | null)?.checked || false
+  toggleSelected(id, checked)
+}
+
+const relatedEventsQuery = (item: BlockedIpsResponse['blocked_ips'][number]) => {
+  const WINDOW_SECS = 1800
+  return {
+    source_ip: item.ip,
+    blocked_only: '1',
+    created_from: String(Math.max(0, item.blocked_at - WINDOW_SECS)),
+    created_to: String(item.blocked_at + WINDOW_SECS),
+    sort_by: 'created_at',
+    sort_direction: 'desc',
+  }
+}
+
+const syncStateItems = computed(() => [
+  {
+    key: 'push',
+    label: '封禁推送',
+    state: safeLineSyncState.value.blocked_ips_push,
+  },
+  {
+    key: 'pull',
+    label: '封禁回流',
+    state: safeLineSyncState.value.blocked_ips_pull,
+  },
+  {
+    key: 'delete',
+    label: '远端解封',
+    state: safeLineSyncState.value.blocked_ips_delete,
+  },
+])
 
 const matchesRealtimeFilters = (
   item: BlockedIpsResponse['blocked_ips'][number],
@@ -168,12 +253,56 @@ const loadBlockedIps = async (showLoader = false) => {
     if (currentPage.value > totalPages.value) {
       currentPage.value = totalPages.value
     }
+    selectedIds.value = []
     pendingRealtimeCount.value = 0
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取封禁名单失败'
   } finally {
     if (showLoader) loading.value = false
     refreshing.value = false
+  }
+}
+
+const loadSafeLineSyncState = async () => {
+  loadingSyncState.value = true
+  try {
+    safeLineSyncState.value = await fetchSafeLineSyncState()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取雷池同步状态失败'
+  } finally {
+    loadingSyncState.value = false
+  }
+}
+
+const handleCreateBlockedIp = async () => {
+  const ip = blockForm.ip.trim()
+  const reason = blockForm.reason.trim()
+  if (!ip) {
+    error.value = '请填写要封禁的 IP'
+    return
+  }
+  if (!reason) {
+    error.value = '请填写封禁原因'
+    return
+  }
+
+  creatingBlockedIp.value = true
+  error.value = ''
+  successMessage.value = ''
+  try {
+    const response = await createBlockedIp({
+      ip,
+      reason,
+      duration_secs: Number(blockForm.duration_secs) || undefined,
+    })
+    successMessage.value = response.message
+    blockForm.ip = ''
+    currentPage.value = 1
+    await loadBlockedIps()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '新增封禁失败'
+  } finally {
+    creatingBlockedIp.value = false
   }
 }
 
@@ -187,6 +316,7 @@ const runSafeLinePull = async () => {
     successMessage.value = response.message
     currentPage.value = 1
     await loadBlockedIps()
+    await loadSafeLineSyncState()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '拉取雷池封禁失败'
   } finally {
@@ -203,10 +333,29 @@ const runSafeLinePush = async () => {
     const response = await syncSafeLineBlockedIps()
     successMessage.value = response.message
     await loadBlockedIps()
+    await loadSafeLineSyncState()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '推送本地封禁失败'
   } finally {
     pushing.value = false
+  }
+}
+
+const handleBatchUnblock = async () => {
+  if (!selectedIds.value.length) return
+
+  batchUnblocking.value = true
+  error.value = ''
+  successMessage.value = ''
+  try {
+    const response = await unblockIpsBatch({ ids: selectedIds.value })
+    successMessage.value = response.message
+    await loadBlockedIps()
+    await loadSafeLineSyncState()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '批量解封失败'
+  } finally {
+    batchUnblocking.value = false
   }
 }
 
@@ -218,6 +367,7 @@ const handleUnblock = async (id: number) => {
     const response = await unblockIp(id)
     successMessage.value = response.message
     await loadBlockedIps()
+    await loadSafeLineSyncState()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '解除封禁失败'
   } finally {
@@ -267,7 +417,7 @@ useAdminRealtimeTopic<{ id: number }>('blocked_ip_deleted', ({ id }) => {
 })
 
 onMounted(async () => {
-  await loadBlockedIps(true)
+  await Promise.all([loadBlockedIps(true), loadSafeLineSyncState()])
   filtersReady.value = true
 })
 
@@ -276,6 +426,7 @@ watch(
   () => {
     if (!filtersReady.value) return
     currentPage.value = 1
+    selectedIds.value = []
     pendingRealtimeCount.value = 0
     loadBlockedIps()
   },
@@ -284,6 +435,7 @@ watch(
 
 watch(currentPage, () => {
   if (!filtersReady.value) return
+  selectedIds.value = []
   pendingRealtimeCount.value = 0
   loadBlockedIps()
 })
@@ -333,10 +485,76 @@ watch(currentPage, () => {
           <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
           刷新
         </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+          :disabled="batchUnblocking || !selectedIds.length"
+          @click="handleBatchUnblock"
+        >
+          {{
+            batchUnblocking
+              ? '批量处理中'
+              : selectedIds.length
+                ? `批量解封(${selectedIds.length})`
+                : '批量解封'
+          }}
+        </button>
       </div>
     </template>
 
     <div class="space-y-3">
+      <div class="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
+        <input
+          v-model="blockForm.ip"
+          type="text"
+          placeholder="手动封禁 IP（例：1.2.3.4）"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+        <input
+          v-model="blockForm.reason"
+          type="text"
+          placeholder="封禁原因"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+        <input
+          v-model.number="blockForm.duration_secs"
+          type="number"
+          min="30"
+          step="30"
+          placeholder="封禁秒数"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+        <button
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="creatingBlockedIp"
+          @click="handleCreateBlockedIp"
+        >
+          {{ creatingBlockedIp ? '封禁中' : '手动封禁' }}
+        </button>
+      </div>
+
+      <div class="grid gap-2 md:grid-cols-3">
+        <div
+          v-for="item in syncStateItems"
+          :key="item.key"
+          class="rounded-md border border-slate-200 bg-white px-3 py-2"
+        >
+          <div class="text-xs text-slate-500">{{ item.label }}</div>
+          <div class="mt-1 text-sm text-slate-800">
+            {{
+              item.state?.last_success_at
+                ? `上次成功：${formatTimestamp(item.state.last_success_at)}`
+                : loadingSyncState
+                  ? '读取中...'
+                  : '暂无成功记录'
+            }}
+          </div>
+          <div class="mt-1 text-xs text-slate-600">
+            导入/跳过：{{ item.state?.last_imported_count ?? 0 }} /
+            {{ item.state?.last_skipped_count ?? 0 }}
+          </div>
+        </div>
+      </div>
+
       <div class="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
         <select
           v-model="blockedFilters.source_scope"
@@ -415,6 +633,14 @@ watch(currentPage, () => {
           <table class="w-full min-w-[980px] border-collapse text-left text-sm">
             <thead class="bg-slate-50 text-slate-600">
               <tr>
+                <th class="px-3 py-2 font-medium">
+                  <input
+                    type="checkbox"
+                    class="accent-blue-600"
+                    :checked="isAllSelected"
+                    @change="onSelectAllChange"
+                  />
+                </th>
                 <th class="px-3 py-2 font-medium">IP</th>
                 <th class="px-3 py-2 font-medium">来源</th>
                 <th class="px-3 py-2 font-medium">原因</th>
@@ -429,6 +655,15 @@ watch(currentPage, () => {
                 :key="ip.id"
                 class="border-t border-slate-200 align-top text-slate-800"
               >
+                <td class="px-3 py-2">
+                  <input
+                    type="checkbox"
+                    class="accent-blue-600"
+                    :disabled="!canUnblock(ip)"
+                    :checked="isSelected(ip.id)"
+                    @change="onSelectOneChange(ip.id, $event)"
+                  />
+                </td>
                 <td class="px-3 py-2 font-mono text-xs text-slate-900">
                   {{ ip.ip }}
                 </td>
@@ -451,25 +686,33 @@ watch(currentPage, () => {
                   <div>{{ timeRemaining(ip.expires_at) }}</div>
                 </td>
                 <td class="px-3 py-2">
-                  <button
-                    v-if="!ip.provider || ip.provider === 'safeline'"
-                    class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                    :disabled="mutatingId === ip.id"
-                    @click="handleUnblock(ip.id)"
-                  >
-                    {{
-                      mutatingId === ip.id
-                        ? '处理中'
-                        : ip.provider === 'safeline'
-                          ? '雷池解封'
-                          : '解除封禁'
-                    }}
-                  </button>
-                  <span v-else class="text-xs text-slate-500">不可操作</span>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button
+                      v-if="canUnblock(ip)"
+                      class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                      :disabled="mutatingId === ip.id"
+                      @click="handleUnblock(ip.id)"
+                    >
+                      {{
+                        mutatingId === ip.id
+                          ? '处理中'
+                          : ip.provider === 'safeline'
+                            ? '雷池解封'
+                            : '解除封禁'
+                      }}
+                    </button>
+                    <span v-else class="text-xs text-slate-500">不可操作</span>
+                    <RouterLink
+                      class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                      :to="{ name: 'admin-events', query: relatedEventsQuery(ip) }"
+                    >
+                      相关事件
+                    </RouterLink>
+                  </div>
                 </td>
               </tr>
               <tr v-if="!blockedPayload.blocked_ips.length">
-                <td colspan="6" class="px-3 py-6 text-center text-sm text-slate-500">
+                <td colspan="7" class="px-3 py-6 text-center text-sm text-slate-500">
                   无数据
                 </td>
               </tr>

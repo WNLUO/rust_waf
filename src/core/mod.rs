@@ -191,7 +191,9 @@ impl WafContext {
         self.traffic_map.snapshot(window_seconds).await
     }
 
-    pub fn subscribe_traffic_realtime(&self) -> broadcast::Receiver<traffic_map::TrafficRealtimeEventRaw> {
+    pub fn subscribe_traffic_realtime(
+        &self,
+    ) -> broadcast::Receiver<traffic_map::TrafficRealtimeEventRaw> {
         self.traffic_map.subscribe_realtime()
     }
 

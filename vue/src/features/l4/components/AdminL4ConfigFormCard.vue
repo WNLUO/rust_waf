@@ -10,8 +10,10 @@ const emit = defineEmits<{
   'update:form': [value: L4ConfigForm]
 }>()
 
-const numberInputClass =
-  'mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40'
+const numberFieldClass = 'l4-inline-field text-sm text-stone-700'
+const numberLabelClass = 'l4-inline-label'
+const numberInputClass = 'l4-inline-input'
+const numberHintClass = 'l4-inline-hint'
 
 function patchForm(patch: Partial<L4ConfigForm>) {
   emit('update:form', { ...props.form, ...patch })
@@ -72,8 +74,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
         </div>
       </label>
 
-      <label class="text-sm text-stone-700">
-        <span class="font-medium text-stone-900">每秒连接速率阈值</span>
+      <label :class="numberFieldClass">
+        <span :class="numberLabelClass">每秒连接速率阈值</span>
         <input
           :value="form.connection_rate_limit"
           type="number"
@@ -88,13 +90,13 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p class="mt-2 text-xs text-slate-500">
+        <p :class="numberHintClass">
           超过阈值后，连接限流器会拒绝来源地址的新连接。
         </p>
       </label>
 
-      <label class="text-sm text-stone-700">
-        <span class="font-medium text-stone-900">SYN / 突发阈值</span>
+      <label :class="numberFieldClass">
+        <span :class="numberLabelClass">SYN / 突发阈值</span>
         <input
           :value="form.syn_flood_threshold"
           type="number"
@@ -109,13 +111,13 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p class="mt-2 text-xs text-slate-500">
+        <p :class="numberHintClass">
           用于判定 1 秒窗口内是否出现连接洪泛。
         </p>
       </label>
 
-      <label class="text-sm text-stone-700">
-        <span class="font-medium text-stone-900">跟踪 IP 上限</span>
+      <label :class="numberFieldClass">
+        <span :class="numberLabelClass">跟踪 IP 上限</span>
         <input
           :value="form.max_tracked_ips"
           type="number"
@@ -130,13 +132,13 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p class="mt-2 text-xs text-slate-500">
+        <p :class="numberHintClass">
           连接跟踪器能同时维护的来源地址数量。
         </p>
       </label>
 
-      <label class="text-sm text-stone-700">
-        <span class="font-medium text-stone-900">封禁表上限</span>
+      <label :class="numberFieldClass">
+        <span :class="numberLabelClass">封禁表上限</span>
         <input
           :value="form.max_blocked_ips"
           type="number"
@@ -151,13 +153,13 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p class="mt-2 text-xs text-slate-500">
+        <p :class="numberHintClass">
           本地限流器允许同时保留的封禁 IP 数量。
         </p>
       </label>
 
-      <label class="text-sm text-stone-700">
-        <span class="font-medium text-stone-900">状态保留时长（秒）</span>
+      <label :class="numberFieldClass">
+        <span :class="numberLabelClass">状态保留时长（秒）</span>
         <input
           :value="form.state_ttl_secs"
           type="number"
@@ -170,13 +172,13 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p class="mt-2 text-xs text-slate-500">
+        <p :class="numberHintClass">
           连接窗口、限流计数和过期封禁的清理周期参考值。
         </p>
       </label>
 
-      <label class="text-sm text-stone-700">
-        <span class="font-medium text-stone-900">Bloom 缩放系数</span>
+      <label :class="numberFieldClass">
+        <span :class="numberLabelClass">Bloom 缩放系数</span>
         <input
           :value="form.bloom_filter_scale"
           type="number"
@@ -191,7 +193,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p class="mt-2 text-xs text-slate-500">
+        <p :class="numberHintClass">
           影响四层 Bloom Filter 的容量规模，实际值会按运行档位归一化。
         </p>
       </label>
@@ -206,8 +208,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
       </div>
 
       <div class="grid gap-3 md:grid-cols-2">
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">事件通道容量</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">事件通道容量</span>
           <input
             :value="form.behavior_event_channel_capacity"
             type="number"
@@ -224,8 +226,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">事件丢弃告警阈值</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">事件丢弃告警阈值</span>
           <input
             :value="form.behavior_drop_critical_threshold"
             type="number"
@@ -242,8 +244,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">分桶降级比例 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">分桶降级比例 (%)</span>
           <input
             :value="form.behavior_fallback_ratio_percent"
             type="number"
@@ -261,8 +263,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">过载封禁阈值</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">过载封禁阈值</span>
           <input
             :value="form.behavior_overload_blocked_connections_threshold"
             type="number"
@@ -279,8 +281,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">过载活跃连接阈值</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">过载活跃连接阈值</span>
           <input
             :value="form.behavior_overload_active_connections_threshold"
             type="number"
@@ -297,8 +299,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">正常桶预算 (rpm)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">正常桶预算 (rpm)</span>
           <input
             :value="form.behavior_normal_connection_budget_per_minute"
             type="number"
@@ -315,8 +317,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">可疑桶预算 (rpm)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">可疑桶预算 (rpm)</span>
           <input
             :value="form.behavior_suspicious_connection_budget_per_minute"
             type="number"
@@ -333,8 +335,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">高风险桶预算 (rpm)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">高风险桶预算 (rpm)</span>
           <input
             :value="form.behavior_high_risk_connection_budget_per_minute"
             type="number"
@@ -360,8 +362,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
       </div>
 
       <div class="grid gap-3 md:grid-cols-2">
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">高过载预算缩放 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">高过载预算缩放 (%)</span>
           <input
             :value="form.behavior_high_overload_budget_scale_percent"
             type="number"
@@ -379,8 +381,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">临界过载预算缩放 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">临界过载预算缩放 (%)</span>
           <input
             :value="form.behavior_critical_overload_budget_scale_percent"
             type="number"
@@ -398,8 +400,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">高过载建议延迟 (ms)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">高过载建议延迟 (ms)</span>
           <input
             :value="form.behavior_high_overload_delay_ms"
             type="number"
@@ -416,8 +418,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">临界过载建议延迟 (ms)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">临界过载建议延迟 (ms)</span>
           <input
             :value="form.behavior_critical_overload_delay_ms"
             type="number"
@@ -434,8 +436,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">软延迟阈值 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">软延迟阈值 (%)</span>
           <input
             :value="form.behavior_soft_delay_threshold_percent"
             type="number"
@@ -452,8 +454,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">硬延迟阈值 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">硬延迟阈值 (%)</span>
           <input
             :value="form.behavior_hard_delay_threshold_percent"
             type="number"
@@ -470,8 +472,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">软延迟时长 (ms)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">软延迟时长 (ms)</span>
           <input
             :value="form.behavior_soft_delay_ms"
             type="number"
@@ -488,8 +490,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">硬延迟时长 (ms)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">硬延迟时长 (ms)</span>
           <input
             :value="form.behavior_hard_delay_ms"
             type="number"
@@ -506,8 +508,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">拒绝阈值 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">拒绝阈值 (%)</span>
           <input
             :value="form.behavior_reject_threshold_percent"
             type="number"
@@ -524,8 +526,8 @@ function patchForm(patch: Partial<L4ConfigForm>) {
           />
         </label>
 
-        <label class="text-sm text-stone-700">
-          <span class="font-medium text-stone-900">临界拒绝阈值 (%)</span>
+        <label :class="numberFieldClass">
+          <span :class="numberLabelClass">临界拒绝阈值 (%)</span>
           <input
             :value="form.behavior_critical_reject_threshold_percent"
             type="number"
@@ -545,3 +547,85 @@ function patchForm(patch: Partial<L4ConfigForm>) {
     </div>
   </CyberCard>
 </template>
+
+<style scoped>
+.l4-inline-field {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.62rem 0.72rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgb(226 232 240);
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0.9) 0%,
+    rgba(241, 245, 249, 0.7) 100%
+  );
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.l4-inline-field:hover {
+  border-color: rgb(203 213 225);
+}
+
+.l4-inline-field:focus-within {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgb(248 250 252);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+.l4-inline-label {
+  color: rgb(100 116 139);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.l4-inline-input {
+  width: 100%;
+  border-radius: 0.72rem;
+  border: 1px solid rgb(203 213 225);
+  background: rgb(255 255 255);
+  padding: 0.52rem 0.72rem;
+  font-size: 0.875rem;
+  color: rgb(41 37 36);
+  outline: none;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+.l4-inline-input:focus {
+  border-color: rgba(59, 130, 246, 0.65);
+  box-shadow:
+    0 0 0 3px rgba(59, 130, 246, 0.12),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+.l4-inline-hint {
+  margin-top: 0.1rem;
+  color: rgb(100 116 139);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
+@media (min-width: 768px) {
+  .l4-inline-field {
+    grid-template-columns: minmax(0, 10.25rem) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 0.75rem;
+  }
+
+  .l4-inline-label {
+    text-align: right;
+  }
+
+  .l4-inline-hint {
+    grid-column: 2;
+    margin-top: 0.05rem;
+  }
+}
+</style>

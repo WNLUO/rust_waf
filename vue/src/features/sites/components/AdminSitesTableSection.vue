@@ -7,7 +7,6 @@ defineProps<{
   filteredRows: SiteRowDraft[]
   hasSavedConfig: boolean
   localActionLabel: (row: SiteRowDraft) => string
-  rowSyncText: (row: SiteRowDraft) => string
 }>()
 
 const emit = defineEmits<{
@@ -122,9 +121,6 @@ const emit = defineEmits<{
                   class="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700"
                 >
                   {{ row.link_last_error }}
-                </div>
-                <div v-else class="text-xs text-slate-500">
-                  {{ rowSyncText(row) }}
                 </div>
               </div>
             </td>

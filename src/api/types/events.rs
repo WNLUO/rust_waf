@@ -57,6 +57,28 @@ pub struct BlockedIpResponse {
     pub(crate) expires_at: i64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BlockedIpCreateRequest {
+    pub(crate) ip: String,
+    pub(crate) reason: String,
+    pub(crate) duration_secs: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BlockedIpsBatchUnblockRequest {
+    pub(crate) ids: Vec<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockedIpsBatchUnblockResponse {
+    pub(crate) success: bool,
+    pub(crate) requested: u32,
+    pub(crate) unblocked: u32,
+    pub(crate) failed: u32,
+    pub(crate) failed_ids: Vec<i64>,
+    pub(crate) message: String,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct EventsQueryParams {
     pub(crate) limit: Option<u32>,

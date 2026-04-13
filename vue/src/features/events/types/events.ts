@@ -75,3 +75,22 @@ export interface BlockedIpsQuery extends Record<string, ApiQueryValue> {
   sort_by?: string
   sort_direction?: 'asc' | 'desc'
 }
+
+export interface BlockedIpCreatePayload {
+  ip: string
+  reason: string
+  duration_secs?: number
+}
+
+export interface BlockedIpsBatchUnblockPayload {
+  ids: number[]
+}
+
+export interface BlockedIpsBatchUnblockResponse {
+  success: boolean
+  requested: number
+  unblocked: number
+  failed: number
+  failed_ids: number[]
+  message: string
+}

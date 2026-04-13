@@ -30,6 +30,9 @@ const modeText = (mode: string) => {
   if (mode === 'degrade') return '降级'
   return '放行'
 }
+
+const hasL7Signals = (bucket: L4BucketItem) =>
+  bucket.l7_block_hits > 0 || bucket.safeline_hits > 0
 </script>
 
 <template>
@@ -81,13 +84,13 @@ const modeText = (mode: string) => {
     sub-title="按 (cdn_ip, authority, alpn, transport) 聚合，优先展示最需要被收紧策略的回源连接群。"
     no-padding
   >
-    <div v-if="topBuckets.length" class="overflow-x-auto">
+    <div v-if="topBuckets.length" class="max-h-[32rem] overflow-auto">
       <table class="min-w-full border-collapse text-left">
         <thead class="bg-slate-50 text-sm text-slate-500">
           <tr>
             <th class="px-4 py-3 font-medium">回源桶</th>
             <th class="px-4 py-3 font-medium">风险</th>
-            <th class="px-4 py-3 font-medium">近 10 秒</th>
+            <th class="px-4 py-3 font-medium">实时活动</th>
             <th class="px-4 py-3 font-medium">L7 联动</th>
             <th class="px-4 py-3 font-medium">连接策略</th>
             <th class="px-4 py-3 font-medium">累计流量</th>
@@ -111,62 +114,86 @@ const modeText = (mode: string) => {
               </div>
             </td>
             <td class="px-4 py-3 align-top">
-              <div class="flex flex-col gap-2">
+              <div class="flex flex-col items-start gap-2">
                 <StatusBadge
                   :text="`${riskText(bucket.risk_level)} · ${bucket.risk_score}`"
                   :type="riskType(bucket.risk_level)"
                   compact
                 />
-                <span class="text-xs text-slate-500">{{ bucket.protocol_hint }}</span>
+                <span
+                  v-if="bucket.policy.reject_new_connections"
+                  class="inline-flex w-fit items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-red-700"
+                >
+                  拒绝新连接
+                </span>
+                <span
+                  v-if="
+                    bucket.protocol_hint &&
+                    bucket.protocol_hint !== 'n/a' &&
+                    bucket.protocol_hint !== bucket.alpn
+                  "
+                  class="text-xs text-slate-500"
+                >
+                  {{ bucket.protocol_hint }}
+                </span>
               </div>
             </td>
             <td class="px-4 py-3 align-top">
-              <div class="space-y-1 text-xs text-slate-600">
-                <div>连接 {{ formatNumber(bucket.recent_connections_10s) }}</div>
-                <div>请求 {{ formatNumber(bucket.recent_requests_10s) }}</div>
-                <div>反馈 {{ formatNumber(bucket.recent_feedback_120s) }}</div>
+              <div class="text-xs text-slate-600">
+                10s 连接
+                <span class="font-medium text-stone-900">{{
+                  formatNumber(bucket.recent_connections_10s)
+                }}</span>
+                · 请求
+                <span class="font-medium text-stone-900">{{
+                  formatNumber(bucket.recent_requests_10s)
+                }}</span>
+                · 120s 反馈
+                <span
+                  :class="
+                    bucket.recent_feedback_120s > 0
+                      ? 'font-medium text-amber-700'
+                      : 'font-medium text-stone-900'
+                  "
+                >
+                  {{ formatNumber(bucket.recent_feedback_120s) }}
+                </span>
               </div>
             </td>
             <td class="px-4 py-3 align-top">
-              <div class="space-y-1 text-xs text-slate-600">
-                <div>L7 拦截 {{ formatNumber(bucket.l7_block_hits) }}</div>
-                <div>雷池命中 {{ formatNumber(bucket.safeline_hits) }}</div>
+              <div v-if="hasL7Signals(bucket)" class="flex flex-wrap gap-1.5 text-xs">
+                <span
+                  class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
+                >
+                  L7 拦截 {{ formatNumber(bucket.l7_block_hits) }}
+                </span>
+                <span
+                  class="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 font-medium text-cyan-700"
+                >
+                  雷池命中 {{ formatNumber(bucket.safeline_hits) }}
+                </span>
+              </div>
+              <div v-else>
+                <span
+                  class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600"
+                >
+                  无联动命中
+                </span>
               </div>
             </td>
             <td class="px-4 py-3 align-top">
-              <div class="flex flex-col gap-2">
+              <div class="flex flex-col items-start gap-2">
                 <StatusBadge
                   :text="`${modeText(bucket.policy.mode)} / ${formatNumber(bucket.policy.connection_budget_per_minute)} rpm`"
                   :type="riskType(bucket.risk_level)"
                   compact
                 />
-                <span class="text-xs text-slate-500">
-                  {{
-                    bucket.policy.disable_keepalive
-                      ? '已收紧 keepalive'
-                      : '保持连接复用'
-                  }}
-                </span>
-                <span
-                  v-if="bucket.policy.reject_new_connections"
-                  class="text-xs text-red-600"
-                >
-                  新连接将被拒绝
-                </span>
-                <span
-                  v-if="bucket.policy.suggested_delay_ms"
-                  class="text-xs text-slate-500"
-                >
-                  建议延迟 {{ formatNumber(bucket.policy.suggested_delay_ms) }} ms
-                </span>
               </div>
             </td>
             <td class="px-4 py-3 align-top">
               <div class="space-y-1 text-xs text-slate-600">
                 <div>{{ formatBytes(bucket.total_bytes) }}</div>
-                <div>
-                  {{ formatNumber(bucket.total_connections) }} 连接 / {{ formatNumber(bucket.total_requests) }} 请求
-                </div>
+                <div>{{ formatNumber(bucket.total_requests) }} 累计请求</div>
               </div>
             </td>
             <td class="px-4 py-3 align-top text-xs text-slate-500">

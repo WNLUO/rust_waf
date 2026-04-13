@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { RefreshCw, Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import L7SectionNav from '@/features/l7/components/L7SectionNav.vue'
-import AdminL7ActivitySection from '@/features/l7/components/AdminL7ActivitySection.vue'
 import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
 import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
 import AdminL7OverviewSection from '@/features/l7/components/AdminL7OverviewSection.vue'
@@ -11,19 +10,14 @@ import { useAdminL7 } from '@/features/l7/composables/useAdminL7'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
-const { actionLabel, formatLatency, formatNumber, formatTimestamp } =
-  useFormatters()
+const { formatLatency, formatNumber, formatTimestamp } = useFormatters()
 
 const {
-  blockL7Rules,
   configForm,
-  enabledL7Rules,
   error,
-  events,
   failureModeLabel,
   http3StatusLabel,
   http3StatusType,
-  l7Rules,
   lastUpdated,
   listenAddrsText,
   loading,
@@ -125,16 +119,6 @@ const lastUpdatedLabel = computed(() => {
       />
 
       <AdminL7AdvancedGlobalSection />
-
-      <AdminL7ActivitySection
-        :action-label="actionLabel"
-        :block-l7-rules="blockL7Rules"
-        :enabled-l7-rules="enabledL7Rules"
-        :events="events"
-        :format-number="formatNumber"
-        :format-timestamp="formatTimestamp"
-        :l7-rules="l7Rules"
-      />
     </div>
   </AppLayout>
 </template>

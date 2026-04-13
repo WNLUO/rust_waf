@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onBeforeUnmount, toRef } from 'vue'
+import { ref, shallowRef, onMounted, watch, onBeforeUnmount, toRef } from 'vue'
 import * as echarts from 'echarts'
 import type {
   EChartsOption,
@@ -33,12 +33,8 @@ type Projectile = {
   curveness: number
   createdAt: number
   durationMs: number
-}
-type PendingLaunch = {
-  key: string
-  event: TrafficEventDelta
-  count: number
-  timer: number | null
+  glowMultiplier: number
+  trailOpacity: number
 }
 type LocalLinesDataItem = {
   coords: number[][]
@@ -61,14 +57,37 @@ type LocalLinesDataItem = {
 }
 
 const PROJECTILE_DURATION_MS = 1000
-const PROJECTILE_CAP = 32
+const PROJECTILE_CAP = 150
 const ACTIVE_TRAIL_OPACITY = 0.12
-const MERGE_WINDOW_MS = 150
+const NORMAL_RATE_LIMIT_MS = 800 // 正常流量频率限制：同节点同方向每800ms最多一发
+const BLOCK_RATE_LIMIT_MS = 250  // 拦截流量频率限制：同节点同方向每250ms最多一发
 
-const activeProjectiles = ref<Projectile[]>([])
+const activeProjectiles = shallowRef<Projectile[]>([])
 const processedTrafficEvents = new Set<string>()
-const pendingLaunches = new Map<string, PendingLaunch>()
+const lastLaunchTime = new Map<string, number>()
 let cleanupTimer: number | null = null
+
+let renderTimeout: number | null = null
+let lastRenderTime = 0
+
+// 防抖/节流图表渲染，避免 ECharts 频繁 setOption 导致主线程阻塞
+const scheduleRender = () => {
+  const now = Date.now()
+  if (now - lastRenderTime >= 100) {
+    if (renderTimeout) {
+      clearTimeout(renderTimeout)
+      renderTimeout = null
+    }
+    lastRenderTime = now
+    renderChart()
+  } else if (!renderTimeout) {
+    renderTimeout = window.setTimeout(() => {
+      lastRenderTime = Date.now()
+      renderTimeout = null
+      renderChart()
+    }, 100 - (now - lastRenderTime))
+  }
+}
 
 const resizeChart = () => chart?.resize()
 
@@ -81,66 +100,27 @@ function projectilePalette(event: TrafficEventDelta) {
     return {
       color: '#ff4d4f', // 鲜艳的红色
       trailColor: 'rgba(255, 77, 79, 0.15)',
-      symbolSize: 4,
+      symbolSize: 4.5,
     }
   }
   if (event.direction === 'egress') {
     return {
       color: '#00f2fe', // 亮青色
       trailColor: 'rgba(0, 242, 254, 0.12)',
-      symbolSize: 3,
+      symbolSize: 3.5,
     }
   }
   return {
     color: '#70ff00', // 荧光绿
     trailColor: 'rgba(112, 255, 0, 0.12)',
-    symbolSize: 3,
+    symbolSize: 3.5,
   }
 }
 
 function launchKey(event: TrafficEventDelta) {
-  return [event.node.id, event.direction, event.decision, event.source_ip].join(':')
-}
-
-function projectileSize(baseSize: number, count: number, decision: TrafficEventDelta['decision']) {
-  if (decision === 'block') {
-    return Math.min(baseSize + Math.min(count - 1, 1) * 0.35, baseSize + 0.35)
-  }
-  return Math.min(baseSize + Math.log2(count + 1) * 0.45, baseSize + 1.1)
-}
-
-function flushPendingLaunch(launch: PendingLaunch, originNode: GeoNode) {
-  if (typeof launch.event.node.lat !== 'number' || typeof launch.event.node.lng !== 'number') {
-    pendingLaunches.delete(launch.key)
-    return
-  }
-
-  const isIngress = launch.event.direction === 'ingress'
-  const coords = isIngress
-    ? [[launch.event.node.lng, launch.event.node.lat], [originNode.lng, originNode.lat]]
-    : [[originNode.lng, originNode.lat], [launch.event.node.lng, launch.event.node.lat]]
-  const palette = projectilePalette(launch.event)
-  const createdAt = Date.now()
-
-  activeProjectiles.value = [
-    ...activeProjectiles.value,
-    {
-      id: `${launch.key}-${createdAt}`,
-      coords,
-      color: palette.color,
-      trailColor: palette.trailColor,
-      symbolSize: projectileSize(
-        palette.symbolSize,
-        launch.count,
-        launch.event.decision,
-      ),
-      curveness: 0.15 + Math.random() * 0.3,
-      createdAt,
-      durationMs: PROJECTILE_DURATION_MS + Math.random() * 120,
-    },
-  ].slice(-PROJECTILE_CAP)
-
-  pendingLaunches.delete(launch.key)
+  // 彻底移除 IP，按 节点 + 方向 + 决策 聚合。
+  // 这样无论有多少并发请求，同节点的流量只会汇聚成一颗粗壮的炮弹，杜绝满屏乱飞和卡顿。
+  return [event.node.id, event.direction, event.decision].join(':')
 }
 
 function syncProjectiles() {
@@ -150,7 +130,7 @@ function syncProjectiles() {
   )
   if (next.length !== activeProjectiles.value.length) {
     activeProjectiles.value = next
-    renderChart()
+    scheduleRender()
   }
 }
 
@@ -173,59 +153,69 @@ function trafficEventKey(event: TrafficEventDelta) {
 }
 
 function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
+  const now = Date.now()
+  let hasNew = false
+
   events.forEach((event) => {
     const key = trafficEventKey(event)
     if (processedTrafficEvents.has(key)) return
     processedTrafficEvents.add(key)
 
-    if (event.decision === 'block') {
-      flushPendingLaunch(
+    const linkKey = launchKey(event)
+    const limitMs = event.decision === 'block' ? BLOCK_RATE_LIMIT_MS : NORMAL_RATE_LIMIT_MS
+    const lastTime = lastLaunchTime.get(linkKey) || 0
+
+    // 节流 (Throttle) 机制：同一节点链路在限制时间内只展示为一颗炮弹
+    if (now - lastTime >= limitMs) {
+      if (typeof event.node.lat !== 'number' || typeof event.node.lng !== 'number') return
+
+      const isIngress = event.direction === 'ingress'
+      const coords = isIngress
+        ? [[event.node.lng, event.node.lat], [originNode.lng, originNode.lat]]
+        : [[originNode.lng, originNode.lat], [event.node.lng, event.node.lat]]
+      const palette = projectilePalette(event)
+      
+      activeProjectiles.value = [
+        ...activeProjectiles.value,
         {
-          key: `${launchKey(event)}:${event.timestamp_ms}`,
-          event,
-          count: 1,
-          timer: null,
-        },
-        originNode,
-      )
-      return
-    }
+          id: `${linkKey}-${now}`,
+          coords,
+          color: palette.color,
+          trailColor: palette.trailColor,
+          symbolSize: palette.symbolSize,
+          curveness: 0.15 + Math.random() * 0.3,
+          createdAt: now,
+          durationMs: PROJECTILE_DURATION_MS + Math.random() * 120,
+          glowMultiplier: 2.0, // 加大发光倍率，凸显汇聚感
+          trailOpacity: ACTIVE_TRAIL_OPACITY + 0.15,
+        }
+      ].slice(-PROJECTILE_CAP)
 
-    const mergedKey = launchKey(event)
-    const existing = pendingLaunches.get(mergedKey)
-    if (existing) {
-      existing.count += 1
-      existing.event = event
-      return
+      lastLaunchTime.set(linkKey, now)
+      hasNew = true
     }
-
-    const launch: PendingLaunch = {
-      key: mergedKey,
-      event,
-      count: 1,
-      timer: window.setTimeout(() => {
-        const pending = pendingLaunches.get(mergedKey)
-        if (!pending) return
-        flushPendingLaunch(pending, originNode)
-        renderChart()
-      }, MERGE_WINDOW_MS),
-    }
-    pendingLaunches.set(mergedKey, launch)
   })
 
+  if (hasNew) {
+    scheduleRender()
+  }
+
+  // 清理 processed 缓存，防内存泄漏
   if (processedTrafficEvents.size > 256) {
     const retained = Array.from(processedTrafficEvents).slice(-128)
     processedTrafficEvents.clear()
     retained.forEach((value) => processedTrafficEvents.add(value))
   }
-
+  
+  if (lastLaunchTime.size > 100) {
+    lastLaunchTime.clear()
+  }
 }
 
 // 加载地图并初始化
 const initMap = async () => {
   if (!chartRef.value) return
 
-  // 获取 GeoJSON 数据
   try {
     const response = await fetch('/maps/china-full.geojson')
     const geoJson = await response.json()
@@ -244,7 +234,6 @@ const renderChart = () => {
 
   const { nodes, originNode } = snapshot.value
   if (!hasGeo(originNode)) {
-    // ... (unchanged fallback)
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { show: false },
@@ -273,22 +262,21 @@ const renderChart = () => {
     lineStyle: {
       color: projectile.trailColor,
       width: 1,
-      opacity: ACTIVE_TRAIL_OPACITY,
+      opacity: projectile.trailOpacity,
       curveness: projectile.curveness,
     },
     effect: {
       show: true,
       period: Math.max(projectile.durationMs / 1000, 0.5),
-      trailLength: 0.22, // 稍微再长一点点
-      symbol: 'path://M5 0 L10 5 L5 10 L0 5 Z', // 菱形符号
+      trailLength: 0.22,
+      symbol: 'path://M5 0 L10 5 L5 10 L0 5 Z',
       symbolSize: projectile.symbolSize,
       color: projectile.color,
-      shadowBlur: 12, // 增强发光
+      shadowBlur: 12 * projectile.glowMultiplier,
       shadowColor: projectile.color,
     },
   }))
 
-  // 转换节点为散点数据
   const scatterData = geoNodes.map(node => ({
     name: node.name,
     value: [node.lng, node.lat, node.trafficWeight],
@@ -299,7 +287,6 @@ const renderChart = () => {
     }
   }))
 
-  // 添加源站节点
   scatterData.push({
     name: originNode.name,
     value: [originNode.lng, originNode.lat, 2.5],
@@ -313,7 +300,7 @@ const renderChart = () => {
   const linesSeries: LinesSeriesOption = {
     type: 'lines',
     coordinateSystem: 'geo',
-    zlevel: 3, // 提升到最上层
+    zlevel: 3,
     effect: {
       show: true,
       constantSpeed: 0,
@@ -353,8 +340,8 @@ const renderChart = () => {
     geo: {
       map: 'china',
       roam: false,
-      zoom: 1.75, // 大幅增加放大比例，使得陆地几乎占满视口
-      center: [104.5, 36.5], // 调整中心点到大陆腹地，彻底挤出南海等非必要留白区域
+      zoom: 1.75,
+      center: [104.5, 36.5],
       emphasis: {
         disabled: true
       },
@@ -393,26 +380,20 @@ watch(
       processedTrafficEvents.clear()
       activeProjectiles.value = []
     }
-    renderChart()
+    scheduleRender()
   },
   { deep: true },
 )
 
 watch(
-  () => props.trafficEvents ?? [],
+  () => props.trafficEvents, 
   (events) => {
+    if (!events || events.length === 0) return
     const originNode = snapshot.value.originNode
     if (!hasGeo(originNode)) return
     emitProjectiles(events, originNode)
-    renderChart()
-  },
-  { deep: true },
+  }
 )
-
-// 监听数据变化更新图表
-watch(() => activeProjectiles.value.length, () => {
-  renderChart()
-})
 
 onMounted(() => {
   initMap()
@@ -426,12 +407,11 @@ onBeforeUnmount(() => {
     window.clearInterval(cleanupTimer)
     cleanupTimer = null
   }
-  pendingLaunches.forEach((launch) => {
-    if (launch.timer !== null) {
-      window.clearTimeout(launch.timer)
-    }
-  })
-  pendingLaunches.clear()
+  if (renderTimeout !== null) {
+    window.clearTimeout(renderTimeout)
+    renderTimeout = null
+  }
+  lastLaunchTime.clear()
   chart?.dispose()
 })
 </script>

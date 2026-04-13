@@ -283,7 +283,9 @@ impl TrafficMapCollector {
                 lat: node.value().lat,
                 lng: node.value().lng,
                 traffic_weight: clamp_f64(
-                    (aggregate.ingress_requests as f64 / 12.0) + (bandwidth_mbps / 25.0),
+                    node.value().traffic_weight
+                        + (aggregate.ingress_requests as f64 / 12.0)
+                        + (bandwidth_mbps / 25.0),
                     0.2,
                     1.6,
                 ),

@@ -34,6 +34,7 @@ pub(crate) enum UpstreamClientConnection {
     },
     Tls {
         authority: String,
+        server_name: String,
         stream: tokio_rustls::client::TlsStream<TcpStream>,
     },
 }
@@ -88,14 +89,7 @@ pub(crate) async fn proxy_http_request(
     )
     .await
     .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-    let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
-    let server_name = ServerName::try_from(
-        authority_uri
-            .host()
-            .ok_or_else(|| anyhow::anyhow!("HTTPS upstream missing host"))?
-            .to_string(),
-    )
-    .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
+    let server_name = build_upstream_tls_server_name(request, &upstream)?;
     let tls_connector = build_upstream_tls_connector(skip_verify)?;
     let tls_stream = tokio::time::timeout(
         std::time::Duration::from_millis(connect_timeout_ms),
@@ -120,19 +114,42 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
     let skip_verify = should_skip_upstream_tls_verification(context, &upstream);
+    let effective_tls_server_name = if matches!(upstream.scheme, UpstreamScheme::Https) {
+        resolve_upstream_tls_server_name(request, &upstream)?
+    } else {
+        None
+    };
     let same_authority = reusable_connection
         .as_ref()
         .map(|connection| match connection {
-            UpstreamClientConnection::Plain { authority, .. }
-            | UpstreamClientConnection::Tls { authority, .. } => authority == &upstream.authority,
+            UpstreamClientConnection::Plain { authority, .. } => authority == &upstream.authority,
+            UpstreamClientConnection::Tls {
+                authority,
+                server_name,
+                ..
+            } => {
+                authority == &upstream.authority
+                    && effective_tls_server_name
+                        .as_deref()
+                        .map(|expected| expected == server_name)
+                        .unwrap_or(false)
+            }
         })
         .unwrap_or(false);
     if !same_authority {
         *reusable_connection = None;
     }
     if reusable_connection.is_none() {
-        *reusable_connection =
-            Some(connect_upstream_client(&upstream, connect_timeout_ms, skip_verify).await?);
+        *reusable_connection = Some(
+            connect_upstream_client(
+                request,
+                &upstream,
+                effective_tls_server_name.as_deref(),
+                connect_timeout_ms,
+                skip_verify,
+            )
+            .await?,
+        );
     }
 
     let response = match reusable_connection.as_mut() {
@@ -165,7 +182,9 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
 }
 
 async fn connect_upstream_client(
+    request: &UnifiedHttpRequest,
     upstream: &crate::core::gateway::UpstreamEndpoint,
+    resolved_server_name: Option<&str>,
     connect_timeout_ms: u64,
     skip_certificate_verification: bool,
 ) -> Result<UpstreamClientConnection> {
@@ -189,14 +208,13 @@ async fn connect_upstream_client(
             )
             .await
             .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-            let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
-            let server_name = ServerName::try_from(
-                authority_uri
-                    .host()
-                    .ok_or_else(|| anyhow::anyhow!("HTTPS upstream missing host"))?
-                    .to_string(),
-            )
-            .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
+            let server_name_text = match resolved_server_name {
+                Some(value) => value.to_string(),
+                None => resolve_upstream_tls_server_name(request, upstream)?
+                    .ok_or_else(|| anyhow::anyhow!("HTTPS upstream missing server name"))?,
+            };
+            let server_name = ServerName::try_from(server_name_text.clone())
+                .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))?;
             let tls_connector = build_upstream_tls_connector(skip_certificate_verification)?;
             let stream = tokio::time::timeout(
                 std::time::Duration::from_millis(connect_timeout_ms),
@@ -206,9 +224,106 @@ async fn connect_upstream_client(
             .map_err(|_| anyhow::anyhow!("Upstream TLS handshake timed out"))??;
             Ok(UpstreamClientConnection::Tls {
                 authority: upstream.authority.clone(),
+                server_name: server_name_text,
                 stream,
             })
         }
+    }
+}
+
+fn build_upstream_tls_server_name(
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> Result<ServerName<'static>> {
+    let server_name = resolve_upstream_tls_server_name(request, upstream)?
+        .ok_or_else(|| anyhow::anyhow!("HTTPS upstream missing server name"))?;
+    ServerName::try_from(server_name)
+        .map_err(|_| anyhow::anyhow!("Invalid HTTPS upstream server name"))
+}
+
+fn resolve_upstream_tls_server_name(
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> Result<Option<String>> {
+    if !matches!(upstream.scheme, UpstreamScheme::Https) {
+        return Ok(None);
+    }
+
+    if let Some(hostname) = crate::core::engine::policy::request_hostname(request) {
+        return Ok(Some(hostname));
+    }
+
+    if let Some(primary_hostname) = request
+        .get_metadata("gateway.primary_hostname")
+        .and_then(|value| normalize_hostname(value))
+    {
+        return Ok(Some(primary_hostname));
+    }
+
+    let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
+    Ok(authority_uri.host().map(ToOwned::to_owned))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn https_upstream(authority: &str) -> crate::core::gateway::UpstreamEndpoint {
+        crate::core::gateway::UpstreamEndpoint {
+            scheme: UpstreamScheme::Https,
+            authority: authority.to_string(),
+        }
+    }
+
+    #[test]
+    fn upstream_tls_server_name_prefers_original_host_without_port() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        request.add_header("host".to_string(), "wnluo.com:660".to_string());
+
+        let resolved =
+            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
+
+        assert_eq!(resolved.as_deref(), Some("wnluo.com"));
+    }
+
+    #[test]
+    fn upstream_tls_server_name_preserves_wildcard_request_host() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        request.add_header("host".to_string(), "api.wnluo.com".to_string());
+
+        let resolved =
+            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
+
+        assert_eq!(resolved.as_deref(), Some("api.wnluo.com"));
+    }
+
+    #[test]
+    fn upstream_tls_server_name_falls_back_to_site_primary_hostname() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_metadata(
+            "gateway.primary_hostname".to_string(),
+            "portal.example.com".to_string(),
+        );
+
+        let resolved =
+            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
+
+        assert_eq!(resolved.as_deref(), Some("portal.example.com"));
+    }
+
+    #[test]
+    fn upstream_tls_server_name_falls_back_to_upstream_host() {
+        let request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+
+        let resolved =
+            resolve_upstream_tls_server_name(&request, &https_upstream("origin.example.com:8443"))
+                .unwrap();
+
+        assert_eq!(resolved.as_deref(), Some("origin.example.com"));
     }
 }
 

@@ -245,8 +245,7 @@ pub(crate) async fn handle_http2_connection(
                         });
                     }
 
-                    let upstream_addr =
-                        select_upstream_target(context.as_ref(), matched_site.as_ref());
+                    let upstream_addr = select_upstream_target(matched_site.as_ref());
                     if let Some(upstream_addr) = upstream_addr.as_deref() {
                         if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
                             if let Some(metrics) = context.metrics.as_ref() {
@@ -348,8 +347,13 @@ pub(crate) async fn handle_http2_connection(
                             body: b"site upstream not configured".to_vec(),
                         });
                     } else if should_reject_unmatched_site(context.as_ref(), &request) {
+                        if config.console_settings.drop_unmatched_requests {
+                            return Err(crate::protocol::ProtocolError::ParseError(
+                                "unmatched site dropped".to_string(),
+                            ));
+                        }
                         return Ok(Http2Response {
-                            status_code: 421,
+                            status_code: 404,
                             headers: vec![],
                             body: b"site not found".to_vec(),
                         });

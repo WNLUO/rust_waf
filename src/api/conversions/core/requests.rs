@@ -225,12 +225,13 @@ impl SettingsUpdateRequest {
         }
 
         current.console_settings.gateway_name = self.gateway_name;
+        current.console_settings.drop_unmatched_requests = self.drop_unmatched_requests;
         current.gateway_config = GatewayConfig {
             https_listen_addr,
             default_certificate_id: self.default_certificate_id,
             ..current.gateway_config
         };
-        current.tcp_upstream_addr = non_empty_string(self.upstream_endpoint);
+        current.tcp_upstream_addr = None;
         current.api_bind = self.api_endpoint.trim().to_string();
         current.sqlite_enabled = true;
         current.console_settings.notes = self.notes;

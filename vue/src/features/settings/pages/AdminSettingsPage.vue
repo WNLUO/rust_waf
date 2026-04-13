@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import AdminGenerateCertificateDialog from '@/features/settings/components/AdminGenerateCertificateDialog.vue'
-import AdminSettingsCertificatesSection from '@/features/settings/components/AdminSettingsCertificatesSection.vue'
 import AdminSettingsGlobalSection from '@/features/settings/components/AdminSettingsGlobalSection.vue'
 import AdminSettingsSystemSection from '@/features/settings/components/AdminSettingsSystemSection.vue'
 import AdminUploadCertificateDialog from '@/features/settings/components/AdminUploadCertificateDialog.vue'
@@ -10,22 +8,14 @@ import { useAdminSettings } from '@/features/settings/composables/useAdminSettin
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
 const {
-  deletingCertificateId,
   error,
-  generateCertificate,
-  generateCertificateForm,
   handleDefaultCertificateChange,
   globalEntryForm,
   loadSafeLineSites,
   loading,
-  loadingCertificates,
   loadingSites,
   localCertificates,
-  openGenerateModal,
-  openUploadModal,
-  persistDefaultCertificate,
   readingClipboard,
-  removeCertificate,
   runSafeLineTest,
   saveMappings,
   saveSettings,
@@ -33,7 +23,6 @@ const {
   savingCertificate,
   savingDefaultCertificate,
   savingMappings,
-  showGenerateModal,
   showUploadModal,
   sites,
   successMessage,
@@ -44,9 +33,7 @@ const {
   uploadCertificate,
   uploadCertificateDomainsText,
   uploadCertificateForm,
-  closeGenerateModal,
   closeUploadModal,
-  generatingCertificate,
 } = useAdminSettings()
 
 useFlashMessages({
@@ -100,33 +87,9 @@ useFlashMessages({
           @update:system-settings="Object.assign(systemSettings, $event)"
         />
 
-        <AdminSettingsCertificatesSection
-          :deleting-certificate-id="deletingCertificateId"
-          :generating-certificate="generatingCertificate"
-          :loading-certificates="loadingCertificates"
-          :local-certificates="localCertificates"
-          :saving-certificate="savingCertificate"
-          :saving-default-certificate="savingDefaultCertificate"
-          :system-settings="systemSettings"
-          @generate="openGenerateModal"
-          @remove="removeCertificate"
-          @set-default="persistDefaultCertificate"
-          @upload="openUploadModal"
-        />
-
         <AdminSettingsGlobalSection />
       </div>
     </div>
-
-    <AdminGenerateCertificateDialog
-      :form="generateCertificateForm"
-      :generating-certificate="generatingCertificate"
-      :is-open="showGenerateModal"
-      :saving-default-certificate="savingDefaultCertificate"
-      @close="closeGenerateModal"
-      @submit="generateCertificate"
-      @update:form="Object.assign(generateCertificateForm, $event)"
-    />
 
     <AdminUploadCertificateDialog
       :form="uploadCertificateForm"

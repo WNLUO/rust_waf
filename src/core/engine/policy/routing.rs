@@ -136,11 +136,9 @@ fn normalize_request_host(value: &str) -> Option<String> {
 }
 
 pub(crate) fn select_upstream_target(
-    context: &WafContext,
     site: Option<&GatewaySiteRuntime>,
 ) -> Option<String> {
     site.and_then(|site| site.upstream_endpoint.clone())
-        .or_else(|| context.config_snapshot().tcp_upstream_addr)
 }
 
 pub(crate) fn resolve_safeline_intercept_config<'a>(

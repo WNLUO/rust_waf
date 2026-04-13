@@ -93,9 +93,9 @@ export function useAdminSettingsState() {
   function toPlainSettingsPayload(): SettingsPayload {
     return {
       gateway_name: systemSettings.gateway_name,
+      drop_unmatched_requests: systemSettings.drop_unmatched_requests,
       https_listen_addr: systemSettings.https_listen_addr,
       default_certificate_id: systemSettings.default_certificate_id,
-      upstream_endpoint: systemSettings.upstream_endpoint,
       api_endpoint: systemSettings.api_endpoint,
       notes: systemSettings.notes,
       safeline: toPlainSafeLineSettings(),

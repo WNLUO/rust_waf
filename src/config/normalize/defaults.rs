@@ -71,6 +71,7 @@ impl Default for ConsoleSettings {
     fn default() -> Self {
         Self {
             gateway_name: default_gateway_name(),
+            drop_unmatched_requests: false,
             emergency_mode: false,
             notes: String::new(),
         }

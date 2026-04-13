@@ -275,7 +275,7 @@ pub(crate) async fn handle_http1_connection(
                     .await?;
             }
         } else {
-            let upstream_addr = select_upstream_target(context.as_ref(), matched_site.as_ref());
+            let upstream_addr = select_upstream_target(matched_site.as_ref());
             if let Some(upstream_addr) = upstream_addr.as_deref() {
                 if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
                     if let Some(metrics) = context.metrics.as_ref() {
@@ -405,8 +405,12 @@ pub(crate) async fn handle_http1_connection(
                     )
                     .await?;
             } else if should_reject_unmatched_site(context.as_ref(), &request) {
+                if config.console_settings.drop_unmatched_requests {
+                    let _ = stream.shutdown().await;
+                    return Ok(());
+                }
                 http1_handler
-                    .write_response(&mut stream, 421, "Misdirected Request", b"site not found")
+                    .write_response(&mut stream, 404, "Not Found", b"site not found")
                     .await?;
             } else {
                 let metrics = context.metrics_snapshot();

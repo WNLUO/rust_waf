@@ -13,9 +13,9 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize)]
 pub struct SettingsResponse {
     pub(crate) gateway_name: String,
+    pub(crate) drop_unmatched_requests: bool,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
-    pub(crate) upstream_endpoint: String,
     pub(crate) api_endpoint: String,
     pub(crate) notes: String,
     pub(crate) safeline: SafeLineSettingsResponse,
@@ -121,9 +121,9 @@ pub struct SafeLineSettingsResponse {
 #[derive(Debug, Deserialize)]
 pub struct SettingsUpdateRequest {
     pub(crate) gateway_name: String,
+    pub(crate) drop_unmatched_requests: bool,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
-    pub(crate) upstream_endpoint: String,
     pub(crate) api_endpoint: String,
     pub(crate) notes: String,
     pub(crate) safeline: SafeLineSettingsRequest,

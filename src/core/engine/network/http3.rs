@@ -227,7 +227,7 @@ async fn handle_http3_request(
         return Ok(());
     }
 
-    let upstream_addr = select_upstream_target(context.as_ref(), matched_site.as_ref());
+    let upstream_addr = select_upstream_target(matched_site.as_ref());
     if let Some(upstream_addr) = upstream_addr.as_deref() {
         if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
             if let Some(metrics) = context.metrics.as_ref() {
@@ -298,7 +298,10 @@ async fn handle_http3_request(
         .await?;
         return Ok(());
     } else if should_reject_unmatched_site(context.as_ref(), &unified) {
-        send_http3_response(&mut stream, 421, &[], b"site not found".to_vec(), None).await?;
+        if config.console_settings.drop_unmatched_requests {
+            return Ok(());
+        }
+        send_http3_response(&mut stream, 404, &[], b"site not found".to_vec(), None).await?;
         return Ok(());
     }
 

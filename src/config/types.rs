@@ -49,6 +49,8 @@ pub struct ConsoleSettings {
     #[serde(default = "super::default_gateway_name")]
     pub gateway_name: String,
     #[serde(default)]
+    pub drop_unmatched_requests: bool,
+    #[serde(default)]
     pub emergency_mode: bool,
     #[serde(default)]
     pub notes: String,

@@ -26,9 +26,9 @@ impl SettingsResponse {
     pub(crate) fn from_config(config: &Config) -> Self {
         Self {
             gateway_name: config.console_settings.gateway_name.clone(),
+            drop_unmatched_requests: config.console_settings.drop_unmatched_requests,
             https_listen_addr: display_https_listen_port(&config.gateway_config.https_listen_addr),
             default_certificate_id: config.gateway_config.default_certificate_id,
-            upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             api_endpoint: config.api_bind.clone(),
             notes: config.console_settings.notes.clone(),
             safeline: SafeLineSettingsResponse::from_config(&config.integrations.safeline),

@@ -2,6 +2,7 @@
 defineProps<{
   certificatesCount: number
   deletingIdsCount: number
+  generatingCertificate: boolean
   preflightingAll: boolean
   pullingSafeLine: boolean
   pushingIdsCount: number
@@ -10,6 +11,7 @@ defineProps<{
 
 const emit = defineEmits<{
   create: []
+  generate: []
   preflight: []
   pushSelected: []
   refresh: []
@@ -28,6 +30,13 @@ const emit = defineEmits<{
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
+        <button
+          :disabled="generatingCertificate"
+          class="inline-flex items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+          @click="emit('generate')"
+        >
+          {{ generatingCertificate ? '生成中...' : '生成随机证书' }}
+        </button>
         <button
           :disabled="pullingSafeLine"
           class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"

@@ -201,12 +201,6 @@ defineProps<{
             "
           />
         </div>
-        <div class="rounded-xl bg-slate-50 p-4">
-          <p class="text-xs tracking-wide text-slate-500">TCP 上游</p>
-          <p class="mt-3 text-sm text-stone-800">
-            {{ configForm.upstream_endpoint || '未配置上游转发地址' }}
-          </p>
-        </div>
         <div class="grid gap-3 md:grid-cols-2">
           <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
             <p class="text-xs tracking-wide text-slate-500">真实 IP 头优先级</p>

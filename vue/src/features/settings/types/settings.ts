@@ -20,9 +20,9 @@ export interface SafeLineSettings {
 
 export interface SettingsPayload {
   gateway_name: string
+  drop_unmatched_requests: boolean
   https_listen_addr: string
   default_certificate_id: number | null
-  upstream_endpoint: string
   api_endpoint: string
   notes: string
   safeline: SafeLineSettings

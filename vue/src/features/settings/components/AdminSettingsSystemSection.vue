@@ -45,14 +45,15 @@ const apiEndpoint = computed({
   get: () => props.systemSettings.api_endpoint,
   set: (value: string) => updateSystemSettings({ api_endpoint: value }),
 })
+const dropUnmatchedRequests = computed({
+  get: () => props.systemSettings.drop_unmatched_requests,
+  set: (value: boolean) =>
+    updateSystemSettings({ drop_unmatched_requests: value }),
+})
 const defaultCertificateId = computed({
   get: () => props.systemSettings.default_certificate_id,
   set: (value: number | null) =>
     updateSystemSettings({ default_certificate_id: value }),
-})
-const upstreamEndpoint = computed({
-  get: () => props.systemSettings.upstream_endpoint,
-  set: (value: string) => updateSystemSettings({ upstream_endpoint: value }),
 })
 const globalHttpPort = computed({
   get: () => props.globalEntryForm.http_port,
@@ -219,19 +220,24 @@ const safeLineAutoSyncInterval = computed({
           </option>
         </select>
       </label>
-      <label class="space-y-1 md:col-span-2 xl:col-span-1">
-        <span class="text-xs text-slate-500">默认回源地址</span>
-        <input
-          v-model="upstreamEndpoint"
-          type="text"
-          placeholder="未命中站点时使用，可留空"
-          class="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-        />
-      </label>
     </div>
 
     <p class="mt-3 text-xs leading-5 text-slate-500">
       全局入口保存时会校验端口是否已被其他进程占用；如果端口可用，保存后 Rust 会立即接管监听。
+    </p>
+
+    <label
+      class="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-stone-700"
+    >
+      <input
+        v-model="dropUnmatchedRequests"
+        type="checkbox"
+        class="accent-blue-600"
+      />
+      <span>未命中站点时直接断开连接</span>
+    </label>
+    <p class="mt-2 text-xs leading-5 text-slate-500">
+      开启后，不返回任何页面内容；关闭时，未命中站点会返回 404。
     </p>
 
     <div class="mt-5 rounded-[16px] border border-slate-200 bg-slate-50/70 p-4">

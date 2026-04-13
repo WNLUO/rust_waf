@@ -42,7 +42,6 @@ const healthcheckEnabled = fieldModel('upstream_healthcheck_enabled')
 const http3Enabled = fieldModel('http3_enabled')
 const runtimeProfile = fieldModel('runtime_profile')
 const failureMode = fieldModel('upstream_failure_mode')
-const upstreamEndpoint = fieldModel('upstream_endpoint')
 const maxRequestSize = fieldModel('max_request_size')
 const firstByteTimeout = fieldModel('first_byte_timeout_ms')
 const readIdleTimeout = fieldModel('read_idle_timeout_ms')
@@ -385,15 +384,6 @@ const safelineResponseHeadersText = computed({
           :class="listFieldClass"
           placeholder="请前往 /admin/sites 配置统一 HTTP 入口端口"
           disabled
-        />
-      </label>
-      <label class="text-sm text-stone-700 md:col-span-2">
-        TCP 上游地址
-        <input
-          v-model="upstreamEndpoint"
-          type="text"
-          placeholder="例如 127.0.0.1:9000"
-          :class="numberInputClass"
         />
       </label>
       <label class="text-sm text-stone-700"

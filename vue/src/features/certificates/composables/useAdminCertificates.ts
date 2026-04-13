@@ -1,11 +1,34 @@
 import { onMounted } from 'vue'
-import { fetchLocalCertificates } from '@/shared/api/certificates'
+import {
+  fetchLocalCertificates,
+  generateLocalCertificate,
+} from '@/shared/api/certificates'
+import { fetchSettings, updateSettings } from '@/shared/api/settings'
 import { useAdminCertificateEditor } from '@/features/certificates/composables/useAdminCertificateEditor'
 import { useAdminCertificatesState } from '@/features/certificates/composables/useAdminCertificatesState'
 import { useAdminCertificateSync } from '@/features/certificates/composables/useAdminCertificateSync'
+import {
+  defaultGeneratedDomain,
+  normalizeDomainList,
+} from '@/features/settings/utils/adminSettings'
 
 export function useAdminCertificates() {
   const state = useAdminCertificatesState()
+
+  function resetGenerateModal() {
+    state.generateCertificateForm.name = ''
+    state.generateCertificateForm.domainsText = ''
+  }
+
+  function openGenerateModal() {
+    state.clearFeedback()
+    resetGenerateModal()
+    state.showGenerateModal.value = true
+  }
+
+  function closeGenerateModal() {
+    state.showGenerateModal.value = false
+  }
 
   async function loadCertificates() {
     state.loading.value = true
@@ -30,6 +53,51 @@ export function useAdminCertificates() {
     }
   }
 
+  async function persistDefaultCertificate(
+    id: number | null,
+    successText = '默认证书已保存。',
+  ) {
+    state.saving.value = true
+    state.clearFeedback()
+    try {
+      const latest = await fetchSettings()
+      latest.default_certificate_id =
+        typeof id === 'number' && Number.isFinite(id) && id > 0 ? id : null
+      const response = await updateSettings(latest)
+      state.successMessage.value = successText || response.message
+    } catch (e) {
+      state.error.value = e instanceof Error ? e.message : '默认证书保存失败'
+    } finally {
+      state.saving.value = false
+    }
+  }
+
+  async function generateCertificate() {
+    state.generatingCertificate.value = true
+    state.clearFeedback()
+    try {
+      const domains = normalizeDomainList(
+        state.generateCertificateForm.domainsText,
+      )
+      const created = await generateLocalCertificate({
+        name: state.generateCertificateForm.name.trim() || null,
+        domains: domains.length ? domains : [defaultGeneratedDomain()],
+        notes: '证书管理中生成的随机假证书',
+      })
+      await loadCertificates()
+      await persistDefaultCertificate(
+        created.id,
+        `已生成随机证书「${created.name}」并设为默认证书。`,
+      )
+      closeGenerateModal()
+      resetGenerateModal()
+    } catch (e) {
+      state.error.value = e instanceof Error ? e.message : '生成随机证书失败'
+    } finally {
+      state.generatingCertificate.value = false
+    }
+  }
+
   const editor = useAdminCertificateEditor({
     loadCertificates,
     state,
@@ -48,6 +116,7 @@ export function useAdminCertificates() {
     bindingIds: state.bindingIds,
     certificateMatchPreviews: state.certificateMatchPreviews,
     certificates: state.certificates,
+    closeGenerateModal,
     closeDialog: editor.closeDialog,
     deletingIds: state.deletingIds,
     dialogMode: state.dialogMode,
@@ -56,9 +125,13 @@ export function useAdminCertificates() {
     error: state.error,
     form: state.form,
     formatTimestamp: state.formatTimestamp,
+    generateCertificate,
+    generateCertificateForm: state.generateCertificateForm,
+    generatingCertificate: state.generatingCertificate,
     loadCertificateMatchPreview: sync.loadCertificateMatchPreview,
     loadCertificates,
     loading: state.loading,
+    openGenerateModal,
     openCreateDialog: editor.openCreateDialog,
     openEditDialog: editor.openEditDialog,
     openingEditor: state.openingEditor,
@@ -76,6 +149,7 @@ export function useAdminCertificates() {
     runCertificatePreflight: sync.runCertificatePreflight,
     saving: state.saving,
     selectedIds: state.selectedIds,
+    showGenerateModal: state.showGenerateModal,
     submitDialog: editor.submitDialog,
     successMessage: state.successMessage,
     syncFromSafeLine: sync.syncFromSafeLine,

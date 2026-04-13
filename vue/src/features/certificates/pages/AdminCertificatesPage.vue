@@ -4,6 +4,7 @@ import AdminCertificatesPreflightSection from '@/features/certificates/component
 import AdminCertificatesTableSection from '@/features/certificates/components/AdminCertificatesTableSection.vue'
 import AdminCertificatesToolbarSection from '@/features/certificates/components/AdminCertificatesToolbarSection.vue'
 import { useAdminCertificates } from '@/features/certificates/composables/useAdminCertificates'
+import AdminGenerateCertificateDialog from '@/features/settings/components/AdminGenerateCertificateDialog.vue'
 import AdminCertificateEditorDialog from '@/features/sites/components/AdminCertificateEditorDialog.vue'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
@@ -14,6 +15,7 @@ const {
   bindingIds,
   certificateMatchPreviews,
   certificates,
+  closeGenerateModal,
   closeDialog,
   deletingIds,
   dialogMode,
@@ -22,9 +24,13 @@ const {
   error,
   form,
   formatTimestamp,
+  generateCertificate,
+  generateCertificateForm,
+  generatingCertificate,
   loadCertificateMatchPreview,
   loadCertificates,
   loading,
+  openGenerateModal,
   openCreateDialog,
   openEditDialog,
   openingEditor,
@@ -42,6 +48,7 @@ const {
   runCertificatePreflight,
   saving,
   selectedIds,
+  showGenerateModal,
   submitDialog,
   successMessage,
   syncFromSafeLine,
@@ -69,11 +76,13 @@ useFlashMessages({
       <AdminCertificatesToolbarSection
         :certificates-count="certificates.length"
         :deleting-ids-count="deletingIds.length"
+        :generating-certificate="generatingCertificate"
         :preflighting-all="preflightingAll"
         :pulling-safe-line="pullingSafeLine"
         :pushing-ids-count="pushingIds.length"
         :selected-count="selectedIds.length"
         @create="openCreateDialog"
+        @generate="openGenerateModal"
         @preflight="runCertificatePreflight"
         @push-selected="pushSelectedCertificates"
         @refresh="loadCertificates"
@@ -132,6 +141,16 @@ useFlashMessages({
       @fill-clipboard="tryFillCertificateFromClipboard"
       @update:form="Object.assign(form, $event)"
       @update:domains-text="domainsText = $event"
+    />
+
+    <AdminGenerateCertificateDialog
+      :form="generateCertificateForm"
+      :generating-certificate="generatingCertificate"
+      :is-open="showGenerateModal"
+      :saving-default-certificate="saving"
+      @close="closeGenerateModal"
+      @submit="generateCertificate"
+      @update:form="Object.assign(generateCertificateForm, $event)"
     />
   </AppLayout>
 </template>

@@ -9,6 +9,7 @@ import type {
 export function useAdminCertificatesState() {
   const loading = ref(true)
   const saving = ref(false)
+  const generatingCertificate = ref(false)
   const openingEditor = ref(false)
   const readingClipboard = ref(false)
   const pullingSafeLine = ref(false)
@@ -24,9 +25,14 @@ export function useAdminCertificatesState() {
   const dialogOpen = ref(false)
   const dialogMode = ref<'create' | 'edit'>('create')
   const editingCertificateId = ref<number | null>(null)
+  const showGenerateModal = ref(false)
   const certificateMatchPreviews = ref<
     Record<number, SafeLineCertificateMatchPreviewResponse | undefined>
   >({})
+  const generateCertificateForm = reactive({
+    name: '',
+    domainsText: '',
+  })
 
   const form = reactive<LocalCertificateDraft>(
     createDefaultUploadCertificateForm(),
@@ -136,6 +142,8 @@ export function useAdminCertificatesState() {
     error,
     form,
     formatTimestamp,
+    generateCertificateForm,
+    generatingCertificate,
     loading,
     openingEditor,
     preflightSummary,
@@ -147,6 +155,7 @@ export function useAdminCertificatesState() {
     resetForm,
     saving,
     selectedIds,
+    showGenerateModal,
     successMessage,
     syncStatusText,
     syncStatusTone,

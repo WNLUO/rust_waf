@@ -235,9 +235,7 @@ impl SettingsUpdateRequest {
         current.api_bind = self.api_endpoint.trim().to_string();
         current.sqlite_enabled = true;
         current.console_settings.notes = self.notes;
-        current.integrations.safeline = self
-            .safeline
-            .into_config(&current.integrations.safeline);
+        current.integrations.safeline = self.safeline.into_config(&current.integrations.safeline);
 
         Ok(current.normalized())
     }

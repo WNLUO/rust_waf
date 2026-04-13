@@ -87,12 +87,12 @@ async fn maybe_configure_http3_managed_certificate(
 
     if !can_override {
         return Ok(Some(
-            "检测到 HTTP/3 正在使用自定义证书路径，已保留用户配置，未自动覆盖。"
-                .to_string(),
+            "检测到 HTTP/3 正在使用自定义证书路径，已保留用户配置，未自动覆盖。".to_string(),
         ));
     }
 
-    let changed = config.http3_config.certificate_path.as_deref() != Some(cert_path_string.as_str())
+    let changed = config.http3_config.certificate_path.as_deref()
+        != Some(cert_path_string.as_str())
         || config.http3_config.private_key_path.as_deref() != Some(key_path_string.as_str())
         || !config.http3_config.enabled;
 
@@ -121,8 +121,7 @@ async fn maybe_configure_http3_managed_certificate(
     .map_err(ApiError::internal)?;
 
     Ok(Some(
-        "已自动为 HTTP/3 写入证书文件并启用 HTTP/3；QUIC 监听已按当前配置热刷新。"
-            .to_string(),
+        "已自动为 HTTP/3 写入证书文件并启用 HTTP/3；QUIC 监听已按当前配置热刷新。".to_string(),
     ))
 }
 
@@ -140,7 +139,8 @@ async fn maybe_clear_http3_managed_certificate(
     let cert_path_string = cert_path.to_string_lossy().to_string();
     let key_path_string = key_path.to_string_lossy().to_string();
 
-    let used_by_http3 = config.http3_config.certificate_path.as_deref() == Some(cert_path_string.as_str())
+    let used_by_http3 = config.http3_config.certificate_path.as_deref()
+        == Some(cert_path_string.as_str())
         || config.http3_config.private_key_path.as_deref() == Some(key_path_string.as_str());
     if !used_by_http3 {
         return Ok(None);
@@ -622,7 +622,8 @@ pub(super) async fn update_local_certificate_handler(
                     )
                     .await
                     .map_err(map_storage_write_error)?;
-                http3_message = maybe_configure_http3_managed_certificate(&state, store, id).await?;
+                http3_message =
+                    maybe_configure_http3_managed_certificate(&state, store, id).await?;
             } else {
                 store
                     .delete_local_certificate_secret(id)

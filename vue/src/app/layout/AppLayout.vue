@@ -9,7 +9,6 @@ import {
   Activity,
   Cpu,
   Settings,
-  Link2,
   ServerCog,
   Globe,
   Menu,
@@ -17,7 +16,6 @@ import {
   PanelLeftOpen,
   X,
   AppWindow,
-  Sparkles,
   KeyRound,
   ChevronDown,
 } from 'lucide-vue-next'

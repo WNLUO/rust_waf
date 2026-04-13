@@ -51,12 +51,8 @@ pub struct SqliteStore {
 enum StorageCommand {
     SecurityEvent(SecurityEventRecord),
     BlockedIp(BlockedIpRecord),
-    Flush {
-        ack: oneshot::Sender<()>,
-    },
-    Shutdown {
-        ack: oneshot::Sender<()>,
-    },
+    Flush { ack: oneshot::Sender<()> },
+    Shutdown { ack: oneshot::Sender<()> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

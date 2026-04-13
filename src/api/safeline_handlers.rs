@@ -52,7 +52,7 @@ pub(super) async fn list_safeline_sites_handler(
                     None,
                 )
             }
-    } else {
+        } else {
             (None, "disabled".to_string(), None)
         };
 
@@ -129,8 +129,7 @@ pub(super) async fn update_safeline_mappings_handler(
         .map_err(ApiError::bad_request)?;
     if mappings.is_empty() && !allow_empty_replace {
         return Err(ApiError::bad_request(
-            "映射更新请求为空。若确实要清空映射，请显式传入 allow_empty_replace=true。"
-                .to_string(),
+            "映射更新请求为空。若确实要清空映射，请显式传入 allow_empty_replace=true。".to_string(),
         ));
     }
     store

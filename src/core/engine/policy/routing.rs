@@ -135,9 +135,7 @@ fn normalize_request_host(value: &str) -> Option<String> {
     normalize_hostname(trimmed.split(':').next().unwrap_or(trimmed))
 }
 
-pub(crate) fn select_upstream_target(
-    site: Option<&GatewaySiteRuntime>,
-) -> Option<String> {
+pub(crate) fn select_upstream_target(site: Option<&GatewaySiteRuntime>) -> Option<String> {
     site.and_then(|site| site.upstream_endpoint.clone())
 }
 

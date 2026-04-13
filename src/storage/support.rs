@@ -408,7 +408,10 @@ pub(super) async fn run_writer(
     }
 }
 
-pub(super) async fn persist_security_event(pool: &SqlitePool, event: SecurityEventRecord) -> Result<()> {
+pub(super) async fn persist_security_event(
+    pool: &SqlitePool,
+    event: SecurityEventRecord,
+) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO security_events (
@@ -463,10 +466,7 @@ pub(super) async fn persist_blocked_ip(pool: &SqlitePool, record: BlockedIpRecor
     Ok(())
 }
 
-pub(super) fn finish_pending_write(
-    pending_writes: &AtomicU64,
-    pending_write_notify: &Notify,
-) {
+pub(super) fn finish_pending_write(pending_writes: &AtomicU64, pending_write_notify: &Notify) {
     let previous = pending_writes.fetch_sub(1, Ordering::Relaxed);
     if previous <= 1 {
         pending_write_notify.notify_waiters();

@@ -244,7 +244,11 @@ impl Http3ListenerRuntime {
         Ok(())
     }
 
-    async fn sync(&self, context: Arc<WafContext>, connection_semaphore: Arc<Semaphore>) -> Result<()> {
+    async fn sync(
+        &self,
+        context: Arc<WafContext>,
+        connection_semaphore: Arc<Semaphore>,
+    ) -> Result<()> {
         let config = context.config_snapshot();
         let http3 = &config.http3_config;
         let mut guard = self.state.lock().await;

@@ -157,9 +157,7 @@ pub(super) fn build_http3_endpoint(
 }
 
 #[cfg(feature = "http3")]
-pub(super) fn validate_http3_endpoint_config(
-    config: &crate::config::Http3Config,
-) -> Result<()> {
+pub(super) fn validate_http3_endpoint_config(config: &crate::config::Http3Config) -> Result<()> {
     let listen_addr = config.listen_addr.trim();
     if listen_addr.is_empty() {
         anyhow::bail!("HTTPS global entry is missing, so HTTP/3 cannot determine a QUIC port");

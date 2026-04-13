@@ -11,9 +11,9 @@ mod stream;
 pub use engine_impl::WafEngine;
 #[cfg(feature = "http3")]
 use listeners::build_http3_endpoint;
+use listeners::EntryListenerRuntime;
 #[cfg(feature = "http3")]
 use listeners::Http3ListenerRuntime;
-use listeners::EntryListenerRuntime;
 pub(crate) use listeners::{
     shutdown_entry_listener_runtime, sync_entry_listener_runtime, validate_entry_listener_config,
 };

@@ -78,10 +78,8 @@ use self::proxy::{
 };
 use self::runtime::PrefixedStream;
 pub use self::runtime::WafEngine;
-pub(crate) use self::runtime::{
-    sync_entry_listener_runtime, validate_entry_listener_config,
-};
 #[cfg(feature = "http3")]
 pub(crate) use self::runtime::{
     shutdown_http3_listener_runtime, sync_http3_listener_runtime, validate_http3_listener_config,
 };
+pub(crate) use self::runtime::{sync_entry_listener_runtime, validate_entry_listener_config};

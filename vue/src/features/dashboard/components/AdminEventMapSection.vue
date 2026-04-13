@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, onBeforeUnmount, toRef } from 'vue'
 import * as echarts from 'echarts'
+import type {
+  EChartsOption,
+  EffectScatterSeriesOption,
+  LinesSeriesOption,
+} from 'echarts'
 import { useAdminEventMap } from '../composables/useAdminEventMap'
+import type { EventMapNode } from '@/shared/types'
 
 const props = defineProps<{
   metrics?: any
@@ -11,10 +17,34 @@ const props = defineProps<{
 const chartRef = ref<HTMLElement | null>(null)
 let chart: echarts.ECharts | null = null
 
-const { snapshot, scope } = useAdminEventMap({
+const { snapshot } = useAdminEventMap({
   metrics: toRef(props, 'metrics'),
   events: toRef(props, 'events')
 })
+
+type GeoNode = EventMapNode & { lat: number; lng: number }
+type LocalLinesDataItem = {
+  coords: number[][]
+  lineStyle: {
+    color: string
+    width: number
+    opacity: number
+    curveness: number
+  }
+  effect: {
+    show: boolean
+    period: number
+    trailLength: number
+    symbol: string
+    symbolSize: number
+    color: string
+  }
+}
+const resizeChart = () => chart?.resize()
+
+function hasGeo(node: EventMapNode): node is GeoNode {
+  return typeof node.lat === 'number' && typeof node.lng === 'number'
+}
 
 // 加载地图并初始化
 const initMap = async () => {
@@ -38,9 +68,12 @@ const renderChart = () => {
   if (!chart) return
 
   const { nodes, flows, originNode } = snapshot.value
+  if (!hasGeo(originNode)) return
+
+  const geoNodes = nodes.filter(hasGeo)
 
   // 转换节点为散点数据
-  const scatterData = nodes.map(node => ({
+  const scatterData = geoNodes.map(node => ({
     name: node.name,
     value: [node.lng, node.lat, node.trafficWeight],
     itemStyle: {
@@ -58,8 +91,9 @@ const renderChart = () => {
   })
 
   // 转换 flows 为线路动画数据
-  const linesData = flows.map(flow => {
-    const targetNode = nodes.find(n => n.id === flow.nodeId)
+  const linesData = flows
+    .map((flow): LocalLinesDataItem | null => {
+    const targetNode = geoNodes.find(n => n.id === flow.nodeId)
     if (!targetNode) return null
 
     const isIngress = flow.direction === 'ingress'
@@ -84,9 +118,45 @@ const renderChart = () => {
         color: flow.decision === 'block' ? '#f87171' : (isIngress ? '#60a5fa' : '#34d399')
       }
     }
-  }).filter(Boolean)
+  })
+    .filter((item): item is LocalLinesDataItem => item !== null)
 
-  const option: echarts.EChartsOption = {
+  const linesSeries: LinesSeriesOption = {
+    type: 'lines',
+    coordinateSystem: 'geo',
+    zlevel: 1,
+    effect: {
+      show: true,
+      constantSpeed: 0,
+      trailLength: 0.4,
+      symbolSize: 3
+    },
+    lineStyle: {
+      curveness: 0.2
+    },
+    data: linesData
+  }
+
+  const scatterSeries: EffectScatterSeriesOption = {
+    type: 'effectScatter',
+    coordinateSystem: 'geo',
+    zlevel: 2,
+    rippleEffect: {
+      brushType: 'stroke',
+      scale: 3
+    },
+    label: {
+      show: false
+    },
+    symbolSize: (val: unknown) => {
+      const point = Array.isArray(val) ? val : []
+      const weight = typeof point[2] === 'number' ? point[2] : 0
+      return 3 + weight * 2
+    },
+    data: scatterData
+  }
+
+  const option: EChartsOption = {
     backgroundColor: 'transparent',
     tooltip: {
       show: false
@@ -121,37 +191,7 @@ const renderChart = () => {
         }
       ]
     },
-    series: [
-      {
-        type: 'lines',
-        coordinateSystem: 'geo',
-        zlevel: 1,
-        effect: {
-          show: true,
-          constantSpeed: 0,
-          trailLength: 0.4,
-          symbolSize: 3
-        },
-        lineStyle: {
-          curveness: 0.2
-        },
-        data: linesData
-      },
-      {
-        type: 'effectScatter',
-        coordinateSystem: 'geo',
-        zlevel: 2,
-        rippleEffect: {
-          brushType: 'stroke',
-          scale: 3
-        },
-        label: {
-          show: false
-        },
-        symbolSize: (val: any) => 3 + val[2] * 2,
-        data: scatterData
-      }
-    ]
+    series: [linesSeries, scatterSeries]
   }
 
   chart.setOption(option)
@@ -164,10 +204,11 @@ watch(() => snapshot.value.flows, () => {
 
 onMounted(() => {
   initMap()
-  window.addEventListener('resize', () => chart?.resize())
+  window.addEventListener('resize', resizeChart)
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeChart)
   chart?.dispose()
 })
 </script>

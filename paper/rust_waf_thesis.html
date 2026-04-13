@@ -266,7 +266,7 @@
   <h1>摘要</h1>
   <div class="abstract-block">
   <p class="no-indent">随着Web应用逐步承载业务核心入口，传统仅依赖边界防火墙或单一反向代理的防护方式已难以覆盖复杂的应用层攻击、协议演进与高并发转发需求。围绕Web应用防火墙在多协议、低开销、可维护和可扩展方面的现实需求，构建了一套基于Rust的L4/L7协同Web防护系统。系统以Rust异步运行时为基础，在传输层实现连接跟踪、速率限制、异常连接识别、风险分桶与黑名单处理，在应用层实现HTTP/1.1、HTTP/2与HTTP/3流量接入、统一请求抽象、正则规则匹配、自定义阻断响应、规则动作模板复用、TLS证书管理、上游健康检查与网关代理转发，同时基于SQLite实现安全事件、阻断记录、站点配置、证书配置和规则数据的持久化，并提供管理API与Vue控制台完成可视化运维。</p>
-  <p class="no-indent">在实现过程中，系统强调“协同”而非“单点”防护思路，即将四层的快速过滤能力与七层的协议语义处理能力有机结合，通过统一上下文与统一数据存储提升响应速度、规则可维护性和运行可观测性。最新实现进一步为L4行为引擎补充了连接预算、延迟阈值、过载分级和分桶观测指标，使系统能够根据连接群风险动态收紧keepalive、建议延迟或拒绝新连接，同时把证书管理、站点同步、SafeLine联动和动作模板管理拆分为更清晰的控制台页面。测试结果表明，该系统能够完成从连接接入、规则判定、事件记录到控制台展示的完整闭环；论文撰写期间实际执行cargo test共121项，全部通过，其中包含115项单元测试和6项接口鉴权、运行时刷新相关测试，前端2项Vitest测试与生产构建验证亦全部通过，说明系统在主要功能路径、管理接口稳定性和工程可交付性方面具备较好的基础。研究表明，Rust在内存安全、并发处理和组件化实现方面适合用于构建面向现代Web边界的防护系统，而L4/L7协同模式也能够为轻量级可扩展WAF的工程实践提供有效路径。</p>
+  <p class="no-indent">在实现过程中，系统强调“协同”而非“单点”防护思路，即将四层的快速过滤能力与七层的协议语义处理能力有机结合，通过统一上下文与统一数据存储提升响应速度、规则可维护性和运行可观测性。最新实现进一步为L4行为引擎补充了连接预算、延迟阈值、过载分级和分桶观测指标，使系统能够根据连接群风险动态收紧keepalive、建议延迟或拒绝新连接，并继续完善协议与网关细节，例如在HTTP/2链路中补齐HEAD请求响应长度保持、在网关默认配置中启用 `$http_host` 主机重写模板，以及在HTTPS上游连接时优先依据原始请求主机名确定TLS `server_name`。测试结果表明，该系统能够完成从连接接入、规则判定、事件记录到控制台展示的完整闭环；论文撰写期间实际执行cargo test共129项，全部通过，前端2项Vitest测试与生产构建验证亦全部通过，说明系统在主要功能路径、协议兼容性和工程可交付性方面具备较好的基础。研究表明，Rust在内存安全、并发处理和组件化实现方面适合用于构建面向现代Web边界的防护系统，而L4/L7协同模式也能够为轻量级可扩展WAF的工程实践提供有效路径。</p>
   <p class="no-indent keywords-line"><strong>关键词：</strong>Rust；Web应用防火墙；L4/L7协同防护；HTTP多协议；规则引擎</p>
   </div>
 
@@ -275,7 +275,7 @@
   <h1>Abstract</h1>
   <div class="abstract-block">
   <p class="no-indent">As Web applications increasingly become the core entry point of business systems, traditional protection approaches that rely only on perimeter firewalls or single reverse proxies are no longer sufficient to handle complex application-layer attacks, protocol evolution, and high-concurrency traffic forwarding. To address the practical requirements of modern Web Application Firewalls in terms of multi-protocol support, low overhead, maintainability, and extensibility, this thesis presents the design and implementation of an L4/L7 collaborative Web protection system based on Rust. Built on Rust's asynchronous runtime, the system implements connection tracking, rate limiting, abnormal connection detection, and blacklist management at Layer 4; and supports HTTP/1.1, HTTP/2, and HTTP/3 traffic access, unified request abstraction, regex-based rule matching, custom blocking responses, reusable rule action templates, TLS certificate management, upstream health checks, and gateway proxying at Layer 7. SQLite is used to persist security events, blocked IP records, site configuration, certificates, and rule data, while a management API and a Vue-based console are provided for visual operations.</p>
-  <p class="no-indent">The implementation emphasizes collaborative protection rather than isolated defense. It combines the fast filtering capability of Layer 4 with the semantic processing capability of Layer 7 through a unified context and persistent storage model, thereby improving response efficiency, rule maintainability, and observability. The latest version further introduces tunable Layer 4 behavior buckets, overload grading, and adaptive connection policies, allowing the system to tighten keepalive, suggest delays, or reject new connections for risky traffic groups. Test results show that the system completes a full operational loop from connection intake and rule decision to event persistence and console display. During thesis verification, cargo test executed 112 backend tests, of which 111 passed and 1 failed because the test case did not run inside a Tokio runtime context; meanwhile, 2 frontend Vitest cases and the production build succeeded. This indicates that the main engineering path is operational, while some test isolation details still need improvement. The study indicates that Rust is well suited for building modern Web protection systems thanks to its memory safety, concurrency model, and modularity, while the L4/L7 collaborative design provides a practical path for lightweight and extensible WAF engineering.</p>
+  <p class="no-indent">The implementation emphasizes collaborative protection rather than isolated defense. It combines the fast filtering capability of Layer 4 with the semantic processing capability of Layer 7 through a unified context and persistent storage model, thereby improving response efficiency, rule maintainability, and observability. The latest version further introduces tunable Layer 4 behavior buckets, overload grading, and adaptive connection policies, while also refining protocol and gateway details such as preserving `Content-Length` for HTTP/2 HEAD responses, defaulting host rewrite behavior to the `$http_host` template, and selecting the upstream TLS `server_name` from the original request host whenever possible. Test results show that the system completes a full operational loop from connection intake and rule decision to event persistence and console display. During thesis verification, cargo test executed 129 backend tests and all passed; meanwhile, 2 frontend Vitest cases and the production build also succeeded. This indicates that the current engineering path is operational and that key protocol handling, gateway routing, and configuration behaviors already have stable regression coverage. The study indicates that Rust is well suited for building modern Web protection systems thanks to its memory safety, concurrency model, and modularity, while the L4/L7 collaborative design provides a practical path for lightweight and extensible WAF engineering.</p>
   <p class="no-indent keywords-line"><strong>Key words:</strong> Rust; Web Application Firewall; L4/L7 Collaborative Protection; Multi-Protocol HTTP; Rule Engine</p>
   </div>
 
@@ -339,7 +339,7 @@
 
   <h2>3.2 功能需求分析</h2>
   <p>从业务功能角度看，系统至少应覆盖以下能力。其一，基础接入能力，包括监听地址配置、TCP与UDP监听、TLS接入以及HTTP/2、HTTP/3协议处理。其二，L4防护能力，包括连接跟踪、单位时间窗口内的速率限制、黑名单阻断、简单DDoS检测，以及基于连接群分桶的自适应预算控制。其三，L7防护能力，包括HTTP请求解析、统一请求抽象、规则匹配、告警记录、自定义阻断响应、动作模板复用，以及在特定诱导场景下对浏览器指纹回传和前端干扰页的支持。其四，代理治理能力，包括站点解析、证书选择、上游健康检查和请求转发。其五，控制面能力，包括规则管理、动作模板管理、证书管理、证书预检与同步、站点管理、全局设置、系统设置、统计看板和第三方安全平台联动。其六，审计能力，包括安全事件持久化、阻断IP记录、来源系统区分、同步状态追踪以及L4过载态指标展示。</p>
-  <p>结合项目当前代码统计，系统后端 `src` 目录包含151个Rust源文件，前端 `vue/src` 目录包含124个Vue、TypeScript与样式文件；按路由定义计，API层共声明49条路由；SQLite模式中包含17张数据表和18个索引。这说明项目已经具备较为完整的工程组织形态，不再是单一功能实验，而是一个包含数据面、防护逻辑、存储层和控制面的系统化实现。</p>
+  <p>结合项目当前代码统计，系统后端 `src` 目录包含151个Rust源文件，前端 `vue/src` 目录包含118个Vue、TypeScript与样式文件；按路由定义计，API层共声明49条路由；SQLite模式中包含17张数据表和18个索引。这说明项目已经具备较为完整的工程组织形态，不再是单一功能实验，而是一个包含数据面、防护逻辑、存储层和控制面的系统化实现。</p>
   <p class="table-title">表3-1 功能需求与模块映射关系</p>
   <table class="data">
     <tr>
@@ -572,8 +572,8 @@
   <p>值得注意的是，L4检测结果并非只有“通过”与“阻断”两种。系统还支持“告警但不阻断”的规则动作，并可在需要时将阻断结果持久化到数据库。结合行为引擎后，L4层既能担当流量闸门，也能担当风险感知器和连接治理器，为后续分析保留更多上下文信息。</p>
 
   <h2>4.3 L7检测与规则引擎实现</h2>
-  <p>L7实现的关键在于先完成协议归一化，再执行统一的检测逻辑。对于HTTP/1.1，系统通过读取请求行、头部和请求体，构建统一请求对象；对于HTTP/2，系统基于hyper的HTTP/2 server connection，将每个流转换为UnifiedHttpRequest；对于HTTP/3，系统在TLS终止与QUIC连接建立后，从请求与流中读取头部和请求体，补充UDP/QUIC相关元数据。所有协议的请求都被统一为“方法、URI、头部、体、客户端IP、版本、元数据”的结构。</p>
-  <p>在统一请求对象生成后，系统先调用L7Inspector完成基础检查，再将请求序列化为文本并交由规则引擎处理。当前项目中的L7Inspector本体较为轻量，主要承担统一入口和可扩展钩子作用，实际防护效果更多由规则引擎承担。规则引擎会预编译启用规则中的正则表达式，并按层级和动作完成匹配与裁决。若命中respond类型规则，系统既可以直接使用规则内定义的response_template返回自定义HTTP响应，也可以复用plugin_template_id关联的预置模板；响应体支持内联文本或文件内容，并可按配置生成gzip响应体。需要说明的是，当前预置动作模板中的“SQL假回显”和“XSS假回显”主要仍以静态respond页面模拟成功回显，尚未实现按命中类型在运行时动态改写响应正文。</p>
+  <p>L7实现的关键在于先完成协议归一化，再执行统一的检测逻辑。对于HTTP/1.1，系统通过读取请求行、头部和请求体，构建统一请求对象；对于HTTP/2，系统基于hyper的HTTP/2 server connection，将每个流转换为UnifiedHttpRequest，并在响应阶段按协议约束清理hop-by-hop头；对于HTTP/3，系统在TLS终止与QUIC连接建立后，从请求与流中读取头部和请求体，补充UDP/QUIC相关元数据。所有协议的请求都被统一为“方法、URI、头部、体、客户端IP、版本、元数据”的结构。</p>
+  <p>在统一请求对象生成后，系统先调用L7Inspector完成基础检查，再将请求序列化为文本并交由规则引擎处理。当前项目中的L7Inspector本体较为轻量，主要承担统一入口和可扩展钩子作用，实际防护效果更多由规则引擎承担。规则引擎会预编译启用规则中的正则表达式，并按层级和动作完成匹配与裁决。若命中respond类型规则，系统既可以直接使用规则内定义的response_template返回自定义HTTP响应，也可以复用plugin_template_id关联的预置模板；响应体支持内联文本或文件内容，并可按配置生成gzip响应体。对HTTP/2而言，当前实现还专门处理了HEAD请求场景，即响应体可以按协议要求留空，但仍保留与原始资源一致的 `Content-Length`，从而避免管理端或被代理站点在方法语义和头部长度上一致性不足。需要说明的是，当前预置动作模板中的“SQL假回显”和“XSS假回显”主要仍以静态respond页面模拟成功回显，尚未实现按命中类型在运行时动态改写响应正文。</p>
   <p>在最新实现中，动作模板进一步扩展到“诱导式对抗”场景。例如“浏览器指纹收集 JS”模板会先返回一个看似正常的HTML页面，在浏览器侧采集Canvas、WebGL、字体列表、时区、窗口尺寸和webdriver状态等特征，并把结果以JSON形式回传到固定上报端点。随后页面会继续渲染一个永不提供通过路径的高数题干扰层，前端持续生成题目、记录尝试次数，并按节奏回传部分作答信息。论文中应将这一能力界定为诱导与画像采集型动作，而不是传统意义上的真实身份校验模块。</p>
   <p>在代理前处理阶段，系统还会自动补充x-request-id、x-forwarded-for、x-forwarded-proto和x-forwarded-host等标准转发头，并根据可信代理配置解析真实客户端地址。这样既增强了后端业务系统的可追踪性，也为日志关联和链路审计提供了统一标识。</p>
   <p class="figure">图4-1 请求处理流程思维导图</p>
@@ -609,6 +609,7 @@
 
   <h2>4.4 网关代理、证书与上游治理</h2>
   <p>除了检测功能外，本文系统还具备明显的网关属性。系统会从数据库中加载站点配置，根据主机名和监听端口匹配站点信息，再决定证书选择与上游目标。对于TLS连接，系统通过SNI解析和证书解析器选择对应证书，实现多站点复用监听。对于HTTP/3，则结合TLS 1.3和QUIC运行条件决定是否启用相应监听器。</p>
+  <p>在最新网关实现中，主机头治理与上游TLS握手被进一步收紧。其一，默认主机重写值不再留空，而是采用 `$http_host` 模板，使代理转发在未做额外定制时即可保留原始请求中的Host语义；其二，当上游为HTTPS时，系统会优先从请求Host、再从站点 `primary_hostname`、最后从上游地址中解析TLS `server_name`，并将其与可复用连接一同缓存。这样既减少了直接以IP或错误主机名握手带来的证书不匹配风险，也使多域名、多上游场景下的转发行为更符合真实网关部署需求。</p>
   <p>在代理转发前，系统会调用上游治理策略判断当前后端是否健康。若上游健康检查失败，则根据配置中的FailOpen或FailClose策略决定是继续放行还是直接拒绝代理请求。这一机制体现了防护系统在“安全性”与“可用性”之间的折中：FailOpen强调服务连续性，FailClose强调安全保守性。系统同时记录代理尝试次数、成功次数、失败次数和平均代理延迟，为运维人员判断后端质量提供依据。</p>
   <p>网关运行时还负责站点、证书和上游信息的索引组织。项目中通过primary hostname、hostnames、listen_ports和certificate_id等字段完成站点映射，能够支持本地站点管理和与SafeLine远程站点之间的同步关系维护。这意味着系统并非仅保护单一站点，而具备一定的多站点网关化管理能力。</p>
 
@@ -642,7 +643,7 @@
   <h1>5 系统测试与结果分析</h1>
 
   <h2>5.1 测试环境与测试方法</h2>
-  <p>系统测试主要采用单元测试、集成测试、前端脚本测试、构建验证与功能链路分析相结合的方法。后端通过cargo test执行Rust测试，覆盖配置校验、规则引擎、L4限流、连接跟踪、L4行为分桶快照、HTTP/1.1解析、HTTP/2处理、HTTP/3/QUIC元数据处理、浏览器指纹上报处理、SQLite持久化、管理接口鉴权、L4运行时刷新、站点热刷新和SafeLine同步等模块。前端通过npm test验证管理端Bearer Token辅助逻辑，再通过npm run build进行类型检查与生产构建验证，确保控制台能够正常打包发布。测试环境基于本地macOS开发机完成，项目代码目录中已包含SQLite数据库文件和前端构建配置。</p>
+  <p>系统测试主要采用单元测试、前端脚本测试、构建验证与功能链路分析相结合的方法。后端通过cargo test执行Rust测试，覆盖配置校验、规则引擎、L4限流、连接跟踪、L4行为分桶快照、HTTP/1.1解析、HTTP/2处理、HTTP/3/QUIC元数据处理、浏览器指纹上报处理、SQLite持久化、管理接口鉴权、Host重写模板、上游TLS主机名解析与SafeLine同步等模块。前端通过npm test验证管理端Bearer Token辅助逻辑，再通过npm run build进行类型检查与生产构建验证，确保控制台能够正常打包发布。测试环境基于本地macOS开发机完成，项目代码目录中已包含SQLite数据库文件和前端构建配置。</p>
   <p class="table-title">表5-1 测试环境与评价维度</p>
   <table class="data">
     <tr>
@@ -673,7 +674,7 @@
   </table>
 
   <h2>5.2 功能测试结果</h2>
-  <p>论文撰写期间，对项目进行了实际编译与验证。后端执行cargo test共121项测试，全部通过；其中包含115项单元测试以及6项接口鉴权、L4配置热刷新和站点运行时刷新相关测试。前端执行npm test共2项测试通过，npm run build亦成功完成，说明控制台在当前代码状态下可正常验证与编译。结合测试名称可以看出，系统已对配置归一化、TLS接入、L4/L7规则匹配、L4行为快照、HTTP/2请求转换、HTTP/3报文识别、代理转发、SQLite模式初始化、事件去重、浏览器指纹上报写库、管理端令牌持久化、L4运行时刷新以及站点同步与热刷新等关键路径进行覆盖。</p>
+  <p>论文撰写期间，对项目进行了实际编译与验证。后端执行cargo test共129项测试，全部通过；前端执行npm test共2项测试通过，npm run build亦成功完成，说明控制台在当前代码状态下可正常验证与编译。结合测试名称可以看出，系统已对配置归一化、TLS接入、L4/L7规则匹配、L4行为快照、HTTP/2请求转换与HEAD响应长度保持、HTTP/3报文识别、代理转发、上游TLS主机名解析、Host重写模板、SQLite模式初始化、事件去重、浏览器指纹上报写库以及SafeLine同步等关键路径进行覆盖。</p>
   <p class="table-title">表5-2 系统测试与验证结果</p>
   <table class="data">
     <tr>
@@ -686,7 +687,7 @@
       <td>后端自动化测试</td>
       <td>cargo test</td>
       <td>通过</td>
-      <td>121项全部通过，其中包含115项单元测试和6项集成/运行时刷新测试</td>
+      <td>129项全部通过，覆盖协议处理、代理治理、配置归一化与持久化等关键模块</td>
     </tr>
     <tr>
       <td>前端脚本测试</td>
@@ -710,7 +711,7 @@
       <td>L7功能验证</td>
       <td>统一请求抽象、规则匹配、自定义响应</td>
       <td>通过</td>
-      <td>覆盖HTTP/1.1、HTTP/2、HTTP/3相关路径</td>
+      <td>覆盖HTTP/1.1、HTTP/2、HTTP/3相关路径，并补充HEAD响应长度一致性验证</td>
     </tr>
     <tr>
       <td>存储验证</td>
@@ -728,7 +729,7 @@
   <p>从结果看，系统已经实现较完整的工程闭环。其一，四层检测能够在连接进入早期阶段完成快速处理，有利于减少上层解析开销。其二，七层检测通过统一请求结构避免了不同协议下重复编写检测逻辑。其三，SQLite持久化使安全事件、站点、规则和联动状态具有可追溯性，浏览器指纹诱导模板也已经能够通过专门端点进入统一事件库。其四，前端控制台使系统具备直接展示与操作能力，尤其是动作模板、模板预览、证书预检、L4行为分桶面板和事件来源筛选页面进一步增强了规则配置效率与教学演示效果。其五，后端自动化测试现已全部通过，说明行为引擎、鉴权中间件和运行时刷新链路已经具备较稳定的回归验证基础。</p>
 
   <h2>5.3 系统实现效果分析</h2>
-  <p>从实现效果上看，本文系统体现出四个特点。第一，结构完整。项目不仅包含检测逻辑，还覆盖网关接入、代理治理、配置管理、持久化和可视化控制台，符合“系统设计与实现”类毕业论文的写作要求。第二，协议覆盖较广。项目已经兼顾HTTP/1.1、HTTP/2和HTTP/3，对现代Web协议的适配较为突出。第三，协同思想明确。L4承担连接级快速阻断与自适应连接治理，L7承担请求级细粒度判定，两者职责分工清晰。第四，工程实现扎实。当前后端121项测试全部通过，结合2项前端脚本测试和前端构建验证，可说明代码具备较强的实际可运行性，而非停留在架构设想阶段。</p>
+  <p>从实现效果上看，本文系统体现出四个特点。第一，结构完整。项目不仅包含检测逻辑，还覆盖网关接入、代理治理、配置管理、持久化和可视化控制台，符合“系统设计与实现”类毕业论文的写作要求。第二，协议覆盖较广。项目已经兼顾HTTP/1.1、HTTP/2和HTTP/3，对现代Web协议的适配较为突出，并开始处理HEAD响应长度保持这类更细的协议一致性问题。第三，协同思想明确。L4承担连接级快速阻断与自适应连接治理，L7承担请求级细粒度判定，两者职责分工清晰。第四，工程实现扎实。当前后端129项测试全部通过，结合2项前端脚本测试和前端构建验证，可说明代码具备较强的实际可运行性，而非停留在架构设想阶段。</p>
   <p>此外，系统通过指标收集器记录总报文数、拦截数、代理成功率、失败次数和平均延迟，并在最新实现中进一步输出L4分桶数量、高风险分桶数量、过载级别、行为事件丢弃数和SQLite写队列摘要等控制面指标。这些信息虽然不等同于严格的性能压测数据，但能够为教学展示、功能验收和参数调优提供较好的可视化依据。对于本科毕业设计而言，这样的实现深度已经能够覆盖“需求分析、总体设计、详细实现、测试分析”的完整链条。</p>
   <p class="table-title">表5-3 运行态观测指标说明</p>
   <table class="data">
@@ -803,7 +804,7 @@
 
   <h1>6 结论</h1>
   <p>本文围绕“基于Rust的L4/L7协同Web防护系统设计与实现”这一主题，对一个真实可运行的Rust项目进行了系统分析、架构总结与实现归纳。论文从研究背景出发，说明了现代Web环境下构建协同式防护系统的必要性；在理论层面梳理了Rust异步并发、多协议处理、规则匹配与Bloom Filter等关键技术；在工程层面给出了系统的需求分析、总体架构、数据库设计以及各核心模块的详细实现过程。</p>
-  <p>研究表明，该系统已经实现了从连接接入、L4快速检测、L7统一请求处理、规则引擎裁决、事件持久化、站点与证书管理到控制台运维展示的完整闭环，具备较好的系统性和工程实践价值。实际验证结果显示，后端121项测试全部通过，前端2项脚本测试与构建验证成功，说明项目在主要功能正确性、接口鉴权和运行时刷新方面具有可靠基础。系统通过Rust语言的安全性与并发能力，较好地支撑了轻量级WAF在稳定运行、模块组织和扩展性方面的需求；新增的L4行为分桶与过载指标使系统不仅能看见“有没有拦截”，还能展示“为什么收紧连接策略”；浏览器指纹诱导模板以及证书页、系统设置页、SafeLine页等独立控制面也说明该系统已经能够把前端运维操作、后端持久化与联动审计组织成一条完整的工程链路。</p>
+  <p>研究表明，该系统已经实现了从连接接入、L4快速检测、L7统一请求处理、规则引擎裁决、事件持久化、站点与证书管理到控制台运维展示的完整闭环，具备较好的系统性和工程实践价值。实际验证结果显示，后端129项测试全部通过，前端2项脚本测试与构建验证成功，说明项目在主要功能正确性、协议细节一致性和网关转发稳定性方面具有可靠基础。系统通过Rust语言的安全性与并发能力，较好地支撑了轻量级WAF在稳定运行、模块组织和扩展性方面的需求；新增的L4行为分桶与过载指标使系统不仅能看见“有没有拦截”，还能展示“为什么收紧连接策略”；而HTTP/2 HEAD响应处理、默认 Host 重写模板以及基于请求主机名的上游TLS握手策略，也说明该系统已经开始从“能跑通”进一步走向“协议与代理行为更严谨”的工程化阶段。</p>
   <p>同时也应看到，当前系统在深度语义检测、热更新能力、复杂场景下的HTTP/3观测和性能压测数据方面仍有提升空间。未来可从三方面继续完善：一是增强L7语义分析和攻击特征识别能力；二是补充动态重载与更细粒度控制能力；三是引入标准化压测与攻防验证，形成更系统的性能与安全评估体系。总体而言，本文所设计并实现的系统能够为Rust在Web安全防护方向的工程实践提供一套具有参考价值的实现方案。</p>
 
   <div class="page-break"></div>
@@ -831,8 +832,8 @@
   <div class="page-break"></div>
 
   <h1>附录</h1>
-  <p>附录A：项目验证信息。论文撰写期间，已对项目执行后端与前端验证。后端执行cargo test，共121项测试，全部通过，其中包括115项单元测试与6项接口鉴权、L4运行时刷新和站点热刷新相关测试。前端执行npm test时2项测试通过，执行npm run build构建成功。相关验证覆盖L4限流、L4行为分桶快照、L7规则、HTTP/2与HTTP/3处理、浏览器指纹上报写库、SQLite持久化、管理端令牌逻辑以及SafeLine同步与站点热刷新等主要模块。</p>
-  <p>附录B：系统实现规模。根据项目代码统计，后端 `src` 目录包含151个Rust源文件，前端 `vue/src` 目录包含124个Vue、TypeScript与样式文件；API层定义49条路由；数据库模式定义17张表与18个索引。上述信息说明系统已经形成较完整的软件工程结构。</p>
+  <p>附录A：项目验证信息。论文撰写期间，已对项目执行后端与前端验证。后端执行cargo test，共129项测试，全部通过；前端执行npm test时2项测试通过，执行npm run build构建成功。相关验证覆盖L4限流、L4行为分桶快照、L7规则、HTTP/2 HEAD响应长度保持、HTTP/3处理、浏览器指纹上报写库、上游TLS主机名解析、Host重写模板、SQLite持久化、管理端令牌逻辑以及SafeLine同步等主要模块。</p>
+  <p>附录B：系统实现规模。根据项目代码统计，后端 `src` 目录包含151个Rust源文件，前端 `vue/src` 目录包含118个Vue、TypeScript与样式文件；API层定义49条路由；数据库模式定义17张表与18个索引。上述信息说明系统已经形成较完整的软件工程结构。</p>
   <p>附录C：论文后续排版建议。由于当前封面信息、页码、学校格式细节和自动目录尚未最终确认，建议在Word或WPS中结合学校模板补充学院、专业、姓名、导师、页眉页脚、签名页和自动目录等内容，以达到最终提交要求。</p>
 
   <div class="page-break"></div>

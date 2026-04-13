@@ -128,6 +128,8 @@ pub(super) fn build_http3_endpoint(
 
     crate::tls::ensure_rustls_crypto_provider();
 
+    validate_http3_endpoint_config(config)?;
+
     let certs = load_tls_certificates(cert_path)?;
     let private_key = load_tls_private_key(key_path)?;
     let mut server_crypto = RustlsServerConfig::builder()
@@ -152,6 +154,24 @@ pub(super) fn build_http3_endpoint(
 
     let listen_addr: SocketAddr = config.listen_addr.parse()?;
     Ok(Some(quinn::Endpoint::server(server_config, listen_addr)?))
+}
+
+#[cfg(feature = "http3")]
+pub(super) fn validate_http3_endpoint_config(
+    config: &crate::config::Http3Config,
+) -> Result<()> {
+    let (Some(cert_path), Some(key_path)) = (
+        config.certificate_path.as_deref(),
+        config.private_key_path.as_deref(),
+    ) else {
+        anyhow::bail!("certificate_path/private_key_path are missing");
+    };
+
+    config.validate().map_err(anyhow::Error::msg)?;
+    let certs = load_tls_certificates(cert_path)?;
+    let private_key = load_tls_private_key(key_path)?;
+    let _ = (certs, private_key);
+    Ok(())
 }
 
 #[cfg_attr(not(feature = "http3"), allow(dead_code))]

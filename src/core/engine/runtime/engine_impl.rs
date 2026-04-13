@@ -75,8 +75,6 @@ impl WafEngine {
 
         let mut shutdown_senders = Vec::new();
         let mut udp_listener_addresses = Vec::new();
-        #[cfg(feature = "http3")]
-        let mut quic_listener = None;
 
         for addr in &startup_config.listen_addrs {
             match UdpSocket::bind(addr).await {
@@ -87,38 +85,6 @@ impl WafEngine {
                 Err(err) => {
                     warn!("Failed to bind UDP listener on {}: {}", addr, err);
                 }
-            }
-        }
-
-        #[cfg(feature = "http3")]
-        {
-            if let Some(endpoint) = build_http3_endpoint(&startup_config.http3_config)? {
-                let addr = endpoint.local_addr()?;
-                self.context
-                    .set_http3_runtime("running", true, Some(addr.to_string()), None);
-                quic_listener = Some((addr, endpoint));
-            } else {
-                let config = &startup_config.http3_config;
-                let (status, last_error) = if !config.enabled {
-                    ("disabled".to_string(), None)
-                } else if !config.enable_tls13 {
-                    (
-                        "degraded".to_string(),
-                        Some("HTTP/3 requires TLS 1.3".to_string()),
-                    )
-                } else if config.certificate_path.is_none() || config.private_key_path.is_none() {
-                    (
-                        "degraded".to_string(),
-                        Some("certificate_path/private_key_path are missing".to_string()),
-                    )
-                } else {
-                    (
-                        "pending".to_string(),
-                        Some("HTTP/3 listener was not started".to_string()),
-                    )
-                };
-                self.context
-                    .set_http3_runtime(status, false, None, last_error);
             }
         }
 
@@ -137,11 +103,6 @@ impl WafEngine {
             self.context
                 .set_http3_runtime("disabled", false, None, None);
         }
-
-        #[cfg(feature = "http3")]
-        let _has_quic_listener = quic_listener.is_some();
-        #[cfg(not(feature = "http3"))]
-        let _has_quic_listener = false;
 
         for (addr, socket) in udp_listener_addresses {
             info!("UDP inspection listener started on {}", addr);
@@ -201,55 +162,6 @@ impl WafEngine {
             shutdown_senders.push((task, shutdown_tx));
         }
 
-        #[cfg(feature = "http3")]
-        if let Some((addr, endpoint)) = quic_listener {
-            info!("HTTP/3 listener started on {}", addr);
-            let context = Arc::clone(&self.context);
-            let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-            let connection_semaphore = Arc::clone(&self.connection_semaphore);
-
-            let task = tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = shutdown_rx.recv() => {
-                            info!("HTTP/3 listener shutdown signal received for {}", addr);
-                            break;
-                        }
-                        accept_result = endpoint.accept() => {
-                            match accept_result {
-                                Some(incoming) => {
-                                    match connection_semaphore.clone().try_acquire_owned() {
-                                        Ok(permit) => {
-                                            let ctx = Arc::clone(&context);
-                                            tokio::spawn(async move {
-                                                if let Err(err) =
-                                                    handle_http3_quic_connection(ctx, incoming, addr, permit).await
-                                                {
-                                                    warn!("HTTP/3 connection handling failed: {}", err);
-                                                }
-                                            });
-                                        }
-                                        Err(_) => {
-                                            warn!(
-                                                "Dropping HTTP/3 connection on {} due to concurrency limit",
-                                                addr
-                                            );
-                                        }
-                                    }
-                                }
-                                None => break,
-                            }
-                        }
-                        _ = tokio::signal::ctrl_c() => {
-                            info!("Ctrl+C received, shutting down HTTP/3 listener on {}", addr);
-                            break;
-                        }
-                    }
-                }
-            });
-            shutdown_senders.push((task, shutdown_tx));
-        }
-
         info!(
             "Successfully started {} listener task(s)",
             shutdown_senders.len()
@@ -262,6 +174,12 @@ impl WafEngine {
                 Arc::clone(&self.connection_semaphore),
             )
             .await?;
+        #[cfg(feature = "http3")]
+        super::sync_http3_listener_runtime(
+            Arc::clone(&self.context),
+            startup_config.max_concurrent_tasks,
+        )
+        .await?;
 
         loop {
             tokio::select! {
@@ -270,7 +188,9 @@ impl WafEngine {
                     for (_, shutdown_tx) in &shutdown_senders {
                         let _ = shutdown_tx.send(()).await;
                     }
-                    entry_runtime.shutdown_all().await;
+                    super::shutdown_entry_listener_runtime().await;
+                    #[cfg(feature = "http3")]
+                    super::shutdown_http3_listener_runtime(Arc::clone(&self.context)).await;
                     self.context.shutdown_storage().await?;
                     break Ok(());
                 }
@@ -282,7 +202,9 @@ impl WafEngine {
                     for (_, shutdown_tx) in &shutdown_senders {
                         let _ = shutdown_tx.send(()).await;
                     }
-                    entry_runtime.shutdown_all().await;
+                    super::shutdown_entry_listener_runtime().await;
+                    #[cfg(feature = "http3")]
+                    super::shutdown_http3_listener_runtime(Arc::clone(&self.context)).await;
                     self.context.shutdown_storage().await?;
                     break Ok(());
                 }

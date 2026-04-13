@@ -77,15 +77,22 @@ pub(super) async fn update_l7_config_handler(
         .refresh_gateway_runtime_from_storage()
         .await
         .map_err(ApiError::internal)?;
+    #[cfg(feature = "http3")]
+    crate::core::engine::sync_http3_listener_runtime(
+        Arc::clone(&state.context),
+        next.max_concurrent_tasks,
+    )
+    .await
+    .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
         message: if previous.listen_addrs != next.listen_addrs
             || previous.http3_config.listen_addr != next.http3_config.listen_addr
         {
-            "HTTP 接入与代理配置已写入数据库。代理超时、真实来源解析、上游策略和站点/证书路由已立即刷新；监听地址与 HTTP/3 监听变更仍需重启服务生效。".to_string()
+            "HTTP 接入与代理配置已写入数据库。代理超时、真实来源解析、上游策略、站点/证书路由与 HTTP/3 监听已立即刷新；如有旧连接，占用中的会在连接切换后自然收敛。".to_string()
         } else {
-            "HTTP 接入与代理配置已写入数据库，并已立即刷新运行时代理参数与站点/证书路由。"
+            "HTTP 接入与代理配置已写入数据库，并已立即刷新运行时代理参数、站点/证书路由与 HTTP/3 配置。"
                 .to_string()
         },
     }))
@@ -113,6 +120,13 @@ pub(super) async fn update_settings_handler(
         .refresh_gateway_runtime_from_storage()
         .await
         .map_err(ApiError::internal)?;
+    #[cfg(feature = "http3")]
+    crate::core::engine::sync_http3_listener_runtime(
+        Arc::clone(&state.context),
+        next.max_concurrent_tasks,
+    )
+    .await
+    .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
@@ -148,6 +162,13 @@ pub(super) async fn update_global_settings_handler(
         .refresh_gateway_runtime_from_storage()
         .await
         .map_err(ApiError::internal)?;
+    #[cfg(feature = "http3")]
+    crate::core::engine::sync_http3_listener_runtime(
+        Arc::clone(&state.context),
+        next.max_concurrent_tasks,
+    )
+    .await
+    .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,

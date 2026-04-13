@@ -13,8 +13,27 @@ struct RunningEntryListener {
     task: JoinHandle<()>,
 }
 
+#[cfg(feature = "http3")]
+struct RunningHttp3Listener {
+    addr: String,
+    config_key: String,
+    shutdown_tx: mpsc::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+#[cfg(feature = "http3")]
+#[derive(Default)]
+struct Http3ListenerRuntimeState {
+    listener: Option<RunningHttp3Listener>,
+}
+
 pub(super) struct EntryListenerRuntime {
     state: Mutex<EntryListenerRuntimeState>,
+}
+
+#[cfg(feature = "http3")]
+pub(super) struct Http3ListenerRuntime {
+    state: Mutex<Http3ListenerRuntimeState>,
 }
 
 fn is_benign_tls_disconnect(err: &anyhow::Error) -> bool {
@@ -182,8 +201,107 @@ impl EntryListenerRuntime {
     }
 }
 
+#[cfg(feature = "http3")]
+impl Http3ListenerRuntime {
+    pub(super) fn global() -> Arc<Self> {
+        HTTP3_LISTENER_RUNTIME
+            .get_or_init(|| {
+                Arc::new(Self {
+                    state: Mutex::new(Http3ListenerRuntimeState::default()),
+                })
+            })
+            .clone()
+    }
+
+    async fn validate_config(&self, context: Arc<WafContext>) -> Result<()> {
+        let config = context.config_snapshot();
+        let http3 = &config.http3_config;
+        if !http3.enabled {
+            return Ok(());
+        }
+
+        engine_tls::validate_http3_endpoint_config(http3)?;
+        let requested_addr = http3.listen_addr.trim().to_string();
+        let config_key = http3_config_key(http3)?;
+        let guard = self.state.lock().await;
+        let owned = guard
+            .listener
+            .as_ref()
+            .map(|listener| listener.addr == requested_addr && listener.config_key == config_key)
+            .unwrap_or(false);
+        drop(guard);
+
+        if !owned {
+            UdpSocket::bind(&requested_addr).await.map_err(|err| {
+                anyhow::anyhow!(
+                    "HTTP/3 入口 {} 已被其他进程占用或无法监听: {}",
+                    requested_addr,
+                    err
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn sync(&self, context: Arc<WafContext>, connection_semaphore: Arc<Semaphore>) -> Result<()> {
+        let config = context.config_snapshot();
+        let http3 = &config.http3_config;
+        let mut guard = self.state.lock().await;
+        let previous = guard.listener.take();
+        drop(guard);
+
+        if !http3.enabled {
+            if let Some(listener) = previous {
+                shutdown_http3_listener(listener).await;
+            }
+            context.set_http3_runtime("disabled", false, None, None);
+            return Ok(());
+        }
+
+        let config_key = http3_config_key(http3)?;
+        if let Some(existing) = previous {
+            if existing.config_key == config_key {
+                let listener_addr = existing.addr.clone();
+                let mut guard = self.state.lock().await;
+                guard.listener = Some(existing);
+                drop(guard);
+                context.set_http3_runtime("running", true, Some(listener_addr), None);
+                return Ok(());
+            }
+            shutdown_http3_listener(existing).await;
+        }
+
+        let listener = spawn_http3_listener(http3, context.clone(), connection_semaphore).await?;
+        let listener_addr = listener.addr.clone();
+        let mut guard = self.state.lock().await;
+        guard.listener = Some(listener);
+        drop(guard);
+        context.set_http3_runtime("running", true, Some(listener_addr), None);
+        Ok(())
+    }
+
+    pub(super) async fn shutdown_all(&self, context: Arc<WafContext>) {
+        let mut guard = self.state.lock().await;
+        let previous = guard.listener.take();
+        drop(guard);
+
+        if let Some(listener) = previous {
+            shutdown_http3_listener(listener).await;
+        }
+        context.set_http3_runtime("disabled", false, None, None);
+    }
+}
+
 pub(crate) async fn validate_entry_listener_config(context: Arc<WafContext>) -> Result<()> {
     EntryListenerRuntime::global()
+        .validate_config(context)
+        .await
+}
+
+#[cfg(feature = "http3")]
+pub(crate) async fn validate_http3_listener_config(context: Arc<WafContext>) -> Result<()> {
+    Http3ListenerRuntime::global()
         .validate_config(context)
         .await
 }
@@ -195,6 +313,25 @@ pub(crate) async fn sync_entry_listener_runtime(
     EntryListenerRuntime::global()
         .sync(context, Arc::new(Semaphore::new(concurrency_limit.max(1))))
         .await
+}
+
+#[cfg(feature = "http3")]
+pub(crate) async fn sync_http3_listener_runtime(
+    context: Arc<WafContext>,
+    concurrency_limit: usize,
+) -> Result<()> {
+    Http3ListenerRuntime::global()
+        .sync(context, Arc::new(Semaphore::new(concurrency_limit.max(1))))
+        .await
+}
+
+pub(crate) async fn shutdown_entry_listener_runtime() {
+    EntryListenerRuntime::global().shutdown_all().await;
+}
+
+#[cfg(feature = "http3")]
+pub(crate) async fn shutdown_http3_listener_runtime(context: Arc<WafContext>) {
+    Http3ListenerRuntime::global().shutdown_all(context).await;
 }
 
 async fn spawn_http_entry_listener(
@@ -319,6 +456,73 @@ async fn shutdown_entry_listeners(listeners: Vec<RunningEntryListener>) {
 }
 
 async fn shutdown_entry_listener(listener: RunningEntryListener) {
+    let _ = listener.shutdown_tx.send(()).await;
+    let _ = listener.task.await;
+}
+
+#[cfg(feature = "http3")]
+fn http3_config_key(config: &crate::config::Http3Config) -> Result<String> {
+    Ok(serde_json::to_string(config)?)
+}
+
+#[cfg(feature = "http3")]
+async fn spawn_http3_listener(
+    config: &crate::config::Http3Config,
+    context: Arc<WafContext>,
+    connection_semaphore: Arc<Semaphore>,
+) -> Result<RunningHttp3Listener> {
+    let endpoint = build_http3_endpoint(config)?
+        .ok_or_else(|| anyhow::anyhow!("HTTP/3 listener was not started"))?;
+    let addr_string = endpoint.local_addr()?.to_string();
+    info!("HTTP/3 listener started on {}", addr_string);
+    let config_key = http3_config_key(config)?;
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+    let task_addr = addr_string.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    info!("HTTP/3 listener shutdown signal received for {}", task_addr);
+                    endpoint.close(0u32.into(), b"listener shutdown");
+                    break;
+                }
+                accept_result = endpoint.accept() => {
+                    match accept_result {
+                        Some(incoming) => {
+                            match connection_semaphore.clone().try_acquire_owned() {
+                                Ok(permit) => {
+                                    let ctx = Arc::clone(&context);
+                                    tokio::spawn(async move {
+                                        if let Err(err) = handle_http3_quic_connection(ctx, incoming, incoming.remote_address(), permit).await {
+                                            warn!("HTTP/3 connection handling failed: {}", err);
+                                        }
+                                    });
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Dropping HTTP/3 connection on {} due to concurrency limit",
+                                        task_addr
+                                    );
+                                }
+                            }
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(RunningHttp3Listener {
+        addr: addr_string,
+        config_key,
+        shutdown_tx,
+        task,
+    })
+}
+
+#[cfg(feature = "http3")]
+async fn shutdown_http3_listener(listener: RunningHttp3Listener) {
     let _ = listener.shutdown_tx.send(()).await;
     let _ = listener.task.await;
 }

@@ -177,7 +177,7 @@ onMounted(loadSettings)
           其他高级配置
         </h3>
         <p class="mt-2 text-sm leading-6 text-slate-500">
-          这里集中管理源 IP、协议兼容、SSL 合规与其他影响 L7 行为的全局高级选项。
+          这里集中管理真实来源 IP Header、协议兼容、SSL 合规与其他影响 L7 行为的全局高级选项。
         </p>
         <p class="mt-2 text-xs leading-5 text-amber-700">
           这一组开关属于全局设置，不会跟随页面右上角的“保存 HTTP 接入配置”一起提交，需要单独点击本区块的“保存高级配置”。
@@ -212,14 +212,14 @@ onMounted(loadSettings)
 
     <template v-else>
       <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p class="text-sm font-semibold text-stone-900">源 IP 获取方式</p>
+        <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
         <p class="mt-1 text-xs leading-5 text-slate-500">
-          决定网关从连接、头部还是代理协议中识别真实来源。
+          决定网关从连接、真实来源 IP Header 或代理协议中识别真实来源。
         </p>
 
         <div class="mt-4 grid gap-3 lg:grid-cols-[15rem_minmax(0,1fr)]">
           <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500">获取来源</span>
+            <span class="text-xs font-medium text-slate-500">获取方式</span>
             <select
               v-model="form.source_ip_strategy"
               class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -237,19 +237,19 @@ onMounted(loadSettings)
               <option value="x_forwarded_for_last_but_two">
                 取 X-Forwarded-For 中上上上一级代理的地址
               </option>
-              <option value="header">从 HTTP Header 中获取</option>
+              <option value="header">从真实来源 IP Header 中获取</option>
               <option value="proxy_protocol">从 PROXY Protocol 中获取</option>
             </select>
           </label>
 
           <div class="grid gap-3 md:grid-cols-2">
             <label class="space-y-1.5">
-              <span class="text-xs font-medium text-slate-500">自定义 Header</span>
+              <span class="text-xs font-medium text-slate-500">真实来源 IP Header</span>
               <input
                 v-model="form.custom_source_ip_header"
                 class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
                 type="text"
-                placeholder="例如 x-real-ip"
+                placeholder="例如 x-cdn-real-ip"
               />
             </label>
             <label class="space-y-1.5">

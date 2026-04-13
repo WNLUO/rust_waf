@@ -147,15 +147,15 @@ onMounted(loadSettings)
       <div class="grid gap-3 xl:grid-cols-[minmax(0,1.18fr)_minmax(0,0.92fr)]">
         <section class="rounded-xl border border-slate-200 bg-white p-3">
           <div>
-            <p class="text-sm font-semibold text-stone-900">源 IP 获取方式</p>
+            <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
             <p class="mt-0.5 text-xs leading-4 text-slate-500">
-              决定网关从连接、头部还是代理协议中识别真实来源。
+              决定网关从连接、真实来源 IP Header 或代理协议中识别真实来源。
             </p>
           </div>
 
           <div class="mt-3 grid gap-3 lg:grid-cols-[15rem_minmax(0,1fr)]">
             <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">获取来源</span>
+              <span class="text-xs font-medium text-slate-500">获取方式</span>
               <select
                 v-model="settings.source_ip_strategy"
                 class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -173,19 +173,19 @@ onMounted(loadSettings)
                 <option value="x_forwarded_for_last_but_two">
                   取 X-Forwarded-For 中上上上一级代理的地址
                 </option>
-                <option value="header">从 HTTP Header 中获取</option>
+                <option value="header">从真实来源 IP Header 中获取</option>
                 <option value="proxy_protocol">从 PROXY Protocol 中获取</option>
               </select>
             </label>
 
             <div class="grid gap-3 md:grid-cols-2">
               <label class="space-y-1">
-                <span class="text-xs font-medium text-slate-500">自定义 Header</span>
+                <span class="text-xs font-medium text-slate-500">真实来源 IP Header</span>
                 <input
                   v-model="settings.custom_source_ip_header"
                   class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
                   type="text"
-                  placeholder="例如 x-real-ip"
+                  placeholder="例如 x-cdn-real-ip"
                 />
               </label>
               <label class="space-y-1">

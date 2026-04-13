@@ -22,6 +22,7 @@ use self::certificate_sync::{
     certificate_fingerprint, match_remote_certificate, normalized_domain_set,
     sync_remote_certificate, update_certificate_sync_metadata, CertificateSyncMetadataUpdate,
 };
+pub(crate) use self::shared::is_configured;
 use self::shared::{apply_safeline_mapping, ensure_enabled, parse_json_vec, unix_timestamp};
 use self::site_sync::{
     allows_push, find_matching_remote_site, hash_local_site_entry, hash_remote_site,

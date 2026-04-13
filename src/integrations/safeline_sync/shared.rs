@@ -7,6 +7,15 @@ pub(super) fn ensure_enabled(config: &SafeLineConfig) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn is_configured(config: &SafeLineConfig) -> bool {
+    let has_base_url = !config.base_url.trim().is_empty();
+    let has_token = !config.api_token.trim().is_empty();
+    let has_user_password =
+        !config.username.trim().is_empty() && !config.password.trim().is_empty();
+
+    has_base_url && (has_token || has_user_password)
+}
+
 pub(super) fn apply_safeline_mapping(
     event: crate::integrations::safeline::SafeLineSecurityEventSummary,
     mappings: &[crate::storage::SafeLineSiteMappingEntry],
@@ -55,4 +64,22 @@ pub(super) fn unix_timestamp() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safeline_configuration_requires_base_url_and_auth() {
+        let mut config = SafeLineConfig::default();
+        assert!(!is_configured(&config));
+
+        config.enabled = true;
+        config.base_url = "https://safeline.example.com".to_string();
+        assert!(!is_configured(&config));
+
+        config.api_token = "token".to_string();
+        assert!(is_configured(&config));
+    }
 }

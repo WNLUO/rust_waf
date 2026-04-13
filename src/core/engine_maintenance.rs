@@ -67,7 +67,7 @@ pub(super) async fn run_safeline_auto_sync_loop(
         };
         let safeline = &config.integrations.safeline;
 
-        if !safeline.enabled {
+        if !safeline.enabled || !crate::integrations::safeline_sync::is_configured(safeline) {
             continue;
         }
 

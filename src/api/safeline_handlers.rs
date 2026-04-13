@@ -261,16 +261,21 @@ pub(super) async fn pull_safeline_site_handler(
         crate::integrations::safeline_sync::pull_site(store, safeline, &remote_site_id, options)
             .await
             .map_err(|err| ApiError::bad_request(err.to_string()))?;
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
 
     Ok(Json(WriteStatusResponse {
         success: true,
         message: match result.action {
             crate::integrations::safeline_sync::SingleSiteSyncAction::Created => format!(
-                "雷池站点 {} 已写入本地缓存，本次不会覆盖本地站点配置。",
+                "雷池站点 {} 已导入为本地站点，并已建立同步链路。",
                 result.remote_site_id
             ),
             crate::integrations::safeline_sync::SingleSiteSyncAction::Updated => format!(
-                "雷池站点 {} 的本地缓存已刷新，本次不会覆盖本地站点配置。",
+                "雷池站点 {} 对应的本地站点已更新，并已刷新同步链路。",
                 result.remote_site_id
             ),
         },

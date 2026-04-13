@@ -175,6 +175,9 @@ pub(super) fn normalize_console_and_gateway(config: &mut Config) {
             }
         })
         .collect();
+
+    // QUIC shares the same public entry port as HTTPS to avoid double-configuring edge ports.
+    config.http3_config.listen_addr = config.gateway_config.https_listen_addr.clone();
 }
 
 pub(super) fn normalize_integrations_and_admin(config: &mut Config) {

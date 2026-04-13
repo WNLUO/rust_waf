@@ -329,7 +329,7 @@ defineProps<{
         <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
           <p class="text-xs tracking-wide text-slate-500">监听地址</p>
           <p class="mt-3 text-sm text-stone-800">
-            {{ configForm.http3_listen_addr }}
+            {{ configForm.http3_listen_addr || '跟随全局 HTTPS 入口' }}
           </p>
         </div>
         <div class="rounded-xl border border-slate-200 bg-white/80 p-4">

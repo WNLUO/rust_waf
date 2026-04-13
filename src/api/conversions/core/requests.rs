@@ -110,10 +110,10 @@ impl L7ConfigUpdateRequest {
                 .map_err(|err| format!("上游地址 '{}' 无效: {}", upstream_endpoint, err))?;
         }
 
-        let http3_listen_addr = self.http3_listen_addr.trim().to_string();
-        http3_listen_addr
-            .parse::<SocketAddr>()
-            .map_err(|err| format!("HTTP/3 监听地址 '{}' 无效: {}", http3_listen_addr, err))?;
+        let http3_listen_addr = current.gateway_config.https_listen_addr.trim().to_string();
+        if self.http3_enabled && http3_listen_addr.is_empty() {
+            return Err("启用 HTTP/3 前需要先配置 HTTPS 全局入口端口".to_string());
+        }
 
         let http3_config = Http3Config {
             enabled: self.http3_enabled,

@@ -174,5 +174,28 @@ mod tests {
         assert!(config.integrations.safeline.auto_sync_events);
         assert!(config.integrations.safeline.auto_sync_blocked_ips_push);
         assert!(config.integrations.safeline.auto_sync_blocked_ips_pull);
+        assert_eq!(
+            config.http3_config.listen_addr,
+            config.gateway_config.https_listen_addr
+        );
+    }
+
+    #[test]
+    fn normalized_aligns_http3_listener_with_https_entry() {
+        let config = Config {
+            gateway_config: GatewayConfig {
+                https_listen_addr: "9443".to_string(),
+                ..GatewayConfig::default()
+            },
+            http3_config: Http3Config {
+                listen_addr: "0.0.0.0:8443".to_string(),
+                ..Http3Config::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(config.gateway_config.https_listen_addr, "0.0.0.0:9443");
+        assert_eq!(config.http3_config.listen_addr, "0.0.0.0:9443");
     }
 }

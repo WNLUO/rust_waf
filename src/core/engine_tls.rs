@@ -160,6 +160,11 @@ pub(super) fn build_http3_endpoint(
 pub(super) fn validate_http3_endpoint_config(
     config: &crate::config::Http3Config,
 ) -> Result<()> {
+    let listen_addr = config.listen_addr.trim();
+    if listen_addr.is_empty() {
+        anyhow::bail!("HTTPS global entry is missing, so HTTP/3 cannot determine a QUIC port");
+    }
+
     let (Some(cert_path), Some(key_path)) = (
         config.certificate_path.as_deref(),
         config.private_key_path.as_deref(),
@@ -168,6 +173,7 @@ pub(super) fn validate_http3_endpoint_config(
     };
 
     config.validate().map_err(anyhow::Error::msg)?;
+    let _: SocketAddr = listen_addr.parse()?;
     let certs = load_tls_certificates(cert_path)?;
     let private_key = load_tls_private_key(key_path)?;
     let _ = (certs, private_key);

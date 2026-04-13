@@ -57,7 +57,6 @@ const http2MaxStreams = fieldModel('http2_max_concurrent_streams')
 const http2MaxFrameSize = fieldModel('http2_max_frame_size')
 const http2InitialWindowSize = fieldModel('http2_initial_window_size')
 const http2EnablePriorities = fieldModel('http2_enable_priorities')
-const http3ListenAddr = fieldModel('http3_listen_addr')
 const http3MaxStreams = fieldModel('http3_max_concurrent_streams')
 const http3IdleTimeout = fieldModel('http3_idle_timeout_secs')
 const http3Mtu = fieldModel('http3_mtu')
@@ -864,13 +863,15 @@ const safelineResponseHeadersText = computed({
       </div>
 
       <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <label class="text-sm text-stone-700 md:col-span-2"
-          >HTTP/3 监听地址<input
-            v-model="http3ListenAddr"
-            type="text"
-            placeholder="例如 0.0.0.0:8443"
-            :class="numberInputClass"
-        /></label>
+        <div class="text-sm text-stone-700 md:col-span-2">
+          HTTP/3 监听地址
+          <div :class="numberInputClass">
+            {{ form.http3_listen_addr || '跟随全局 HTTPS 入口' }}
+          </div>
+          <p class="mt-2 text-xs leading-5 text-slate-500">
+            QUIC 端口固定跟随“站点页 / 全局入口”的 HTTPS 入口端口，这里不再单独配置。
+          </p>
+        </div>
         <label class="text-sm text-stone-700"
           >最大并发流<input
             v-model.number="http3MaxStreams"

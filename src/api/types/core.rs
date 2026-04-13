@@ -192,7 +192,6 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) listen_addrs: Vec<String>,
     pub(crate) upstream_endpoint: String,
     pub(crate) http3_enabled: bool,
-    pub(crate) http3_listen_addr: String,
     pub(crate) http3_max_concurrent_streams: usize,
     pub(crate) http3_idle_timeout_secs: u64,
     pub(crate) http3_mtu: usize,

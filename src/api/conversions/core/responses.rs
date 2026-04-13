@@ -26,13 +26,10 @@ impl SettingsResponse {
     pub(crate) fn from_config(config: &Config) -> Self {
         Self {
             gateway_name: config.console_settings.gateway_name.clone(),
-            auto_refresh_seconds: config.console_settings.auto_refresh_seconds,
             https_listen_addr: display_https_listen_port(&config.gateway_config.https_listen_addr),
             default_certificate_id: config.gateway_config.default_certificate_id,
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             api_endpoint: config.api_bind.clone(),
-            notification_level: config.console_settings.notification_level.clone(),
-            retain_days: config.console_settings.retain_days,
             notes: config.console_settings.notes.clone(),
             safeline: SafeLineSettingsResponse::from_config(&config.integrations.safeline),
         }

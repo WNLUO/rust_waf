@@ -225,7 +225,6 @@ impl SettingsUpdateRequest {
         }
 
         current.console_settings.gateway_name = self.gateway_name;
-        current.console_settings.auto_refresh_seconds = self.auto_refresh_seconds;
         current.gateway_config = GatewayConfig {
             https_listen_addr,
             default_certificate_id: self.default_certificate_id,
@@ -234,8 +233,6 @@ impl SettingsUpdateRequest {
         current.tcp_upstream_addr = non_empty_string(self.upstream_endpoint);
         current.api_bind = self.api_endpoint.trim().to_string();
         current.sqlite_enabled = true;
-        current.console_settings.notification_level = self.notification_level;
-        current.console_settings.retain_days = self.retain_days;
         current.console_settings.notes = self.notes;
         current.integrations.safeline = self
             .safeline

@@ -157,6 +157,8 @@ mod tests {
         let config = Config::default();
 
         assert_eq!(config.runtime_profile, RuntimeProfile::Standard);
+        assert_eq!(config.listen_addrs, vec!["0.0.0.0:66".to_string()]);
+        assert_eq!(config.gateway_config.https_listen_addr, "0.0.0.0:660");
         assert!(config.api_enabled);
         assert!(config.bloom_enabled);
         assert!(config.l4_bloom_false_positive_verification);

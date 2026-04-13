@@ -10,8 +10,6 @@ import { useAdminSettings } from '@/features/settings/composables/useAdminSettin
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
 const {
-  clearSiteData,
-  clearingSiteData,
   deletingCertificateId,
   error,
   generateCertificate,
@@ -60,13 +58,6 @@ useFlashMessages({
   successDuration: 3200,
 })
 
-async function handleClearSiteData() {
-  if (!window.confirm('确认清空所有站点数据吗？这会删除本地站点、映射、同步链路和缓存站点，但不会删除证书。')) {
-    return
-  }
-  await clearSiteData()
-}
-
 </script>
 
 <template>
@@ -91,7 +82,6 @@ async function handleClearSiteData() {
       </div>
       <div class="space-y-4">
         <AdminSettingsSystemSection
-          :clearing-site-data="clearingSiteData"
           :global-entry-form="globalEntryForm"
           :loading="loading"
           :loading-sites="loadingSites"
@@ -102,7 +92,6 @@ async function handleClearSiteData() {
           :system-settings="systemSettings"
           :test-result="testResult"
           :testing="testing"
-          @clear-site-data="handleClearSiteData"
           @default-certificate-change="handleDefaultCertificateChange"
           @load-sites="loadSafeLineSites"
           @save-mappings="saveMappings"

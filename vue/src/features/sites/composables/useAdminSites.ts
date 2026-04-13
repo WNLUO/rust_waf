@@ -171,6 +171,7 @@ export function useAdminSites(
 
   return {
     actions: data.actions,
+    clearSiteData: data.clearSiteData,
     currentLocalSite: editor.currentLocalSite,
     defaultSafelineInterceptConfig: editor.defaultSafelineInterceptConfig,
     editorTitle: editor.editorTitle,

@@ -13,13 +13,10 @@ pub struct HealthResponse {
 #[derive(Debug, Serialize)]
 pub struct SettingsResponse {
     pub(crate) gateway_name: String,
-    pub(crate) auto_refresh_seconds: u32,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
     pub(crate) upstream_endpoint: String,
     pub(crate) api_endpoint: String,
-    pub(crate) notification_level: String,
-    pub(crate) retain_days: u32,
     pub(crate) notes: String,
     pub(crate) safeline: SafeLineSettingsResponse,
 }
@@ -124,13 +121,10 @@ pub struct SafeLineSettingsResponse {
 #[derive(Debug, Deserialize)]
 pub struct SettingsUpdateRequest {
     pub(crate) gateway_name: String,
-    pub(crate) auto_refresh_seconds: u32,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
     pub(crate) upstream_endpoint: String,
     pub(crate) api_endpoint: String,
-    pub(crate) notification_level: String,
-    pub(crate) retain_days: u32,
     pub(crate) notes: String,
     pub(crate) safeline: SafeLineSettingsRequest,
 }

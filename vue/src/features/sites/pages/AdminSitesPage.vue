@@ -12,6 +12,7 @@ const { formatNumber, formatTimestamp } = useFormatters()
 
 const {
   actions,
+  clearSiteData,
   currentLocalSite,
   defaultSafelineInterceptConfig,
   editorTitle,
@@ -31,7 +32,6 @@ const {
   openRemoteSyncDialog,
   remoteSyncCandidates,
   remoteSitePullOptions,
-  refreshPageData,
   removeCurrentLocalSite,
   resetLocalSiteForm,
   rowSyncText,
@@ -60,6 +60,13 @@ useFlashMessages({
   errorDuration: 5600,
   successDuration: 3200,
 })
+
+async function handleClearSiteData() {
+  if (!window.confirm('确认清空所有站点数据吗？这会删除本地站点、映射、同步链路和缓存站点，但不会删除证书。')) {
+    return
+  }
+  await clearSiteData()
+}
 </script>
 
 <template>
@@ -70,9 +77,9 @@ useFlashMessages({
         :has-saved-config="hasSavedConfig"
         :keyword="filters.keyword"
         :state="filters.state"
+        @clear-site-data="handleClearSiteData"
         @create-local-site="openCreateLocalSiteModal"
         @load-remote="openRemoteSyncDialog"
-        @refresh="refreshPageData"
         @update:keyword="filters.keyword = $event"
         @update:state="filters.state = $event"
       />

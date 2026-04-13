@@ -90,7 +90,7 @@ pub struct GatewayConfig {
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
-            https_listen_addr: String::new(),
+            https_listen_addr: "660".to_string(),
             default_certificate_id: None,
             listen_ipv6: false,
             enable_http1_0: default_enable_http1_0(),

@@ -20,13 +20,10 @@ export interface SafeLineSettings {
 
 export interface SettingsPayload {
   gateway_name: string
-  auto_refresh_seconds: number
   https_listen_addr: string
   default_certificate_id: number | null
   upstream_endpoint: string
   api_endpoint: string
-  notification_level: 'all' | 'critical' | 'blocked_only'
-  retain_days: number
   notes: string
   safeline: SafeLineSettings
 }

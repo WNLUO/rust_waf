@@ -20,8 +20,6 @@ export function useAdminSettings() {
   })
 
   return {
-    clearSiteData: system.clearSiteData,
-    clearingSiteData: state.clearingSiteData,
     closeGenerateModal: certificates.closeGenerateModal,
     closeUploadModal: certificates.closeUploadModal,
     deletingCertificateId: state.deletingCertificateId,

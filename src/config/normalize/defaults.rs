@@ -8,7 +8,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             interface: "eth0".to_string(),
-            listen_addrs: vec!["0.0.0.0:8080".to_string()],
+            listen_addrs: vec!["0.0.0.0:66".to_string()],
             tcp_upstream_addr: None,
             udp_upstream_addr: None,
             runtime_profile: RuntimeProfile::Standard,
@@ -71,10 +71,7 @@ impl Default for ConsoleSettings {
     fn default() -> Self {
         Self {
             gateway_name: default_gateway_name(),
-            auto_refresh_seconds: default_auto_refresh_seconds(),
             emergency_mode: false,
-            notification_level: default_notification_level(),
-            retain_days: default_retain_days(),
             notes: String::new(),
         }
     }

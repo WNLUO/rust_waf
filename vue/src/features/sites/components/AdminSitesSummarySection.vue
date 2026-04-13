@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CloudDownload, Plus, RefreshCw, Search } from 'lucide-vue-next'
+import { CloudDownload, Plus, RotateCcw, Search } from 'lucide-vue-next'
 import type { LocalSitesStateFilter } from '@/features/sites/composables/useAdminSites'
 
 const props = defineProps<{
   actions: {
+    clearingSiteData: boolean
     refreshing: boolean
     loadingSites: boolean
   }
@@ -15,7 +16,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   createLocalSite: []
-  refresh: []
+  clearSiteData: []
   loadRemote: []
   'update:keyword': [value: string]
   'update:state': [value: LocalSitesStateFilter]
@@ -61,15 +62,12 @@ const stateModel = computed({
           {{ actions.loadingSites ? '读取中...' : '从雷池同步' }}
         </button>
         <button
-          :disabled="actions.refreshing"
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          @click="emit('refresh')"
+          :disabled="actions.clearingSiteData"
+          class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 transition hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+          @click="emit('clearSiteData')"
         >
-          <RefreshCw
-            :size="14"
-            :class="{ 'animate-spin': actions.refreshing }"
-          />
-          {{ actions.refreshing ? '刷新中...' : '刷新列表' }}
+          <RotateCcw :size="14" />
+          {{ actions.clearingSiteData ? '清空中...' : '清空站点数据' }}
         </button>
       </div>
     </div>

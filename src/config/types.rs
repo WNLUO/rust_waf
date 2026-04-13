@@ -48,14 +48,8 @@ pub struct Config {
 pub struct ConsoleSettings {
     #[serde(default = "super::default_gateway_name")]
     pub gateway_name: String,
-    #[serde(default = "super::default_auto_refresh_seconds")]
-    pub auto_refresh_seconds: u32,
     #[serde(default)]
     pub emergency_mode: bool,
-    #[serde(default = "super::default_notification_level")]
-    pub notification_level: String,
-    #[serde(default = "super::default_retain_days")]
-    pub retain_days: u32,
     #[serde(default)]
     pub notes: String,
 }

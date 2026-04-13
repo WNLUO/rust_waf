@@ -9,6 +9,7 @@ import {
   testSafeLineConnection,
 } from '@/shared/api/safeline'
 import {
+  clearLocalSiteData,
   fetchLocalSites,
 } from '@/shared/api/sites'
 import { fetchSettings } from '@/shared/api/settings'
@@ -50,6 +51,7 @@ export function useAdminSitesData({
   const siteRows = ref<SiteRowDraft[]>([])
   const sitesLoadedAt = ref<number | null>(null)
   const actions = reactive({
+    clearingSiteData: false,
     refreshing: false,
     testing: false,
     loadingSites: false,
@@ -183,8 +185,28 @@ export function useAdminSitesData({
     }
   }
 
+  async function clearSiteData() {
+    actions.clearingSiteData = true
+    clearFeedback()
+    try {
+      const response = await clearLocalSiteData()
+      sites.value = []
+      mappings.value = []
+      localSites.value = []
+      siteLinks.value = []
+      siteRows.value = []
+      sitesLoadedAt.value = null
+      successMessage.value = response.message
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : '清空站点数据失败'
+    } finally {
+      actions.clearingSiteData = false
+    }
+  }
+
   return {
     actions,
+    clearSiteData,
     globalL7Config,
     hasSavedConfig,
     loadLocalCertificates,

@@ -130,11 +130,6 @@ pub(super) fn normalize_console_and_gateway(config: &mut Config) {
     if config.console_settings.gateway_name.is_empty() {
         config.console_settings.gateway_name = default_gateway_name();
     }
-    config.console_settings.auto_refresh_seconds =
-        config.console_settings.auto_refresh_seconds.clamp(3, 60);
-    config.console_settings.notification_level =
-        normalize_notification_level(&config.console_settings.notification_level);
-    config.console_settings.retain_days = config.console_settings.retain_days.clamp(1, 365);
     config.console_settings.notes = config.console_settings.notes.trim().to_string();
 
     config.gateway_config.https_listen_addr =

@@ -24,10 +24,6 @@ pub(super) fn default_gateway_name() -> String {
     "玄枢防护网关".to_string()
 }
 
-pub(super) const fn default_auto_refresh_seconds() -> u32 {
-    5
-}
-
 pub(super) const fn default_sqlite_enabled() -> bool {
     true
 }
@@ -40,16 +36,8 @@ pub(super) const fn default_sqlite_rules_enabled() -> bool {
     true
 }
 
-pub(super) fn default_notification_level() -> String {
-    "critical".to_string()
-}
-
 pub(super) const fn default_safeline_enabled() -> bool {
     true
-}
-
-pub(super) const fn default_retain_days() -> u32 {
-    30
 }
 
 pub(super) const fn default_verify_tls() -> bool {
@@ -86,14 +74,6 @@ pub(super) const fn default_safeline_auto_sync_interval_secs() -> u64 {
 
 pub(super) const fn default_admin_api_audit_enabled() -> bool {
     true
-}
-
-pub(super) fn normalize_notification_level(value: &str) -> String {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "all" => "all".to_string(),
-        "blocked_only" => "blocked_only".to_string(),
-        _ => "critical".to_string(),
-    }
 }
 
 pub(super) fn normalize_base_url(value: &str) -> String {

@@ -71,7 +71,7 @@ fn normalize_base_config(config: &mut Config) {
     };
 
     if config.listen_addrs.is_empty() {
-        config.listen_addrs = vec!["0.0.0.0:8080".to_string()];
+        config.listen_addrs = vec!["0.0.0.0:66".to_string()];
     }
 
     config.udp_upstream_addr = config.udp_upstream_addr.take().and_then(|addr| {

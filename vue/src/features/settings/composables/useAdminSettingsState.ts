@@ -26,7 +26,6 @@ export function useAdminSettingsState() {
   const generatingCertificate = ref(false)
   const savingDefaultCertificate = ref(false)
   const readingClipboard = ref(false)
-  const clearingSiteData = ref(false)
   const deletingCertificateId = ref<number | null>(null)
   const showGenerateModal = ref(false)
   const showUploadModal = ref(false)
@@ -38,8 +37,8 @@ export function useAdminSettingsState() {
   const localCertificates = ref<LocalCertificateItem[]>([])
   const sitesLoadedAt = ref<number | null>(null)
   const globalEntryForm = reactive<GlobalEntryConfigPayload>({
-    http_port: '',
-    https_port: '',
+    http_port: '66',
+    https_port: '660',
   })
 
   const systemSettings = reactive<SystemSettingsForm>(
@@ -94,20 +93,16 @@ export function useAdminSettingsState() {
   function toPlainSettingsPayload(): SettingsPayload {
     return {
       gateway_name: systemSettings.gateway_name,
-      auto_refresh_seconds: systemSettings.auto_refresh_seconds,
       https_listen_addr: systemSettings.https_listen_addr,
       default_certificate_id: systemSettings.default_certificate_id,
       upstream_endpoint: systemSettings.upstream_endpoint,
       api_endpoint: systemSettings.api_endpoint,
-      notification_level: systemSettings.notification_level,
-      retain_days: systemSettings.retain_days,
       notes: systemSettings.notes,
       safeline: toPlainSafeLineSettings(),
     }
   }
 
   return {
-    clearingSiteData,
     clearFeedback,
     deletingCertificateId,
     error,

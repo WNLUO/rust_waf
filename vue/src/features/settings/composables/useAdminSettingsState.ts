@@ -11,8 +11,8 @@ import type {
   LocalCertificateItem,
   SafeLineMappingItem,
   SafeLineSiteItem,
+  SettingsUpdatePayload,
   SafeLineTestResponse,
-  SettingsPayload,
 } from '@/shared/types'
 
 export function useAdminSettingsState() {
@@ -64,15 +64,8 @@ export function useAdminSettingsState() {
     successMessage.value = ''
   }
 
-  function toPlainSafeLineSettings() {
+  function toPlainSafeLineTestPayload() {
     return {
-      enabled: true,
-      auto_sync_events: systemSettings.safeline.auto_sync_events,
-      auto_sync_blocked_ips_push:
-        systemSettings.safeline.auto_sync_blocked_ips_push,
-      auto_sync_blocked_ips_pull:
-        systemSettings.safeline.auto_sync_blocked_ips_pull,
-      auto_sync_interval_secs: systemSettings.safeline.auto_sync_interval_secs,
       base_url: systemSettings.safeline.base_url,
       api_token: systemSettings.safeline.api_token,
       username: systemSettings.safeline.username,
@@ -90,7 +83,7 @@ export function useAdminSettingsState() {
     }
   }
 
-  function toPlainSettingsPayload(): SettingsPayload {
+  function toPlainSettingsPayload(): SettingsUpdatePayload {
     return {
       gateway_name: systemSettings.gateway_name,
       drop_unmatched_requests: systemSettings.drop_unmatched_requests,
@@ -98,7 +91,20 @@ export function useAdminSettingsState() {
       default_certificate_id: systemSettings.default_certificate_id,
       api_endpoint: systemSettings.api_endpoint,
       notes: systemSettings.notes,
-      safeline: toPlainSafeLineSettings(),
+      safeline: {
+        auto_sync_events: systemSettings.safeline.auto_sync_events,
+        auto_sync_blocked_ips_push:
+          systemSettings.safeline.auto_sync_blocked_ips_push,
+        auto_sync_blocked_ips_pull:
+          systemSettings.safeline.auto_sync_blocked_ips_pull,
+        auto_sync_interval_secs:
+          systemSettings.safeline.auto_sync_interval_secs,
+        base_url: systemSettings.safeline.base_url,
+        api_token: systemSettings.safeline.api_token,
+        username: systemSettings.safeline.username,
+        password: systemSettings.safeline.password,
+        verify_tls: systemSettings.safeline.verify_tls,
+      },
     }
   }
 
@@ -127,7 +133,7 @@ export function useAdminSettingsState() {
     systemSettings,
     testResult,
     testing,
-    toPlainSafeLineSettings,
+    toPlainSafeLineTestPayload,
     toPlainSettingsPayload,
     uploadCertificateDomainsText,
     uploadCertificateForm,

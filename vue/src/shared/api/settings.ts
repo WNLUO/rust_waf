@@ -1,6 +1,7 @@
 import type {
   GlobalSettingsPayload,
   SettingsPayload,
+  SettingsUpdatePayload,
   WriteStatusResponse,
 } from '@/shared/types'
 import { apiRequest } from './core'
@@ -9,7 +10,7 @@ export function fetchSettings() {
   return apiRequest<SettingsPayload>('/settings')
 }
 
-export function updateSettings(payload: SettingsPayload) {
+export function updateSettings(payload: SettingsUpdatePayload) {
   return apiRequest<WriteStatusResponse>('/settings', {
     method: 'PUT',
     body: JSON.stringify(payload),

@@ -6,22 +6,22 @@ import type {
   SafeLineMappingsUpdateRequest,
   SafeLineSitesResponse,
   SafeLineSyncOverviewResponse,
+  SafeLineTestPayload,
   SafeLineTestResponse,
-  SettingsPayload,
   SiteSyncLinkDraft,
   SiteSyncLinksResponse,
   WriteStatusResponse,
 } from '@/shared/types'
 import { apiRequest } from './core'
 
-export function testSafeLineConnection(payload: SettingsPayload['safeline']) {
+export function testSafeLineConnection(payload: SafeLineTestPayload) {
   return apiRequest<SafeLineTestResponse>('/integrations/safeline/test', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
 }
 
-export function fetchSafeLineSites(payload: SettingsPayload['safeline']) {
+export function fetchSafeLineSites(payload: SafeLineTestPayload) {
   return apiRequest<SafeLineSitesResponse>('/integrations/safeline/sites', {
     method: 'POST',
     body: JSON.stringify(payload),

@@ -26,7 +26,7 @@ export function useAdminSettingsSafeLine({
     successMessage,
     testResult,
     testing,
-    toPlainSafeLineSettings,
+    toPlainSafeLineTestPayload,
   } = state
 
   async function loadMappings() {
@@ -42,7 +42,9 @@ export function useAdminSettingsSafeLine({
     testing.value = true
     error.value = ''
     try {
-      testResult.value = await testSafeLineConnection(toPlainSafeLineSettings())
+      testResult.value = await testSafeLineConnection(
+        toPlainSafeLineTestPayload(),
+      )
     } catch (e) {
       error.value = e instanceof Error ? e.message : '雷池连通性测试失败'
       testResult.value = null
@@ -55,7 +57,7 @@ export function useAdminSettingsSafeLine({
     loadingSites.value = true
     error.value = ''
     try {
-      const response = await fetchSafeLineSites(toPlainSafeLineSettings())
+      const response = await fetchSafeLineSites(toPlainSafeLineTestPayload())
       sites.value = response.sites
       sitesLoadedAt.value = Math.floor(Date.now() / 1000)
     } catch (e) {

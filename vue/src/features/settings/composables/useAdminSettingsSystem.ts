@@ -50,15 +50,12 @@ export function useAdminSettingsSystem({
           )
         : 300
 
-      const [settingsResponse, globalEntryResponse] = await Promise.all([
-        updateSettings(toPlainSettingsPayload()),
-        updateGlobalEntryConfig({
-          http_port: globalEntryForm.http_port.trim(),
-          https_port: globalEntryForm.https_port.trim(),
-        }),
-      ])
-      successMessage.value =
-        globalEntryResponse.message || settingsResponse.message
+      const settingsResponse = await updateSettings(toPlainSettingsPayload())
+      const globalEntryResponse = await updateGlobalEntryConfig({
+        http_port: globalEntryForm.http_port.trim(),
+        https_port: globalEntryForm.https_port.trim(),
+      })
+      successMessage.value = globalEntryResponse.message || settingsResponse.message
     } catch (e) {
       error.value = e instanceof Error ? e.message : '系统设置保存失败'
     } finally {

@@ -4,6 +4,7 @@ import { RefreshCw, Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import L7SectionNav from '@/features/l7/components/L7SectionNav.vue'
 import AdminL7ActivitySection from '@/features/l7/components/AdminL7ActivitySection.vue'
+import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
 import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
 import AdminL7OverviewSection from '@/features/l7/components/AdminL7OverviewSection.vue'
 import { useAdminL7 } from '@/features/l7/composables/useAdminL7'
@@ -125,6 +126,8 @@ const lastUpdatedLabel = computed(() => {
         @update:real-ip-headers-text="realIpHeadersText = $event"
         @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
       />
+
+      <AdminL7AdvancedGlobalSection />
 
       <AdminL7ActivitySection
         :action-label="actionLabel"

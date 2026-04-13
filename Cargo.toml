@@ -12,7 +12,7 @@ name = "waf"
 path = "src/main.rs"
 
 [features]
-default = ["api"]
+default = ["api", "http3"]
 api = ["dep:axum"]
 capture = ["dep:pnet"]
 http2 = []  # 现有HTTP/2.0支持

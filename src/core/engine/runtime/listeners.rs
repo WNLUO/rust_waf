@@ -213,37 +213,6 @@ impl Http3ListenerRuntime {
             .clone()
     }
 
-    async fn validate_config(&self, context: Arc<WafContext>) -> Result<()> {
-        let config = context.config_snapshot();
-        let http3 = &config.http3_config;
-        if !http3.enabled {
-            return Ok(());
-        }
-
-        engine_tls::validate_http3_endpoint_config(http3)?;
-        let requested_addr = http3.listen_addr.trim().to_string();
-        let config_key = http3_config_key(http3)?;
-        let guard = self.state.lock().await;
-        let owned = guard
-            .listener
-            .as_ref()
-            .map(|listener| listener.addr == requested_addr && listener.config_key == config_key)
-            .unwrap_or(false);
-        drop(guard);
-
-        if !owned {
-            UdpSocket::bind(&requested_addr).await.map_err(|err| {
-                anyhow::anyhow!(
-                    "HTTP/3 入口 {} 已被其他进程占用或无法监听: {}",
-                    requested_addr,
-                    err
-                )
-            })?;
-        }
-
-        Ok(())
-    }
-
     async fn sync(
         &self,
         context: Arc<WafContext>,
@@ -299,13 +268,6 @@ impl Http3ListenerRuntime {
 
 pub(crate) async fn validate_entry_listener_config(context: Arc<WafContext>) -> Result<()> {
     EntryListenerRuntime::global()
-        .validate_config(context)
-        .await
-}
-
-#[cfg(feature = "http3")]
-pub(crate) async fn validate_http3_listener_config(context: Arc<WafContext>) -> Result<()> {
-    Http3ListenerRuntime::global()
         .validate_config(context)
         .await
 }
@@ -496,8 +458,17 @@ async fn spawn_http3_listener(
                             match connection_semaphore.clone().try_acquire_owned() {
                                 Ok(permit) => {
                                     let ctx = Arc::clone(&context);
+                                    let remote_addr = incoming.remote_address();
                                     tokio::spawn(async move {
-                                        if let Err(err) = handle_http3_quic_connection(ctx, incoming, incoming.remote_address(), permit).await {
+                                        if let Err(err) =
+                                            handle_http3_quic_connection(
+                                                ctx,
+                                                incoming,
+                                                remote_addr,
+                                                permit,
+                                            )
+                                            .await
+                                        {
                                             warn!("HTTP/3 connection handling failed: {}", err);
                                         }
                                     });

@@ -271,15 +271,19 @@ struct StartupGeneratedCertificate {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     static TEST_DB_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn unique_test_db_path(label: &str) -> String {
         let unique = TEST_DB_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir()
-            .join(format!("rust_waf_{label}_{unique}.db"))
-            .to_string_lossy()
-            .to_string()
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("rust_waf_{label}_{unique}_{nanos}.db"));
+        let _ = std::fs::remove_file(&path);
+        path.to_string_lossy().to_string()
     }
 
     #[tokio::test]

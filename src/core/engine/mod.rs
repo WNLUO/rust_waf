@@ -76,10 +76,8 @@ use self::proxy::{
     apply_safeline_upstream_action, proxy_http_request, proxy_http_request_with_session_affinity,
     resolve_runtime_custom_response, write_http1_upstream_response, UpstreamResponseDisposition,
 };
+#[cfg(feature = "http3")]
+pub(crate) use self::runtime::sync_http3_listener_runtime;
 use self::runtime::PrefixedStream;
 pub use self::runtime::WafEngine;
-#[cfg(feature = "http3")]
-pub(crate) use self::runtime::{
-    shutdown_http3_listener_runtime, sync_http3_listener_runtime, validate_http3_listener_config,
-};
 pub(crate) use self::runtime::{sync_entry_listener_runtime, validate_entry_listener_config};

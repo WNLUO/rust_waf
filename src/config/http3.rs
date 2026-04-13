@@ -29,7 +29,7 @@ pub struct Http3Config {
 impl Default for Http3Config {
     fn default() -> Self {
         Self {
-            enabled: false, // 默认禁用HTTP/3.0
+            enabled: true, // 默认启用HTTP/3.0
             listen_addr: "0.0.0.0:8443".to_string(),
             max_concurrent_streams: 100,
             idle_timeout_secs: 300,
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Http3Config::default();
-        assert!(!config.enabled);
+        assert!(config.enabled);
         assert_eq!(config.listen_addr, "0.0.0.0:8443");
         assert_eq!(config.max_concurrent_streams, 100);
     }

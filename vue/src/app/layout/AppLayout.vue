@@ -48,8 +48,14 @@ const navItems: NavItem[] = [
       { name: '证书管理', path: '/admin/certificates' },
     ],
   },
-  { name: '规则中心', path: '/admin/rules', icon: Shield },
-  { name: '动作中心', path: '/admin/actions', icon: Sparkles },
+  {
+    name: '防御策略',
+    icon: Shield,
+    children: [
+      { name: '规则中心', path: '/admin/rules' },
+      { name: '动作中心', path: '/admin/actions' },
+    ],
+  },
   { name: 'L4管理', path: '/admin/l4', icon: ServerCog },
   { name: 'L7管理', path: '/admin/l7', icon: Globe },
   { name: '事件记录', path: '/admin/events', icon: Activity },

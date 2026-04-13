@@ -1,21 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { fetchSecurityEvents } from '@/shared/api/events'
+import {
+  fetchSecurityEvents,
+  markSecurityEventHandled,
+} from '@/shared/api/events'
 import { syncSafeLineEvents } from '@/shared/api/safeline'
 import type { SecurityEventItem, SecurityEventsResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
-import { Copy, Eye, RefreshCw, X } from 'lucide-vue-next'
+import { Eye, RefreshCw, X } from 'lucide-vue-next'
+
+const PAGE_SIZE = 30
 
 const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
 const loading = ref(true)
 const refreshing = ref(false)
 const syncing = ref(false)
+const mutatingId = ref<number | null>(null)
 const error = ref('')
 const successMessage = ref('')
 const filtersReady = ref(false)
+const currentPage = ref(1)
 const previewTitle = ref('')
 const previewContent = ref('')
 const eventsPayload = ref<SecurityEventsResponse>({
@@ -41,16 +48,37 @@ const eventsFilters = reactive({
   action: 'all',
   blocked_only: false,
   handled: 'all' as 'all' | 'handled' | 'unhandled',
+  source_ip: '',
+  created_from: '',
+  created_to: '',
   sort_by: 'created_at',
   sort_direction: 'desc' as 'asc' | 'desc',
 })
+
+const toUnixTimestamp = (value: string) => {
+  if (!value) return undefined
+  const parsed = new Date(value).getTime()
+  if (Number.isNaN(parsed)) return undefined
+  return Math.floor(parsed / 1000)
+}
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil((eventsPayload.value.total || 0) / PAGE_SIZE)),
+)
+const pageStart = computed(() =>
+  eventsPayload.value.total ? eventsPayload.value.offset + 1 : 0,
+)
+const pageEnd = computed(
+  () => eventsPayload.value.offset + eventsPayload.value.events.length,
+)
 
 const loadEvents = async (showLoader = false) => {
   if (showLoader) loading.value = true
   refreshing.value = true
   try {
     eventsPayload.value = await fetchSecurityEvents({
-      limit: 30,
+      limit: PAGE_SIZE,
+      offset: (currentPage.value - 1) * PAGE_SIZE,
       sort_by: eventsFilters.sort_by,
       sort_direction: eventsFilters.sort_direction,
       blocked_only: eventsFilters.blocked_only,
@@ -65,11 +93,16 @@ const loadEvents = async (showLoader = false) => {
       handled_only:
         eventsFilters.handled === 'all'
           ? undefined
-          : eventsFilters.handled === 'handled'
-            ? true
-            : false,
+          : eventsFilters.handled === 'handled',
+      source_ip: eventsFilters.source_ip.trim() || undefined,
+      created_from: toUnixTimestamp(eventsFilters.created_from),
+      created_to: toUnixTimestamp(eventsFilters.created_to),
     })
     error.value = ''
+
+    if (currentPage.value > totalPages.value) {
+      currentPage.value = totalPages.value
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取事件失败'
   } finally {
@@ -86,6 +119,7 @@ const runSafeLineSync = async () => {
   try {
     const response = await syncSafeLineEvents()
     successMessage.value = response.message
+    currentPage.value = 1
     await loadEvents()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '同步雷池事件失败'
@@ -94,11 +128,19 @@ const runSafeLineSync = async () => {
   }
 }
 
-const copyToClipboard = async (text: string) => {
+const toggleHandled = async (event: SecurityEventItem) => {
+  mutatingId.value = event.id
+  error.value = ''
+  successMessage.value = ''
+
   try {
-    await navigator.clipboard?.writeText(text)
-  } catch {
-    // ignore clipboard failure
+    const response = await markSecurityEventHandled(event.id, !event.handled)
+    successMessage.value = response.message
+    await loadEvents()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '更新事件状态失败'
+  } finally {
+    mutatingId.value = null
   }
 }
 
@@ -125,7 +167,7 @@ const safeLineAttackTypeMap: Record<string, string> = {
 }
 
 const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
-  if (event.layer !== 'safeline') return null
+  if (event.layer.toLowerCase() !== 'safeline') return null
   const matched = event.reason.match(/^safeline:([^:]+):/)
   return matched?.[1] ?? null
 }
@@ -145,8 +187,9 @@ const eventActionBadgeType = (action: string) => {
   const normalized = action.trim().toLowerCase()
   if (normalized === '1' || normalized === 'block') return 'error'
   if (normalized === 'allow') return 'success'
-  if (normalized === '0' || normalized === 'alert' || normalized === 'log')
+  if (normalized === '0' || normalized === 'alert' || normalized === 'log') {
     return 'warning'
+  }
   return 'warning'
 }
 
@@ -157,7 +200,7 @@ const eventAttackTypeLabel = (event: SecurityEventItem) => {
 }
 
 const eventReasonLabel = (event: SecurityEventItem) => {
-  if (event.layer !== 'safeline') return event.reason
+  if (event.layer.toLowerCase() !== 'safeline') return event.reason
 
   const attackTypeCode = getSafeLineAttackTypeCode(event)
   const attackTypeLabel = attackTypeCode
@@ -172,20 +215,6 @@ const eventReasonLabel = (event: SecurityEventItem) => {
   return normalized || event.reason
 }
 
-onMounted(async () => {
-  await loadEvents(true)
-  filtersReady.value = true
-})
-
-watch(
-  () => ({ ...eventsFilters }),
-  () => {
-    if (!filtersReady.value) return
-    loadEvents()
-  },
-  { deep: true },
-)
-
 const siteOptions = computed(() => {
   const seen = new Map<string, string>()
   for (const event of eventsPayload.value.events) {
@@ -199,36 +228,60 @@ const siteOptions = computed(() => {
   }
   return Array.from(seen.entries()).map(([id, label]) => ({ id, label }))
 })
+
+const goToPage = (page: number) => {
+  currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
+}
+
+onMounted(async () => {
+  await loadEvents(true)
+  filtersReady.value = true
+})
+
+watch(
+  () => ({ ...eventsFilters }),
+  () => {
+    if (!filtersReady.value) return
+    currentPage.value = 1
+    loadEvents()
+  },
+  { deep: true },
+)
+
+watch(currentPage, () => {
+  if (!filtersReady.value) return
+  loadEvents()
+})
 </script>
 
 <template>
   <AppLayout>
     <template #header-extra>
-      <button
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        :disabled="syncing"
-        @click="runSafeLineSync"
-      >
-        <RefreshCw :size="14" :class="{ 'animate-spin': syncing }" />
-        {{ syncing ? '同步中...' : '同步雷池事件' }}
-      </button>
-      <button
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        :disabled="refreshing"
-        @click="loadEvents()"
-      >
-        <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
-        刷新事件
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="syncing"
+          @click="runSafeLineSync"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': syncing }" />
+          {{ syncing ? '同步中' : '同步雷池' }}
+        </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="refreshing"
+          @click="loadEvents()"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
+          刷新
+        </button>
+      </div>
     </template>
 
-    <div class="min-w-0 space-y-6">
-      <div
-        class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"
-      >
+    <div class="space-y-3">
+      <div class="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
         <select
           v-model="eventsFilters.layer"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="all">全部层级</option>
           <option value="l4">四层</option>
@@ -237,15 +290,15 @@ const siteOptions = computed(() => {
         </select>
         <select
           v-model="eventsFilters.provider"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
-          <option value="all">全部来源系统</option>
+          <option value="all">全部来源</option>
           <option value="browser_fingerprint">浏览器指纹</option>
           <option value="safeline">雷池</option>
         </select>
         <select
           v-model="eventsFilters.provider_site_id"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="all">全部雷池站点</option>
           <option v-for="site in siteOptions" :key="site.id" :value="site.id">
@@ -254,7 +307,7 @@ const siteOptions = computed(() => {
         </select>
         <select
           v-model="eventsFilters.action"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="all">全部动作</option>
           <option value="block">拦截</option>
@@ -262,158 +315,222 @@ const siteOptions = computed(() => {
           <option value="alert">告警</option>
           <option value="log">记录</option>
         </select>
+        <select
+          v-model="eventsFilters.handled"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        >
+          <option value="all">全部状态</option>
+          <option value="unhandled">未处理</option>
+          <option value="handled">已处理</option>
+        </select>
+        <input
+          v-model="eventsFilters.source_ip"
+          type="text"
+          placeholder="源 IP"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+      </div>
+
+      <div class="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
         <label
-          class="inline-flex items-center gap-2 rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
         >
           <input
             v-model="eventsFilters.blocked_only"
             type="checkbox"
             class="accent-blue-600"
           />
-          仅显示拦截
+          仅拦截
         </label>
-        <select
-          v-model="eventsFilters.handled"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
-        >
-          <option value="all">全部状态</option>
-          <option value="unhandled">仅未处理</option>
-          <option value="handled">仅已处理</option>
-        </select>
+        <input
+          v-model="eventsFilters.created_from"
+          type="datetime-local"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+        <input
+          v-model="eventsFilters.created_to"
+          type="datetime-local"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
         <select
           v-model="eventsFilters.sort_by"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
-          <option value="created_at">时间排序</option>
+          <option value="created_at">按时间</option>
           <option value="source_ip">按来源 IP</option>
           <option value="dest_port">按目标端口</option>
         </select>
         <select
           v-model="eventsFilters.sort_direction"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="desc">降序</option>
           <option value="asc">升序</option>
         </select>
       </div>
 
-      <div v-if="loading" class="text-sm text-slate-500">正在加载事件...</div>
+      <div v-if="loading" class="text-sm text-slate-500">加载中...</div>
 
-      <div v-else class="min-w-0 space-y-4">
-        <div
-          class="max-w-full overflow-hidden rounded-xl border border-white/80 bg-white/78 shadow-[0_16px_44px_rgba(90,60,30,0.08)]"
-        >
-          <div class="max-w-full overflow-x-auto overscroll-x-contain">
-            <table class="w-full min-w-[760px] border-collapse text-left">
-              <thead class="bg-slate-50 text-sm text-slate-500">
-                <tr>
-                  <th class="whitespace-nowrap px-4 py-3 font-medium">时间</th>
-                  <th class="whitespace-nowrap px-4 py-3 font-medium">分类</th>
-                  <th class="whitespace-nowrap px-4 py-3 font-medium">原因</th>
-                  <th class="whitespace-nowrap px-4 py-3 font-medium">来源</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="event in eventsPayload.events"
-                  :key="event.id"
-                  class="border-t border-slate-200 align-top text-sm text-stone-800 transition hover:bg-[#fff8ef]"
-                  :class="{ 'opacity-65': event.handled }"
-                >
-                  <td class="px-4 py-3">
-                    <div class="min-w-[154px]">
-                      <p class="font-mono text-[13px] leading-6 text-stone-900">
-                        {{ formatTimestamp(event.created_at) }}
-                      </p>
+      <div
+        v-else
+        class="overflow-hidden rounded-md border border-slate-200 bg-white"
+      >
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[1240px] border-collapse text-left text-sm">
+            <thead class="bg-slate-50 text-slate-600">
+              <tr>
+                <th class="px-3 py-2 font-medium">时间</th>
+                <th class="px-3 py-2 font-medium">层级/动作</th>
+                <th class="px-3 py-2 font-medium">来源</th>
+                <th class="px-3 py-2 font-medium">目标/请求</th>
+                <th class="px-3 py-2 font-medium">原因</th>
+                <th class="px-3 py-2 font-medium">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="event in eventsPayload.events"
+                :key="event.id"
+                class="border-t border-slate-200 align-top text-slate-800"
+              >
+                <td class="px-3 py-2">
+                  <div class="space-y-1">
+                    <div class="font-mono text-xs text-slate-900">
+                      {{ formatTimestamp(event.created_at) }}
                     </div>
-                  </td>
-                  <td class="px-4 py-3">
+                    <div v-if="event.provider_event_id" class="text-xs text-slate-500">
+                      ID: {{ event.provider_event_id }}
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex flex-wrap gap-1">
+                    <StatusBadge
+                      :text="layerLabel(event.layer)"
+                      :type="event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'"
+                      compact
+                    />
+                    <StatusBadge
+                      :text="eventActionLabel(event.action)"
+                      :type="eventActionBadgeType(event.action)"
+                      compact
+                    />
+                    <StatusBadge
+                      v-if="eventAttackTypeLabel(event)"
+                      :text="eventAttackTypeLabel(event)"
+                      type="muted"
+                      compact
+                    />
+                  </div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="space-y-1">
+                    <div class="font-mono text-xs text-slate-900">
+                      {{ event.source_ip }}:{{ event.source_port }}
+                    </div>
+                    <div class="text-xs text-slate-500">
+                      {{ event.provider || 'local' }}
+                    </div>
                     <div
-                      class="flex min-w-[236px] flex-nowrap items-center gap-2 whitespace-nowrap"
+                      v-if="event.provider_site_name || event.provider_site_domain"
+                      class="text-xs text-slate-500"
                     >
-                      <StatusBadge
-                        :text="layerLabel(event.layer)"
-                        :type="event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'"
-                      />
-                      <StatusBadge
-                        :text="eventActionLabel(event.action)"
-                        :type="eventActionBadgeType(event.action)"
-                      />
-                      <StatusBadge
-                        v-if="eventAttackTypeLabel(event)"
-                        :text="eventAttackTypeLabel(event)"
-                        type="muted"
-                        compact
-                      />
-                      <button
-                        v-if="
-                          event.provider_site_name || event.provider_site_domain
-                        "
-                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/85 text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-                        :title="
-                          event.provider_site_name ||
-                          event.provider_site_domain ||
-                          '站点链接预览'
-                        "
-                        @click="
-                          openPreview(
-                            '站点链接预览',
-                            event.provider_site_name ||
-                              event.provider_site_domain,
-                          )
-                        "
-                      >
-                        <Eye :size="13" />
-                      </button>
+                      {{
+                        event.provider_site_name ||
+                        event.provider_site_domain
+                      }}
                     </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="flex min-w-[300px] items-start gap-2">
-                      <div class="min-w-0 flex-1">
-                        <p
-                          class="truncate font-medium leading-6 text-stone-900"
-                          :title="eventReasonLabel(event)"
-                        >
-                          {{ eventReasonLabel(event) }}
-                        </p>
-                        <p
-                          v-if="event.provider_event_id"
-                          class="mt-1 font-mono text-xs text-slate-500"
-                        >
-                          Event ID: {{ event.provider_event_id }}
-                        </p>
+                  </div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="space-y-1 text-xs">
+                    <div class="font-mono text-slate-900">
+                      {{ event.dest_ip }}:{{ event.dest_port }}
+                    </div>
+                    <div class="text-slate-600">
+                      {{ event.protocol }}
+                      <span v-if="event.http_version"> / {{ event.http_version }}</span>
+                    </div>
+                    <div class="font-mono text-slate-600">
+                      {{ event.http_method || '-' }}
+                      <span v-if="event.uri"> {{ event.uri }}</span>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex items-start gap-2">
+                    <div class="min-w-0 flex-1">
+                      <div
+                        class="break-all text-sm text-slate-900"
+                        :title="eventReasonLabel(event)"
+                      >
+                        {{ eventReasonLabel(event) }}
                       </div>
-                      <button
-                        v-if="event.details_json"
-                        class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/85 text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-                        title="查看事件详情"
-                        @click="openPreview('事件详情', event.details_json)"
-                      >
-                        <Eye :size="13" />
-                      </button>
                     </div>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="min-w-[190px]">
-                      <p
-                        class="truncate font-mono text-[13px] whitespace-nowrap text-stone-900"
-                        :title="event.source_ip"
-                      >
-                        {{ event.source_ip }}
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="!eventsPayload.events.length">
-                  <td
-                    colspan="4"
-                    class="px-4 py-6 text-center text-sm text-slate-500"
-                  >
-                    当前没有可显示的安全事件。
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                    <button
+                      v-if="event.details_json"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                      title="查看详情"
+                      @click="openPreview('事件详情', event.details_json)"
+                    >
+                      <Eye :size="14" />
+                    </button>
+                  </div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex flex-col items-start gap-2">
+                    <StatusBadge
+                      :text="event.handled ? '已处理' : '未处理'"
+                      :type="event.handled ? 'muted' : 'warning'"
+                      compact
+                    />
+                    <button
+                      class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                      :disabled="mutatingId === event.id"
+                      @click="toggleHandled(event)"
+                    >
+                      {{
+                        mutatingId === event.id
+                          ? '处理中'
+                          : event.handled
+                            ? '标记未处理'
+                            : '标记已处理'
+                      }}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="!eventsPayload.events.length">
+                <td colspan="6" class="px-3 py-6 text-center text-sm text-slate-500">
+                  无数据
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-600"
+        >
+          <div>
+            {{ pageStart }}-{{ pageEnd }} / {{ eventsPayload.total }}
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              class="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
+              :disabled="currentPage <= 1"
+              @click="goToPage(currentPage - 1)"
+            >
+              上一页
+            </button>
+            <span>{{ currentPage }} / {{ totalPages }}</span>
+            <button
+              class="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
+              :disabled="currentPage >= totalPages"
+              @click="goToPage(currentPage + 1)"
+            >
+              下一页
+            </button>
           </div>
         </div>
       </div>
@@ -421,52 +538,27 @@ const siteOptions = computed(() => {
 
     <div
       v-if="previewContent"
-      class="fixed inset-0 z-[100] flex items-center justify-center px-4 py-8"
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
     >
       <div
-        class="absolute inset-0 bg-stone-950/35 backdrop-blur-sm"
+        class="absolute inset-0"
         @click="closePreview"
       ></div>
       <div
-        class="relative w-full max-w-5xl rounded-xl border border-white/85 bg-[linear-gradient(160deg,rgba(255,250,244,0.98),rgba(244,239,231,0.98))] p-4 shadow-[0_24px_80px_rgba(60,40,20,0.24)] md:p-5"
+        class="relative z-[101] w-full max-w-5xl rounded-md border border-slate-300 bg-white"
       >
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm tracking-wide text-blue-700">链接预览</p>
-            <h3 class="mt-2 text-2xl font-semibold text-stone-900">
-              {{ previewTitle }}
-            </h3>
-          </div>
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div class="text-sm font-medium text-slate-900">{{ previewTitle }}</div>
           <button
-            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white/75 transition hover:border-blue-500/40 hover:text-blue-700"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
             @click="closePreview"
           >
-            <X :size="18" />
+            <X :size="16" />
           </button>
         </div>
-
-        <div class="mt-4 rounded-xl border border-slate-200 bg-white/80 p-5">
-          <p class="text-xs tracking-wide text-slate-500">完整内容</p>
-          <p class="mt-3 break-all font-mono text-sm leading-7 text-stone-800">
-            {{ previewContent }}
-          </p>
-        </div>
-
-        <div class="mt-4 flex flex-wrap gap-3">
-          <button
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-            @click="copyToClipboard(previewContent)"
-          >
-            <Copy :size="14" />
-            复制内容
-          </button>
-          <button
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-2 text-sm text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-            @click="closePreview"
-          >
-            关闭
-          </button>
-        </div>
+        <pre
+          class="max-h-[70vh] overflow-auto whitespace-pre-wrap break-all px-4 py-3 text-xs text-slate-800"
+        >{{ previewContent }}</pre>
       </div>
     </div>
   </AppLayout>

@@ -7,6 +7,10 @@ import { useFlashMessages } from '@/shared/composables/useNotifications'
 
 type AdvancedGlobalSettingsForm = Pick<
   GlobalSettingsPayload,
+  | 'enable_http1_0'
+  | 'source_ip_strategy'
+  | 'custom_source_ip_header'
+  | 'trusted_proxy_cidrs'
   | 'http_to_https_redirect'
   | 'enable_hsts'
   | 'add_x_forwarded_headers'
@@ -16,6 +20,8 @@ type AdvancedGlobalSettingsForm = Pick<
   | 'support_sse'
   | 'enable_ntlm'
   | 'fallback_self_signed_certificate'
+  | 'ssl_protocols'
+  | 'ssl_ciphers'
   | 'rewrite_host_enabled'
   | 'rewrite_host_value'
   | 'header_operations'
@@ -23,6 +29,10 @@ type AdvancedGlobalSettingsForm = Pick<
 
 function createDefaultAdvancedSettings(): AdvancedGlobalSettingsForm {
   return {
+    enable_http1_0: true,
+    source_ip_strategy: 'connection',
+    custom_source_ip_header: '',
+    trusted_proxy_cidrs: [],
     http_to_https_redirect: true,
     enable_hsts: true,
     add_x_forwarded_headers: true,
@@ -32,6 +42,8 @@ function createDefaultAdvancedSettings(): AdvancedGlobalSettingsForm {
     support_sse: true,
     enable_ntlm: true,
     fallback_self_signed_certificate: true,
+    ssl_protocols: ['TLSv1.2', 'TLSv1.3'],
+    ssl_ciphers: '',
     rewrite_host_enabled: true,
     rewrite_host_value: '',
     header_operations: [],
@@ -42,6 +54,7 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const successMessage = ref('')
+const trustedProxyCidrsText = ref('')
 const form = reactive<AdvancedGlobalSettingsForm>(
   createDefaultAdvancedSettings(),
 )
@@ -56,6 +69,10 @@ useFlashMessages({
 })
 
 function assignForm(payload: GlobalSettingsPayload) {
+  form.enable_http1_0 = payload.enable_http1_0
+  form.source_ip_strategy = payload.source_ip_strategy
+  form.custom_source_ip_header = payload.custom_source_ip_header
+  form.trusted_proxy_cidrs = [...payload.trusted_proxy_cidrs]
   form.http_to_https_redirect = payload.http_to_https_redirect
   form.enable_hsts = payload.enable_hsts
   form.add_x_forwarded_headers = payload.add_x_forwarded_headers
@@ -66,9 +83,22 @@ function assignForm(payload: GlobalSettingsPayload) {
   form.enable_ntlm = payload.enable_ntlm
   form.fallback_self_signed_certificate =
     payload.fallback_self_signed_certificate
+  form.ssl_protocols = [...payload.ssl_protocols]
+  form.ssl_ciphers = payload.ssl_ciphers
   form.rewrite_host_enabled = payload.rewrite_host_enabled
   form.rewrite_host_value = payload.rewrite_host_value
   form.header_operations = payload.header_operations.map((item) => ({ ...item }))
+  trustedProxyCidrsText.value = payload.trusted_proxy_cidrs.join('\n')
+}
+
+function toggleSslProtocol(protocol: string, enabled: boolean) {
+  const next = new Set(form.ssl_protocols)
+  if (enabled) {
+    next.add(protocol)
+  } else {
+    next.delete(protocol)
+  }
+  form.ssl_protocols = [...next]
 }
 
 function addHeaderOperation() {
@@ -105,6 +135,12 @@ async function saveSettings() {
     const payload: GlobalSettingsPayload = {
       ...latest,
       ...form,
+      trusted_proxy_cidrs: trustedProxyCidrsText.value
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
+      custom_source_ip_header: form.custom_source_ip_header.trim(),
+      ssl_ciphers: form.ssl_ciphers.trim(),
       rewrite_host_value: form.rewrite_host_value.trim(),
       header_operations: form.header_operations.map(
         (item): HeaderOperationItem => ({
@@ -141,8 +177,7 @@ onMounted(loadSettings)
           其他高级配置
         </h3>
         <p class="mt-2 text-sm leading-6 text-slate-500">
-          这里集中管理 HTTP 跳转、压缩、转发头与 Host 改写等影响 L7
-          行为的全局高级选项。
+          这里集中管理源 IP、协议兼容、SSL 合规与其他影响 L7 行为的全局高级选项。
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -173,6 +208,105 @@ onMounted(loadSettings)
     </div>
 
     <template v-else>
+      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p class="text-sm font-semibold text-stone-900">源 IP 获取方式</p>
+        <p class="mt-1 text-xs leading-5 text-slate-500">
+          决定网关从连接、头部还是代理协议中识别真实来源。
+        </p>
+
+        <div class="mt-4 grid gap-3 lg:grid-cols-[15rem_minmax(0,1fr)]">
+          <label class="space-y-1.5">
+            <span class="text-xs font-medium text-slate-500">获取来源</span>
+            <select
+              v-model="form.source_ip_strategy"
+              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+            >
+              <option value="connection">从网络连接中获取</option>
+              <option value="x_forwarded_for_first">
+                取 X-Forwarded-For 中上一一级代理的地址
+              </option>
+              <option value="x_forwarded_for_last">
+                取 X-Forwarded-For 中上一级代理的地址
+              </option>
+              <option value="x_forwarded_for_last_but_one">
+                取 X-Forwarded-For 中上上一级代理的地址
+              </option>
+              <option value="x_forwarded_for_last_but_two">
+                取 X-Forwarded-For 中上上上一级代理的地址
+              </option>
+              <option value="header">从 HTTP Header 中获取</option>
+              <option value="proxy_protocol">从 PROXY Protocol 中获取</option>
+            </select>
+          </label>
+
+          <div class="grid gap-3 md:grid-cols-2">
+            <label class="space-y-1.5">
+              <span class="text-xs font-medium text-slate-500">自定义 Header</span>
+              <input
+                v-model="form.custom_source_ip_header"
+                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                type="text"
+                placeholder="例如 x-real-ip"
+              />
+            </label>
+            <label class="space-y-1.5">
+              <span class="text-xs font-medium text-slate-500">可信代理 CIDR</span>
+              <textarea
+                v-model="trustedProxyCidrsText"
+                class="min-h-[6rem] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                placeholder="每行一个，如 10.0.0.0/8"
+              />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p class="text-sm font-semibold text-stone-900">协议兼容</p>
+        <p class="mt-1 text-xs leading-5 text-slate-500">
+          控制是否接受旧版 HTTP/1.0 请求；HTTP/2 与 HTTP/3 开关仍在上方的 HTTP 接入配置区管理。
+        </p>
+        <div class="mt-4 grid gap-3">
+          <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+            <input v-model="form.enable_http1_0" type="checkbox" class="h-4 w-4 accent-blue-600" />
+            启用 HTTP/1.0
+          </label>
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p class="text-sm font-semibold text-stone-900">SSL 合规配置</p>
+        <div class="mt-4 flex flex-wrap gap-2.5">
+          <label
+            v-for="protocol in ['TLSv1.2', 'TLSv1.3']"
+            :key="protocol"
+            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+          >
+            <input
+              :checked="form.ssl_protocols.includes(protocol)"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+              @change="
+                toggleSslProtocol(
+                  protocol,
+                  ($event.target as HTMLInputElement).checked,
+                )
+              "
+            />
+            {{ protocol }}
+          </label>
+        </div>
+        <label class="mt-4 block space-y-1.5">
+          <span class="text-xs font-medium text-slate-500">SSL Ciphers</span>
+          <input
+            v-model="form.ssl_ciphers"
+            class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+            type="text"
+            placeholder="留空则沿用默认"
+          />
+        </label>
+      </section>
+
       <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
           <input v-model="form.http_to_https_redirect" type="checkbox" class="h-4 w-4 accent-blue-600" />

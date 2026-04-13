@@ -113,7 +113,7 @@ onMounted(loadSettings)
           协议、转发与边界行为
         </h3>
         <p class="mt-1 text-sm leading-6 text-slate-500">
-          用更紧凑的方式组织源 IP、协议兼容和 SSL 配置，减少视觉噪音。
+          用更紧凑的方式组织源 IP 与 SSL 配置，减少视觉噪音。
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -200,46 +200,7 @@ onMounted(loadSettings)
           </div>
         </section>
 
-        <div class="space-y-4">
-          <section class="rounded-2xl border border-slate-200 bg-white p-4">
-            <p class="text-sm font-semibold text-stone-900">协议兼容</p>
-            <p class="mt-1 text-xs leading-5 text-slate-500">
-              HTTP/3 依赖 QUIC、TLS 1.3 与可用证书配置。
-            </p>
-            <div class="mt-4 grid gap-3">
-              <label
-                class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
-              >
-                <input
-                  v-model="settings.enable_http1_0"
-                  type="checkbox"
-                  class="h-4 w-4 accent-blue-600"
-                />
-                启用 HTTP/1.0
-              </label>
-              <label
-                class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
-              >
-                <input
-                  v-model="settings.http2_enabled"
-                  type="checkbox"
-                  class="h-4 w-4 accent-blue-600"
-                />
-                启用 HTTP/2
-              </label>
-              <label
-                class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
-              >
-                <input
-                  v-model="settings.http3_enabled"
-                  type="checkbox"
-                  class="h-4 w-4 accent-blue-600"
-                />
-                启用 HTTP/3
-              </label>
-            </div>
-          </section>
-
+        <div>
           <section class="rounded-2xl border border-slate-200 bg-white p-4">
             <p class="text-sm font-semibold text-stone-900">SSL 合规配置</p>
             <div class="mt-4 flex flex-wrap gap-2.5">

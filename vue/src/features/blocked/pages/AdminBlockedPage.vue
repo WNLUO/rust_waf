@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { fetchBlockedIps, unblockIp } from '@/shared/api/events'
 import {
-  fetchBlockedIps,
-  unblockIp,
-} from '@/shared/api/events'
-import { pullSafeLineBlockedIps, syncSafeLineBlockedIps } from '@/shared/api/safeline'
+  pullSafeLineBlockedIps,
+  syncSafeLineBlockedIps,
+} from '@/shared/api/safeline'
 import type { BlockedIpsResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
-import { Ban, RefreshCw } from 'lucide-vue-next'
+import { RefreshCw } from 'lucide-vue-next'
+
+const PAGE_SIZE = 30
 
 const { formatTimestamp, timeRemaining } = useFormatters()
 const loading = ref(true)
@@ -18,6 +20,7 @@ const pulling = ref(false)
 const pushing = ref(false)
 const mutatingId = ref<number | null>(null)
 const filtersReady = ref(false)
+const currentPage = ref(1)
 const error = ref('')
 const successMessage = ref('')
 const blockedPayload = ref<BlockedIpsResponse>({
@@ -37,25 +40,57 @@ useFlashMessages({
 })
 
 const blockedFilters = reactive({
+  source_scope: 'all' as 'all' | 'local' | 'remote',
   provider: 'all',
+  ip: '',
+  keyword: '',
   active_only: true,
+  blocked_from: '',
+  blocked_to: '',
   sort_by: 'blocked_at',
   sort_direction: 'desc' as 'asc' | 'desc',
 })
+
+const toUnixTimestamp = (value: string) => {
+  if (!value) return undefined
+  const parsed = new Date(value).getTime()
+  if (Number.isNaN(parsed)) return undefined
+  return Math.floor(parsed / 1000)
+}
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil((blockedPayload.value.total || 0) / PAGE_SIZE)),
+)
+const pageStart = computed(() =>
+  blockedPayload.value.total ? blockedPayload.value.offset + 1 : 0,
+)
+const pageEnd = computed(
+  () => blockedPayload.value.offset + blockedPayload.value.blocked_ips.length,
+)
 
 const loadBlockedIps = async (showLoader = false) => {
   if (showLoader) loading.value = true
   refreshing.value = true
   try {
     blockedPayload.value = await fetchBlockedIps({
-      limit: 30,
+      limit: PAGE_SIZE,
+      offset: (currentPage.value - 1) * PAGE_SIZE,
+      source_scope: blockedFilters.source_scope,
       provider:
         blockedFilters.provider === 'all' ? undefined : blockedFilters.provider,
+      ip: blockedFilters.ip.trim() || undefined,
+      keyword: blockedFilters.keyword.trim() || undefined,
       active_only: blockedFilters.active_only,
+      blocked_from: toUnixTimestamp(blockedFilters.blocked_from),
+      blocked_to: toUnixTimestamp(blockedFilters.blocked_to),
       sort_by: blockedFilters.sort_by,
       sort_direction: blockedFilters.sort_direction,
     })
     error.value = ''
+
+    if (currentPage.value > totalPages.value) {
+      currentPage.value = totalPages.value
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取封禁名单失败'
   } finally {
@@ -72,6 +107,7 @@ const runSafeLinePull = async () => {
   try {
     const response = await pullSafeLineBlockedIps()
     successMessage.value = response.message
+    currentPage.value = 1
     await loadBlockedIps()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '拉取雷池封禁失败'
@@ -98,14 +134,21 @@ const runSafeLinePush = async () => {
 
 const handleUnblock = async (id: number) => {
   mutatingId.value = id
+  error.value = ''
+  successMessage.value = ''
   try {
-    await unblockIp(id)
+    const response = await unblockIp(id)
+    successMessage.value = response.message
     await loadBlockedIps()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '解除封禁失败'
   } finally {
     mutatingId.value = null
   }
+}
+
+const goToPage = (page: number) => {
+  currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
 }
 
 onMounted(async () => {
@@ -117,65 +160,81 @@ watch(
   () => ({ ...blockedFilters }),
   () => {
     if (!filtersReady.value) return
+    currentPage.value = 1
     loadBlockedIps()
   },
   { deep: true },
 )
+
+watch(currentPage, () => {
+  if (!filtersReady.value) return
+  loadBlockedIps()
+})
 </script>
 
 <template>
   <AppLayout>
     <template #header-extra>
-      <button
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        :disabled="pulling"
-        @click="runSafeLinePull"
-      >
-        <RefreshCw :size="14" :class="{ 'animate-spin': pulling }" />
-        {{ pulling ? '拉取中...' : '拉取雷池封禁' }}
-      </button>
-      <button
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        :disabled="pushing"
-        @click="runSafeLinePush"
-      >
-        <RefreshCw :size="14" :class="{ 'animate-spin': pushing }" />
-        {{ pushing ? '推送中...' : '推送本地封禁' }}
-      </button>
-      <button
-        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        :disabled="refreshing"
-        @click="loadBlockedIps()"
-      >
-        <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
-        刷新名单
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="pulling"
+          @click="runSafeLinePull"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': pulling }" />
+          {{ pulling ? '拉取中' : '拉取雷池' }}
+        </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="pushing"
+          @click="runSafeLinePush"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': pushing }" />
+          {{ pushing ? '推送中' : '推送本地' }}
+        </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="refreshing"
+          @click="loadBlockedIps()"
+        >
+          <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
+          刷新
+        </button>
+      </div>
     </template>
 
-    <div class="space-y-6">
-      <div
-        class="flex flex-wrap gap-3 rounded-[28px] border border-white/70 bg-white/60 p-4"
-      >
-        <label
-          class="inline-flex items-center gap-2 rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+    <div class="space-y-3">
+      <div class="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+        <select
+          v-model="blockedFilters.source_scope"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
-          <input
-            v-model="blockedFilters.active_only"
-            type="checkbox"
-            class="accent-blue-600"
-          />
-          仅显示有效封禁
-        </label>
+          <option value="all">全部范围</option>
+          <option value="local">仅本地</option>
+          <option value="remote">仅远端</option>
+        </select>
         <select
           v-model="blockedFilters.provider"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="all">全部来源</option>
           <option value="safeline">雷池</option>
         </select>
+        <input
+          v-model="blockedFilters.ip"
+          type="text"
+          placeholder="IP"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+        <input
+          v-model="blockedFilters.keyword"
+          type="text"
+          placeholder="关键词"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
         <select
           v-model="blockedFilters.sort_by"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="blocked_at">按封禁时间</option>
           <option value="expires_at">按到期时间</option>
@@ -183,81 +242,132 @@ watch(
         </select>
         <select
           v-model="blockedFilters.sort_direction"
-          class="rounded-[18px] border border-slate-200 bg-white px-3 py-2 text-sm text-stone-700"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
         >
           <option value="desc">降序</option>
           <option value="asc">升序</option>
         </select>
       </div>
 
-      <div v-if="loading" class="text-sm text-slate-500">
-        正在加载封禁名单...
+      <div class="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
+        <label
+          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+        >
+          <input
+            v-model="blockedFilters.active_only"
+            type="checkbox"
+            class="accent-blue-600"
+          />
+          仅有效
+        </label>
+        <input
+          v-model="blockedFilters.blocked_from"
+          type="datetime-local"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
+        <input
+          v-model="blockedFilters.blocked_to"
+          type="datetime-local"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+        />
       </div>
 
-      <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <article
-          v-for="ip in blockedPayload.blocked_ips"
-          :key="ip.id"
-          class="rounded-xl border border-white/80 bg-white/78 p-4 shadow-[0_14px_40px_rgba(90,60,30,0.07)]"
+      <div v-if="loading" class="text-sm text-slate-500">加载中...</div>
+
+      <div
+        v-else
+        class="overflow-hidden rounded-md border border-slate-200 bg-white"
+      >
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[980px] border-collapse text-left text-sm">
+            <thead class="bg-slate-50 text-slate-600">
+              <tr>
+                <th class="px-3 py-2 font-medium">IP</th>
+                <th class="px-3 py-2 font-medium">来源</th>
+                <th class="px-3 py-2 font-medium">原因</th>
+                <th class="px-3 py-2 font-medium">封禁时间</th>
+                <th class="px-3 py-2 font-medium">到期</th>
+                <th class="px-3 py-2 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="ip in blockedPayload.blocked_ips"
+                :key="ip.id"
+                class="border-t border-slate-200 align-top text-slate-800"
+              >
+                <td class="px-3 py-2 font-mono text-xs text-slate-900">
+                  {{ ip.ip }}
+                </td>
+                <td class="px-3 py-2">
+                  <div class="space-y-1 text-xs">
+                    <div class="text-slate-900">{{ ip.provider || 'local' }}</div>
+                    <div v-if="ip.provider_remote_id" class="text-slate-500">
+                      ID: {{ ip.provider_remote_id }}
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2 text-sm text-slate-900">
+                  <div class="max-w-[420px] break-all">{{ ip.reason }}</div>
+                </td>
+                <td class="px-3 py-2 text-xs text-slate-600">
+                  {{ formatTimestamp(ip.blocked_at) }}
+                </td>
+                <td class="px-3 py-2 text-xs text-slate-600">
+                  <div>{{ formatTimestamp(ip.expires_at) }}</div>
+                  <div>{{ timeRemaining(ip.expires_at) }}</div>
+                </td>
+                <td class="px-3 py-2">
+                  <button
+                    v-if="!ip.provider || ip.provider === 'safeline'"
+                    class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    :disabled="mutatingId === ip.id"
+                    @click="handleUnblock(ip.id)"
+                  >
+                    {{
+                      mutatingId === ip.id
+                        ? '处理中'
+                        : ip.provider === 'safeline'
+                          ? '雷池解封'
+                          : '解除封禁'
+                    }}
+                  </button>
+                  <span v-else class="text-xs text-slate-500">不可操作</span>
+                </td>
+              </tr>
+              <tr v-if="!blockedPayload.blocked_ips.length">
+                <td colspan="6" class="px-3 py-6 text-center text-sm text-slate-500">
+                  无数据
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-600"
         >
-          <div class="flex items-start justify-between gap-4">
-            <div
-              class="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/10 text-red-600"
-            >
-              <Ban :size="22" />
-            </div>
+          <div>
+            {{ pageStart }}-{{ pageEnd }} / {{ blockedPayload.total }}
+          </div>
+          <div class="flex items-center gap-2">
             <button
-              v-if="!ip.provider || ip.provider === 'safeline'"
-              :disabled="mutatingId === ip.id"
-              class="rounded-full border border-emerald-500/20 px-3 py-2 text-xs text-emerald-600 transition hover:bg-emerald-500/10"
-              @click="handleUnblock(ip.id)"
+              class="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
+              :disabled="currentPage <= 1"
+              @click="goToPage(currentPage - 1)"
             >
-              {{
-                mutatingId === ip.id
-                  ? '处理中...'
-                  : ip.provider === 'safeline'
-                    ? '雷池解封'
-                    : '解除封禁'
-              }}
+              上一页
             </button>
-            <span
-              v-else
-              class="rounded-full border border-slate-200 px-3 py-2 text-xs text-slate-500"
+            <span>{{ currentPage }} / {{ totalPages }}</span>
+            <button
+              class="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
+              :disabled="currentPage >= totalPages"
+              @click="goToPage(currentPage + 1)"
             >
-              外部回流
-            </span>
+              下一页
+            </button>
           </div>
-
-          <h3 class="mt-3 font-mono text-2xl font-semibold text-stone-900">
-            {{ ip.ip }}
-          </h3>
-          <p v-if="ip.provider" class="mt-2 text-xs text-blue-700">
-            来源：{{ ip.provider }}
-            <span v-if="ip.provider_remote_id">
-              / 远端 ID：{{ ip.provider_remote_id }}</span
-            >
-          </p>
-          <p class="mt-3 text-sm text-slate-500">
-            封禁时间：{{ formatTimestamp(ip.blocked_at) }}
-          </p>
-          <p class="mt-2 text-sm text-slate-500">
-            到期时间：{{ formatTimestamp(ip.expires_at) }}
-          </p>
-          <p class="mt-1 text-xs text-slate-500">
-            剩余：{{ timeRemaining(ip.expires_at) }}
-          </p>
-
-          <div class="mt-3 rounded-xl bg-slate-50 p-4">
-            <p class="text-xs tracking-wide text-slate-500">封禁原因</p>
-            <p class="mt-2 text-sm leading-6 text-stone-800">{{ ip.reason }}</p>
-          </div>
-        </article>
-        <p
-          v-if="!blockedPayload.blocked_ips.length"
-          class="text-sm text-slate-500"
-        >
-          当前没有处于封禁状态的地址。
-        </p>
+        </div>
       </div>
     </div>
   </AppLayout>

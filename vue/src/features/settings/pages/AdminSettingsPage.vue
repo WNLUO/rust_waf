@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import AdminSettingsGlobalSection from '@/features/settings/components/AdminSettingsGlobalSection.vue'
 import AdminSettingsSystemSection from '@/features/settings/components/AdminSettingsSystemSection.vue'
 import AdminUploadCertificateDialog from '@/features/settings/components/AdminUploadCertificateDialog.vue'
 import { useAdminSettings } from '@/features/settings/composables/useAdminSettings'
@@ -87,7 +86,6 @@ useFlashMessages({
           @update:system-settings="Object.assign(systemSettings, $event)"
         />
 
-        <AdminSettingsGlobalSection />
       </div>
     </div>
 

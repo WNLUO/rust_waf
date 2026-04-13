@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import CyberCard from '@/shared/ui/CyberCard.vue'
 import type { L4ConfigForm } from '@/features/l4/utils/adminL4'
 
 const props = defineProps<{
@@ -13,7 +12,6 @@ const emit = defineEmits<{
 const numberFieldClass = 'l4-inline-field text-sm text-stone-700'
 const numberLabelClass = 'l4-inline-label'
 const numberInputClass = 'l4-inline-input'
-const numberHintClass = 'l4-inline-hint'
 
 function patchForm(patch: Partial<L4ConfigForm>) {
   emit('update:form', { ...props.form, ...patch })
@@ -21,57 +19,35 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 </script>
 
 <template>
-  <CyberCard
-    title="L4 防护配置"
-    sub-title="保存到数据库后，后端会立即刷新运行中的 L4 实例。"
-  >
-    <div class="grid gap-3 md:grid-cols-2">
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-stone-700"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <p class="font-medium text-stone-900">启用 DDoS 防护</p>
-            <p class="mt-1 text-xs leading-6 text-slate-500">
-              关闭后仍会保留页面配置，但运行时不会做 DDoS 判定。
-            </p>
-          </div>
-          <input
-            :checked="form.ddos_protection_enabled"
-            type="checkbox"
-            class="h-5 w-5 accent-blue-600"
-            @change="
-              patchForm({
-                ddos_protection_enabled: ($event.target as HTMLInputElement)
-                  .checked,
-              })
-            "
-          />
-        </div>
+  <section class="space-y-3">
+    <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      <label class="l4-toggle-field text-sm text-stone-700">
+        <span class="font-medium">启用 DDoS 防护</span>
+        <input
+          :checked="form.ddos_protection_enabled"
+          type="checkbox"
+          class="h-5 w-5 accent-blue-600"
+          @change="
+            patchForm({
+              ddos_protection_enabled: ($event.target as HTMLInputElement)
+                .checked,
+            })
+          "
+        />
       </label>
 
-      <label
-        class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-stone-700"
-      >
-        <div class="flex items-center justify-between gap-4">
-          <div>
-            <p class="font-medium text-stone-900">高级 DDoS 判定</p>
-            <p class="mt-1 text-xs leading-6 text-slate-500">
-              额外使用更长窗口观测持续连接洪泛。
-            </p>
-          </div>
-          <input
-            :checked="form.advanced_ddos_enabled"
-            type="checkbox"
-            class="h-5 w-5 accent-blue-600"
-            @change="
-              patchForm({
-                advanced_ddos_enabled: ($event.target as HTMLInputElement)
-                  .checked,
-              })
-            "
-          />
-        </div>
+      <label class="l4-toggle-field text-sm text-stone-700">
+        <span class="font-medium">高级 DDoS 判定</span>
+        <input
+          :checked="form.advanced_ddos_enabled"
+          type="checkbox"
+          class="h-5 w-5 accent-blue-600"
+          @change="
+            patchForm({
+              advanced_ddos_enabled: ($event.target as HTMLInputElement).checked,
+            })
+          "
+        />
       </label>
 
       <label :class="numberFieldClass">
@@ -90,9 +66,6 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p :class="numberHintClass">
-          超过阈值后，连接限流器会拒绝来源地址的新连接。
-        </p>
       </label>
 
       <label :class="numberFieldClass">
@@ -111,9 +84,6 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p :class="numberHintClass">
-          用于判定 1 秒窗口内是否出现连接洪泛。
-        </p>
       </label>
 
       <label :class="numberFieldClass">
@@ -132,9 +102,6 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p :class="numberHintClass">
-          连接跟踪器能同时维护的来源地址数量。
-        </p>
       </label>
 
       <label :class="numberFieldClass">
@@ -153,9 +120,6 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p :class="numberHintClass">
-          本地限流器允许同时保留的封禁 IP 数量。
-        </p>
       </label>
 
       <label :class="numberFieldClass">
@@ -172,9 +136,6 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p :class="numberHintClass">
-          连接窗口、限流计数和过期封禁的清理周期参考值。
-        </p>
       </label>
 
       <label :class="numberFieldClass">
@@ -193,21 +154,13 @@ function patchForm(patch: Partial<L4ConfigForm>) {
             })
           "
         />
-        <p :class="numberHintClass">
-          影响四层 Bloom Filter 的容量规模，实际值会按运行档位归一化。
-        </p>
       </label>
     </div>
 
-    <div class="mt-6 space-y-4">
-      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
-        <p class="mt-1 text-xs leading-6 text-slate-500">
-          这些参数决定 L4 分桶在正常、可疑和高风险状态下的连接预算与事件承压上限。
-        </p>
-      </div>
+    <div class="space-y-2 border-t border-slate-200 pt-3">
+      <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
 
-      <div class="grid gap-3 md:grid-cols-2">
+      <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         <label :class="numberFieldClass">
           <span :class="numberLabelClass">事件通道容量</span>
           <input
@@ -354,14 +307,11 @@ function patchForm(patch: Partial<L4ConfigForm>) {
         </label>
       </div>
 
-      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <p class="text-sm font-medium text-stone-900">过载缩放与延迟</p>
-        <p class="mt-1 text-xs leading-6 text-slate-500">
-          用于控制高负载下预算缩放、软延迟、硬延迟和拒绝新连接的切换边界。
-        </p>
-      </div>
+      <p class="border-t border-slate-200 pt-3 text-sm font-medium text-stone-900">
+        过载缩放与延迟
+      </p>
 
-      <div class="grid gap-3 md:grid-cols-2">
+      <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         <label :class="numberFieldClass">
           <span :class="numberLabelClass">高过载预算缩放 (%)</span>
           <input
@@ -545,87 +495,45 @@ function patchForm(patch: Partial<L4ConfigForm>) {
         </label>
       </div>
     </div>
-  </CyberCard>
+  </section>
 </template>
 
 <style scoped>
 .l4-inline-field {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.62rem 0.72rem;
-  border-radius: 0.9rem;
-  border: 1px solid rgb(226 232 240);
-  background: linear-gradient(
-    180deg,
-    rgba(248, 250, 252, 0.9) 0%,
-    rgba(241, 245, 249, 0.7) 100%
-  );
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.l4-inline-field:hover {
-  border-color: rgb(203 213 225);
-}
-
-.l4-inline-field:focus-within {
-  border-color: rgba(59, 130, 246, 0.45);
-  background: rgb(248 250 252);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .l4-inline-label {
   color: rgb(100 116 139);
-  font-size: 0.76rem;
-  font-weight: 600;
-  line-height: 1.35;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .l4-inline-input {
-  width: 100%;
-  border-radius: 0.72rem;
+  width: 5rem;
+  border-radius: 0.375rem;
   border: 1px solid rgb(203 213 225);
-  background: rgb(255 255 255);
-  padding: 0.52rem 0.72rem;
+  background: transparent;
+  padding: 0.25rem 0.5rem;
   font-size: 0.875rem;
   color: rgb(41 37 36);
   outline: none;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+  text-align: right;
+  transition: border-color 0.2s ease;
 }
 
 .l4-inline-input:focus {
   border-color: rgba(59, 130, 246, 0.65);
-  box-shadow:
-    0 0 0 3px rgba(59, 130, 246, 0.12),
-    inset 0 1px 0 rgba(148, 163, 184, 0.08);
 }
 
-.l4-inline-hint {
-  margin-top: 0.1rem;
-  color: rgb(100 116 139);
-  font-size: 0.74rem;
-  line-height: 1.3;
-}
-
-@media (min-width: 768px) {
-  .l4-inline-field {
-    grid-template-columns: minmax(0, 10.25rem) minmax(0, 1fr);
-    align-items: center;
-    column-gap: 0.75rem;
-  }
-
-  .l4-inline-label {
-    text-align: right;
-  }
-
-  .l4-inline-hint {
-    grid-column: 2;
-    margin-top: 0.05rem;
-  }
+.l4-toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 </style>

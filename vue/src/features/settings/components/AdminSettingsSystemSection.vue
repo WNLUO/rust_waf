@@ -255,41 +255,41 @@ const safeLineAutoSyncInterval = computed({
         <div class="mt-4 border-t border-slate-100 pt-3">
           <p class="mb-3 text-sm font-semibold text-stone-900">雷池接入参数</p>
 
-          <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <label class="space-y-1 md:col-span-2 xl:col-span-2">
-              <span class="text-xs font-medium text-slate-500">雷池地址</span>
+          <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2">
+              <span class="font-medium whitespace-nowrap">雷池地址</span>
               <input
                 v-model="safeLineBaseUrl"
                 type="text"
                 placeholder="https://127.0.0.1:9443"
-                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
-            <label class="space-y-1 md:col-span-2 xl:col-span-2">
-              <span class="text-xs font-medium text-slate-500">API Token</span>
+            <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2">
+              <span class="font-medium whitespace-nowrap">API Token</span>
               <input
                 v-model="safeLineApiToken"
                 type="password"
                 placeholder="API-TOKEN"
-                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
-            <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">雷池账号</span>
+            <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+              <span class="font-medium whitespace-nowrap">雷池账号</span>
               <input
                 v-model="safeLineUsername"
                 type="text"
                 placeholder="用户名"
-                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
               />
             </label>
-            <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">雷池密码</span>
+            <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+              <span class="font-medium whitespace-nowrap">雷池密码</span>
               <input
                 v-model="safeLinePassword"
                 type="password"
                 placeholder="密码"
-                class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
               />
             </label>
 

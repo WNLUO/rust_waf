@@ -217,12 +217,12 @@ onMounted(loadSettings)
           决定网关从连接、真实来源 IP Header 或代理协议中识别真实来源。
         </p>
 
-        <div class="mt-4 grid gap-3 lg:grid-cols-[15rem_minmax(0,1fr)]">
-          <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500">获取方式</span>
+        <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 items-start">
+          <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2 lg:col-span-1">
+            <span class="font-medium whitespace-nowrap">获取方式</span>
             <select
               v-model="form.source_ip_strategy"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
             >
               <option value="connection">从网络连接中获取</option>
               <option value="x_forwarded_for_first">
@@ -242,25 +242,23 @@ onMounted(loadSettings)
             </select>
           </label>
 
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="space-y-1.5">
-              <span class="text-xs font-medium text-slate-500">真实来源 IP Header</span>
-              <input
-                v-model="form.custom_source_ip_header"
-                class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-                type="text"
-                placeholder="例如 x-cdn-real-ip"
-              />
-            </label>
-            <label class="space-y-1.5">
-              <span class="text-xs font-medium text-slate-500">可信代理 CIDR</span>
-              <textarea
-                v-model="trustedProxyCidrsText"
-                class="min-h-[6rem] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-                placeholder="每行一个，如 10.0.0.0/8"
-              />
-            </label>
-          </div>
+          <label class="space-y-1.5">
+            <span class="text-xs font-medium text-slate-500">真实来源 IP Header</span>
+            <input
+              v-model="form.custom_source_ip_header"
+              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              type="text"
+              placeholder="例如 x-cdn-real-ip"
+            />
+          </label>
+          <label class="space-y-1.5 md:col-span-2 lg:col-span-1">
+            <span class="text-xs font-medium text-slate-500">可信代理 CIDR</span>
+            <textarea
+              v-model="trustedProxyCidrsText"
+              class="min-h-[6rem] w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              placeholder="每行一个，如 10.0.0.0/8"
+            />
+          </label>
         </div>
       </section>
 
@@ -279,35 +277,40 @@ onMounted(loadSettings)
 
       <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p class="text-sm font-semibold text-stone-900">SSL 合规配置</p>
-        <div class="mt-4 flex flex-wrap gap-2.5">
-          <label
-            v-for="protocol in ['TLSv1.2', 'TLSv1.3']"
-            :key="protocol"
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-          >
+        <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 items-start">
+          <div class="flex items-center gap-4 text-sm text-stone-700 md:col-span-2">
+            <span class="font-medium whitespace-nowrap">SSL 协议版本</span>
+            <div class="flex flex-wrap gap-4">
+              <label
+                v-for="protocol in ['TLSv1.2', 'TLSv1.3']"
+                :key="protocol"
+                class="inline-flex items-center gap-1.5"
+              >
+                <input
+                  :checked="form.ssl_protocols.includes(protocol)"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                  @change="
+                    toggleSslProtocol(
+                      protocol,
+                      ($event.target as HTMLInputElement).checked,
+                    )
+                  "
+                />
+                {{ protocol }}
+              </label>
+            </div>
+          </div>
+          <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2 lg:col-span-1">
+            <span class="font-medium whitespace-nowrap">SSL Ciphers</span>
             <input
-              :checked="form.ssl_protocols.includes(protocol)"
-              type="checkbox"
-              class="h-4 w-4 accent-blue-600"
-              @change="
-                toggleSslProtocol(
-                  protocol,
-                  ($event.target as HTMLInputElement).checked,
-                )
-              "
+              v-model="form.ssl_ciphers"
+              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
+              type="text"
+              placeholder="留空则沿用默认"
             />
-            {{ protocol }}
           </label>
         </div>
-        <label class="mt-4 block space-y-1.5">
-          <span class="text-xs font-medium text-slate-500">SSL Ciphers</span>
-          <input
-            v-model="form.ssl_ciphers"
-            class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-            type="text"
-            placeholder="留空则沿用默认"
-          />
-        </label>
       </section>
 
       <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -343,23 +346,23 @@ onMounted(loadSettings)
           <input v-model="form.enable_ntlm" type="checkbox" class="h-4 w-4 accent-blue-600" />
           启用 NTLM 认证
         </label>
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+        <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+          <span class="font-medium">应用不存在时返回自置证书</span>
           <input v-model="form.fallback_self_signed_certificate" type="checkbox" class="h-4 w-4 accent-blue-600" />
-          应用不存在时返回自置证书
         </label>
       </div>
 
-      <div class="mt-4 grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+      <div class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+        <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+          <span class="font-medium">代理时修改请求中的 Host 头</span>
           <input v-model="form.rewrite_host_enabled" type="checkbox" class="h-4 w-4 accent-blue-600" />
-          代理时修改请求中的 Host 头
         </label>
-        <label class="space-y-1.5">
-          <span class="text-xs text-slate-500">Host 头</span>
+        <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+          <span class="font-medium whitespace-nowrap">Host 头</span>
           <input
             v-model="form.rewrite_host_value"
             :disabled="!form.rewrite_host_enabled"
-            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-50"
+            class="w-24 flex-1 rounded border border-slate-200 px-2 py-1 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-50 text-right"
             type="text"
             placeholder="$http_host"
           />
@@ -427,3 +430,4 @@ onMounted(loadSettings)
     </template>
   </section>
 </template>
+ate>

@@ -682,21 +682,14 @@ const safelineResponseHeadersText = computed({
       </div>
 
       <div class="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <label
-          class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
-        >
-          <span class="flex items-center justify-between gap-3">
-            <span class="font-medium">启用响应接管</span>
-            <input
-              v-model="safelineInterceptEnabled"
-              type="checkbox"
-              class="h-4 w-4 accent-blue-600"
-            />
-          </span>
-          <span class="mt-2 block text-xs leading-6 text-slate-500"
-            >默认开启后，雷池拦截响应会先由 Rust 接管，再决定对外如何返回。</span
-          >
-        </label>
+        <label class="l7-toggle-field text-sm text-stone-700">
+        <span class="font-medium">启用响应接管</span>
+        <input
+          v-model="safelineInterceptEnabled"
+          type="checkbox"
+          class="h-4 w-4 accent-blue-600"
+        />
+      </label>
         <div
           class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
         >
@@ -909,18 +902,13 @@ const safelineResponseHeadersText = computed({
             <span class="text-sm text-stone-800">允许连接迁移</span>
           </span>
         </label>
-        <label class="text-sm text-stone-700">
-          TLS 1.3
-          <span
-            class="mt-2 flex items-center gap-3 rounded-[18px] border border-slate-200 bg-white px-4 py-3"
-          >
-            <input
-              v-model="http3Tls13Enabled"
-              type="checkbox"
-              class="h-4 w-4 accent-blue-600"
-            />
-            <span class="text-sm text-stone-800">启用 TLS 1.3</span>
-          </span>
+        <label class="l7-toggle-field text-sm text-stone-700">
+          <span class="font-medium">TLS 1.3</span>
+          <input
+            v-model="http3Tls13Enabled"
+            type="checkbox"
+            class="h-4 w-4 accent-blue-600"
+          />
         </label>
       </div>
     </div>
@@ -929,39 +917,48 @@ const safelineResponseHeadersText = computed({
 
 <style scoped>
 .l7-inline-field {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.62rem 0.72rem;
-  border-radius: 0.9rem;
-  border: 1px solid rgb(226 232 240);
-  background: linear-gradient(
-    180deg,
-    rgba(248, 250, 252, 0.9) 0%,
-    rgba(241, 245, 249, 0.7) 100%
-  );
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   color: rgb(100 116 139);
-  font-size: 0.76rem;
-  font-weight: 600;
-  line-height: 1.35;
-  transition:
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.l7-inline-field:hover {
-  border-color: rgb(203 213 225);
+.l7-inline-field :deep(input),
+.l7-inline-field :deep(select),
+.l7-inline-field :deep(.numberInputClass) {
+  width: 5rem;
+  margin-top: 0 !important;
+  border-radius: 0.375rem;
+  border: 1px solid rgb(203 213 225);
+  background: transparent;
+  padding: 0.25rem 0.5rem;
+  box-shadow: none;
+  text-align: right;
+  transition: border-color 0.2s ease;
 }
 
-.l7-inline-field:focus-within {
-  border-color: rgba(59, 130, 246, 0.45);
-  background: rgb(248 250 252);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+.l7-inline-field :deep(input[type="text"]) {
+  width: 10rem;
+  text-align: left;
 }
 
-@media (min-width: 768px) {
-  .l7-inline-field {
-    grid-template-columns: minmax(0, 10.25rem) minmax(0, 1fr);
+.l7-inline-field :deep(input:focus),
+.l7-inline-field :deep(select:focus) {
+  border-color: rgba(59, 130, 246, 0.65);
+}
+
+.l7-toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+</style>
+nmax(0, 1fr);
     align-items: center;
     column-gap: 0.75rem;
   }
@@ -986,5 +983,12 @@ const safelineResponseHeadersText = computed({
   box-shadow:
     0 0 0 3px rgba(59, 130, 246, 0.12),
     inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+</style>
+, 246, 0.12),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+</style>
+a(148, 163, 184, 0.08);
 }
 </style>

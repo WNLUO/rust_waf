@@ -13,7 +13,7 @@ pub struct Http2Config {
 impl Default for Http2Config {
     fn default() -> Self {
         Self {
-            enabled: false, // 默认关闭HTTP/2.0，需要显式启用
+            enabled: true,
             max_concurrent_streams: 100,
             max_frame_size: 16384,
             enable_priorities: true,
@@ -47,7 +47,7 @@ pub struct L7Config {
     pub proxy_write_timeout_ms: u64,
     #[serde(default = "default_proxy_read_timeout_ms")]
     pub proxy_read_timeout_ms: u64,
-    #[serde(default)]
+    #[serde(default = "default_upstream_healthcheck_enabled")]
     pub upstream_healthcheck_enabled: bool,
     #[serde(default = "default_upstream_healthcheck_interval_secs")]
     pub upstream_healthcheck_interval_secs: u64,
@@ -171,6 +171,10 @@ const fn default_proxy_write_timeout_ms() -> u64 {
 
 const fn default_proxy_read_timeout_ms() -> u64 {
     10_000
+}
+
+const fn default_upstream_healthcheck_enabled() -> bool {
+    true
 }
 
 const fn default_upstream_healthcheck_interval_secs() -> u64 {
@@ -320,7 +324,7 @@ impl Default for L7Config {
             proxy_connect_timeout_ms: default_proxy_connect_timeout_ms(),
             proxy_write_timeout_ms: default_proxy_write_timeout_ms(),
             proxy_read_timeout_ms: default_proxy_read_timeout_ms(),
-            upstream_healthcheck_enabled: true,
+            upstream_healthcheck_enabled: default_upstream_healthcheck_enabled(),
             upstream_healthcheck_interval_secs: default_upstream_healthcheck_interval_secs(),
             upstream_healthcheck_timeout_ms: default_upstream_healthcheck_timeout_ms(),
             upstream_failure_mode: UpstreamFailureMode::default(),

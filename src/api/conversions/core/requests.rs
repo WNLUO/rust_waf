@@ -237,7 +237,9 @@ impl SettingsUpdateRequest {
         current.console_settings.notification_level = self.notification_level;
         current.console_settings.retain_days = self.retain_days;
         current.console_settings.notes = self.notes;
-        current.integrations.safeline = self.safeline.into_config();
+        current.integrations.safeline = self
+            .safeline
+            .into_config(&current.integrations.safeline);
 
         Ok(current.normalized())
     }
@@ -279,8 +281,8 @@ impl GlobalSettingsUpdateRequest {
 }
 
 impl SafeLineSettingsRequest {
-    pub(crate) fn into_config(self) -> SafeLineConfig {
-        SafeLineConfig {
+    pub(crate) fn into_config(self, previous: &SafeLineConfig) -> SafeLineConfig {
+        let mut config = SafeLineConfig {
             enabled: true,
             auto_sync_events: self.auto_sync_events,
             auto_sync_blocked_ips_push: self.auto_sync_blocked_ips_push,
@@ -298,7 +300,82 @@ impl SafeLineSettingsRequest {
             blocklist_sync_path: "/api/open/ipgroup".to_string(),
             blocklist_delete_path: "/api/open/ipgroup".to_string(),
             blocklist_ip_group_ids: Vec::new(),
+        };
+
+        let was_configured = safeline_is_configured(previous);
+        let is_configured = safeline_is_configured(&config);
+        let auto_sync_all_disabled = !config.auto_sync_events
+            && !config.auto_sync_blocked_ips_push
+            && !config.auto_sync_blocked_ips_pull;
+
+        if !was_configured && is_configured && auto_sync_all_disabled {
+            config.auto_sync_events = true;
+            config.auto_sync_blocked_ips_push = true;
+            config.auto_sync_blocked_ips_pull = true;
         }
+
+        config
+    }
+}
+
+fn safeline_is_configured(config: &SafeLineConfig) -> bool {
+    let has_base_url = !config.base_url.trim().is_empty();
+    let has_token = !config.api_token.trim().is_empty();
+    let has_user_password =
+        !config.username.trim().is_empty() && !config.password.trim().is_empty();
+
+    has_base_url && (has_token || has_user_password)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safeline_first_time_configuration_enables_auto_sync_defaults() {
+        let request = SafeLineSettingsRequest {
+            auto_sync_events: false,
+            auto_sync_blocked_ips_push: false,
+            auto_sync_blocked_ips_pull: false,
+            auto_sync_interval_secs: 300,
+            base_url: "https://safeline.example.com".to_string(),
+            api_token: "token".to_string(),
+            username: String::new(),
+            password: String::new(),
+            verify_tls: false,
+        };
+
+        let config = request.into_config(&SafeLineConfig::default());
+
+        assert!(config.auto_sync_events);
+        assert!(config.auto_sync_blocked_ips_push);
+        assert!(config.auto_sync_blocked_ips_pull);
+    }
+
+    #[test]
+    fn safeline_existing_configuration_respects_manual_auto_sync_disable() {
+        let request = SafeLineSettingsRequest {
+            auto_sync_events: false,
+            auto_sync_blocked_ips_push: false,
+            auto_sync_blocked_ips_pull: false,
+            auto_sync_interval_secs: 300,
+            base_url: "https://safeline.example.com".to_string(),
+            api_token: "token".to_string(),
+            username: String::new(),
+            password: String::new(),
+            verify_tls: false,
+        };
+
+        let previous = SafeLineConfig {
+            base_url: "https://safeline.example.com".to_string(),
+            api_token: "token".to_string(),
+            ..SafeLineConfig::default()
+        };
+        let config = request.into_config(&previous);
+
+        assert!(!config.auto_sync_events);
+        assert!(!config.auto_sync_blocked_ips_push);
+        assert!(!config.auto_sync_blocked_ips_pull);
     }
 }
 

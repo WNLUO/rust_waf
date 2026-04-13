@@ -151,4 +151,28 @@ mod tests {
             vec!["TLSv1.2".to_string(), "TLSv1.3".to_string()]
         );
     }
+
+    #[test]
+    fn default_config_enables_standard_profile_and_api() {
+        let config = Config::default();
+
+        assert_eq!(config.runtime_profile, RuntimeProfile::Standard);
+        assert!(config.api_enabled);
+        assert!(config.bloom_enabled);
+        assert!(config.l4_bloom_false_positive_verification);
+        assert!(config.l7_bloom_false_positive_verification);
+        assert!(config.l4_config.advanced_ddos_enabled);
+        assert!(config.l7_config.upstream_healthcheck_enabled);
+        assert!(config.l7_config.http2_config.enabled);
+        assert!(config.gateway_config.enable_http1_0);
+        assert!(config.gateway_config.http_to_https_redirect);
+        assert!(config.gateway_config.enable_hsts);
+        assert!(config.gateway_config.rewrite_host_enabled);
+        assert!(config.gateway_config.rewrite_x_forwarded_for);
+        assert!(config.gateway_config.enable_ntlm);
+        assert!(config.gateway_config.fallback_self_signed_certificate);
+        assert!(config.integrations.safeline.auto_sync_events);
+        assert!(config.integrations.safeline.auto_sync_blocked_ips_push);
+        assert!(config.integrations.safeline.auto_sync_blocked_ips_pull);
+    }
 }

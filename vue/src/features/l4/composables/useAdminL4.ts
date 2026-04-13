@@ -34,9 +34,9 @@ export function useAdminL4() {
   const lastUpdated = ref<number | null>(null)
   const meta = ref({
     runtime_enabled: false,
-    bloom_enabled: false,
-    bloom_false_positive_verification: false,
-    runtime_profile: 'minimal',
+    bloom_enabled: true,
+    bloom_false_positive_verification: true,
+    runtime_profile: 'standard',
   })
 
   const configForm = reactive<L4ConfigForm>(createDefaultL4ConfigForm())

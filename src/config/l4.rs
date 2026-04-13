@@ -129,7 +129,7 @@ impl Default for L4Config {
     fn default() -> Self {
         Self {
             ddos_protection_enabled: true,
-            advanced_ddos_enabled: false,
+            advanced_ddos_enabled: true,
             connection_rate_limit: 100,
             syn_flood_threshold: 50,
             max_tracked_ips: 4096,

@@ -129,6 +129,6 @@ impl RuntimeProfile {
 
 impl Default for RuntimeProfile {
     fn default() -> Self {
-        Self::Minimal
+        Self::Standard
     }
 }

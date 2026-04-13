@@ -96,17 +96,17 @@ impl Default for GatewayConfig {
             enable_http1_0: default_enable_http1_0(),
             source_ip_strategy: SourceIpStrategy::default(),
             custom_source_ip_header: String::new(),
-            http_to_https_redirect: false,
-            enable_hsts: false,
-            rewrite_host_enabled: false,
+            http_to_https_redirect: true,
+            enable_hsts: true,
+            rewrite_host_enabled: true,
             rewrite_host_value: String::new(),
             add_x_forwarded_headers: default_add_x_forwarded_headers(),
-            rewrite_x_forwarded_for: false,
+            rewrite_x_forwarded_for: true,
             support_gzip: default_support_gzip(),
             support_brotli: default_support_brotli(),
             support_sse: default_support_sse(),
-            enable_ntlm: false,
-            fallback_self_signed_certificate: false,
+            enable_ntlm: true,
+            fallback_self_signed_certificate: true,
             ssl_protocols: default_ssl_protocols(),
             ssl_ciphers: String::new(),
             header_operations: Vec::new(),
@@ -115,7 +115,7 @@ impl Default for GatewayConfig {
 }
 
 const fn default_enable_http1_0() -> bool {
-    false
+    true
 }
 
 const fn default_add_x_forwarded_headers() -> bool {

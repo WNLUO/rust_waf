@@ -11,7 +11,7 @@ export type L4ConfigForm = Omit<
 export function createDefaultL4ConfigForm(): L4ConfigForm {
   return {
     ddos_protection_enabled: true,
-    advanced_ddos_enabled: false,
+    advanced_ddos_enabled: true,
     connection_rate_limit: 100,
     syn_flood_threshold: 50,
     max_tracked_ips: 4096,

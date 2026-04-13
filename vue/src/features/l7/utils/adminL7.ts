@@ -10,7 +10,7 @@ export const listFieldClass =
 
 export function createDefaultL7ConfigForm(): L7ConfigForm {
   return {
-    runtime_profile: 'minimal',
+    runtime_profile: 'standard',
     max_request_size: 8192,
     real_ip_headers: [],
     trusted_proxy_cidrs: [],
@@ -25,13 +25,13 @@ export function createDefaultL7ConfigForm(): L7ConfigForm {
     upstream_healthcheck_timeout_ms: 1000,
     upstream_failure_mode: 'fail_open',
     bloom_filter_scale: 1,
-    http2_enabled: false,
+    http2_enabled: true,
     http2_max_concurrent_streams: 100,
     http2_max_frame_size: 16384,
     http2_enable_priorities: true,
     http2_initial_window_size: 65535,
-    bloom_enabled: false,
-    bloom_false_positive_verification: false,
+    bloom_enabled: true,
+    bloom_false_positive_verification: true,
     listen_addrs: ['0.0.0.0:8080'],
     upstream_endpoint: '',
     http3_enabled: false,

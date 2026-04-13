@@ -285,12 +285,55 @@ onMounted(() => {
           trend="down"
           :series="metricsHistory.latency"
         />
-        <MetricWidget
-          label="启用规则"
-          :value="dashboard?.metrics.active_rules || 0"
-          :hint="`规则总数 ${formatNumber(dashboard?.rules.rules.length || 0)} / 成功率 ${successRate}`"
-          :icon="Database"
-        />
+        <div
+          class="relative overflow-hidden rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-stone-50 p-3 shadow-sm"
+        >
+          <div
+            class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 via-amber-300 to-transparent"
+          ></div>
+          <div class="absolute right-0 top-0 p-3 opacity-20">
+            <Database :size="20" class="text-amber-700" />
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-xs font-medium text-amber-700/80">启用规则</p>
+                <h3 class="mt-1 text-xl font-semibold text-slate-900">
+                  {{ dashboard?.metrics.active_rules || 0 }}
+                </h3>
+              </div>
+              <StatusBadge
+                :text="
+                  (dashboard?.metrics.active_rules || 0) > 0 ? '配置生效中' : '待启用'
+                "
+                :type="
+                  (dashboard?.metrics.active_rules || 0) > 0 ? 'warning' : 'muted'
+                "
+              />
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 rounded-lg border border-amber-100 bg-white/80 p-3">
+              <div>
+                <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                  规则总数
+                </p>
+                <p class="mt-1 text-lg font-semibold text-slate-900">
+                  {{ formatNumber(dashboard?.rules.rules.length || 0) }}
+                </p>
+              </div>
+              <div>
+                <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                  代理成功率
+                </p>
+                <p class="mt-1 text-lg font-semibold text-slate-900">
+                  {{ successRate }}
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
       </section>
 
       <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -324,29 +367,10 @@ onMounted(() => {
       <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <AdminEventMapSection :traffic-map="trafficMap" />
 
-        <CyberCard title="运行摘要" sub-title="落库、代理与健康检查核心数据">
+        <CyberCard title="运行摘要">
           <div class="grid gap-4">
             <div class="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-              <div class="flex items-center justify-between">
-                <p class="text-sm text-amber-700">L7 CC 防护摘要</p>
-                <StatusBadge
-                  :text="
-                    (dashboard?.metrics.l7_cc_challenges || 0) +
-                      (dashboard?.metrics.l7_cc_blocks || 0) >
-                    0
-                      ? '近期开启动作'
-                      : '暂无处置'
-                  "
-                  :type="
-                    (dashboard?.metrics.l7_cc_challenges || 0) +
-                      (dashboard?.metrics.l7_cc_blocks || 0) >
-                    0
-                      ? 'warning'
-                      : 'muted'
-                  "
-                />
-              </div>
-              <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+              <div class="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p class="text-xs text-amber-700/80">Challenge / 429</p>
                   <p class="mt-1 text-2xl font-semibold text-stone-900">
@@ -370,21 +394,17 @@ onMounted(() => {
               </div>
             </div>
 
-            <div class="rounded-xl bg-slate-50 p-4">
-              <div class="flex items-center justify-between">
-                <p class="text-sm text-slate-500">代理结果</p>
-                <ArrowUpRight :size="18" class="text-blue-700" />
-              </div>
-              <div class="mt-4 grid grid-cols-2 gap-4">
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <div class="grid grid-cols-2 gap-3">
                 <div>
                   <p class="text-xs text-slate-500">成功</p>
-                  <p class="mt-1 text-2xl font-semibold text-stone-900">
+                  <p class="mt-0.5 text-2xl font-semibold text-stone-900">
                     {{ formatNumber(dashboard?.metrics.proxy_successes || 0) }}
                   </p>
                 </div>
                 <div>
-                  <p class="text-xs text-slate-500">失败</p>
-                  <p class="mt-1 text-2xl font-semibold text-red-600">
+                  <p class="text-xs text-slate-500">上游代理失败</p>
+                  <p class="mt-0.5 text-2xl font-semibold text-red-600">
                     {{ formatNumber(dashboard?.metrics.proxy_failures || 0) }}
                   </p>
                 </div>
@@ -393,23 +413,38 @@ onMounted(() => {
 
             <div class="grid gap-4 md:grid-cols-2">
               <div class="rounded-xl border border-slate-200 p-4">
-                <p class="text-xs text-slate-500">健康检查成功</p>
-                <p class="mt-2 text-2xl font-semibold text-emerald-600">
-                  {{
-                    formatNumber(
-                      dashboard?.metrics.upstream_healthcheck_successes || 0,
-                    )
-                  }}
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-xs text-slate-500">上游状态</p>
+                  <StatusBadge
+                    :text="dashboard?.health.upstream_healthy ? '可用' : '异常'"
+                    :type="dashboard?.health.upstream_healthy ? 'success' : 'error'"
+                  />
+                </div>
+                <p class="mt-2 text-2xl font-semibold text-slate-900">
+                  {{ dashboard?.health.upstream_healthy ? 'Healthy' : 'Degraded' }}
                 </p>
               </div>
               <div class="rounded-xl border border-slate-200 p-4">
-                <p class="text-xs text-slate-500">健康检查失败</p>
-                <p class="mt-2 text-2xl font-semibold text-red-600">
+                <p class="text-xs text-slate-500">最近检查</p>
+                <p class="mt-2 text-lg font-semibold text-slate-900">
                   {{
-                    formatNumber(
-                      dashboard?.metrics.upstream_healthcheck_failures || 0,
-                    )
+                    dashboard?.health.upstream_last_check_at
+                      ? new Intl.DateTimeFormat('zh-CN', {
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        }).format(new Date(dashboard.health.upstream_last_check_at * 1000))
+                      : '暂无记录'
                   }}
+                </p>
+                <p
+                  v-if="dashboard?.health.upstream_last_error"
+                  class="mt-2 truncate text-xs text-red-600"
+                  :title="dashboard.health.upstream_last_error"
+                >
+                  {{ dashboard.health.upstream_last_error }}
                 </p>
               </div>
             </div>

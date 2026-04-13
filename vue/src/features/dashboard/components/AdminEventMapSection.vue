@@ -300,7 +300,7 @@ onBeforeUnmount(() => {
           <span class="text-blue-400 font-mono">{{ snapshot.activeNodeCount }}</span>
         </div>
         <div class="flex justify-between items-center text-[10px] text-slate-400">
-          <span>拦截请求</span>
+          <span>拦截流</span>
           <span class="text-red-400 font-mono">{{ snapshot.blockedFlowCount }}</span>
         </div>
         <div class="flex justify-between items-center text-[10px] text-slate-400">

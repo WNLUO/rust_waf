@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { PencilLine, RefreshCw } from 'lucide-vue-next'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import { syncModeLabel, type SiteRowDraft } from '@/features/sites/utils/adminSites'
+import type { SiteRowDraft } from '@/features/sites/utils/adminSites'
 
 defineProps<{
   filteredRows: SiteRowDraft[]
-  formatTimestamp: (timestamp?: number | null) => string
   hasSavedConfig: boolean
   localActionLabel: (row: SiteRowDraft) => string
   rowSyncText: (row: SiteRowDraft) => string
@@ -41,6 +40,7 @@ const emit = defineEmits<{
         >
           <tr>
             <th class="px-4 py-3 font-medium">站点</th>
+            <th class="px-4 py-3 font-medium">主域名</th>
             <th class="px-4 py-3 font-medium">本地配置</th>
             <th class="px-4 py-3 font-medium">同步状态</th>
             <th class="px-4 py-3 font-medium">操作</th>
@@ -79,49 +79,27 @@ const emit = defineEmits<{
                     compact
                   />
                 </div>
-                <p class="text-xs text-slate-500">
-                  主域名：{{ row.local_primary_hostname || '未设置' }}
-                </p>
-                <div class="flex flex-wrap gap-2 text-xs text-slate-400">
-                  <span v-if="row.local_site_id" class="font-mono">
-                    LOCAL:{{ row.local_site_id }}
-                  </span>
-                  <span v-if="row.safeline_site_id" class="font-mono">
-                    SAFE:{{ row.safeline_site_id }}
-                  </span>
-                </div>
               </div>
             </td>
 
             <td class="px-4 py-3 align-top">
+              <p
+                class="max-w-[220px] truncate text-xs text-slate-500"
+                :title="row.local_primary_hostname || '未设置'"
+              >
+                {{ row.local_primary_hostname || '未设置' }}
+              </p>
+            </td>
+
+            <td class="px-4 py-3 align-top">
               <div class="grid gap-1.5 text-xs text-slate-500">
-                <p class="truncate" :title="row.local_hostnames.join(' / ')">
-                  Hostnames：{{
-                    row.local_hostnames.length
-                      ? row.local_hostnames.join(' / ')
-                      : '未设置'
-                  }}
-                </p>
-                <p>入口端口：由站点页顶部“全局入口”统一配置</p>
                 <p class="truncate" :title="row.local_upstreams.join(' / ')">
-                  Upstream：{{
+                  {{
                     row.local_upstreams.length
                       ? row.local_upstreams.join(' / ')
                       : '未设置'
                   }}
                 </p>
-                <div class="flex flex-wrap gap-2 pt-1">
-                  <StatusBadge
-                    :text="`同步 ${syncModeLabel(row.local_sync_mode)}`"
-                    type="info"
-                    compact
-                  />
-                  <StatusBadge
-                    :text="row.saved ? '映射已保存' : '未保存映射'"
-                    :type="row.saved ? 'success' : 'muted'"
-                    compact
-                  />
-                </div>
               </div>
             </td>
 
@@ -148,12 +126,6 @@ const emit = defineEmits<{
                 <div v-else class="text-xs text-slate-500">
                   {{ rowSyncText(row) }}
                 </div>
-                <p
-                  v-if="row.link_last_synced_at"
-                  class="text-xs text-slate-400"
-                >
-                  最近同步：{{ formatTimestamp(row.link_last_synced_at) }}
-                </p>
               </div>
             </td>
 

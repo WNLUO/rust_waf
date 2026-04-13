@@ -93,7 +93,6 @@ async function handleClearSiteData() {
       <AdminSitesTableSection
         v-else
         :filtered-rows="filteredRows"
-        :format-timestamp="formatTimestamp"
         :has-saved-config="hasSavedConfig"
         :local-action-label="localActionLabel"
         :row-sync-text="rowSyncText"

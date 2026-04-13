@@ -281,14 +281,14 @@ pub(crate) async fn handle_http1_connection(
                     .await?;
             }
         } else {
-            context.traffic_map.record_ingress(
-                traffic_source_ip.clone(),
-                request_dump.len(),
-                false,
-            );
             let upstream_addr = select_upstream_target(matched_site.as_ref());
             if let Some(upstream_addr) = upstream_addr.as_deref() {
                 if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
+                    context.traffic_map.record_ingress(
+                        traffic_source_ip.clone(),
+                        request_dump.len(),
+                        false,
+                    );
                     if let Some(metrics) = context.metrics.as_ref() {
                         metrics.record_fail_close_rejection();
                     }
@@ -347,6 +347,11 @@ pub(crate) async fn handle_http1_connection(
                             response,
                         ) {
                             UpstreamResponseDisposition::Forward(response) => {
+                                context.traffic_map.record_ingress(
+                                    traffic_source_ip.clone(),
+                                    request_dump.len(),
+                                    false,
+                                );
                                 write_http1_upstream_response(
                                     context.as_ref(),
                                     &mut stream,
@@ -355,6 +360,11 @@ pub(crate) async fn handle_http1_connection(
                                 .await?;
                             }
                             UpstreamResponseDisposition::Custom(response) => {
+                                context.traffic_map.record_ingress(
+                                    traffic_source_ip.clone(),
+                                    request_dump.len(),
+                                    true,
+                                );
                                 let response = resolve_runtime_custom_response(&response);
                                 let body = body_for_request(&request, &response.body);
                                 let mut headers = response.headers.clone();
@@ -387,12 +397,22 @@ pub(crate) async fn handle_http1_connection(
                                 }
                             }
                             UpstreamResponseDisposition::Drop => {
+                                context.traffic_map.record_ingress(
+                                    traffic_source_ip.clone(),
+                                    request_dump.len(),
+                                    true,
+                                );
                                 let _ = stream.shutdown().await;
                                 return Ok(());
                             }
                         }
                     }
                     Err(err) => {
+                        context.traffic_map.record_ingress(
+                            traffic_source_ip.clone(),
+                            request_dump.len(),
+                            false,
+                        );
                         if let Some(metrics) = context.metrics.as_ref() {
                             metrics.record_proxy_failure();
                         }
@@ -412,6 +432,11 @@ pub(crate) async fn handle_http1_connection(
                     }
                 }
             } else if matched_site.is_some() {
+                context.traffic_map.record_ingress(
+                    traffic_source_ip.clone(),
+                    request_dump.len(),
+                    false,
+                );
                 http1_handler
                     .write_response(
                         &mut stream,
@@ -421,6 +446,11 @@ pub(crate) async fn handle_http1_connection(
                     )
                     .await?;
             } else if should_reject_unmatched_site(context.as_ref(), &request) {
+                context.traffic_map.record_ingress(
+                    traffic_source_ip.clone(),
+                    request_dump.len(),
+                    false,
+                );
                 if config.console_settings.drop_unmatched_requests {
                     let _ = stream.shutdown().await;
                     return Ok(());
@@ -429,6 +459,11 @@ pub(crate) async fn handle_http1_connection(
                     .write_response(&mut stream, 404, "Not Found", b"site not found")
                     .await?;
             } else {
+                context.traffic_map.record_ingress(
+                    traffic_source_ip.clone(),
+                    request_dump.len(),
+                    false,
+                );
                 let metrics = context.metrics_snapshot();
                 let metrics_line = metrics
                     .map(|snapshot| {

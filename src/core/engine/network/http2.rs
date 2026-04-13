@@ -255,13 +255,13 @@ pub(crate) async fn handle_http2_connection(
                     }
 
                     let upstream_addr = select_upstream_target(matched_site.as_ref());
-                    context.traffic_map.record_ingress(
-                        traffic_source_ip.clone(),
-                        request_dump.len(),
-                        false,
-                    );
                     if let Some(upstream_addr) = upstream_addr.as_deref() {
                         if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
+                            context.traffic_map.record_ingress(
+                                traffic_source_ip.clone(),
+                                request_dump.len(),
+                                false,
+                            );
                             if let Some(metrics) = context.metrics.as_ref() {
                                 metrics.record_fail_close_rejection();
                             }
@@ -306,6 +306,11 @@ pub(crate) async fn handle_http2_connection(
                                     response,
                                 ) {
                                     UpstreamResponseDisposition::Forward(response) => {
+                                        context.traffic_map.record_ingress(
+                                            traffic_source_ip.clone(),
+                                            request_dump.len(),
+                                            false,
+                                        );
                                         let mut headers = response.headers.clone();
                                         apply_response_policies(
                                             context.as_ref(),
@@ -319,6 +324,11 @@ pub(crate) async fn handle_http2_connection(
                                         })
                                     }
                                     UpstreamResponseDisposition::Custom(response) => {
+                                        context.traffic_map.record_ingress(
+                                            traffic_source_ip.clone(),
+                                            request_dump.len(),
+                                            true,
+                                        );
                                         let response = resolve_runtime_custom_response(&response);
                                         let body = body_for_request(&request, &response.body);
                                         let mut headers = response.headers.clone();
@@ -334,6 +344,11 @@ pub(crate) async fn handle_http2_connection(
                                         })
                                     }
                                     UpstreamResponseDisposition::Drop => {
+                                        context.traffic_map.record_ingress(
+                                            traffic_source_ip.clone(),
+                                            request_dump.len(),
+                                            true,
+                                        );
                                         Err(crate::protocol::ProtocolError::ParseError(
                                             "SafeLine blocked upstream response dropped"
                                                 .to_string(),
@@ -342,6 +357,11 @@ pub(crate) async fn handle_http2_connection(
                                 };
                             }
                             Err(err) => {
+                                context.traffic_map.record_ingress(
+                                    traffic_source_ip.clone(),
+                                    request_dump.len(),
+                                    false,
+                                );
                                 if let Some(metrics) = context.metrics.as_ref() {
                                     metrics.record_proxy_failure();
                                 }
@@ -360,12 +380,22 @@ pub(crate) async fn handle_http2_connection(
                             }
                         }
                     } else if matched_site.is_some() {
+                        context.traffic_map.record_ingress(
+                            traffic_source_ip.clone(),
+                            request_dump.len(),
+                            false,
+                        );
                         return Ok(Http2Response {
                             status_code: 502,
                             headers: vec![],
                             body: b"site upstream not configured".to_vec(),
                         });
                     } else if should_reject_unmatched_site(context.as_ref(), &request) {
+                        context.traffic_map.record_ingress(
+                            traffic_source_ip.clone(),
+                            request_dump.len(),
+                            false,
+                        );
                         if config.console_settings.drop_unmatched_requests {
                             return Err(crate::protocol::ProtocolError::ParseError(
                                 "unmatched site dropped".to_string(),
@@ -378,6 +408,11 @@ pub(crate) async fn handle_http2_connection(
                         });
                     }
 
+                    context.traffic_map.record_ingress(
+                        traffic_source_ip.clone(),
+                        request_dump.len(),
+                        false,
+                    );
                     let metrics = context.metrics_snapshot();
                     let metrics_line = metrics
                         .map(|snapshot| {

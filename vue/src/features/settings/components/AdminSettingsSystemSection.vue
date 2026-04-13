@@ -173,10 +173,8 @@ const safeLineAutoSyncInterval = computed({
           <p class="text-sm font-semibold text-stone-900">核心参数</p>
         </div>
 
-        <div class="mt-4 space-y-3">
-          <label
-            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
-          >
+        <div class="mt-4 grid gap-3 xl:grid-cols-4">
+          <label class="flex items-center gap-2.5 px-1 py-1.5">
             <span class="shrink-0 text-xs font-medium text-slate-500"
               >统一 HTTP 入口端口</span
             >
@@ -185,12 +183,10 @@ const safeLineAutoSyncInterval = computed({
               type="text"
               inputmode="numeric"
               placeholder="例如 8080"
-              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
+              class="w-full max-w-[9.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
             />
           </label>
-          <label
-            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
-          >
+          <label class="flex items-center gap-2.5 px-1 py-1.5">
             <span class="shrink-0 text-xs font-medium text-slate-500"
               >统一 HTTPS 入口端口</span
             >
@@ -199,31 +195,27 @@ const safeLineAutoSyncInterval = computed({
               type="text"
               inputmode="numeric"
               placeholder="例如 660，可留空关闭 HTTPS 入口"
-              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
+              class="w-full max-w-[9.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
             />
           </label>
-          <label
-            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
-          >
+          <label class="flex items-center gap-2.5 px-1 py-1.5">
             <span class="shrink-0 text-xs font-medium text-slate-500"
               >控制面 API 地址</span
             >
             <input
               v-model="apiEndpoint"
               type="text"
-              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
+              class="w-full max-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
             />
           </label>
-          <label
-            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
-          >
+          <label class="flex items-center gap-2.5 px-1 py-1.5">
             <span class="shrink-0 text-xs font-medium text-slate-500"
               >默认证书</span
             >
             <select
               v-model="defaultCertificateId"
               :disabled="savingDefaultCertificate"
-              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
+              class="w-full max-w-[11rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-left outline-none transition focus:border-blue-500"
               @change="emit('defaultCertificateChange', $event)"
             >
               <option :value="null">未设置</option>

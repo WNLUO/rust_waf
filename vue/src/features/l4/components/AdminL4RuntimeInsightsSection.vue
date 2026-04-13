@@ -42,6 +42,7 @@ const hasMeasuredPortBytes = (items: L4StatsPayload['per_port_stats']) =>
 
 <template>
   <div class="space-y-6">
+    <section class="grid grid-cols-1 gap-4 xl:grid-cols-3">
     <CyberCard
       title="运行摘要"
       sub-title="帮助你快速确认当前实例到底在按什么模式跑。"
@@ -171,8 +172,9 @@ const hasMeasuredPortBytes = (items: L4StatsPayload['per_port_stats']) =>
         未启用，或者运行实例还没有积累到可展示的校验数据。
       </div>
     </CyberCard>
+    </section>
 
-    <section class="space-y-4">
+    <section class="grid grid-cols-1 gap-4 xl:grid-cols-3">
       <CyberCard title="限流阈值" sub-title="用于快速复核当前保存的关键阈值。">
         <div class="space-y-3 text-sm text-stone-700">
           <div

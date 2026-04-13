@@ -40,6 +40,15 @@ fn is_benign_tls_disconnect(err: &anyhow::Error) -> bool {
     let message = err.to_string();
     message.contains("peer closed connection without sending TLS close_notify")
         || message.contains("unexpected eof")
+        || is_benign_http2_disconnect_message(&message)
+}
+
+fn is_benign_http2_disconnect_message(message: &str) -> bool {
+    message.contains("HTTP/2 connection error")
+        && (message.contains("GoAway(b\"\", SETTINGS_TIMEOUT, Remote)")
+            || message.contains("GoAway(b\"\", NO_ERROR, Remote)")
+            || message.contains("broken pipe")
+            || message.contains("connection closed"))
 }
 
 impl EntryListenerRuntime {

@@ -106,11 +106,12 @@ impl Http2Handler {
             let handler = handler.clone();
             let client_ip = client_ip.clone();
             async move {
+                let is_head_request = request.method() == http::Method::HEAD;
                 let unified =
                     Http2Handler::request_to_unified(request, &client_ip, listener_port, max_size)
                         .await?;
                 let response = handler(unified).await?;
-                Ok::<_, ProtocolError>(Http2Handler::build_response(response))
+                Ok::<_, ProtocolError>(Http2Handler::build_response(response, is_head_request))
             }
         });
 
@@ -198,10 +199,18 @@ impl Http2Handler {
         Ok(unified)
     }
 
-    fn build_response(response: Http2Response) -> Response<Http2ResponseBody> {
+    fn build_response(
+        response: Http2Response,
+        is_head_request: bool,
+    ) -> Response<Http2ResponseBody> {
         let status =
             StatusCode::from_u16(response.status_code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let body_len = response.body.len();
+        let body = if is_head_request {
+            Bytes::new()
+        } else {
+            Bytes::from(response.body)
+        };
         let mut builder = Response::builder().status(status);
         let mut has_content_type = false;
         let mut has_content_length = false;
@@ -227,16 +236,14 @@ impl Http2Handler {
             builder = builder.header("content-length", body_len.to_string());
         }
 
-        builder
-            .body(Full::new(Bytes::from(response.body)))
-            .unwrap_or_else(|err| {
-                warn!("Failed to build HTTP/2 response: {}", err);
-                Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header("content-type", "text/plain; charset=utf-8")
-                    .body(Full::from(Bytes::from_static(b"internal server error")))
-                    .expect("fallback HTTP/2 response must be valid")
-            })
+        builder.body(Full::new(body)).unwrap_or_else(|err| {
+            warn!("Failed to build HTTP/2 response: {}", err);
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Full::from(Bytes::from_static(b"internal server error")))
+                .expect("fallback HTTP/2 response must be valid")
+        })
     }
 }
 
@@ -402,16 +409,19 @@ mod tests {
 
     #[test]
     fn test_build_response_filters_hop_by_hop_headers() {
-        let response = Http2Handler::build_response(Http2Response {
-            status_code: 200,
-            headers: vec![
-                ("transfer-encoding".to_string(), "chunked".to_string()),
-                ("connection".to_string(), "keep-alive".to_string()),
-                ("keep-alive".to_string(), "timeout=5".to_string()),
-                ("content-type".to_string(), "text/plain".to_string()),
-            ],
-            body: b"ok".to_vec(),
-        });
+        let response = Http2Handler::build_response(
+            Http2Response {
+                status_code: 200,
+                headers: vec![
+                    ("transfer-encoding".to_string(), "chunked".to_string()),
+                    ("connection".to_string(), "keep-alive".to_string()),
+                    ("keep-alive".to_string(), "timeout=5".to_string()),
+                    ("content-type".to_string(), "text/plain".to_string()),
+                ],
+                body: b"ok".to_vec(),
+            },
+            false,
+        );
 
         assert_eq!(response.status(), StatusCode::OK);
         assert!(response.headers().get("transfer-encoding").is_none());
@@ -422,17 +432,35 @@ mod tests {
 
     #[test]
     fn test_build_response_rewrites_duplicate_content_length() {
-        let response = Http2Handler::build_response(Http2Response {
-            status_code: 200,
-            headers: vec![
-                ("content-length".to_string(), "999".to_string()),
-                ("content-type".to_string(), "text/plain".to_string()),
-            ],
-            body: b"ok".to_vec(),
-        });
+        let response = Http2Handler::build_response(
+            Http2Response {
+                status_code: 200,
+                headers: vec![
+                    ("content-length".to_string(), "999".to_string()),
+                    ("content-type".to_string(), "text/plain".to_string()),
+                ],
+                body: b"ok".to_vec(),
+            },
+            false,
+        );
 
         let values = response.headers().get_all("content-length");
         assert_eq!(values.iter().count(), 1);
         assert_eq!(response.headers()["content-length"], "2");
+    }
+
+    #[test]
+    fn test_head_response_keeps_content_length() {
+        let response = Http2Handler::build_response(
+            Http2Response {
+                status_code: 404,
+                headers: vec![("content-type".to_string(), "text/plain".to_string())],
+                body: b"site not found".to_vec(),
+            },
+            true,
+        );
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()["content-length"], "14");
     }
 }

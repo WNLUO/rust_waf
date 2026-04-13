@@ -78,6 +78,73 @@ pub(super) async fn list_blocked_ips_handler(
     }))
 }
 
+pub(super) async fn cleanup_expired_blocked_ips_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<BlockedIpsCleanupExpiredRequest>,
+) -> ApiResult<Json<BlockedIpsCleanupExpiredResponse>> {
+    let store = sqlite_store(&state)?;
+    let source_scope = parse_blocked_ip_source_scope_param(payload.source_scope.as_deref())
+        .map_err(ApiError::bad_request)?;
+    let provider = payload.provider.and_then(|value| {
+        let normalized = value.trim().to_string();
+        (!normalized.is_empty() && normalized != "all").then_some(normalized)
+    });
+    let expires_before = payload.expires_before.unwrap_or_else(unix_timestamp);
+    let cleanup_query = crate::storage::BlockedIpCleanupQuery {
+        source_scope,
+        provider,
+        blocked_from: payload.blocked_from,
+        blocked_to: payload.blocked_to,
+        expires_before,
+    };
+
+    let cleaned_items = store
+        .cleanup_expired_blocked_ips(&cleanup_query)
+        .await
+        .map_err(ApiError::internal)?;
+    let mut runtime_unblocked = 0_u32;
+    for item in &cleaned_items {
+        if item.provider.is_none() {
+            match item.ip.parse::<std::net::IpAddr>() {
+                Ok(ip) => {
+                    let removed = state
+                        .context
+                        .l4_inspector()
+                        .as_ref()
+                        .map(|inspector| inspector.unblock_ip(&ip))
+                        .unwrap_or(false);
+                    if removed {
+                        runtime_unblocked = runtime_unblocked.saturating_add(1);
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Failed to parse blocked IP '{}' while cleanup runtime unblock: {}",
+                        item.ip,
+                        err
+                    );
+                }
+            }
+        }
+        store.emit_blocked_ip_deleted(item.id);
+    }
+
+    let cleaned = cleaned_items.len() as u32;
+    Ok(Json(BlockedIpsCleanupExpiredResponse {
+        success: true,
+        cleaned,
+        runtime_unblocked,
+        message: if cleaned == 0 {
+            "没有匹配到可清理的过期封禁记录。".to_string()
+        } else {
+            format!(
+                "已清理 {} 条过期封禁记录，其中运行时同步解除 {} 条。",
+                cleaned, runtime_unblocked
+            )
+        },
+    }))
+}
+
 pub(super) async fn create_blocked_ip_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<BlockedIpCreateRequest>,
@@ -271,5 +338,16 @@ async fn unblock_blocked_ip(state: &ApiState, id: i64) -> ApiResult<WriteStatusR
             "Blocked IP record '{}' not found",
             id
         )))
+    }
+}
+
+fn parse_blocked_ip_source_scope_param(
+    value: Option<&str>,
+) -> Result<crate::storage::BlockedIpSourceScope, String> {
+    match value.unwrap_or("all").trim().to_ascii_lowercase().as_str() {
+        "all" => Ok(crate::storage::BlockedIpSourceScope::All),
+        "local" => Ok(crate::storage::BlockedIpSourceScope::Local),
+        "remote" => Ok(crate::storage::BlockedIpSourceScope::Remote),
+        other => Err(format!("Unsupported blocked IP source_scope '{}'", other)),
     }
 }

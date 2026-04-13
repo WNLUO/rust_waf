@@ -28,41 +28,6 @@ defineProps<{
 </script>
 
 <template>
-  <section class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <div
-      class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
-    >
-      <div class="max-w-3xl">
-        <p class="text-sm tracking-wider text-blue-700">HTTP 接入管理</p>
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <StatusBadge
-          :text="runtimeStatus ? '运行中' : '未启用'"
-          :type="runtimeStatus ? 'success' : 'warning'"
-        />
-        <StatusBadge :text="`配置档位 ${runtimeProfileLabel}`" type="info" />
-        <StatusBadge
-          :text="configForm.bloom_enabled ? 'Bloom 已启用' : 'Bloom 未启用'"
-          :type="configForm.bloom_enabled ? 'info' : 'muted'"
-        />
-        <StatusBadge
-          :text="configForm.cc_defense.enabled ? 'CC 守卫开启' : 'CC 守卫关闭'"
-          :type="configForm.cc_defense.enabled ? 'warning' : 'muted'"
-        />
-        <StatusBadge
-          :text="
-            configForm.bloom_false_positive_verification
-              ? '误判校验开启'
-              : '误判校验关闭'
-          "
-          :type="
-            configForm.bloom_false_positive_verification ? 'success' : 'muted'
-          "
-        />
-      </div>
-    </div>
-  </section>
-
   <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
     <MetricWidget
       label="请求侧策略拦截"
@@ -122,8 +87,8 @@ defineProps<{
 
   <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
     <CyberCard title="协议支持" sub-title="HTTP 协议与监听入口摘要">
-      <div class="space-y-4">
-        <div class="flex flex-wrap gap-3">
+      <template #header-action>
+        <div class="self-end flex flex-wrap justify-end gap-2">
           <StatusBadge
             v-for="item in protocolTags"
             :key="item.text"
@@ -131,6 +96,8 @@ defineProps<{
             :type="item.type"
           />
         </div>
+      </template>
+      <div class="space-y-4">
         <div class="grid gap-3 md:grid-cols-2">
           <div class="rounded-xl bg-slate-50 p-4">
             <p class="text-xs tracking-wide text-slate-500">监听地址</p>
@@ -183,8 +150,8 @@ defineProps<{
       title="代理链路摘要"
       sub-title="上游地址、健康状态与真实来源解析"
     >
-      <div class="space-y-4">
-        <div class="flex flex-wrap gap-3">
+      <template #header-action>
+        <div class="self-end flex flex-wrap justify-end gap-2">
           <StatusBadge
             :text="`上游 ${upstreamStatusText}`"
             :type="upstreamStatusType"
@@ -201,6 +168,8 @@ defineProps<{
             "
           />
         </div>
+      </template>
+      <div class="space-y-4">
         <div>
           <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
             <p class="text-xs tracking-wide text-slate-500">可信代理网段</p>
@@ -238,8 +207,8 @@ defineProps<{
       title="HTTP/3 运行状态"
       sub-title="编译能力、证书就绪度与监听启动结果"
     >
-      <div class="space-y-5">
-        <div class="flex flex-wrap gap-3">
+      <template #header-action>
+        <div class="self-end flex flex-wrap justify-end gap-2">
           <StatusBadge
             :text="`状态 ${http3StatusLabel}`"
             :type="http3StatusType"
@@ -255,6 +224,8 @@ defineProps<{
             :type="stats?.http3_listener_started ? 'success' : 'muted'"
           />
         </div>
+      </template>
+      <div class="space-y-5">
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
             <p class="text-xs tracking-wide text-slate-500">配置启用</p>

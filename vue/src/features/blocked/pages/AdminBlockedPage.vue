@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
+  cleanupExpiredBlockedIps,
   createBlockedIp,
   fetchBlockedIps,
   unblockIp,
@@ -19,7 +20,7 @@ import {
   useAdminRealtimeState,
   useAdminRealtimeTopic,
 } from '@/shared/realtime/adminRealtime'
-import { RefreshCw } from 'lucide-vue-next'
+import { RefreshCw, X } from 'lucide-vue-next'
 
 const PAGE_SIZE = 30
 
@@ -31,6 +32,8 @@ const pushing = ref(false)
 const mutatingId = ref<number | null>(null)
 const creatingBlockedIp = ref(false)
 const batchUnblocking = ref(false)
+const cleaningExpired = ref(false)
+const showBlockDialog = ref(false)
 const filtersReady = ref(false)
 const currentPage = ref(1)
 const error = ref('')
@@ -74,9 +77,26 @@ const blockedFilters = reactive({
 })
 const blockForm = reactive({
   ip: '',
-  reason: 'manual block',
-  duration_secs: 3600,
+  reason_preset: 'manual' as 'manual' | 'scanner' | 'flood' | 'payload' | 'custom',
+  reason_custom: '',
+  duration_preset: '1h' as '15m' | '1h' | '6h' | '24h' | '7d' | 'custom',
+  duration_custom_minutes: 60,
 })
+
+const durationPresetSeconds: Record<'15m' | '1h' | '6h' | '24h' | '7d', number> = {
+  '15m': 15 * 60,
+  '1h': 60 * 60,
+  '6h': 6 * 60 * 60,
+  '24h': 24 * 60 * 60,
+  '7d': 7 * 24 * 60 * 60,
+}
+
+const reasonPresetLabel: Record<'manual' | 'scanner' | 'flood' | 'payload', string> = {
+  manual: '人工处置',
+  scanner: '可疑扫描行为',
+  flood: '高频请求/连接洪泛',
+  payload: '恶意请求载荷',
+}
 
 const toUnixTimestamp = (value: string) => {
   if (!value) return undefined
@@ -164,6 +184,25 @@ const syncStateItems = computed(() => [
     state: safeLineSyncState.value.blocked_ips_delete,
   },
 ])
+
+const blockDurationSeconds = computed(() => {
+  if (blockForm.duration_preset === 'custom') {
+    const minutes = Math.max(1, Math.floor(Number(blockForm.duration_custom_minutes) || 0))
+    return minutes * 60
+  }
+  return durationPresetSeconds[blockForm.duration_preset]
+})
+
+const blockReason = computed(() => {
+  if (blockForm.reason_preset === 'custom') {
+    return blockForm.reason_custom.trim()
+  }
+  return reasonPresetLabel[blockForm.reason_preset]
+})
+
+const blockExpiresAtPreview = computed(() =>
+  Math.floor(Date.now() / 1000) + blockDurationSeconds.value,
+)
 
 const matchesRealtimeFilters = (
   item: BlockedIpsResponse['blocked_ips'][number],
@@ -274,9 +313,18 @@ const loadSafeLineSyncState = async () => {
   }
 }
 
+const openBlockDialog = () => {
+  showBlockDialog.value = true
+}
+
+const closeBlockDialog = () => {
+  if (creatingBlockedIp.value) return
+  showBlockDialog.value = false
+}
+
 const handleCreateBlockedIp = async () => {
   const ip = blockForm.ip.trim()
-  const reason = blockForm.reason.trim()
+  const reason = blockReason.value
   if (!ip) {
     error.value = '请填写要封禁的 IP'
     return
@@ -293,12 +341,14 @@ const handleCreateBlockedIp = async () => {
     const response = await createBlockedIp({
       ip,
       reason,
-      duration_secs: Number(blockForm.duration_secs) || undefined,
+      duration_secs: blockDurationSeconds.value,
     })
     successMessage.value = response.message
     blockForm.ip = ''
+    blockForm.reason_custom = ''
     currentPage.value = 1
     await loadBlockedIps()
+    closeBlockDialog()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '新增封禁失败'
   } finally {
@@ -356,6 +406,26 @@ const handleBatchUnblock = async () => {
     error.value = e instanceof Error ? e.message : '批量解封失败'
   } finally {
     batchUnblocking.value = false
+  }
+}
+
+const handleCleanupExpired = async () => {
+  cleaningExpired.value = true
+  error.value = ''
+  successMessage.value = ''
+  try {
+    const response = await cleanupExpiredBlockedIps({
+      source_scope: blockedFilters.source_scope,
+      provider: blockedFilters.provider === 'all' ? undefined : blockedFilters.provider,
+      blocked_from: toUnixTimestamp(blockedFilters.blocked_from),
+      blocked_to: toUnixTimestamp(blockedFilters.blocked_to),
+    })
+    successMessage.value = response.message
+    await loadBlockedIps()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '清理过期封禁失败'
+  } finally {
+    cleaningExpired.value = false
   }
 }
 
@@ -486,6 +556,19 @@ watch(currentPage, () => {
           刷新
         </button>
         <button
+          class="inline-flex items-center gap-2 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+          @click="openBlockDialog"
+        >
+          手动封禁
+        </button>
+        <button
+          class="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-700 hover:bg-amber-100 disabled:opacity-60"
+          :disabled="cleaningExpired"
+          @click="handleCleanupExpired"
+        >
+          {{ cleaningExpired ? '清理中' : '清理过期' }}
+        </button>
+        <button
           class="inline-flex items-center gap-2 rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-100 disabled:opacity-60"
           :disabled="batchUnblocking || !selectedIds.length"
           @click="handleBatchUnblock"
@@ -502,36 +585,6 @@ watch(currentPage, () => {
     </template>
 
     <div class="space-y-3">
-      <div class="grid gap-2 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-4">
-        <input
-          v-model="blockForm.ip"
-          type="text"
-          placeholder="手动封禁 IP（例：1.2.3.4）"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        />
-        <input
-          v-model="blockForm.reason"
-          type="text"
-          placeholder="封禁原因"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        />
-        <input
-          v-model.number="blockForm.duration_secs"
-          type="number"
-          min="30"
-          step="30"
-          placeholder="封禁秒数"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        />
-        <button
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-          :disabled="creatingBlockedIp"
-          @click="handleCreateBlockedIp"
-        >
-          {{ creatingBlockedIp ? '封禁中' : '手动封禁' }}
-        </button>
-      </div>
-
       <div class="grid gap-2 md:grid-cols-3">
         <div
           v-for="item in syncStateItems"
@@ -743,6 +796,109 @@ watch(currentPage, () => {
               下一页
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="showBlockDialog"
+      class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
+    >
+      <div class="absolute inset-0" @click="closeBlockDialog"></div>
+      <div class="relative z-[101] w-full max-w-xl rounded-md border border-slate-300 bg-white">
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div>
+            <div class="text-sm font-medium text-slate-900">手动封禁 IP</div>
+            <div class="text-xs text-slate-500">只需填 IP，其他优先用预设即可</div>
+          </div>
+          <button
+            class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+            :disabled="creatingBlockedIp"
+            @click="closeBlockDialog"
+          >
+            <X :size="16" />
+          </button>
+        </div>
+        <div class="space-y-3 px-4 py-3">
+          <div class="space-y-1">
+            <label class="text-xs text-slate-600">IP 地址</label>
+            <input
+              v-model="blockForm.ip"
+              type="text"
+              placeholder="例如 1.2.3.4 或 2001:db8::1"
+              class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+            />
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="space-y-1">
+              <label class="text-xs text-slate-600">封禁时长</label>
+              <select
+                v-model="blockForm.duration_preset"
+                class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+              >
+                <option value="15m">15 分钟</option>
+                <option value="1h">1 小时（推荐）</option>
+                <option value="6h">6 小时</option>
+                <option value="24h">24 小时</option>
+                <option value="7d">7 天</option>
+                <option value="custom">自定义</option>
+              </select>
+            </div>
+            <div v-if="blockForm.duration_preset === 'custom'" class="space-y-1">
+              <label class="text-xs text-slate-600">自定义时长（分钟）</label>
+              <input
+                v-model.number="blockForm.duration_custom_minutes"
+                type="number"
+                min="1"
+                step="1"
+                class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+              />
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-xs text-slate-600">封禁原因</label>
+            <select
+              v-model="blockForm.reason_preset"
+              class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+            >
+              <option value="manual">人工处置（推荐）</option>
+              <option value="scanner">可疑扫描行为</option>
+              <option value="flood">高频请求/连接洪泛</option>
+              <option value="payload">恶意请求载荷</option>
+              <option value="custom">自定义</option>
+            </select>
+          </div>
+          <div v-if="blockForm.reason_preset === 'custom'" class="space-y-1">
+            <label class="text-xs text-slate-600">自定义原因</label>
+            <input
+              v-model="blockForm.reason_custom"
+              type="text"
+              placeholder="请输入备注，例如：运维人工封禁"
+              class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+            />
+          </div>
+
+          <div class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            预计解封时间：{{ formatTimestamp(blockExpiresAtPreview) }}
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3">
+          <button
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            :disabled="creatingBlockedIp"
+            @click="closeBlockDialog"
+          >
+            取消
+          </button>
+          <button
+            class="rounded-md border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+            :disabled="creatingBlockedIp"
+            @click="handleCreateBlockedIp"
+          >
+            {{ creatingBlockedIp ? '封禁中...' : '确认封禁' }}
+          </button>
         </div>
       </div>
     </div>

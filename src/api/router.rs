@@ -63,6 +63,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             post(events_handlers::batch_unblock_blocked_ips_handler),
         )
         .route(
+            "/blocked-ips/cleanup-expired",
+            post(events_handlers::cleanup_expired_blocked_ips_handler),
+        )
+        .route(
             "/blocked-ips/:id",
             delete(events_handlers::delete_blocked_ip_handler),
         )

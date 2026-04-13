@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import {
-  fetchSecurityEvents,
-  markSecurityEventHandled,
-} from '@/shared/api/events'
+import { fetchSecurityEvents } from '@/shared/api/events'
 import { syncSafeLineEvents } from '@/shared/api/safeline'
 import type { SecurityEventItem, SecurityEventsResponse } from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
@@ -24,7 +21,6 @@ const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
 const loading = ref(true)
 const refreshing = ref(false)
 const syncing = ref(false)
-const mutatingId = ref<number | null>(null)
 const error = ref('')
 const successMessage = ref('')
 const filtersReady = ref(false)
@@ -62,6 +58,52 @@ const eventsFilters = reactive({
   sort_by: 'created_at',
   sort_direction: 'desc' as 'asc' | 'desc',
 })
+const showAdvancedFiltersDialog = ref(false)
+const advancedFiltersDraft = reactive({
+  provider: 'all',
+  provider_site_id: 'all',
+  blocked_only: false,
+  created_from: '',
+  created_to: '',
+  sort_by: 'created_at',
+  sort_direction: 'desc' as 'asc' | 'desc',
+})
+
+const openAdvancedFilters = () => {
+  advancedFiltersDraft.provider = eventsFilters.provider
+  advancedFiltersDraft.provider_site_id = eventsFilters.provider_site_id
+  advancedFiltersDraft.blocked_only = eventsFilters.blocked_only
+  advancedFiltersDraft.created_from = eventsFilters.created_from
+  advancedFiltersDraft.created_to = eventsFilters.created_to
+  advancedFiltersDraft.sort_by = eventsFilters.sort_by
+  advancedFiltersDraft.sort_direction = eventsFilters.sort_direction
+  showAdvancedFiltersDialog.value = true
+}
+
+const closeAdvancedFilters = () => {
+  showAdvancedFiltersDialog.value = false
+}
+
+const resetAdvancedFilters = () => {
+  advancedFiltersDraft.provider = 'all'
+  advancedFiltersDraft.provider_site_id = 'all'
+  advancedFiltersDraft.blocked_only = false
+  advancedFiltersDraft.created_from = ''
+  advancedFiltersDraft.created_to = ''
+  advancedFiltersDraft.sort_by = 'created_at'
+  advancedFiltersDraft.sort_direction = 'desc'
+}
+
+const applyAdvancedFilters = () => {
+  eventsFilters.provider = advancedFiltersDraft.provider
+  eventsFilters.provider_site_id = advancedFiltersDraft.provider_site_id
+  eventsFilters.blocked_only = advancedFiltersDraft.blocked_only
+  eventsFilters.created_from = advancedFiltersDraft.created_from
+  eventsFilters.created_to = advancedFiltersDraft.created_to
+  eventsFilters.sort_by = advancedFiltersDraft.sort_by
+  eventsFilters.sort_direction = advancedFiltersDraft.sort_direction
+  closeAdvancedFilters()
+}
 
 const toUnixTimestamp = (value: string) => {
   if (!value) return undefined
@@ -224,22 +266,6 @@ const runSafeLineSync = async () => {
   }
 }
 
-const toggleHandled = async (event: SecurityEventItem) => {
-  mutatingId.value = event.id
-  error.value = ''
-  successMessage.value = ''
-
-  try {
-    const response = await markSecurityEventHandled(event.id, !event.handled)
-    successMessage.value = response.message
-    await loadEvents()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '更新事件状态失败'
-  } finally {
-    mutatingId.value = null
-  }
-}
-
 const openPreview = (title: string, content: string | null | undefined) => {
   if (!content) return
   previewTitle.value = title
@@ -261,8 +287,8 @@ const safeLineAttackTypeMap: Record<string, string> = {
   '8': '代码注入',
   '10': '文件上传',
 }
-const REQUEST_URI_PREVIEW_LIMIT = 140
-const REQUEST_QUERY_PREVIEW_LIMIT = 72
+const REASON_PREVIEW_LIMIT = 72
+const PATH_PREVIEW_LIMIT = 48
 
 const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
   if (event.layer.toLowerCase() !== 'safeline') return null
@@ -291,6 +317,9 @@ const eventActionBadgeType = (action: string) => {
   return 'warning'
 }
 
+const shouldShowActionBadge = (action: string) =>
+  action.trim().toLowerCase() !== 'respond'
+
 const eventAttackTypeLabel = (event: SecurityEventItem) => {
   const code = getSafeLineAttackTypeCode(event)
   if (!code) return ''
@@ -313,28 +342,23 @@ const eventReasonLabel = (event: SecurityEventItem) => {
   return normalized || event.reason
 }
 
-const eventUriPreview = (uri: string | null | undefined) => {
-  if (!uri) return ''
-  if (uri.length <= REQUEST_URI_PREVIEW_LIMIT) return uri
+const truncateText = (value: string, limit: number) =>
+  value.length > limit ? `${value.slice(0, limit)}…` : value
 
-  const queryStartIndex = uri.indexOf('?')
-  if (queryStartIndex < 0) {
-    return `${uri.slice(0, REQUEST_URI_PREVIEW_LIMIT)}…`
-  }
+const eventReasonPreview = (event: SecurityEventItem) =>
+  truncateText(eventReasonLabel(event), REASON_PREVIEW_LIMIT)
 
-  const path = uri.slice(0, queryStartIndex)
-  const query = uri.slice(queryStartIndex + 1)
-  const previewQuery = query.slice(0, REQUEST_QUERY_PREVIEW_LIMIT)
-  const hasMoreQuery = query.length > REQUEST_QUERY_PREVIEW_LIMIT
+const isReasonTruncated = (event: SecurityEventItem) =>
+  eventReasonLabel(event).length > REASON_PREVIEW_LIMIT
 
-  return `${path}?${previewQuery}${hasMoreQuery ? '…' : ''} [query ${query.length} chars]`
-}
-
-const isUriTruncated = (uri: string | null | undefined) =>
-  Boolean(uri && uri.length > REQUEST_URI_PREVIEW_LIMIT)
-
-const eventRequestLine = (event: SecurityEventItem) =>
+const eventPathText = (event: SecurityEventItem) =>
   `${event.http_method || '-'}${event.uri ? ` ${event.uri}` : ''}`
+
+const eventPathPreview = (event: SecurityEventItem) =>
+  truncateText(eventPathText(event), PATH_PREVIEW_LIMIT)
+
+const isPathTruncated = (event: SecurityEventItem) =>
+  eventPathText(event).length > PATH_PREVIEW_LIMIT
 
 const siteOptions = computed(() => {
   const seen = new Map<string, string>()
@@ -488,10 +512,10 @@ watch(currentPage, () => {
     </template>
 
     <div class="space-y-3">
-      <div class="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+      <div class="flex flex-wrap items-center gap-2 xl:flex-nowrap">
         <select
           v-model="eventsFilters.layer"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          class="w-full min-w-[140px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-auto"
         >
           <option value="all">全部层级</option>
           <option value="l4">四层</option>
@@ -499,25 +523,8 @@ watch(currentPage, () => {
           <option value="safeline">雷池</option>
         </select>
         <select
-          v-model="eventsFilters.provider"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        >
-          <option value="all">全部来源</option>
-          <option value="browser_fingerprint">浏览器指纹</option>
-          <option value="safeline">雷池</option>
-        </select>
-        <select
-          v-model="eventsFilters.provider_site_id"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        >
-          <option value="all">全部雷池站点</option>
-          <option v-for="site in siteOptions" :key="site.id" :value="site.id">
-            {{ site.label }}
-          </option>
-        </select>
-        <select
           v-model="eventsFilters.action"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          class="w-full min-w-[140px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-auto"
         >
           <option value="all">全部动作</option>
           <option value="block">拦截</option>
@@ -527,7 +534,7 @@ watch(currentPage, () => {
         </select>
         <select
           v-model="eventsFilters.handled"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          class="w-full min-w-[140px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-auto"
         >
           <option value="all">全部状态</option>
           <option value="unhandled">未处理</option>
@@ -537,46 +544,14 @@ watch(currentPage, () => {
           v-model="eventsFilters.source_ip"
           type="text"
           placeholder="源 IP"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          class="w-full min-w-[180px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-[220px]"
         />
-      </div>
-
-      <div class="grid gap-2 md:grid-cols-4 xl:grid-cols-6">
-        <label
-          class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+        <button
+          class="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          @click="openAdvancedFilters"
         >
-          <input
-            v-model="eventsFilters.blocked_only"
-            type="checkbox"
-            class="accent-blue-600"
-          />
-          仅拦截
-        </label>
-        <input
-          v-model="eventsFilters.created_from"
-          type="datetime-local"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        />
-        <input
-          v-model="eventsFilters.created_to"
-          type="datetime-local"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        />
-        <select
-          v-model="eventsFilters.sort_by"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        >
-          <option value="created_at">按时间</option>
-          <option value="source_ip">按来源 IP</option>
-          <option value="dest_port">按目标端口</option>
-        </select>
-        <select
-          v-model="eventsFilters.sort_direction"
-          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
-        >
-          <option value="desc">降序</option>
-          <option value="asc">升序</option>
-        </select>
+          高级筛选
+        </button>
       </div>
 
       <div v-if="loading" class="text-sm text-slate-500">加载中...</div>
@@ -586,41 +561,39 @@ watch(currentPage, () => {
         class="overflow-hidden rounded-md border border-slate-200 bg-white"
       >
         <div class="overflow-x-auto">
-          <table class="w-full min-w-[1240px] border-collapse text-left text-sm">
+          <table class="min-w-max w-full border-collapse text-sm whitespace-nowrap">
             <thead class="bg-slate-50 text-slate-600">
               <tr>
-                <th class="px-3 py-2 font-medium">时间</th>
-                <th class="px-3 py-2 font-medium">层级/动作</th>
-                <th class="px-3 py-2 font-medium">来源</th>
-                <th class="px-3 py-2 font-medium">目标/请求</th>
-                <th class="px-3 py-2 font-medium">原因</th>
-                <th class="px-3 py-2 font-medium">状态</th>
+                <th class="px-3 py-2 text-center font-medium">时间</th>
+                <th class="px-3 py-2 text-center font-medium">层级/动作</th>
+                <th class="px-3 py-2 text-center font-medium">来源</th>
+                <th class="px-3 py-2 text-center font-medium">目标/请求</th>
+                <th class="px-3 py-2 text-center font-medium">原因</th>
+                <th class="px-3 py-2 text-center font-medium">路径</th>
               </tr>
             </thead>
             <tbody>
               <tr
                 v-for="event in eventsPayload.events"
                 :key="event.id"
-                class="border-t border-slate-200 align-top text-slate-800"
+                class="border-t border-slate-200 align-middle text-slate-800"
               >
                 <td class="px-3 py-2">
-                  <div class="space-y-1">
+                  <div class="space-y-1 text-center">
                     <div class="font-mono text-xs text-slate-900">
                       {{ formatTimestamp(event.created_at) }}
-                    </div>
-                    <div v-if="event.provider_event_id" class="text-xs text-slate-500">
-                      ID: {{ event.provider_event_id }}
                     </div>
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex flex-wrap gap-1">
+                  <div class="flex flex-nowrap justify-center gap-1">
                     <StatusBadge
                       :text="layerLabel(event.layer)"
                       :type="event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'"
                       compact
                     />
                     <StatusBadge
+                      v-if="shouldShowActionBadge(event.action)"
                       :text="eventActionLabel(event.action)"
                       :type="eventActionBadgeType(event.action)"
                       compact
@@ -634,62 +607,36 @@ watch(currentPage, () => {
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="space-y-1">
-                    <div class="font-mono text-xs text-slate-900">
-                      {{ event.source_ip }}:{{ event.source_port }}
-                    </div>
-                    <div class="text-xs text-slate-500">
-                      {{ event.provider || 'local' }}
-                    </div>
-                    <div
-                      v-if="event.provider_site_name || event.provider_site_domain"
-                      class="text-xs text-slate-500"
-                    >
-                      {{
-                        event.provider_site_name ||
-                        event.provider_site_domain
-                      }}
-                    </div>
+                  <div class="font-mono text-center text-xs text-slate-900">
+                    {{ event.source_ip }}
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="space-y-1 text-xs">
-                    <div class="font-mono text-slate-900">
-                      {{ event.dest_ip }}:{{ event.dest_port }}
-                    </div>
-                    <div class="text-slate-600">
+                  <div class="flex items-center justify-center gap-2 text-xs whitespace-nowrap">
+                    <div class="font-mono text-slate-600">
                       {{ event.protocol }}
                       <span v-if="event.http_version"> / {{ event.http_version }}</span>
                     </div>
-                    <div class="flex items-start gap-2">
-                      <div
-                        class="event-request-text font-mono text-slate-600"
-                        :title="eventRequestLine(event)"
-                      >
-                        {{ event.http_method || '-' }}
-                        <span v-if="event.uri"> {{ eventUriPreview(event.uri) }}</span>
-                      </div>
-                      <button
-                        v-if="isUriTruncated(event.uri)"
-                        class="inline-flex h-6 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50"
-                        title="查看完整请求 URI"
-                        @click="openPreview('完整请求 URI', event.uri)"
-                      >
-                        查看完整
-                      </button>
-                    </div>
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex items-start gap-2">
-                    <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-center gap-2">
+                    <div class="min-w-0">
                       <div
                         class="event-reason-text text-sm text-slate-900"
                         :title="eventReasonLabel(event)"
                       >
-                        {{ eventReasonLabel(event) }}
+                        {{ eventReasonPreview(event) }}
                       </div>
                     </div>
+                    <button
+                      v-if="isReasonTruncated(event)"
+                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
+                      title="查看完整原因"
+                      @click="openPreview('完整原因', eventReasonLabel(event))"
+                    >
+                      更多
+                    </button>
                     <button
                       v-if="event.details_json"
                       class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
@@ -701,24 +648,20 @@ watch(currentPage, () => {
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex flex-col items-start gap-2">
-                    <StatusBadge
-                      :text="event.handled ? '已处理' : '未处理'"
-                      :type="event.handled ? 'muted' : 'warning'"
-                      compact
-                    />
-                    <button
-                      class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                      :disabled="mutatingId === event.id"
-                      @click="toggleHandled(event)"
+                  <div class="flex items-center justify-center gap-2">
+                    <div
+                      class="event-path-text font-mono text-xs text-slate-700"
+                      :title="eventPathText(event)"
                     >
-                      {{
-                        mutatingId === event.id
-                          ? '处理中'
-                          : event.handled
-                            ? '标记未处理'
-                            : '标记已处理'
-                      }}
+                      {{ eventPathPreview(event) }}
+                    </div>
+                    <button
+                      v-if="isPathTruncated(event)"
+                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
+                      title="查看完整路径"
+                      @click="openPreview('完整路径', eventPathText(event))"
+                    >
+                      更多
                     </button>
                   </div>
                 </td>
@@ -760,6 +703,105 @@ watch(currentPage, () => {
     </div>
 
     <div
+      v-if="showAdvancedFiltersDialog"
+      class="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/30 px-4"
+    >
+      <div
+        class="absolute inset-0"
+        @click="closeAdvancedFilters"
+      ></div>
+      <div
+        class="relative z-[96] w-full max-w-2xl rounded-md border border-slate-300 bg-white"
+      >
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div class="text-sm font-medium text-slate-900">高级筛选</div>
+          <button
+            class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+            @click="closeAdvancedFilters"
+          >
+            <X :size="16" />
+          </button>
+        </div>
+        <div class="grid gap-3 p-4 md:grid-cols-2">
+          <select
+            v-model="advancedFiltersDraft.provider"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          >
+            <option value="all">全部来源</option>
+            <option value="browser_fingerprint">浏览器指纹</option>
+            <option value="safeline">雷池</option>
+          </select>
+          <select
+            v-model="advancedFiltersDraft.provider_site_id"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          >
+            <option value="all">全部雷池站点</option>
+            <option v-for="site in siteOptions" :key="site.id" :value="site.id">
+              {{ site.label }}
+            </option>
+          </select>
+          <label
+            class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
+          >
+            <input
+              v-model="advancedFiltersDraft.blocked_only"
+              type="checkbox"
+              class="accent-blue-600"
+            />
+            仅拦截
+          </label>
+          <select
+            v-model="advancedFiltersDraft.sort_by"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          >
+            <option value="created_at">按时间</option>
+            <option value="source_ip">按来源 IP</option>
+            <option value="dest_port">按目标端口</option>
+          </select>
+          <input
+            v-model="advancedFiltersDraft.created_from"
+            type="datetime-local"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          />
+          <input
+            v-model="advancedFiltersDraft.created_to"
+            type="datetime-local"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          />
+          <select
+            v-model="advancedFiltersDraft.sort_direction"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 md:col-span-2"
+          >
+            <option value="desc">降序</option>
+            <option value="asc">升序</option>
+          </select>
+        </div>
+        <div
+          class="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3"
+        >
+          <button
+            class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            @click="resetAdvancedFilters"
+          >
+            重置
+          </button>
+          <button
+            class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+            @click="closeAdvancedFilters"
+          >
+            取消
+          </button>
+          <button
+            class="rounded-md border border-blue-600 bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
+            @click="applyAdvancedFilters"
+          >
+            应用筛选
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
       v-if="previewContent"
       class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
     >
@@ -789,24 +831,16 @@ watch(currentPage, () => {
 
 <style scoped>
 .event-reason-text {
-  max-width: 24rem;
+  max-width: 18rem;
   overflow: hidden;
-  word-break: break-all;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-height: 1.375rem;
-  max-height: calc(1.375rem * 2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.event-request-text {
-  max-width: 28rem;
+.event-path-text {
+  max-width: 22rem;
   overflow: hidden;
-  word-break: break-all;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-height: 1.125rem;
-  max-height: calc(1.125rem * 2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 </style>

@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RefreshCw, Save } from 'lucide-vue-next'
+import { RefreshCw } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import L7SectionNav from '@/features/l7/components/L7SectionNav.vue'
-import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
-import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
 import AdminL7OverviewSection from '@/features/l7/components/AdminL7OverviewSection.vue'
 import { useAdminL7 } from '@/features/l7/composables/useAdminL7'
 import { useFormatters } from '@/shared/composables/useFormatters'
@@ -19,18 +16,14 @@ const {
   http3StatusLabel,
   http3StatusType,
   lastUpdated,
-  listenAddrsText,
   loading,
   protocolTags,
   proxySuccessRate,
   refreshAll,
   runtimeProfileLabel,
   runtimeStatus,
-  saveConfig,
-  saving,
   stats,
   successMessage,
-  trustedProxyCidrsText,
   upstreamStatusText,
   upstreamStatusType,
   refreshing,
@@ -70,14 +63,6 @@ const lastUpdatedLabel = computed(() => {
           <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
           刷新
         </button>
-        <button
-          :disabled="saving || loading"
-          class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
-          @click="saveConfig"
-        >
-          <Save :size="14" />
-          {{ saving ? '保存中...' : '保存 HTTP 接入配置' }}
-        </button>
       </div>
     </template>
 
@@ -91,8 +76,6 @@ const lastUpdatedLabel = computed(() => {
     </div>
 
     <div v-else class="space-y-4">
-      <L7SectionNav />
-
       <AdminL7OverviewSection
         :config-form="configForm"
         :failure-mode-label="failureModeLabel"
@@ -109,16 +92,6 @@ const lastUpdatedLabel = computed(() => {
         :upstream-status-text="upstreamStatusText"
         :upstream-status-type="upstreamStatusType"
       />
-      <AdminL7ConfigSection
-        :form="configForm"
-        :listen-addrs-text="listenAddrsText"
-        :trusted-proxy-cidrs-text="trustedProxyCidrsText"
-        @update:form="Object.assign(configForm, $event)"
-        @update:listen-addrs-text="listenAddrsText = $event"
-        @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
-      />
-
-      <AdminL7AdvancedGlobalSection />
     </div>
   </AppLayout>
 </template>

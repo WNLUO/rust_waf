@@ -94,3 +94,18 @@ export interface BlockedIpsBatchUnblockResponse {
   failed_ids: number[]
   message: string
 }
+
+export interface BlockedIpsCleanupExpiredPayload {
+  source_scope?: 'all' | 'local' | 'remote'
+  provider?: string
+  blocked_from?: number
+  blocked_to?: number
+  expires_before?: number
+}
+
+export interface BlockedIpsCleanupExpiredResponse {
+  success: boolean
+  cleaned: number
+  runtime_unblocked: number
+  message: string
+}

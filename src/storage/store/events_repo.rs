@@ -208,4 +208,37 @@ impl SqliteStore {
 
         Ok(row)
     }
+
+    #[cfg(any(feature = "api", test))]
+    pub async fn cleanup_expired_blocked_ips(
+        &self,
+        query: &BlockedIpCleanupQuery,
+    ) -> Result<Vec<BlockedIpEntry>> {
+        let mut select_builder = QueryBuilder::<Sqlite>::new(
+            "SELECT id, provider, provider_remote_id, ip, reason, blocked_at, expires_at FROM blocked_ips WHERE 1=1",
+        );
+        append_blocked_ip_cleanup_filters(&mut select_builder, query);
+        let items = select_builder
+            .build_query_as::<BlockedIpEntry>()
+            .fetch_all(&self.pool)
+            .await?;
+
+        if items.is_empty() {
+            return Ok(items);
+        }
+
+        for chunk in items.chunks(300) {
+            let mut builder = QueryBuilder::<Sqlite>::new("DELETE FROM blocked_ips WHERE id IN (");
+            {
+                let mut separated = builder.separated(", ");
+                for item in chunk {
+                    separated.push_bind(item.id);
+                }
+            }
+            builder.push(")");
+            builder.build().execute(&self.pool).await?;
+        }
+
+        Ok(items)
+    }
 }

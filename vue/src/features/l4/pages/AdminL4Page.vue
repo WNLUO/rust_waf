@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { RefreshCw, Save } from 'lucide-vue-next'
+import { RefreshCw } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminL4ArchitectureSection from '@/features/l4/components/AdminL4ArchitectureSection.vue'
 import AdminL4BehaviorSection from '@/features/l4/components/AdminL4BehaviorSection.vue'
-import AdminL4ConfigSection from '@/features/l4/components/AdminL4ConfigSection.vue'
 import AdminL4OverviewSection from '@/features/l4/components/AdminL4OverviewSection.vue'
+import AdminL4RuntimeInsightsSection from '@/features/l4/components/AdminL4RuntimeInsightsSection.vue'
 import AdminL4StatsSection from '@/features/l4/components/AdminL4StatsSection.vue'
 import L4SectionNav from '@/features/l4/components/L4SectionNav.vue'
 import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
@@ -28,8 +28,6 @@ const {
   refreshing,
   runtimeProfileLabel,
   runtimeStatus,
-  saveConfig,
-  saving,
   stats,
   successMessage,
   topBuckets,
@@ -71,14 +69,6 @@ const lastUpdatedLabel = computed(() => {
           <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" />
           刷新
         </button>
-        <button
-          class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
-          :disabled="saving || loading"
-          @click="saveConfig"
-        >
-          <Save :size="14" />
-          {{ saving ? '保存中...' : '保存配置' }}
-        </button>
       </div>
     </template>
 
@@ -109,21 +99,19 @@ const lastUpdatedLabel = computed(() => {
         :format-timestamp="formatTimestamp"
         :top-buckets="topBuckets"
       />
-      <AdminL4ConfigSection
+      <AdminL4RuntimeInsightsSection
         :bloom-panels="bloomPanels"
         :false-positive-panels="falsePositivePanels"
-        :form="configForm"
         :format-number="formatNumber"
         :format-bytes="formatBytes"
         :meta="meta"
+        :config-form="configForm"
         :stats="stats"
         :top-ports="topPorts"
         :total-processed-bytes="totalProcessedBytes"
         :blocked-capacity-label="blockedCapacityLabel"
         :blocked-capacity-tone="blockedCapacityTone"
-        @update:form="Object.assign(configForm, $event)"
       />
-
       <AdminL4StatsSection
         :format-bytes="formatBytes"
         :format-number="formatNumber"

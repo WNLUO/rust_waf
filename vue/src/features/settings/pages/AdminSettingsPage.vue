@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { Save } from 'lucide-vue-next'
+import { RefreshCw, Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
+import AdminL4ConfigFormCard from '@/features/l4/components/AdminL4ConfigFormCard.vue'
+import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
+import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
+import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
+import { useAdminL7 } from '@/features/l7/composables/useAdminL7'
 import AdminSettingsSystemSection from '@/features/settings/components/AdminSettingsSystemSection.vue'
 import AdminUploadCertificateDialog from '@/features/settings/components/AdminUploadCertificateDialog.vue'
 import { useAdminSettings } from '@/features/settings/composables/useAdminSettings'
@@ -35,11 +40,53 @@ const {
   closeUploadModal,
 } = useAdminSettings()
 
+const {
+  configForm: l4ConfigForm,
+  error: l4Error,
+  loading: l4Loading,
+  refreshAll: refreshL4,
+  refreshing: refreshingL4,
+  saveConfig: saveL4Config,
+  saving: savingL4,
+  successMessage: l4SuccessMessage,
+} = useAdminL4()
+
+const {
+  configForm: l7ConfigForm,
+  error: l7Error,
+  listenAddrsText,
+  loading: l7Loading,
+  refreshAll: refreshL7,
+  refreshing: refreshingL7,
+  saveConfig: saveL7Config,
+  saving: savingL7,
+  successMessage: l7SuccessMessage,
+  trustedProxyCidrsText,
+} = useAdminL7()
+
 useFlashMessages({
   error,
   success: successMessage,
   errorTitle: '系统设置',
   successTitle: '系统设置',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
+
+useFlashMessages({
+  error: l4Error,
+  success: l4SuccessMessage,
+  errorTitle: 'L4 管理',
+  successTitle: 'L4 管理',
+  errorDuration: 5600,
+  successDuration: 3200,
+})
+
+useFlashMessages({
+  error: l7Error,
+  success: l7SuccessMessage,
+  errorTitle: 'L7 管理',
+  successTitle: 'L7 管理',
   errorDuration: 5600,
   successDuration: 3200,
 })
@@ -86,6 +133,103 @@ useFlashMessages({
           @update:system-settings="Object.assign(systemSettings, $event)"
         />
 
+        <section
+          class="rounded-xl border border-white/80 bg-white/78 p-4 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
+        >
+          <div
+            class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+          >
+            <div>
+              <p class="text-sm tracking-wider text-blue-700">L4 管理</p>
+              <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+                L4 配置项
+              </h3>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
+                :disabled="refreshingL4"
+                @click="refreshL4()"
+              >
+                <RefreshCw :size="14" :class="{ 'animate-spin': refreshingL4 }" />
+                刷新
+              </button>
+              <button
+                class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
+                :disabled="savingL4 || l4Loading"
+                @click="saveL4Config"
+              >
+                <Save :size="14" />
+                {{ savingL4 ? '保存中...' : '保存配置' }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="l4Loading"
+            class="rounded-lg border border-slate-200 bg-white/75 px-4 py-3 text-sm text-slate-500 shadow-[0_10px_25px_rgba(90,60,30,0.05)]"
+          >
+            正在加载 L4 配置...
+          </div>
+          <AdminL4ConfigFormCard
+            v-else
+            :form="l4ConfigForm"
+            @update:form="Object.assign(l4ConfigForm, $event)"
+          />
+        </section>
+
+        <section class="space-y-4">
+          <div
+            class="rounded-xl border border-white/80 bg-white/78 p-4 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
+          >
+            <div
+              class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+            >
+              <div>
+                <p class="text-sm tracking-wider text-blue-700">L7 管理</p>
+                <h3 class="mt-2 text-2xl font-semibold text-stone-900">
+                  L7 配置项
+                </h3>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  :disabled="refreshingL7"
+                  class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
+                  @click="refreshL7()"
+                >
+                  <RefreshCw :size="14" :class="{ 'animate-spin': refreshingL7 }" />
+                  刷新
+                </button>
+                <button
+                  :disabled="savingL7 || l7Loading"
+                  class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
+                  @click="saveL7Config"
+                >
+                  <Save :size="14" />
+                  {{ savingL7 ? '保存中...' : '保存 HTTP 接入配置' }}
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-if="l7Loading"
+              class="rounded-lg border border-slate-200 bg-white/75 px-4 py-3 text-sm text-slate-500 shadow-[0_10px_25px_rgba(90,60,30,0.05)]"
+            >
+              正在加载 L7 配置...
+            </div>
+            <AdminL7ConfigSection
+              v-else
+              :form="l7ConfigForm"
+              :listen-addrs-text="listenAddrsText"
+              :trusted-proxy-cidrs-text="trustedProxyCidrsText"
+              @update:form="Object.assign(l7ConfigForm, $event)"
+              @update:listen-addrs-text="listenAddrsText = $event"
+              @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
+            />
+          </div>
+
+          <AdminL7AdvancedGlobalSection />
+        </section>
       </div>
     </div>
 

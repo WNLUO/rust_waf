@@ -80,6 +80,23 @@ pub struct BlockedIpsBatchUnblockResponse {
 }
 
 #[derive(Debug, Deserialize, Default)]
+pub struct BlockedIpsCleanupExpiredRequest {
+    pub(crate) source_scope: Option<String>,
+    pub(crate) provider: Option<String>,
+    pub(crate) blocked_from: Option<i64>,
+    pub(crate) blocked_to: Option<i64>,
+    pub(crate) expires_before: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockedIpsCleanupExpiredResponse {
+    pub(crate) success: bool,
+    pub(crate) cleaned: u32,
+    pub(crate) runtime_unblocked: u32,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub struct EventsQueryParams {
     pub(crate) limit: Option<u32>,
     pub(crate) offset: Option<u32>,

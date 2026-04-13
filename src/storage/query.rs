@@ -51,6 +51,16 @@ pub struct BlockedIpQuery {
 }
 
 #[cfg(any(feature = "api", test))]
+#[derive(Debug, Clone)]
+pub struct BlockedIpCleanupQuery {
+    pub source_scope: BlockedIpSourceScope,
+    pub provider: Option<String>,
+    pub blocked_from: Option<i64>,
+    pub blocked_to: Option<i64>,
+    pub expires_before: i64,
+}
+
+#[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BlockedIpSourceScope {
     Local,
@@ -236,4 +246,34 @@ pub(super) fn append_blocked_ip_sort<'a>(
         SortDirection::Asc => "ASC",
         SortDirection::Desc => "DESC",
     });
+}
+
+#[cfg(any(feature = "api", test))]
+pub(super) fn append_blocked_ip_cleanup_filters<'a>(
+    builder: &mut QueryBuilder<'a, Sqlite>,
+    query: &'a BlockedIpCleanupQuery,
+) {
+    match query.source_scope {
+        BlockedIpSourceScope::Local => {
+            builder.push(" AND provider IS NULL");
+        }
+        BlockedIpSourceScope::Remote => {
+            builder.push(" AND provider IS NOT NULL");
+        }
+        BlockedIpSourceScope::All => {}
+    }
+    if let Some(provider) = query.provider.as_deref() {
+        builder.push(" AND provider = ");
+        builder.push_bind(provider);
+    }
+    if let Some(blocked_from) = query.blocked_from {
+        builder.push(" AND blocked_at >= ");
+        builder.push_bind(blocked_from);
+    }
+    if let Some(blocked_to) = query.blocked_to {
+        builder.push(" AND blocked_at <= ");
+        builder.push_bind(blocked_to);
+    }
+    builder.push(" AND expires_at <= ");
+    builder.push_bind(query.expires_before);
 }

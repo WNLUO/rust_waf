@@ -27,8 +27,8 @@ use tokio::task::JoinHandle;
 use self::models::{serialize_rule_response_template, StoredAppConfigRow, StoredRuleRow};
 #[cfg(any(feature = "api", test))]
 use self::query::{
-    append_blocked_ip_filters, append_blocked_ip_sort, append_event_sort,
-    append_security_event_filters, normalized_limit,
+    append_blocked_ip_cleanup_filters, append_blocked_ip_filters, append_blocked_ip_sort,
+    append_event_sort, append_security_event_filters, normalized_limit,
 };
 
 const SQLITE_STARTUP_BACKUP_RETENTION: usize = 5;

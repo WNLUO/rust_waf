@@ -2,6 +2,8 @@ import type {
   BlockedIpCreatePayload,
   BlockedIpsBatchUnblockPayload,
   BlockedIpsBatchUnblockResponse,
+  BlockedIpsCleanupExpiredPayload,
+  BlockedIpsCleanupExpiredResponse,
   BlockedIpsQuery,
   BlockedIpsResponse,
   EventsQuery,
@@ -33,6 +35,13 @@ export function createBlockedIp(payload: BlockedIpCreatePayload) {
 
 export function unblockIpsBatch(payload: BlockedIpsBatchUnblockPayload) {
   return apiRequest<BlockedIpsBatchUnblockResponse>('/blocked-ips/unblock-batch', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function cleanupExpiredBlockedIps(payload: BlockedIpsCleanupExpiredPayload) {
+  return apiRequest<BlockedIpsCleanupExpiredResponse>('/blocked-ips/cleanup-expired', {
     method: 'POST',
     body: JSON.stringify(payload),
   })

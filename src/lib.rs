@@ -84,12 +84,6 @@ async fn ensure_startup_default_certificate(
     store: &SqliteStore,
     mut config: Config,
 ) -> Result<Config> {
-    if config.gateway_config.https_listen_addr.trim().is_empty()
-        || !config.gateway_config.fallback_self_signed_certificate
-    {
-        return Ok(config);
-    }
-
     let mut selected_certificate_id = None;
     if let Some(default_certificate_id) = config.gateway_config.default_certificate_id {
         if has_usable_local_certificate(store, default_certificate_id).await? {

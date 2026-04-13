@@ -16,10 +16,6 @@ const AdminL7RulesPage = () =>
   import('@/features/rules/pages/AdminL7RulesPage.vue')
 const AdminL4RulesPage = () =>
   import('@/features/rules/pages/AdminL4RulesPage.vue')
-const AdminL4BlocklistPage = () =>
-  import('@/features/l4/pages/AdminL4BlocklistPage.vue')
-const AdminL4PortsPage = () =>
-  import('@/features/l4/pages/AdminL4PortsPage.vue')
 const AdminEventsPage = () =>
   import('@/features/events/pages/AdminEventsPage.vue')
 const AdminBlockedPage = () =>
@@ -89,16 +85,6 @@ const router = createRouter({
       path: '/admin/l4/rules',
       name: 'admin-l4-rules',
       component: AdminL4RulesPage,
-    },
-    {
-      path: '/admin/l4/blocklist',
-      name: 'admin-l4-blocklist',
-      component: AdminL4BlocklistPage,
-    },
-    {
-      path: '/admin/l4/ports',
-      name: 'admin-l4-ports',
-      component: AdminL4PortsPage,
     },
     {
       path: '/admin/events',

@@ -7,7 +7,6 @@ import AdminL4BehaviorSection from '@/features/l4/components/AdminL4BehaviorSect
 import AdminL4OverviewSection from '@/features/l4/components/AdminL4OverviewSection.vue'
 import AdminL4RuntimeInsightsSection from '@/features/l4/components/AdminL4RuntimeInsightsSection.vue'
 import AdminL4StatsSection from '@/features/l4/components/AdminL4StatsSection.vue'
-import L4SectionNav from '@/features/l4/components/L4SectionNav.vue'
 import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
@@ -26,8 +25,6 @@ const {
   meta,
   refreshAll,
   refreshing,
-  runtimeProfileLabel,
-  runtimeStatus,
   stats,
   successMessage,
   topBuckets,
@@ -82,13 +79,8 @@ const lastUpdatedLabel = computed(() => {
     </div>
 
     <div v-else class="space-y-4">
-      <L4SectionNav />
-
       <AdminL4OverviewSection
         :format-number="formatNumber"
-        :meta="meta"
-        :runtime-profile-label="runtimeProfileLabel"
-        :runtime-status="runtimeStatus"
         :stats="stats"
         :top-ports-count="topPorts.length"
       />

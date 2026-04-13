@@ -502,7 +502,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 .l4-inline-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
 }
 
@@ -522,7 +522,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
   font-size: 0.875rem;
   color: rgb(41 37 36);
   outline: none;
-  text-align: right;
+  text-align: left;
   transition: border-color 0.2s ease;
 }
 
@@ -533,7 +533,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 .l4-toggle-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
 }
 </style>

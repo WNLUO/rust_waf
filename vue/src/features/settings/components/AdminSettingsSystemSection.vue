@@ -42,11 +42,6 @@ const apiEndpoint = computed({
   get: () => props.systemSettings.api_endpoint,
   set: (value: string) => updateSystemSettings({ api_endpoint: value }),
 })
-const dropUnmatchedRequests = computed({
-  get: () => props.systemSettings.drop_unmatched_requests,
-  set: (value: boolean) =>
-    updateSystemSettings({ drop_unmatched_requests: value }),
-})
 const defaultCertificateId = computed({
   get: () => props.systemSettings.default_certificate_id,
   set: (value: number | null) =>
@@ -169,35 +164,20 @@ const safeLineAutoSyncInterval = computed({
         <h3 class="mt-1 text-xl font-semibold text-stone-900">
           基础运行配置
         </h3>
-        <p class="mt-1 text-sm leading-6 text-slate-500">
-          保留系统入口、默认行为和雷池接入参数，只压缩层级和视觉密度。
-        </p>
       </div>
     </div>
 
     <div class="mt-5 space-y-4">
       <section class="rounded-2xl border border-slate-200/90 bg-white/90 p-4">
-        <div
-          class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between"
-        >
-          <div>
-            <p class="text-sm font-semibold text-stone-900">核心参数</p>
-          </div>
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-stone-700"
-          >
-            <input
-              v-model="dropUnmatchedRequests"
-              type="checkbox"
-              class="accent-blue-600"
-            />
-            <span>未命中站点时直接断开连接</span>
-          </label>
+        <div>
+          <p class="text-sm font-semibold text-stone-900">核心参数</p>
         </div>
 
-        <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500"
+        <div class="mt-4 space-y-3">
+          <label
+            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
+          >
+            <span class="shrink-0 text-xs font-medium text-slate-500"
               >统一 HTTP 入口端口</span
             >
             <input
@@ -205,11 +185,13 @@ const safeLineAutoSyncInterval = computed({
               type="text"
               inputmode="numeric"
               placeholder="例如 8080"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
             />
           </label>
-          <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500"
+          <label
+            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
+          >
+            <span class="shrink-0 text-xs font-medium text-slate-500"
               >统一 HTTPS 入口端口</span
             >
             <input
@@ -217,23 +199,31 @@ const safeLineAutoSyncInterval = computed({
               type="text"
               inputmode="numeric"
               placeholder="例如 660，可留空关闭 HTTPS 入口"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
             />
           </label>
-          <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500">控制面 API 地址</span>
+          <label
+            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
+          >
+            <span class="shrink-0 text-xs font-medium text-slate-500"
+              >控制面 API 地址</span
+            >
             <input
               v-model="apiEndpoint"
               type="text"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
             />
           </label>
-          <label class="space-y-1.5">
-            <span class="text-xs font-medium text-slate-500">默认证书</span>
+          <label
+            class="flex flex-col gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 md:flex-row md:items-center md:justify-between md:gap-6"
+          >
+            <span class="shrink-0 text-xs font-medium text-slate-500"
+              >默认证书</span
+            >
             <select
               v-model="defaultCertificateId"
               :disabled="savingDefaultCertificate"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500 md:max-w-sm"
               @change="emit('defaultCertificateChange', $event)"
             >
               <option :value="null">未设置</option>
@@ -248,15 +238,11 @@ const safeLineAutoSyncInterval = computed({
           </label>
         </div>
 
-        <p class="mt-3 text-xs leading-5 text-slate-500">
-          开启断开连接后，不返回任何页面内容；关闭时，未命中站点会返回 404。
-        </p>
-
         <div class="mt-4 border-t border-slate-100 pt-3">
           <p class="mb-3 text-sm font-semibold text-stone-900">雷池接入参数</p>
 
           <div class="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-            <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2">
+            <label class="flex items-center justify-start gap-2 text-sm text-stone-700 md:col-span-2">
               <span class="font-medium whitespace-nowrap">雷池地址</span>
               <input
                 v-model="safeLineBaseUrl"
@@ -265,7 +251,7 @@ const safeLineAutoSyncInterval = computed({
                 class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
-            <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2">
+            <label class="flex items-center justify-start gap-2 text-sm text-stone-700 md:col-span-2">
               <span class="font-medium whitespace-nowrap">API Token</span>
               <input
                 v-model="safeLineApiToken"
@@ -274,22 +260,22 @@ const safeLineAutoSyncInterval = computed({
                 class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
-            <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+            <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
               <span class="font-medium whitespace-nowrap">雷池账号</span>
               <input
                 v-model="safeLineUsername"
                 type="text"
                 placeholder="用户名"
-                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
+                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
-            <label class="flex items-center justify-between gap-2 text-sm text-stone-700">
+            <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
               <span class="font-medium whitespace-nowrap">雷池密码</span>
               <input
                 v-model="safeLinePassword"
                 type="password"
                 placeholder="密码"
-                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
+                class="w-24 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               />
             </label>
 

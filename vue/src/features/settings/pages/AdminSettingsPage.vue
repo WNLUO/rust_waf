@@ -211,18 +211,30 @@ useFlashMessages({
               </div>
             </div>
 
-            <div
-              v-if="l7Loading"
-              class="rounded-lg border border-slate-200 bg-white/75 px-4 py-3 text-sm text-slate-500 shadow-[0_10px_25px_rgba(90,60,30,0.05)]"
-            >
-              正在加载 L7 配置...
-            </div>
-            <AdminL7ConfigSection
-              v-else
-              :form="l7ConfigForm"
-              :listen-addrs-text="listenAddrsText"
-              :trusted-proxy-cidrs-text="trustedProxyCidrsText"
-              @update:form="Object.assign(l7ConfigForm, $event)"
+          <div
+            v-if="l7Loading"
+            class="rounded-lg border border-slate-200 bg-white/75 px-4 py-3 text-sm text-slate-500 shadow-[0_10px_25px_rgba(90,60,30,0.05)]"
+          >
+            正在加载 L7 配置...
+          </div>
+          <label
+            v-else
+            class="mb-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-stone-800"
+          >
+            <span class="font-medium">未命中站点时直接断开连接</span>
+            <input
+              v-model="systemSettings.drop_unmatched_requests"
+              :disabled="saving || loading"
+              type="checkbox"
+              class="h-4 w-4 accent-blue-600"
+            />
+          </label>
+          <AdminL7ConfigSection
+            v-if="!l7Loading"
+            :form="l7ConfigForm"
+            :listen-addrs-text="listenAddrsText"
+            :trusted-proxy-cidrs-text="trustedProxyCidrsText"
+            @update:form="Object.assign(l7ConfigForm, $event)"
               @update:listen-addrs-text="listenAddrsText = $event"
               @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
             />

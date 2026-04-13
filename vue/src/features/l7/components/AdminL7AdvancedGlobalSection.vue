@@ -222,7 +222,7 @@ onMounted(loadSettings)
             <span class="font-medium whitespace-nowrap">获取方式</span>
             <select
               v-model="form.source_ip_strategy"
-              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
+              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
             >
               <option value="connection">从网络连接中获取</option>
               <option value="x_forwarded_for_first">
@@ -305,7 +305,7 @@ onMounted(loadSettings)
             <span class="font-medium whitespace-nowrap">SSL Ciphers</span>
             <input
               v-model="form.ssl_ciphers"
-              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-right"
+              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
               type="text"
               placeholder="留空则沿用默认"
             />
@@ -362,7 +362,7 @@ onMounted(loadSettings)
           <input
             v-model="form.rewrite_host_value"
             :disabled="!form.rewrite_host_enabled"
-            class="w-24 flex-1 rounded border border-slate-200 px-2 py-1 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-50 text-right"
+            class="w-24 flex-1 rounded border border-slate-200 px-2 py-1 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-50 text-left"
             type="text"
             placeholder="$http_host"
           />

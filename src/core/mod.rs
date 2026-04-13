@@ -17,6 +17,7 @@ use log::{info, warn};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::broadcast;
 
 pub use engine::WafEngine;
 pub use packet::{
@@ -188,6 +189,17 @@ impl WafContext {
         window_seconds: u32,
     ) -> traffic_map::TrafficMapSnapshot {
         self.traffic_map.snapshot(window_seconds).await
+    }
+
+    pub fn subscribe_traffic_realtime(&self) -> broadcast::Receiver<traffic_map::TrafficRealtimeEventRaw> {
+        self.traffic_map.subscribe_realtime()
+    }
+
+    pub async fn enrich_traffic_realtime_event(
+        &self,
+        event: traffic_map::TrafficRealtimeEventRaw,
+    ) -> traffic_map::TrafficRealtimeEvent {
+        self.traffic_map.enrich_realtime_event(event).await
     }
 
     pub fn upstream_health_snapshot(&self) -> UpstreamHealthSnapshot {

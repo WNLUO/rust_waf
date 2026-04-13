@@ -1,11 +1,12 @@
 use dashmap::DashMap;
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::broadcast;
 
 const ORIGIN_CACHE_TTL_SUCCESS_MS: i64 = 10 * 60 * 1_000;
 const ORIGIN_CACHE_TTL_PENDING_MS: i64 = 15 * 1_000;
@@ -84,6 +85,37 @@ pub struct TrafficMapSnapshot {
     pub live_traffic_score: f64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TrafficRealtimeEventRaw {
+    pub timestamp_ms: i64,
+    pub source_ip: String,
+    pub direction: String,
+    pub decision: String,
+    pub bytes: u64,
+    pub latency_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrafficRealtimeNode {
+    pub id: String,
+    pub name: String,
+    pub region: String,
+    pub role: String,
+    pub lat: Option<f64>,
+    pub lng: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TrafficRealtimeEvent {
+    pub timestamp_ms: i64,
+    pub direction: String,
+    pub decision: String,
+    pub bytes: u64,
+    pub latency_ms: Option<u64>,
+    pub source_ip: String,
+    pub node: TrafficRealtimeNode,
+}
+
 #[derive(Debug, Clone)]
 struct TrafficObservation {
     timestamp_ms: i64,
@@ -111,6 +143,7 @@ pub struct TrafficMapCollector {
     origin_cache: Mutex<Option<CachedOriginNode>>,
     http_client: Client,
     max_window_seconds: u32,
+    realtime_tx: broadcast::Sender<TrafficRealtimeEventRaw>,
 }
 
 #[derive(Debug, Clone)]
@@ -134,19 +167,31 @@ impl TrafficMapCollector {
             origin_cache: Mutex::new(None),
             http_client: Client::new(),
             max_window_seconds: 300,
+            realtime_tx: broadcast::channel(512).0,
         }
     }
 
     pub fn record_ingress(&self, source_ip: impl Into<String>, bytes: usize, blocked: bool) {
+        let timestamp_ms = unix_timestamp_ms();
+        let source_ip = source_ip.into();
+        let decision = if blocked {
+            TrafficDecision::Block
+        } else {
+            TrafficDecision::Allow
+        };
         self.record(TrafficObservation {
-            timestamp_ms: unix_timestamp_ms(),
-            source_ip: source_ip.into(),
+            timestamp_ms,
+            source_ip: source_ip.clone(),
             direction: TrafficDirection::Ingress,
-            decision: if blocked {
-                TrafficDecision::Block
-            } else {
-                TrafficDecision::Allow
-            },
+            decision,
+            bytes: bytes as u64,
+            latency_ms: None,
+        });
+        let _ = self.realtime_tx.send(TrafficRealtimeEventRaw {
+            timestamp_ms,
+            source_ip,
+            direction: TrafficDirection::Ingress.as_str().to_string(),
+            decision: decision.as_str().to_string(),
             bytes: bytes as u64,
             latency_ms: None,
         });
@@ -158,14 +203,72 @@ impl TrafficMapCollector {
         bytes: usize,
         latency: std::time::Duration,
     ) {
+        let timestamp_ms = unix_timestamp_ms();
+        let source_ip = source_ip.into();
+        let latency_ms = latency.as_millis() as u64;
         self.record(TrafficObservation {
-            timestamp_ms: unix_timestamp_ms(),
-            source_ip: source_ip.into(),
+            timestamp_ms,
+            source_ip: source_ip.clone(),
             direction: TrafficDirection::Egress,
             decision: TrafficDecision::Allow,
             bytes: bytes as u64,
-            latency_ms: Some(latency.as_millis() as u64),
+            latency_ms: Some(latency_ms),
         });
+        let _ = self.realtime_tx.send(TrafficRealtimeEventRaw {
+            timestamp_ms,
+            source_ip,
+            direction: TrafficDirection::Egress.as_str().to_string(),
+            decision: TrafficDecision::Allow.as_str().to_string(),
+            bytes: bytes as u64,
+            latency_ms: Some(latency_ms),
+        });
+    }
+
+    pub fn subscribe_realtime(&self) -> broadcast::Receiver<TrafficRealtimeEventRaw> {
+        self.realtime_tx.subscribe()
+    }
+
+    pub async fn enrich_realtime_event(
+        &self,
+        event: TrafficRealtimeEventRaw,
+    ) -> TrafficRealtimeEvent {
+        if !self.geo_cache.contains_key(&event.source_ip) {
+            let resolved = self.resolve_geo_node(&event.source_ip).await;
+            self.geo_cache.insert(event.source_ip.clone(), resolved);
+        }
+
+        let node = self
+            .geo_cache
+            .get(&event.source_ip)
+            .map(|entry| TrafficRealtimeNode {
+                id: entry.id.to_string(),
+                name: entry.name.to_string(),
+                region: entry.region.to_string(),
+                role: "cdn".to_string(),
+                lat: Some(entry.lat),
+                lng: Some(entry.lng),
+            })
+            .unwrap_or_else(|| {
+                let fallback = fallback_node(&event.source_ip);
+                TrafficRealtimeNode {
+                    id: fallback.id.to_string(),
+                    name: fallback.name.to_string(),
+                    region: fallback.region.to_string(),
+                    role: "cdn".to_string(),
+                    lat: Some(fallback.lat),
+                    lng: Some(fallback.lng),
+                }
+            });
+
+        TrafficRealtimeEvent {
+            timestamp_ms: event.timestamp_ms,
+            direction: event.direction,
+            decision: event.decision,
+            bytes: event.bytes,
+            latency_ms: event.latency_ms,
+            source_ip: event.source_ip,
+            node,
+        }
     }
 
     fn record(&self, observation: TrafficObservation) {

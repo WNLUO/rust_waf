@@ -52,6 +52,7 @@ impl ApiServer {
         let realtime_tx = broadcast::channel(64).0;
         realtime::spawn_sampler(Arc::clone(&self.context), realtime_tx.clone());
         realtime::spawn_storage_bridge(Arc::clone(&self.context), realtime_tx.clone());
+        realtime::spawn_traffic_bridge(Arc::clone(&self.context), realtime_tx.clone());
         let ws_tickets = Arc::new(realtime::WsTicketStore::default());
         let state = ApiState {
             context: Arc::clone(&self.context),
@@ -117,6 +118,7 @@ pub(super) fn parse_blocked_ip_sort_field(
 #[doc(hidden)]
 pub fn build_test_router(context: Arc<WafContext>) -> Router {
     let realtime_tx = broadcast::channel(8).0;
+    realtime::spawn_traffic_bridge(Arc::clone(&context), realtime_tx.clone());
     router::build_router(ApiState {
         context,
         realtime_tx,

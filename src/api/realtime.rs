@@ -120,6 +120,28 @@ pub(super) fn spawn_storage_bridge(
     });
 }
 
+pub(super) fn spawn_traffic_bridge(
+    context: Arc<WafContext>,
+    realtime_tx: broadcast::Sender<String>,
+) {
+    let mut traffic_rx = context.subscribe_traffic_realtime();
+
+    tokio::spawn(async move {
+        loop {
+            let event = match traffic_rx.recv().await {
+                Ok(event) => event,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
+
+            let enriched = context.enrich_traffic_realtime_event(event).await;
+            if let Ok(payload) = serialize_message("traffic_event_delta", &enriched) {
+                let _ = realtime_tx.send(payload);
+            }
+        }
+    });
+}
+
 pub(super) async fn issue_admin_ws_ticket_handler(
     State(state): State<ApiState>,
 ) -> axum::Json<AdminWsTicketResponse> {

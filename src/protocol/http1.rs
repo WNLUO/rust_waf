@@ -161,7 +161,7 @@ impl Http1Handler {
             let body_start = request_str.find("\r\n\r\n").map(|pos| pos + 4).unwrap_or(0);
 
             if body_start < request_str.len() {
-                unified_request.body = request_str[body_start..].as_bytes().to_vec();
+                unified_request.body = request_str.as_bytes()[body_start..].to_vec();
             }
         }
 

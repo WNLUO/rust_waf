@@ -224,7 +224,7 @@ pub(super) async fn update_certificate_sync_metadata(
 }
 
 fn replace_local_certificate(
-    local_certificates: &mut Vec<LocalCertificateEntry>,
+    local_certificates: &mut [LocalCertificateEntry],
     id: i64,
     upsert: &LocalCertificateUpsert,
     now: i64,

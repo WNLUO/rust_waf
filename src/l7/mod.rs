@@ -13,14 +13,21 @@ pub struct HttpTrafficProcessor {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::Http2Config;
 
     #[test]
     fn processor_tracks_request_limits_from_config() {
-        let mut config = L7Config::default();
-        config.max_request_size = 16_384;
-        config.http2_config.enabled = true;
+        let config = L7Config {
+            max_request_size: 16_384,
+            http2_config: Http2Config {
+                enabled: true,
+                ..Http2Config::default()
+            },
+            ..L7Config::default()
+        };
 
         let processor = HttpTrafficProcessor::new(&config);
         assert_eq!(processor.max_request_size(), 16_384);

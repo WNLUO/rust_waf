@@ -143,7 +143,7 @@ pub(super) fn build_site_upsert_payload(site: &SafeLineSiteUpsert) -> Value {
     })
 }
 
-fn find_object_candidates<'a>(value: &'a Value) -> Vec<&'a serde_json::Map<String, Value>> {
+fn find_object_candidates(value: &Value) -> Vec<&serde_json::Map<String, Value>> {
     let mut candidates = Vec::new();
     collect_object_candidates(value, &mut candidates);
     candidates

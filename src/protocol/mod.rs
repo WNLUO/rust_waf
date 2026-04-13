@@ -7,11 +7,12 @@ pub mod unified;
 use std::fmt;
 
 /// HTTP协议版本枚举
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum HttpVersion {
     /// HTTP/1.0
     Http1_0,
     /// HTTP/1.1
+    #[default]
     Http1_1,
     /// HTTP/2.0
     Http2_0,
@@ -27,12 +28,6 @@ impl fmt::Display for HttpVersion {
             HttpVersion::Http2_0 => write!(f, "HTTP/2.0"),
             HttpVersion::Http3_0 => write!(f, "HTTP/3.0"),
         }
-    }
-}
-
-impl Default for HttpVersion {
-    fn default() -> Self {
-        HttpVersion::Http1_1
     }
 }
 

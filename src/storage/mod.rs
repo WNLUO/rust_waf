@@ -48,6 +48,7 @@ pub struct SqliteStore {
     dropped_blocked_ips: Arc<AtomicU64>,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum StorageCommand {
     SecurityEvent(SecurityEventRecord),
     BlockedIp(BlockedIpRecord),

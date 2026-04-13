@@ -98,13 +98,13 @@ impl ProtocolDetector {
         // QUIC包以特定头部格式开始
 
         // 检查QUIC长头格式 (0xC0)
-        if bytes.len() >= 1 && (bytes[0] & 0xC0) == 0xC0 {
+        if !bytes.is_empty() && (bytes[0] & 0xC0) == 0xC0 {
             debug!("Detected QUIC long header format");
             return true;
         }
 
         // 检查QUIC短头格式 (0x80)
-        if bytes.len() >= 1 && (bytes[0] & 0x80) == 0x80 {
+        if !bytes.is_empty() && (bytes[0] & 0x80) == 0x80 {
             debug!("Detected QUIC short header format");
             return true;
         }

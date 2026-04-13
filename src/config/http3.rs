@@ -151,24 +151,30 @@ mod tests {
 
     #[test]
     fn test_config_validation_invalid_mtu() {
-        let mut config = Http3Config::default();
-        config.mtu = 1000;
+        let config = Http3Config {
+            mtu: 1000,
+            ..Http3Config::default()
+        };
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_config_validation_invalid_streams() {
-        let mut config = Http3Config::default();
-        config.max_concurrent_streams = 2000;
+        let config = Http3Config {
+            max_concurrent_streams: 2000,
+            ..Http3Config::default()
+        };
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_config_validation_tls_requirement() {
-        let mut config = Http3Config::default();
-        config.enable_tls13 = true;
-        config.certificate_path = Some("/path/to/cert.pem".to_string());
-        config.private_key_path = None;
+        let config = Http3Config {
+            enable_tls13: true,
+            certificate_path: Some("/path/to/cert.pem".to_string()),
+            private_key_path: None,
+            ..Http3Config::default()
+        };
         assert!(config.validate().is_err());
     }
 }

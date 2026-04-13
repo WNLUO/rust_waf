@@ -115,7 +115,7 @@ async fn handle_socket(socket: WebSocket, state: ApiState) {
 
     if let Ok(messages) = collect_messages(state.context.as_ref()).await {
         for payload in messages {
-            if socket.send(Message::Text(payload.into())).await.is_err() {
+            if socket.send(Message::Text(payload)).await.is_err() {
                 return;
             }
         }
@@ -143,7 +143,7 @@ async fn handle_socket(socket: WebSocket, state: ApiState) {
             outbound = realtime_rx.recv() => {
                 match outbound {
                     Ok(payload) => {
-                        if socket.send(Message::Text(payload.into())).await.is_err() {
+                        if socket.send(Message::Text(payload)).await.is_err() {
                             break;
                         }
                     }
@@ -152,7 +152,7 @@ async fn handle_socket(socket: WebSocket, state: ApiState) {
                 }
             }
             _ = ping_interval.tick() => {
-                if socket.send(Message::Ping(Vec::new().into())).await.is_err() {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() {
                     break;
                 }
             }

@@ -15,7 +15,10 @@ use axum::{
 pub(super) fn build_router(state: ApiState) -> Router {
     let protected = Router::new()
         .route("/metrics", get(system_handlers::metrics_handler))
-        .route("/ws/admin-ticket", axum::routing::post(realtime::issue_admin_ws_ticket_handler))
+        .route(
+            "/ws/admin-ticket",
+            axum::routing::post(realtime::issue_admin_ws_ticket_handler),
+        )
         .route(
             "/dashboard/traffic-map",
             get(system_handlers::traffic_map_handler),

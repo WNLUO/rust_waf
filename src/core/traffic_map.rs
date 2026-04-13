@@ -7,6 +7,8 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const ORIGIN_CACHE_TTL_MS: i64 = 10 * 60 * 1_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficDirection {
     Ingress,
@@ -104,8 +106,15 @@ struct GeoNode {
 pub struct TrafficMapCollector {
     observations: Mutex<VecDeque<TrafficObservation>>,
     geo_cache: DashMap<String, GeoNode>,
+    origin_cache: Mutex<Option<CachedOriginNode>>,
     http_client: Client,
     max_window_seconds: u32,
+}
+
+#[derive(Debug, Clone)]
+struct CachedOriginNode {
+    node: TrafficMapNodeSnapshot,
+    refreshed_at_ms: i64,
 }
 
 impl Default for TrafficMapCollector {
@@ -119,6 +128,7 @@ impl TrafficMapCollector {
         Self {
             observations: Mutex::new(VecDeque::new()),
             geo_cache: DashMap::new(),
+            origin_cache: Mutex::new(None),
             http_client: Client::new(),
             max_window_seconds: 300,
         }
@@ -350,7 +360,7 @@ impl TrafficMapCollector {
             scope: "china".to_string(),
             window_seconds,
             generated_at: now_ms,
-            origin_node: origin_node(),
+            origin_node: self.origin_node().await,
             nodes,
             flows,
             active_node_count: node_aggregates.len() as u32,
@@ -380,6 +390,58 @@ impl TrafficMapCollector {
         fallback_node(source_ip)
     }
 
+    async fn origin_node(&self) -> TrafficMapNodeSnapshot {
+        let now_ms = unix_timestamp_ms();
+        if let Some(cached) = self
+            .origin_cache
+            .lock()
+            .expect("origin_cache lock poisoned")
+            .clone()
+            .filter(|cached| now_ms - cached.refreshed_at_ms < ORIGIN_CACHE_TTL_MS)
+        {
+            return cached.node;
+        }
+
+        let node = match self.lookup_origin_node().await {
+            Some(node) => node,
+            None => default_origin_node(),
+        };
+
+        let mut guard = self
+            .origin_cache
+            .lock()
+            .expect("origin_cache lock poisoned");
+        *guard = Some(CachedOriginNode {
+            node: node.clone(),
+            refreshed_at_ms: now_ms,
+        });
+
+        node
+    }
+
+    async fn lookup_origin_node(&self) -> Option<TrafficMapNodeSnapshot> {
+        let public_ip = self.lookup_public_ip().await?;
+        let payload = self.lookup_remote_region(&public_ip).await?;
+        let node = origin_node_from_geo_payload(&payload)?;
+        Some(node)
+    }
+
+    async fn lookup_public_ip(&self) -> Option<String> {
+        let response = self
+            .http_client
+            .get("https://api.ipify.org?format=json")
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+
+        let payload = response.json::<PublicIpResponse>().await.ok()?;
+        let ip = payload.ip.trim();
+        (!ip.is_empty()).then_some(ip.to_string())
+    }
+
     async fn lookup_remote_region(&self, source_ip: &str) -> Option<IpWhoisResponse> {
         let url = format!("https://ipwho.is/{source_ip}");
         let response = self.http_client.get(url).send().await.ok()?;
@@ -397,6 +459,13 @@ struct IpWhoisResponse {
     country_code: Option<String>,
     region: Option<String>,
     city: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublicIpResponse {
+    ip: String,
 }
 
 fn is_internal_ip(ip: IpAddr) -> bool {
@@ -418,7 +487,7 @@ fn is_internal_ip(ip: IpAddr) -> bool {
     }
 }
 
-fn origin_node() -> TrafficMapNodeSnapshot {
+fn default_origin_node() -> TrafficMapNodeSnapshot {
     TrafficMapNodeSnapshot {
         id: "origin-cn".to_string(),
         name: "本服务器".to_string(),
@@ -432,6 +501,48 @@ fn origin_node() -> TrafficMapNodeSnapshot {
         bandwidth_mbps: 0.0,
         last_seen_at: unix_timestamp_ms(),
     }
+}
+
+fn origin_node_from_geo_payload(payload: &IpWhoisResponse) -> Option<TrafficMapNodeSnapshot> {
+    let country_code = payload
+        .country_code
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default();
+    if !country_code.eq_ignore_ascii_case("CN") {
+        return None;
+    }
+
+    let lat = payload.latitude?;
+    let lng = payload.longitude?;
+    let region = payload
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("中国");
+    let city = payload
+        .city
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let label = city
+        .map(|city| format!("{region} {city}"))
+        .unwrap_or_else(|| region.to_string());
+
+    Some(TrafficMapNodeSnapshot {
+        id: "origin-cn".to_string(),
+        name: "本服务器".to_string(),
+        region: label,
+        role: "origin".to_string(),
+        lat,
+        lng,
+        traffic_weight: 1.0,
+        request_count: 0,
+        blocked_count: 0,
+        bandwidth_mbps: 0.0,
+        last_seen_at: unix_timestamp_ms(),
+    })
 }
 
 fn internal_node() -> GeoNode {

@@ -9,7 +9,6 @@ pub(crate) async fn handle_http1_connection(
 ) -> Result<()> {
     let config = context.config_snapshot();
     let http1_handler = Http1Handler::new();
-    let extra_metadata = extra_metadata;
     let mut reusable_upstream_connection = None;
     let connection_id = extra_metadata
         .iter()

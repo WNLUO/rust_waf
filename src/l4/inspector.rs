@@ -159,30 +159,28 @@ impl L4Inspector {
         }
 
         // DDoS detection (simplified)
-        if self.ddos_enabled {
-            if self.detect_simple_ddos(packet) {
-                let blocked = self.connection_manager.block_ip(
-                    &packet.source_ip,
-                    "connection flood detected",
-                    Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
-                );
-                self.record_port_event(&port, |stats| {
-                    stats.increment_block();
-                    stats.increment_ddos();
-                });
-                self.ddos_events.fetch_add(1, Ordering::Relaxed);
-                self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                let reason = format!(
-                    "DDoS attack detected: {} connections within 1s",
-                    self.connection_manager
-                        .recent_connection_count(&packet.source_ip, Duration::from_secs(1))
-                );
-                return if blocked {
-                    InspectionResult::block_and_persist_ip(InspectionLayer::L4, reason)
-                } else {
-                    InspectionResult::block(InspectionLayer::L4, reason)
-                };
-            }
+        if self.ddos_enabled && self.detect_simple_ddos(packet) {
+            let blocked = self.connection_manager.block_ip(
+                &packet.source_ip,
+                "connection flood detected",
+                Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
+            );
+            self.record_port_event(&port, |stats| {
+                stats.increment_block();
+                stats.increment_ddos();
+            });
+            self.ddos_events.fetch_add(1, Ordering::Relaxed);
+            self.defense_actions.fetch_add(1, Ordering::Relaxed);
+            let reason = format!(
+                "DDoS attack detected: {} connections within 1s",
+                self.connection_manager
+                    .recent_connection_count(&packet.source_ip, Duration::from_secs(1))
+            );
+            return if blocked {
+                InspectionResult::block_and_persist_ip(InspectionLayer::L4, reason)
+            } else {
+                InspectionResult::block(InspectionLayer::L4, reason)
+            };
         }
 
         // Record successful connection

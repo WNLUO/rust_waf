@@ -108,7 +108,7 @@ impl UnifiedHttpRequest {
 
         // 添加请求体
         if !self.body.is_empty() {
-            inspection_text.push_str("\n");
+            inspection_text.push('\n');
             let body_str = String::from_utf8_lossy(&self.body);
             inspection_text.push_str(&body_str);
         }

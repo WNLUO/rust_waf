@@ -46,10 +46,12 @@ pub async fn load_runtime_config() -> Result<Config> {
         info!("Loaded configuration from SQLite: {}", sqlite_path);
         config
     } else {
-        let mut config = config::Config::default();
-        config.sqlite_enabled = true;
-        config.sqlite_path = sqlite_path.clone();
-        config.sqlite_auto_migrate = true;
+        let config = config::Config {
+            sqlite_enabled: true,
+            sqlite_path: sqlite_path.clone(),
+            sqlite_auto_migrate: true,
+            ..config::Config::default()
+        };
         bootstrap_store.seed_app_config(&config).await?;
         info!("Seeded default configuration into SQLite: {}", sqlite_path);
         config

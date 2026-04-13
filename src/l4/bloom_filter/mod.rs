@@ -134,7 +134,7 @@ impl L4BloomFilterManager {
         }
 
         if self.false_positive_verification {
-            let key = (ip.clone(), port);
+            let key = (*ip, port);
             let exact_result = self.exact_set_ip_port.contains(&key);
             log::debug!(
                 "IP:Port Bloom filter hit for {}:{}, exact verification: {}",

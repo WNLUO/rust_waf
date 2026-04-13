@@ -7,7 +7,7 @@ pub struct BloomFilter {
 
 impl BloomFilter {
     pub fn new(size: usize, hash_count: usize) -> Self {
-        let byte_count = (size + 7) / 8;
+        let byte_count = size.div_ceil(8);
         Self {
             data: vec![0u8; byte_count],
             size,
@@ -24,7 +24,7 @@ impl BloomFilter {
             if self
                 .data
                 .get(byte_index)
-                .map_or(true, |&byte| byte & bit_mask == 0)
+                .is_none_or(|&byte| byte & bit_mask == 0)
             {
                 return false;
             }

@@ -33,8 +33,8 @@ export interface EventMapNode {
   name: string
   region: string
   role: 'cdn' | 'origin'
-  lat: number
-  lng: number
+  lat?: number
+  lng?: number
   trafficWeight: number
   requestCount?: number
   blockedCount?: number

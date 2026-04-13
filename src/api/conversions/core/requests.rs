@@ -74,7 +74,6 @@ impl L4ConfigUpdateRequest {
             behavior_reject_threshold_percent: self.behavior_reject_threshold_percent,
             behavior_critical_reject_threshold_percent: self
                 .behavior_critical_reject_threshold_percent,
-            ..current.l4_config.clone()
         };
 
         current.normalized()
@@ -324,6 +323,7 @@ fn safeline_is_configured(config: &SafeLineConfig) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

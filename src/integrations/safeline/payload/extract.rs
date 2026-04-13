@@ -92,7 +92,7 @@ pub(crate) fn parse_certificate_detail(payload: &Value) -> Option<SafeLineCertif
     })
 }
 
-fn find_array_candidates<'a>(value: &'a Value) -> Vec<&'a Vec<Value>> {
+fn find_array_candidates(value: &Value) -> Vec<&Vec<Value>> {
     let mut candidates = Vec::new();
     collect_array_candidates(value, &mut candidates);
     candidates
@@ -126,7 +126,7 @@ fn collect_array_candidates<'a>(value: &'a Value, candidates: &mut Vec<&'a Vec<V
     }
 }
 
-fn find_object_candidates<'a>(value: &'a Value) -> Vec<&'a serde_json::Map<String, Value>> {
+fn find_object_candidates(value: &Value) -> Vec<&serde_json::Map<String, Value>> {
     let mut candidates = Vec::new();
     collect_object_candidates(value, &mut candidates);
     candidates

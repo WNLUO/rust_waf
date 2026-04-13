@@ -335,7 +335,7 @@ impl L7CcGuard {
 
     fn maybe_cleanup(&self, unix_now: i64) {
         let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        if sequence % 1024 != 0 {
+        if !sequence.is_multiple_of(1024) {
             return;
         }
 
@@ -560,13 +560,15 @@ mod tests {
 
     #[tokio::test]
     async fn issues_challenge_when_route_rate_crosses_threshold() {
-        let mut config = CcDefenseConfig::default();
-        config.route_challenge_threshold = 2;
-        config.route_block_threshold = 20;
-        config.host_challenge_threshold = 20;
-        config.host_block_threshold = 40;
-        config.ip_challenge_threshold = 20;
-        config.ip_block_threshold = 40;
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 2,
+            route_block_threshold: 20,
+            host_challenge_threshold: 20,
+            host_block_threshold: 40,
+            ip_challenge_threshold: 20,
+            ip_block_threshold: 40,
+            ..CcDefenseConfig::default()
+        };
         let guard = L7CcGuard::new(&config);
 
         let mut first = request("/search?q=1");

@@ -176,7 +176,6 @@ pub(crate) fn enforce_upstream_policy(context: &WafContext) -> Result<()> {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[allow(dead_code)]
 async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> Result<()> {
     engine_maintenance::probe_upstream_tcp(upstream_addr, timeout_ms).await
@@ -207,16 +206,15 @@ pub(crate) fn resolve_client_ip(
         crate::config::SourceIpStrategy::XForwardedForLastButTwo => request
             .get_header("x-forwarded-for")
             .and_then(|value| extract_forwarded_ip_from_right(value, 2)),
-        crate::config::SourceIpStrategy::Header => gateway
-            .custom_source_ip_header
-            .trim()
-            .is_empty()
-            .then_some(None)
-            .unwrap_or_else(|| {
+        crate::config::SourceIpStrategy::Header => {
+            if gateway.custom_source_ip_header.trim().is_empty() {
+                None
+            } else {
                 request
                     .get_header(&gateway.custom_source_ip_header)
                     .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
-            }),
+            }
+        }
         crate::config::SourceIpStrategy::ProxyProtocol => request
             .get_metadata("proxy_protocol_source_ip")
             .and_then(|value| value.parse::<std::net::IpAddr>().ok()),

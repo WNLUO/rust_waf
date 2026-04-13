@@ -27,6 +27,7 @@ where
     Ok(approx_bytes)
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum UpstreamClientConnection {
     Plain {
         authority: String,
@@ -265,6 +266,7 @@ fn resolve_upstream_tls_server_name(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

@@ -24,16 +24,13 @@ impl BucketKey {
             .get_metadata("tls.sni")
             .map(String::as_str)
             .or_else(|| request.get_header("host").map(String::as_str));
-        let alpn = request
-            .get_metadata("tls.alpn")
-            .map(String::as_str)
-            .or_else(|| {
-                Some(match request.version {
-                    HttpVersion::Http2_0 => "h2",
-                    HttpVersion::Http3_0 => "h3",
-                    _ => "http/1.1",
-                })
-            });
+        let alpn = request.get_metadata("tls.alpn").map(String::as_str).or({
+            Some(match request.version {
+                HttpVersion::Http2_0 => "h2",
+                HttpVersion::Http3_0 => "h3",
+                _ => "http/1.1",
+            })
+        });
         let transport = request
             .get_metadata("transport")
             .map(String::as_str)

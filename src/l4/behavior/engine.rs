@@ -4,6 +4,7 @@ use super::policy::{
 };
 use super::runtime::{extend_queue, unix_timestamp, worker_loop};
 use super::*;
+use std::sync::RwLock;
 
 impl L4BehaviorTuning {
     pub(super) fn from_config(config: &L4Config) -> Self {
@@ -37,7 +38,7 @@ impl L4BehaviorTuning {
 impl L4BehaviorEngine {
     pub fn new(config: &L4Config) -> Self {
         let buckets = Arc::new(DashMap::new());
-        let tuning = Arc::new(L4BehaviorTuning::from_config(config));
+        let tuning = Arc::new(RwLock::new(L4BehaviorTuning::from_config(config)));
         let (sender, receiver) = mpsc::channel(config.behavior_event_channel_capacity);
         let dropped_events = Arc::new(AtomicU64::new(0));
         let max_buckets = config.max_tracked_ips.max(128);
@@ -53,6 +54,11 @@ impl L4BehaviorEngine {
             fallback_threshold,
             tuning,
         }
+    }
+
+    pub fn update_tuning(&self, config: &L4Config) {
+        let mut guard = self.tuning.write().expect("behavior tuning lock poisoned");
+        *guard = L4BehaviorTuning::from_config(config);
     }
 
     pub fn start(&self) {
@@ -76,11 +82,14 @@ impl L4BehaviorEngine {
 
     pub fn pre_admission_policy(&self, peer_ip: IpAddr, transport: &str) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
+        let tuning = self
+            .tuning
+            .read()
+            .expect("behavior tuning lock poisoned")
+            .clone();
         self.aggregate_for_peer_transport(peer_ip, canonicalize_transport(transport))
-            .map(|bucket| {
-                policy_from_runtime(&bucket, overload_level.clone(), self.tuning.as_ref())
-            })
-            .unwrap_or_else(|| default_policy(overload_level, self.tuning.as_ref()))
+            .map(|bucket| policy_from_runtime(&bucket, overload_level.clone(), &tuning))
+            .unwrap_or_else(|| default_policy(overload_level, &tuning))
     }
 
     pub fn observe_connection_open(
@@ -127,9 +136,14 @@ impl L4BehaviorEngine {
     ) -> L4AdaptivePolicy {
         let key = BucketKey::from_request(resolve_request_bucket_ip(packet, request), request);
         let overload_level = self.current_overload_level();
+        let tuning = self
+            .tuning
+            .read()
+            .expect("behavior tuning lock poisoned")
+            .clone();
         let policy = self
             .policy_for_key(&key, overload_level.clone())
-            .unwrap_or_else(|| default_policy(overload_level.clone(), self.tuning.as_ref()));
+            .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
 
         let bytes = request.to_inspection_string().len() as u64;
         self.try_send(BehaviorEvent::RequestObserved {
@@ -193,8 +207,17 @@ impl L4BehaviorEngine {
             active_connections,
             self.fallback_threshold,
             self.dropped_events.load(Ordering::Relaxed),
-            self.tuning.as_ref(),
+            &self
+                .tuning
+                .read()
+                .expect("behavior tuning lock poisoned")
+                .clone(),
         );
+        let tuning = self
+            .tuning
+            .read()
+            .expect("behavior tuning lock poisoned")
+            .clone();
 
         let mut normal_buckets = 0u64;
         let mut fine_grained_buckets = 0u64;
@@ -225,8 +248,7 @@ impl L4BehaviorEngine {
                     L4BucketRiskLevel::Suspicious => suspicious_buckets += 1,
                     L4BucketRiskLevel::High => high_risk_buckets += 1,
                 }
-                let policy =
-                    policy_from_runtime(bucket, overload_level.clone(), self.tuning.as_ref());
+                let policy = policy_from_runtime(bucket, overload_level.clone(), &tuning);
                 L4BucketSnapshot {
                     peer_ip: entry.key().peer_ip.to_string(),
                     authority: entry.key().authority.clone(),
@@ -298,8 +320,13 @@ impl L4BehaviorEngine {
 
     pub fn connection_admission_for_key(&self, key: &BucketKey) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
+        let tuning = self
+            .tuning
+            .read()
+            .expect("behavior tuning lock poisoned")
+            .clone();
         self.policy_for_key(key, overload_level.clone())
-            .unwrap_or_else(|| default_policy(overload_level, self.tuning.as_ref()))
+            .unwrap_or_else(|| default_policy(overload_level, &tuning))
     }
 
     fn try_send(&self, event: BehaviorEvent) {
@@ -313,8 +340,13 @@ impl L4BehaviorEngine {
         key: &BucketKey,
         overload_level: L4OverloadLevel,
     ) -> Option<L4AdaptivePolicy> {
+        let tuning = self
+            .tuning
+            .read()
+            .expect("behavior tuning lock poisoned")
+            .clone();
         self.lookup_bucket(key)
-            .map(|bucket| policy_from_runtime(&bucket, overload_level, self.tuning.as_ref()))
+            .map(|bucket| policy_from_runtime(&bucket, overload_level, &tuning))
     }
 
     fn lookup_bucket(&self, key: &BucketKey) -> Option<BucketRuntime> {
@@ -333,7 +365,11 @@ impl L4BehaviorEngine {
             0,
             self.fallback_threshold,
             self.dropped_events.load(Ordering::Relaxed),
-            self.tuning.as_ref(),
+            &self
+                .tuning
+                .read()
+                .expect("behavior tuning lock poisoned")
+                .clone(),
         )
     }
 

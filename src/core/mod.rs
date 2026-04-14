@@ -277,7 +277,7 @@ impl WafContext {
         if let Some(decision) = decision {
             self.apply_runtime_config(decision.next_config);
             if decision.requires_l4_refresh {
-                self.refresh_l4_runtime_from_config().await?;
+                self.refresh_l4_behavior_tuning_from_config();
             }
         }
 
@@ -349,6 +349,13 @@ impl WafContext {
             .expect("l4_inspector lock poisoned");
         *guard = next;
         Ok(())
+    }
+
+    pub fn refresh_l4_behavior_tuning_from_config(&self) {
+        let config = self.config_snapshot();
+        if let Some(inspector) = self.l4_inspector() {
+            inspector.update_behavior_tuning(&config.l4_config);
+        }
     }
 
     pub async fn refresh_rules_from_storage(&self) -> Result<bool> {

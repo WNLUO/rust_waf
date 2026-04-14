@@ -244,6 +244,10 @@ impl L4Inspector {
             .pre_admission_policy(peer_ip, transport)
     }
 
+    pub fn update_behavior_tuning(&self, config: &L4Config) {
+        self.behavior_engine.update_tuning(config);
+    }
+
     pub fn record_l7_feedback(
         &self,
         packet: &PacketInfo,

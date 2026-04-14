@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -29,7 +29,7 @@ pub struct L4BehaviorEngine {
     dropped_events: Arc<AtomicU64>,
     max_buckets: usize,
     fallback_threshold: usize,
-    tuning: Arc<L4BehaviorTuning>,
+    tuning: Arc<RwLock<L4BehaviorTuning>>,
 }
 
 #[derive(Debug, Clone)]

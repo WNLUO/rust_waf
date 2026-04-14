@@ -2,6 +2,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import {
   fetchL7Config,
   fetchL7Stats,
+  updateL7CompatibilityConfig,
   updateL7Config,
 } from '@/shared/api/l7'
 import { fetchRulesList } from '@/shared/api/rules'
@@ -126,6 +127,14 @@ export function useAdminL7() {
   }
 
   const saveConfig = async () => {
+    return saveConfigInternal(false)
+  }
+
+  const saveCompatibilityConfig = async () => {
+    return saveConfigInternal(true)
+  }
+
+  const saveConfigInternal = async (compatibilityMode: boolean) => {
     saving.value = true
     error.value = ''
     successMessage.value = ''
@@ -428,7 +437,9 @@ export function useAdminL7() {
         configForm.bloom_false_positive_verification = false
       }
 
-      const response = await updateL7Config({ ...configForm })
+      const response = compatibilityMode
+        ? await updateL7CompatibilityConfig({ ...configForm })
+        : await updateL7Config({ ...configForm })
       successMessage.value = response.message
       await refreshAll()
       return true
@@ -552,6 +563,7 @@ export function useAdminL7() {
     runtimeProfileLabel,
     runtimeStatus,
     saveConfig,
+    saveCompatibilityConfig,
     saving,
     stats,
     successMessage,

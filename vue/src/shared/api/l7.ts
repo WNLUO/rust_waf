@@ -20,6 +20,21 @@ export function updateL7Config(
   })
 }
 
+export function updateL7CompatibilityConfig(
+  payload: Omit<
+    L7ConfigPayload,
+    | 'runtime_enabled'
+    | 'adaptive_managed_fields'
+    | 'adaptive_runtime'
+    | 'advanced_compatibility'
+  >,
+) {
+  return apiRequest<WriteStatusResponse>('/l7/config/compatibility', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export function fetchL7Stats() {
   return apiRequest<L7StatsPayload>('/l7/stats')
 }

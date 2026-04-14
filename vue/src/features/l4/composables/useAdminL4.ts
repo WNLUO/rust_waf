@@ -1,5 +1,10 @@
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/l4'
+import {
+  fetchL4Config,
+  fetchL4Stats,
+  updateL4CompatibilityConfig,
+  updateL4Config,
+} from '@/shared/api/l4'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
 import type {
   AdaptiveProtectionRuntimePayload,
@@ -138,6 +143,14 @@ export function useAdminL4() {
   }
 
   const saveConfig = async () => {
+    return saveConfigInternal(false)
+  }
+
+  const saveCompatibilityConfig = async () => {
+    return saveConfigInternal(true)
+  }
+
+  const saveConfigInternal = async (compatibilityMode: boolean) => {
     saving.value = true
     error.value = ''
     successMessage.value = ''
@@ -294,7 +307,9 @@ export function useAdminL4() {
         12,
       )
 
-      const response = await updateL4Config({ ...configForm })
+      const response = compatibilityMode
+        ? await updateL4CompatibilityConfig({ ...configForm })
+        : await updateL4Config({ ...configForm })
       successMessage.value = response.message
       await refreshAll()
       return true
@@ -397,6 +412,7 @@ export function useAdminL4() {
     runtimeProfileLabel,
     runtimeStatus,
     saveConfig,
+    saveCompatibilityConfig,
     saving,
     stats,
     successMessage,

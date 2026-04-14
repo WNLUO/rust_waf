@@ -44,7 +44,7 @@ pub(super) async fn update_l4_config_handler(
 ) -> ApiResult<Json<WriteStatusResponse>> {
     let store = sqlite_store(&state)?;
     let current = persisted_config(&state).await?;
-    let next = payload.into_config(current);
+    let next = payload.into_config(current, false);
 
     store
         .upsert_app_config(&next)
@@ -63,6 +63,33 @@ pub(super) async fn update_l4_config_handler(
     }))
 }
 
+pub(super) async fn update_l4_compatibility_config_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<L4ConfigUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let current = persisted_config(&state).await?;
+    let next = payload.into_config(current, true);
+
+    store
+        .upsert_app_config(&next)
+        .await
+        .map_err(ApiError::internal)?;
+    state.context.apply_runtime_config(next.clone());
+    state
+        .context
+        .refresh_l4_runtime_from_config()
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message:
+            "L4 兼容层配置已写入数据库，并已按显式兼容模式刷新旧版细粒度行为参数。"
+                .to_string(),
+    }))
+}
+
 pub(super) async fn update_l7_config_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<L7ConfigUpdateRequest>,
@@ -71,7 +98,7 @@ pub(super) async fn update_l7_config_handler(
     let current = persisted_config(&state).await?;
     let previous = current.clone();
     let next = payload
-        .into_config(current)
+        .into_config(current, false)
         .map_err(ApiError::bad_request)?;
 
     store
@@ -102,6 +129,42 @@ pub(super) async fn update_l7_config_handler(
             "HTTP 接入与代理配置已写入数据库，并已立即刷新运行时代理参数、站点/证书路由与 HTTP/3 配置。"
                 .to_string()
         },
+    }))
+}
+
+pub(super) async fn update_l7_compatibility_config_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<L7ConfigUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let current = persisted_config(&state).await?;
+    let next = payload
+        .into_config(current, true)
+        .map_err(ApiError::bad_request)?;
+
+    store
+        .upsert_app_config(&next)
+        .await
+        .map_err(ApiError::internal)?;
+    state.context.apply_runtime_config(next.clone());
+    state
+        .context
+        .refresh_gateway_runtime_from_storage()
+        .await
+        .map_err(ApiError::internal)?;
+    #[cfg(feature = "http3")]
+    crate::core::engine::sync_http3_listener_runtime(
+        Arc::clone(&state.context),
+        next.max_concurrent_tasks,
+    )
+    .await
+    .map_err(ApiError::internal)?;
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message:
+            "L7 兼容层配置已写入数据库，并已按显式兼容模式刷新旧版 CC / 自动调优细粒度参数。"
+                .to_string(),
     }))
 }
 

@@ -48,6 +48,7 @@ const {
   loading: l4Loading,
   meta: l4Meta,
   saveConfig: saveL4Config,
+  saveCompatibilityConfig: saveL4CompatibilityConfig,
   saving: savingL4,
   successMessage: l4SuccessMessage,
 } = useAdminL4()
@@ -58,6 +59,7 @@ const {
   loading: l7Loading,
   meta: l7Meta,
   saveConfig: saveL7Config,
+  saveCompatibilityConfig: saveL7CompatibilityConfig,
   saving: savingL7,
   stats: l7Stats,
   successMessage: l7SuccessMessage,
@@ -66,6 +68,8 @@ const {
 
 const savingAll = ref(false)
 const trustedCdnDialogOpen = ref(false)
+const l4CompatibilityOpen = ref(false)
+const l7CompatibilityOpen = ref(false)
 const advancedGlobalSectionRef = ref<{
   saveSettings: () => Promise<boolean>
 } | null>(null)
@@ -299,9 +303,32 @@ useFlashMessages({
           </div>
           <div
             v-else-if="adaptiveProtectionEnabled"
-            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
+            class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
           >
-            自适应防护已接管 L4 连接预算、延迟和拒绝阈值。这里的细粒度参数已从常规入口收起，避免线上继续依赖手工阈值。需要兼容旧策略时，可暂时关闭“自适应防护”后再人工调整。
+            <p>
+              自适应防护已接管 L4 连接预算、延迟和拒绝阈值。这里的细粒度参数已从常规入口收起，避免线上继续依赖手工阈值。
+            </p>
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="l4CompatibilityOpen = !l4CompatibilityOpen"
+              >
+                {{ l4CompatibilityOpen ? '收起兼容层入口' : '展开兼容层入口' }}
+              </button>
+              <button
+                v-if="l4CompatibilityOpen"
+                class="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600/90"
+                :disabled="savingL4"
+                @click="saveL4CompatibilityConfig"
+              >
+                {{ savingL4 ? '保存中...' : '保存 L4 兼容层参数' }}
+              </button>
+            </div>
+            <AdminL4ConfigFormCard
+              v-if="l4CompatibilityOpen"
+              :form="l4ConfigForm"
+              @update:form="Object.assign(l4ConfigForm, $event)"
+            />
           </div>
           <AdminL4ConfigFormCard
             v-else
@@ -332,9 +359,40 @@ useFlashMessages({
           </div>
           <div
             v-else-if="adaptiveProtectionEnabled"
-            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
+            class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
           >
-            自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，常规场景不再建议手动维护这一组数值。
+            <p>
+              自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，常规场景不再建议手动维护这一组数值。
+            </p>
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="l7CompatibilityOpen = !l7CompatibilityOpen"
+              >
+                {{ l7CompatibilityOpen ? '收起兼容层入口' : '展开兼容层入口' }}
+              </button>
+              <button
+                v-if="l7CompatibilityOpen"
+                class="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600/90"
+                :disabled="savingL7"
+                @click="saveL7CompatibilityConfig"
+              >
+                {{ savingL7 ? '保存中...' : '保存 L7 兼容层参数' }}
+              </button>
+            </div>
+            <AdminL7ConfigSection
+              v-if="l7CompatibilityOpen"
+              :form="l7ConfigForm"
+              :trusted-proxy-cidrs-text="trustedProxyCidrsText"
+              :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
+              :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
+              :drop-unmatched-requests-disabled="saving || loading"
+              @update:form="Object.assign(l7ConfigForm, $event)"
+              @update:drop-unmatched-requests="
+                systemSettings.drop_unmatched_requests = $event
+              "
+              @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
+            />
           </div>
           <AdminL7ConfigSection
             v-else-if="!l7Loading"

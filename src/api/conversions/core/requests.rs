@@ -40,8 +40,13 @@ impl HeaderOperationPayload {
 }
 
 impl L4ConfigUpdateRequest {
-    pub(crate) fn into_config(self, mut current: Config) -> Config {
-        let adaptive_managed_fields = current.adaptive_protection.enabled;
+    pub(crate) fn into_config(
+        self,
+        mut current: Config,
+        allow_compatibility_updates: bool,
+    ) -> Config {
+        let adaptive_managed_fields =
+            current.adaptive_protection.enabled && !allow_compatibility_updates;
         let previous_trusted_cdn = current.l4_config.trusted_cdn.clone();
         let previous_l4 = current.l4_config.clone();
         let previous_edgeone = previous_trusted_cdn.edgeone_overseas;
@@ -178,8 +183,13 @@ impl L4ConfigUpdateRequest {
 }
 
 impl L7ConfigUpdateRequest {
-    pub(crate) fn into_config(self, mut current: Config) -> Result<Config, String> {
-        let adaptive_managed_fields = current.adaptive_protection.enabled;
+    pub(crate) fn into_config(
+        self,
+        mut current: Config,
+        allow_compatibility_updates: bool,
+    ) -> Result<Config, String> {
+        let adaptive_managed_fields =
+            current.adaptive_protection.enabled && !allow_compatibility_updates;
         current.runtime_profile = match self.runtime_profile.as_str() {
             "minimal" => RuntimeProfile::Minimal,
             "standard" => RuntimeProfile::Standard,
@@ -582,7 +592,7 @@ mod tests {
             behavior_critical_reject_threshold_percent: 666,
             trusted_cdn: TrustedCdnConfigRequest::default(),
         }
-        .into_config(current);
+        .into_config(current, false);
 
         assert_eq!(next.l4_config.connection_rate_limit, 999);
         assert_eq!(next.l4_config.behavior_soft_delay_ms, 25);
@@ -671,7 +681,7 @@ mod tests {
             safeline_intercept: None,
             auto_tuning: None,
         }
-        .into_config(current)
+        .into_config(current, false)
         .expect("l7 update should succeed");
 
         assert_eq!(next.l7_config.cc_defense.ip_challenge_threshold, 60);

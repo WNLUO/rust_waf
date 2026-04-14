@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminL4ConfigFormCard from '@/features/l4/components/AdminL4ConfigFormCard.vue'
+import AdminL4CompatibilityDialog from '@/features/l4/components/AdminL4CompatibilityDialog.vue'
 import AdminTrustedCdnDialog from '@/features/l4/components/AdminTrustedCdnDialog.vue'
 import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
 import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
+import AdminL7CompatibilityDialog from '@/features/l7/components/AdminL7CompatibilityDialog.vue'
 import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
 import { useAdminL7 } from '@/features/l7/composables/useAdminL7'
 import AdminSettingsSystemSection from '@/features/settings/components/AdminSettingsSystemSection.vue'
@@ -313,25 +315,13 @@ useFlashMessages({
             <div class="flex flex-wrap items-center gap-3">
               <button
                 class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-                @click="l4CompatibilityOpen = !l4CompatibilityOpen"
+                @click="l4CompatibilityOpen = true"
               >
-                {{ l4CompatibilityOpen ? '收起兼容层入口' : '展开兼容层入口' }}
-              </button>
-              <button
-                v-if="l4CompatibilityOpen"
-                class="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600/90"
-                :disabled="savingL4"
-                @click="saveL4CompatibilityConfig"
+                打开兼容层入口
               >
-                {{ savingL4 ? '保存中...' : '保存 L4 兼容层参数' }}
+                查看 / 编辑归档参数
               </button>
             </div>
-            <AdminL4ConfigFormCard
-              v-if="l4CompatibilityOpen"
-              :form="l4CompatibilityForm"
-              compatibility-mode
-              @update:form="Object.assign(l4CompatibilityForm, $event)"
-            />
           </div>
           <AdminL4ConfigFormCard
             v-else
@@ -370,33 +360,13 @@ useFlashMessages({
             <div class="flex flex-wrap items-center gap-3">
               <button
                 class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
-                @click="l7CompatibilityOpen = !l7CompatibilityOpen"
+                @click="l7CompatibilityOpen = true"
               >
-                {{ l7CompatibilityOpen ? '收起兼容层入口' : '展开兼容层入口' }}
-              </button>
-              <button
-                v-if="l7CompatibilityOpen"
-                class="rounded-full bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-amber-600/90"
-                :disabled="savingL7"
-                @click="saveL7CompatibilityConfig"
+                打开兼容层入口
               >
-                {{ savingL7 ? '保存中...' : '保存 L7 兼容层参数' }}
+                查看 / 编辑归档参数
               </button>
             </div>
-            <AdminL7ConfigSection
-              v-if="l7CompatibilityOpen"
-              :form="l7CompatibilityForm"
-              compatibility-mode
-              :trusted-proxy-cidrs-text="trustedProxyCidrsText"
-              :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
-              :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
-              :drop-unmatched-requests-disabled="saving || loading"
-              @update:form="Object.assign(l7CompatibilityForm, $event)"
-              @update:drop-unmatched-requests="
-                systemSettings.drop_unmatched_requests = $event
-              "
-              @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
-            />
           </div>
           <AdminL7ConfigSection
             v-else-if="!l7Loading"
@@ -442,6 +412,32 @@ useFlashMessages({
       :saving="savingL4"
       @close="trustedCdnDialogOpen = false"
       @save="saveTrustedCdnSettings"
+    />
+
+    <AdminL4CompatibilityDialog
+      :form="l4CompatibilityForm"
+      :is-open="l4CompatibilityOpen"
+      :saving="savingL4"
+      @close="l4CompatibilityOpen = false"
+      @save="saveL4CompatibilityConfig"
+      @update:form="Object.assign(l4CompatibilityForm, $event)"
+    />
+
+    <AdminL7CompatibilityDialog
+      :form="l7CompatibilityForm"
+      :is-open="l7CompatibilityOpen"
+      :saving="savingL7"
+      :trusted-proxy-cidrs-text="trustedProxyCidrsText"
+      :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
+      :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
+      :drop-unmatched-requests-disabled="saving || loading"
+      @close="l7CompatibilityOpen = false"
+      @save="saveL7CompatibilityConfig"
+      @update:form="Object.assign(l7CompatibilityForm, $event)"
+      @update:drop-unmatched-requests="
+        systemSettings.drop_unmatched_requests = $event
+      "
+      @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
     />
   </AppLayout>
 </template>

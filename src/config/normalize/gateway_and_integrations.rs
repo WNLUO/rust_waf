@@ -87,6 +87,18 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
     if config.l7_config.cc_defense.challenge_cookie_name.is_empty() {
         config.l7_config.cc_defense.challenge_cookie_name = "rwaf_cc".to_string();
     }
+    config.l7_config.cc_defense.static_request_weight_percent = config
+        .l7_config
+        .cc_defense
+        .static_request_weight_percent
+        .clamp(5, 100);
+    config.l7_config.cc_defense.page_subresource_weight_percent = config
+        .l7_config
+        .cc_defense
+        .page_subresource_weight_percent
+        .clamp(1, config.l7_config.cc_defense.static_request_weight_percent);
+    config.l7_config.cc_defense.page_load_grace_secs =
+        clamp_u64(config.l7_config.cc_defense.page_load_grace_secs, 1, 15, 3);
 
     config.l7_config.safeline_intercept.max_body_bytes = clamp_or_default(
         config.l7_config.safeline_intercept.max_body_bytes,

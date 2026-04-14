@@ -169,6 +169,9 @@ impl CcDefenseConfigResponse {
             delay_ms: config.delay_ms,
             challenge_ttl_secs: config.challenge_ttl_secs,
             challenge_cookie_name: config.challenge_cookie_name.clone(),
+            static_request_weight_percent: config.static_request_weight_percent,
+            page_subresource_weight_percent: config.page_subresource_weight_percent,
+            page_load_grace_secs: config.page_load_grace_secs,
         }
     }
 }

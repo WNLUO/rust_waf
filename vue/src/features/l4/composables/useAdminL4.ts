@@ -268,8 +268,10 @@ export function useAdminL4() {
       const response = await updateL4Config({ ...configForm })
       successMessage.value = response.message
       await refreshAll()
+      return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : '保存 L4 配置失败'
+      return false
     } finally {
       saving.value = false
     }

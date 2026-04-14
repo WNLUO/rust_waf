@@ -334,8 +334,10 @@ export function useAdminL7() {
       const response = await updateL7Config({ ...configForm })
       successMessage.value = response.message
       await refreshAll()
+      return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : '保存 HTTP 接入配置失败'
+      return false
     } finally {
       saving.value = false
     }

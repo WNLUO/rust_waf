@@ -93,6 +93,12 @@ pub struct CcDefenseConfig {
     pub challenge_ttl_secs: u64,
     #[serde(default = "default_cc_cookie_name")]
     pub challenge_cookie_name: String,
+    #[serde(default = "default_cc_static_request_weight_percent")]
+    pub static_request_weight_percent: u8,
+    #[serde(default = "default_cc_page_subresource_weight_percent")]
+    pub page_subresource_weight_percent: u8,
+    #[serde(default = "default_cc_page_load_grace_secs")]
+    pub page_load_grace_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,6 +251,18 @@ fn default_cc_cookie_name() -> String {
     "rwaf_cc".to_string()
 }
 
+const fn default_cc_static_request_weight_percent() -> u8 {
+    20
+}
+
+const fn default_cc_page_subresource_weight_percent() -> u8 {
+    10
+}
+
+const fn default_cc_page_load_grace_secs() -> u64 {
+    3
+}
+
 const fn default_safeline_intercept_max_body_bytes() -> usize {
     32 * 1024
 }
@@ -306,6 +324,9 @@ impl Default for CcDefenseConfig {
             delay_ms: default_cc_delay_ms(),
             challenge_ttl_secs: default_cc_challenge_ttl_secs(),
             challenge_cookie_name: default_cc_cookie_name(),
+            static_request_weight_percent: default_cc_static_request_weight_percent(),
+            page_subresource_weight_percent: default_cc_page_subresource_weight_percent(),
+            page_load_grace_secs: default_cc_page_load_grace_secs(),
         }
     }
 }

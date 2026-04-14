@@ -19,6 +19,11 @@ pub struct L7CcGuard {
     host_buckets: DashMap<String, SlidingWindowCounter>,
     route_buckets: DashMap<String, SlidingWindowCounter>,
     hot_path_buckets: DashMap<String, SlidingWindowCounter>,
+    ip_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
+    host_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
+    route_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
+    hot_path_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
+    page_load_windows: DashMap<String, PageLoadWindowState>,
     request_sequence: AtomicU64,
 }
 
@@ -28,10 +33,41 @@ struct SlidingWindowCounter {
     last_seen_unix: AtomicI64,
 }
 
+#[derive(Debug)]
+struct WeightedSlidingWindowCounter {
+    events: Mutex<VecDeque<(Instant, u16)>>,
+    last_seen_unix: AtomicI64,
+}
+
+#[derive(Debug)]
+struct PageLoadWindowState {
+    expires_at_unix: AtomicI64,
+    last_seen_unix: AtomicI64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HtmlResponseMode {
     HtmlChallenge,
     TextOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestKind {
+    Document,
+    StaticAsset,
+    ApiLike,
+    Other,
+}
+
+impl RequestKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Document => "document",
+            Self::StaticAsset => "static",
+            Self::ApiLike => "api",
+            Self::Other => "other",
+        }
+    }
 }
 
 impl L7CcGuard {
@@ -44,6 +80,11 @@ impl L7CcGuard {
             host_buckets: DashMap::new(),
             route_buckets: DashMap::new(),
             hot_path_buckets: DashMap::new(),
+            ip_weighted_buckets: DashMap::new(),
+            host_weighted_buckets: DashMap::new(),
+            route_weighted_buckets: DashMap::new(),
+            hot_path_weighted_buckets: DashMap::new(),
+            page_load_windows: DashMap::new(),
             request_sequence: AtomicU64::new(0),
         }
     }
@@ -69,12 +110,19 @@ impl L7CcGuard {
         let host = normalized_host(request);
         let route_path = normalized_route_path(path);
         let method = request.method.to_ascii_uppercase();
+        let request_kind = classify_request(request, &route_path);
         let html_mode = challenge_mode(request, &route_path);
         let verified = self.has_valid_challenge_cookie(request, client_ip, &host);
-
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(self.config.request_window_secs.max(1));
+
+        if request_kind == RequestKind::Document {
+            self.record_page_load_window(client_ip, &host, &route_path, unix_now);
+        }
+        let is_page_subresource = request_kind == RequestKind::StaticAsset
+            && self.matches_page_load_window(request, client_ip, &host, unix_now);
+        let weight_percent = self.request_weight_percent(request_kind, is_page_subresource);
 
         let ip_count = self.observe(
             &self.ip_buckets,
@@ -105,9 +153,59 @@ impl L7CcGuard {
             window,
         );
 
+        let ip_weighted_points = self.observe_weighted(
+            &self.ip_weighted_buckets,
+            client_ip.to_string(),
+            now,
+            unix_now,
+            window,
+            weight_percent,
+        );
+        let host_weighted_points = self.observe_weighted(
+            &self.host_weighted_buckets,
+            format!("{client_ip}|{host}"),
+            now,
+            unix_now,
+            window,
+            weight_percent,
+        );
+        let route_weighted_points = self.observe_weighted(
+            &self.route_weighted_buckets,
+            format!("{client_ip}|{host}|{method}|{route_path}"),
+            now,
+            unix_now,
+            window,
+            weight_percent,
+        );
+        let hot_path_weighted_points = self.observe_weighted(
+            &self.hot_path_weighted_buckets,
+            format!("{host}|{route_path}"),
+            now,
+            unix_now,
+            window,
+            weight_percent,
+        );
+
+        let ip_effective = weighted_points_to_requests(ip_weighted_points);
+        let host_effective = weighted_points_to_requests(host_weighted_points);
+        let route_effective = weighted_points_to_requests(route_weighted_points);
+        let hot_path_effective = weighted_points_to_requests(hot_path_weighted_points);
+
         request.add_metadata("l7.cc.client_ip".to_string(), client_ip.to_string());
         request.add_metadata("l7.cc.host".to_string(), host.clone());
         request.add_metadata("l7.cc.route".to_string(), route_path.clone());
+        request.add_metadata(
+            "l7.cc.request_kind".to_string(),
+            request_kind.as_str().to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.page_subresource".to_string(),
+            is_page_subresource.to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.weight_percent".to_string(),
+            weight_percent.to_string(),
+        );
         request.add_metadata("l7.cc.ip_count".to_string(), ip_count.to_string());
         request.add_metadata("l7.cc.host_count".to_string(), host_count.to_string());
         request.add_metadata("l7.cc.route_count".to_string(), route_count.to_string());
@@ -115,12 +213,26 @@ impl L7CcGuard {
             "l7.cc.hot_path_count".to_string(),
             hot_path_count.to_string(),
         );
+        request.add_metadata("l7.cc.ip_weighted".to_string(), ip_effective.to_string());
+        request.add_metadata(
+            "l7.cc.host_weighted".to_string(),
+            host_effective.to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.route_weighted".to_string(),
+            route_effective.to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.hot_path_weighted".to_string(),
+            hot_path_effective.to_string(),
+        );
         request.add_metadata("l7.cc.challenge_verified".to_string(), verified.to_string());
 
         self.maybe_cleanup(unix_now);
 
         let challenge_multiplier = if verified { 3 } else { 1 };
         let block_multiplier = if verified { 2 } else { 1 };
+        let low_risk_subresource = request_kind == RequestKind::StaticAsset && is_page_subresource;
 
         let route_block_threshold = self
             .config
@@ -139,15 +251,22 @@ impl L7CcGuard {
             .hot_path_block_threshold
             .saturating_mul(block_multiplier);
 
-        if route_count >= route_block_threshold
-            || host_count >= host_block_threshold
-            || ip_count >= ip_block_threshold
-            || (hot_path_count >= hot_path_block_threshold
-                && route_count >= self.config.route_challenge_threshold.max(3))
+        if !low_risk_subresource
+            && (route_effective >= route_block_threshold
+                || host_effective >= host_block_threshold
+                || ip_effective >= ip_block_threshold
+                || (hot_path_effective >= hot_path_block_threshold
+                    && route_effective >= self.config.route_challenge_threshold.max(3)))
         {
             let reason = format!(
-                "l7 cc guard throttled request: ip_count={} host_count={} route_count={} hot_path_count={} verified={}",
-                ip_count, host_count, route_count, hot_path_count, verified
+                "l7 cc guard throttled request: kind={} page_subresource={} ip={} host={} route={} hot_path={} verified={}",
+                request_kind.as_str(),
+                is_page_subresource,
+                ip_effective,
+                host_effective,
+                route_effective,
+                hot_path_effective,
+                verified
             );
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
             return Some(InspectionResult::respond(
@@ -175,15 +294,21 @@ impl L7CcGuard {
             .saturating_mul(challenge_multiplier);
 
         if !verified
-            && (route_count >= route_challenge_threshold
-                || host_count >= host_challenge_threshold
-                || ip_count >= ip_challenge_threshold
-                || (hot_path_count >= hot_path_challenge_threshold
-                    && route_count >= route_challenge_threshold.saturating_sub(4).max(1)))
+            && !low_risk_subresource
+            && (route_effective >= route_challenge_threshold
+                || host_effective >= host_challenge_threshold
+                || ip_effective >= ip_challenge_threshold
+                || (hot_path_effective >= hot_path_challenge_threshold
+                    && route_effective >= route_challenge_threshold.saturating_sub(4).max(1)))
         {
             let reason = format!(
-                "l7 cc guard issued challenge: ip_count={} host_count={} route_count={} hot_path_count={}",
-                ip_count, host_count, route_count, hot_path_count
+                "l7 cc guard issued challenge: kind={} page_subresource={} ip={} host={} route={} hot_path={}",
+                request_kind.as_str(),
+                is_page_subresource,
+                ip_effective,
+                host_effective,
+                route_effective,
+                hot_path_effective,
             );
             request.add_metadata("l7.cc.action".to_string(), "challenge".to_string());
             return Some(InspectionResult::respond(
@@ -197,12 +322,12 @@ impl L7CcGuard {
             .saturating_mul(self.config.route_challenge_threshold.max(1))
             / 100;
         if self.config.delay_ms > 0
-            && (route_count >= delay_threshold.max(1)
-                || host_count
+            && (route_effective >= delay_threshold.max(1)
+                || host_effective
                     >= u32::from(self.config.delay_threshold_percent)
                         .saturating_mul(self.config.host_challenge_threshold.max(1))
                         / 100
-                || ip_count
+                || ip_effective
                     >= u32::from(self.config.delay_threshold_percent)
                         .saturating_mul(self.config.ip_challenge_threshold.max(1))
                         / 100)
@@ -333,6 +458,72 @@ impl L7CcGuard {
         entry.observe(now, unix_now, window)
     }
 
+    fn observe_weighted(
+        &self,
+        map: &DashMap<String, WeightedSlidingWindowCounter>,
+        key: String,
+        now: Instant,
+        unix_now: i64,
+        window: Duration,
+        weight_percent: u8,
+    ) -> u32 {
+        let mut entry = map
+            .entry(key)
+            .or_insert_with(WeightedSlidingWindowCounter::new);
+        entry.observe(now, unix_now, window, weight_percent)
+    }
+
+    fn request_weight_percent(&self, kind: RequestKind, is_page_subresource: bool) -> u8 {
+        if is_page_subresource {
+            return self.config.page_subresource_weight_percent;
+        }
+        match kind {
+            RequestKind::StaticAsset => self.config.static_request_weight_percent,
+            _ => 100,
+        }
+    }
+
+    fn record_page_load_window(
+        &self,
+        client_ip: std::net::IpAddr,
+        host: &str,
+        document_path: &str,
+        unix_now: i64,
+    ) {
+        let key = page_window_key(client_ip, host, document_path);
+        let expires_at = unix_now + self.config.page_load_grace_secs as i64;
+        let mut entry = self
+            .page_load_windows
+            .entry(key)
+            .or_insert_with(|| PageLoadWindowState::new(expires_at, unix_now));
+        entry.refresh(expires_at, unix_now);
+    }
+
+    fn matches_page_load_window(
+        &self,
+        request: &UnifiedHttpRequest,
+        client_ip: std::net::IpAddr,
+        host: &str,
+        unix_now: i64,
+    ) -> bool {
+        if !has_static_fetch_dest(request) {
+            return false;
+        }
+
+        let Some((referer_host, referer_path)) = referer_host_path(request) else {
+            return false;
+        };
+        if !referer_host.eq_ignore_ascii_case(host) {
+            return false;
+        }
+
+        let key = page_window_key(client_ip, host, &normalized_route_path(&referer_path));
+        self.page_load_windows
+            .get(&key)
+            .map(|entry| entry.is_active(unix_now))
+            .unwrap_or(false)
+    }
+
     fn maybe_cleanup(&self, unix_now: i64) {
         let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
         if !sequence.is_multiple_of(1024) {
@@ -344,6 +535,11 @@ impl L7CcGuard {
         cleanup_map(&self.host_buckets, stale_before);
         cleanup_map(&self.route_buckets, stale_before);
         cleanup_map(&self.hot_path_buckets, stale_before);
+        cleanup_weighted_map(&self.ip_weighted_buckets, stale_before);
+        cleanup_weighted_map(&self.host_weighted_buckets, stale_before);
+        cleanup_weighted_map(&self.route_weighted_buckets, stale_before);
+        cleanup_weighted_map(&self.hot_path_weighted_buckets, stale_before);
+        cleanup_page_window_map(&self.page_load_windows, unix_now, stale_before);
     }
 }
 
@@ -370,10 +566,102 @@ impl SlidingWindowCounter {
     }
 }
 
+impl WeightedSlidingWindowCounter {
+    fn new() -> Self {
+        Self {
+            events: Mutex::new(VecDeque::new()),
+            last_seen_unix: AtomicI64::new(unix_timestamp()),
+        }
+    }
+
+    fn observe(
+        &mut self,
+        now: Instant,
+        unix_now: i64,
+        window: Duration,
+        weight_percent: u8,
+    ) -> u32 {
+        let mut events = self
+            .events
+            .lock()
+            .expect("cc weighted bucket lock poisoned");
+        while let Some((front, _)) = events.front() {
+            if now.duration_since(*front) > window {
+                events.pop_front();
+            } else {
+                break;
+            }
+        }
+        events.push_back((now, u16::from(weight_percent.max(1))));
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        events.iter().map(|(_, weight)| u32::from(*weight)).sum()
+    }
+}
+
+impl PageLoadWindowState {
+    fn new(expires_at_unix: i64, unix_now: i64) -> Self {
+        Self {
+            expires_at_unix: AtomicI64::new(expires_at_unix),
+            last_seen_unix: AtomicI64::new(unix_now),
+        }
+    }
+
+    fn refresh(&mut self, expires_at_unix: i64, unix_now: i64) {
+        self.expires_at_unix
+            .store(expires_at_unix, Ordering::Relaxed);
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+    }
+
+    fn is_active(&self, unix_now: i64) -> bool {
+        self.expires_at_unix.load(Ordering::Relaxed) >= unix_now
+    }
+}
+
+fn weighted_points_to_requests(points: u32) -> u32 {
+    if points == 0 {
+        return 0;
+    }
+    points.div_ceil(100)
+}
+
 fn cleanup_map(map: &DashMap<String, SlidingWindowCounter>, stale_before: i64) {
     let keys = map
         .iter()
         .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
+        .take(128)
+        .map(|entry| entry.key().clone())
+        .collect::<Vec<_>>();
+
+    for key in keys {
+        map.remove(&key);
+    }
+}
+
+fn cleanup_weighted_map(map: &DashMap<String, WeightedSlidingWindowCounter>, stale_before: i64) {
+    let keys = map
+        .iter()
+        .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
+        .take(128)
+        .map(|entry| entry.key().clone())
+        .collect::<Vec<_>>();
+
+    for key in keys {
+        map.remove(&key);
+    }
+}
+
+fn cleanup_page_window_map(
+    map: &DashMap<String, PageLoadWindowState>,
+    unix_now: i64,
+    stale_before: i64,
+) {
+    let keys = map
+        .iter()
+        .filter(|entry| {
+            let value = entry.value();
+            value.expires_at_unix.load(Ordering::Relaxed) < unix_now
+                && value.last_seen_unix.load(Ordering::Relaxed) < stale_before
+        })
         .take(128)
         .map(|entry| entry.key().clone())
         .collect::<Vec<_>>();
@@ -426,6 +714,72 @@ fn request_client_ip(request: &UnifiedHttpRequest) -> Option<std::net::IpAddr> {
                 .get_metadata("network.client_ip")
                 .and_then(|value| value.parse::<std::net::IpAddr>().ok())
         })
+}
+
+fn classify_request(request: &UnifiedHttpRequest, route_path: &str) -> RequestKind {
+    let method = request.method.to_ascii_uppercase();
+    if looks_like_static_asset(route_path) || has_static_fetch_dest(request) {
+        return RequestKind::StaticAsset;
+    }
+
+    let accept = request
+        .get_header("accept")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.eq_ignore_ascii_case("document"))
+        .unwrap_or(false)
+        || ((method == "GET" || method == "HEAD")
+            && (accept.contains("text/html") || accept.contains("application/xhtml+xml")))
+    {
+        return RequestKind::Document;
+    }
+
+    let content_type = request
+        .get_header("content-type")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if method != "GET"
+        || method == "OPTIONS"
+        || route_path.starts_with("/api/")
+        || accept.contains("application/json")
+        || content_type.contains("application/json")
+    {
+        return RequestKind::ApiLike;
+    }
+
+    RequestKind::Other
+}
+
+fn has_static_fetch_dest(request: &UnifiedHttpRequest) -> bool {
+    request
+        .get_header("sec-fetch-dest")
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "image" | "style" | "script" | "font" | "video" | "audio" | "manifest"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn referer_host_path(request: &UnifiedHttpRequest) -> Option<(String, String)> {
+    let referer = request.get_header("referer")?.trim();
+    if referer.is_empty() {
+        return None;
+    }
+    let uri: http::Uri = referer.parse().ok()?;
+    let host = uri.host()?.to_ascii_lowercase();
+    let path = uri
+        .path_and_query()
+        .map(|value| value.path())
+        .unwrap_or("/");
+    Some((host, normalized_route_path(path)))
+}
+
+fn page_window_key(client_ip: std::net::IpAddr, host: &str, document_path: &str) -> String {
+    format!("{client_ip}|{host}|{document_path}")
 }
 
 fn challenge_mode(request: &UnifiedHttpRequest, route_path: &str) -> HtmlResponseMode {
@@ -588,6 +942,36 @@ mod tests {
                 .status_code,
             403
         );
+    }
+
+    #[tokio::test]
+    async fn page_subresources_are_not_challenged_aggressively() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 2,
+            route_block_threshold: 3,
+            page_load_grace_secs: 5,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        let mut doc = request("/index.html");
+        doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        assert!(guard.inspect_request(&mut doc).await.is_none());
+
+        let mut img = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/assets/a.png".to_string(),
+        );
+        img.set_client_ip("203.0.113.10".to_string());
+        img.add_header("host".to_string(), "example.com".to_string());
+        img.add_header("sec-fetch-dest".to_string(), "image".to_string());
+        img.add_header(
+            "referer".to_string(),
+            "https://example.com/index.html".to_string(),
+        );
+
+        assert!(guard.inspect_request(&mut img).await.is_none());
     }
 
     #[test]

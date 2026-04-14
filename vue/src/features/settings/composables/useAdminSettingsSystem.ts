@@ -56,8 +56,10 @@ export function useAdminSettingsSystem({
         https_port: globalEntryForm.https_port.trim(),
       })
       successMessage.value = globalEntryResponse.message || settingsResponse.message
+      return true
     } catch (e) {
       error.value = e instanceof Error ? e.message : '系统设置保存失败'
+      return false
     } finally {
       saving.value = false
     }

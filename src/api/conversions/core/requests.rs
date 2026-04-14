@@ -167,6 +167,7 @@ impl L7ConfigUpdateRequest {
 
 impl CcDefenseConfigRequest {
     pub(crate) fn into_config(self) -> crate::config::l7::CcDefenseConfig {
+        let defaults = crate::config::l7::CcDefenseConfig::default();
         crate::config::l7::CcDefenseConfig {
             enabled: self.enabled,
             request_window_secs: self.request_window_secs,
@@ -182,6 +183,15 @@ impl CcDefenseConfigRequest {
             delay_ms: self.delay_ms,
             challenge_ttl_secs: self.challenge_ttl_secs,
             challenge_cookie_name: self.challenge_cookie_name,
+            static_request_weight_percent: self
+                .static_request_weight_percent
+                .unwrap_or(defaults.static_request_weight_percent),
+            page_subresource_weight_percent: self
+                .page_subresource_weight_percent
+                .unwrap_or(defaults.page_subresource_weight_percent),
+            page_load_grace_secs: self
+                .page_load_grace_secs
+                .unwrap_or(defaults.page_load_grace_secs),
         }
     }
 }

@@ -215,6 +215,9 @@ pub struct CcDefenseConfigResponse {
     pub(crate) delay_ms: u64,
     pub(crate) challenge_ttl_secs: u64,
     pub(crate) challenge_cookie_name: String,
+    pub(crate) static_request_weight_percent: u8,
+    pub(crate) page_subresource_weight_percent: u8,
+    pub(crate) page_load_grace_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -233,6 +236,9 @@ pub struct CcDefenseConfigRequest {
     pub(crate) delay_ms: u64,
     pub(crate) challenge_ttl_secs: u64,
     pub(crate) challenge_cookie_name: String,
+    pub(crate) static_request_weight_percent: Option<u8>,
+    pub(crate) page_subresource_weight_percent: Option<u8>,
+    pub(crate) page_load_grace_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

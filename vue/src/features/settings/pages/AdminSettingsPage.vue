@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { RefreshCw, Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminL4ConfigFormCard from '@/features/l4/components/AdminL4ConfigFormCard.vue'
@@ -63,6 +64,44 @@ const {
   trustedProxyCidrsText,
 } = useAdminL7()
 
+const savingAll = ref(false)
+const advancedGlobalSectionRef = ref<{
+  saveSettings: () => Promise<boolean>
+} | null>(null)
+
+const disableSaveAll = computed(
+  () =>
+    savingAll.value ||
+    saving.value ||
+    loading.value ||
+    savingL4.value ||
+    savingL7.value,
+)
+
+async function saveAllSettings() {
+  if (savingAll.value) return
+
+  savingAll.value = true
+  try {
+    const saveSystemOk = await saveSettings()
+    const saveL4Ok = await saveL4Config()
+    const saveAdvancedGlobalOk =
+      (await advancedGlobalSectionRef.value?.saveSettings()) ?? true
+    const saveL7Ok = await saveL7Config()
+
+    if (
+      !saveSystemOk ||
+      !saveL4Ok ||
+      !saveAdvancedGlobalOk ||
+      !saveL7Ok
+    ) {
+      return
+    }
+  } finally {
+    savingAll.value = false
+  }
+}
+
 useFlashMessages({
   error,
   success: successMessage,
@@ -96,12 +135,12 @@ useFlashMessages({
   <AppLayout>
     <template #header-extra>
       <button
-        :disabled="saving || loading"
+        :disabled="disableSaveAll"
         class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition hover:bg-blue-600/90 disabled:cursor-not-allowed disabled:opacity-60"
-        @click="saveSettings"
+        @click="saveAllSettings"
       >
         <Save :size="12" />
-        {{ saving ? '保存中...' : '保存设置' }}
+        {{ savingAll ? '保存全部中...' : '保存设置' }}
       </button>
     </template>
 
@@ -170,14 +209,6 @@ useFlashMessages({
                 <RefreshCw :size="14" :class="{ 'animate-spin': refreshingL4 }" />
                 刷新
               </button>
-              <button
-                class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
-                :disabled="savingL4 || l4Loading"
-                @click="saveL4Config"
-              >
-                <Save :size="14" />
-                {{ savingL4 ? '保存中...' : '保存配置' }}
-              </button>
             </div>
           </div>
 
@@ -213,14 +244,6 @@ useFlashMessages({
                   <RefreshCw :size="14" :class="{ 'animate-spin': refreshingL7 }" />
                   刷新
                 </button>
-                <button
-                  :disabled="savingL7 || l7Loading"
-                  class="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:-translate-y-0.5 disabled:opacity-60"
-                  @click="saveL7Config"
-                >
-                  <Save :size="14" />
-                  {{ savingL7 ? '保存中...' : '保存 HTTP 接入配置' }}
-                </button>
               </div>
             </div>
 
@@ -244,7 +267,7 @@ useFlashMessages({
             />
           </div>
 
-          <AdminL7AdvancedGlobalSection />
+          <AdminL7AdvancedGlobalSection ref="advancedGlobalSectionRef" />
         </section>
       </div>
     </div>

@@ -99,6 +99,26 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .clamp(1, config.l7_config.cc_defense.static_request_weight_percent);
     config.l7_config.cc_defense.page_load_grace_secs =
         clamp_u64(config.l7_config.cc_defense.page_load_grace_secs, 1, 15, 3);
+    config.l7_config.cc_defense.hard_route_block_multiplier = config
+        .l7_config
+        .cc_defense
+        .hard_route_block_multiplier
+        .clamp(1, 20);
+    config.l7_config.cc_defense.hard_host_block_multiplier = config
+        .l7_config
+        .cc_defense
+        .hard_host_block_multiplier
+        .clamp(1, 20);
+    config.l7_config.cc_defense.hard_ip_block_multiplier = config
+        .l7_config
+        .cc_defense
+        .hard_ip_block_multiplier
+        .clamp(1, 20);
+    config.l7_config.cc_defense.hard_hot_path_block_multiplier = config
+        .l7_config
+        .cc_defense
+        .hard_hot_path_block_multiplier
+        .clamp(1, 20);
 
     config.l7_config.safeline_intercept.max_body_bytes = clamp_or_default(
         config.l7_config.safeline_intercept.max_body_bytes,

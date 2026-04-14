@@ -24,6 +24,7 @@ pub struct L7CcGuard {
     route_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
     hot_path_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
     page_load_windows: DashMap<String, PageLoadWindowState>,
+    page_load_host_windows: DashMap<String, PageLoadWindowState>,
     request_sequence: AtomicU64,
 }
 
@@ -85,6 +86,7 @@ impl L7CcGuard {
             route_weighted_buckets: DashMap::new(),
             hot_path_weighted_buckets: DashMap::new(),
             page_load_windows: DashMap::new(),
+            page_load_host_windows: DashMap::new(),
             request_sequence: AtomicU64::new(0),
         }
     }
@@ -121,7 +123,7 @@ impl L7CcGuard {
             self.record_page_load_window(client_ip, &host, &route_path, unix_now);
         }
         let is_page_subresource = request_kind == RequestKind::StaticAsset
-            && self.matches_page_load_window(request, client_ip, &host, unix_now);
+            && self.matches_page_load_window(request, client_ip, &host, &route_path, unix_now);
         let weight_percent = self.request_weight_percent(request_kind, is_page_subresource);
 
         let ip_count = self.observe(
@@ -251,21 +253,39 @@ impl L7CcGuard {
             .hot_path_block_threshold
             .saturating_mul(block_multiplier);
 
-        if !low_risk_subresource
-            && (route_effective >= route_block_threshold
-                || host_effective >= host_block_threshold
-                || ip_effective >= ip_block_threshold
-                || (hot_path_effective >= hot_path_block_threshold
-                    && route_effective >= self.config.route_challenge_threshold.max(3)))
+        let hard_route_block_threshold = route_block_threshold
+            .saturating_mul(u32::from(self.config.hard_route_block_multiplier));
+        let hard_host_block_threshold =
+            host_block_threshold.saturating_mul(u32::from(self.config.hard_host_block_multiplier));
+        let hard_ip_block_threshold =
+            ip_block_threshold.saturating_mul(u32::from(self.config.hard_ip_block_multiplier));
+        let hard_hot_path_block_threshold = hot_path_block_threshold
+            .saturating_mul(u32::from(self.config.hard_hot_path_block_multiplier));
+        let hard_block = route_count >= hard_route_block_threshold
+            || host_count >= hard_host_block_threshold
+            || ip_count >= hard_ip_block_threshold
+            || hot_path_count >= hard_hot_path_block_threshold;
+
+        if hard_block
+            || (!low_risk_subresource
+                && (route_effective >= route_block_threshold
+                    || host_effective >= host_block_threshold
+                    || ip_effective >= ip_block_threshold
+                    || (hot_path_effective >= hot_path_block_threshold
+                        && route_effective >= self.config.route_challenge_threshold.max(3))))
         {
             let reason = format!(
-                "l7 cc guard throttled request: kind={} page_subresource={} ip={} host={} route={} hot_path={} verified={}",
+                "l7 cc guard throttled request: kind={} page_subresource={} ip={} host={} route={} hot_path={} raw_ip={} raw_host={} raw_route={} raw_hot_path={} verified={}",
                 request_kind.as_str(),
                 is_page_subresource,
                 ip_effective,
                 host_effective,
                 route_effective,
                 hot_path_effective,
+                ip_count,
+                host_count,
+                route_count,
+                hot_path_count,
                 verified
             );
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
@@ -491,12 +511,18 @@ impl L7CcGuard {
         unix_now: i64,
     ) {
         let key = page_window_key(client_ip, host, document_path);
+        let host_key = page_host_window_key(client_ip, host);
         let expires_at = unix_now + self.config.page_load_grace_secs as i64;
         let mut entry = self
             .page_load_windows
             .entry(key)
             .or_insert_with(|| PageLoadWindowState::new(expires_at, unix_now));
         entry.refresh(expires_at, unix_now);
+        let mut host_entry = self
+            .page_load_host_windows
+            .entry(host_key)
+            .or_insert_with(|| PageLoadWindowState::new(expires_at, unix_now));
+        host_entry.refresh(expires_at, unix_now);
     }
 
     fn matches_page_load_window(
@@ -504,22 +530,37 @@ impl L7CcGuard {
         request: &UnifiedHttpRequest,
         client_ip: std::net::IpAddr,
         host: &str,
+        route_path: &str,
         unix_now: i64,
     ) -> bool {
-        if !has_static_fetch_dest(request) {
+        if !request.method.eq_ignore_ascii_case("GET")
+            && !request.method.eq_ignore_ascii_case("HEAD")
+        {
             return false;
         }
 
-        let Some((referer_host, referer_path)) = referer_host_path(request) else {
-            return false;
-        };
-        if !referer_host.eq_ignore_ascii_case(host) {
-            return false;
+        if let Some((referer_host, referer_path)) = referer_host_path(request) {
+            if referer_host.eq_ignore_ascii_case(host) {
+                let key = page_window_key(client_ip, host, &normalized_route_path(&referer_path));
+                if self
+                    .page_load_windows
+                    .get(&key)
+                    .map(|entry| entry.is_active(unix_now))
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
         }
 
-        let key = page_window_key(client_ip, host, &normalized_route_path(&referer_path));
-        self.page_load_windows
-            .get(&key)
+        // Weak match path: when Referer/Sec-Fetch metadata is missing but path strongly
+        // looks like a static asset, still trust a short host-level page-load window.
+        if !looks_like_static_asset(route_path) {
+            return false;
+        }
+        let host_key = page_host_window_key(client_ip, host);
+        self.page_load_host_windows
+            .get(&host_key)
             .map(|entry| entry.is_active(unix_now))
             .unwrap_or(false)
     }
@@ -540,6 +581,7 @@ impl L7CcGuard {
         cleanup_weighted_map(&self.route_weighted_buckets, stale_before);
         cleanup_weighted_map(&self.hot_path_weighted_buckets, stale_before);
         cleanup_page_window_map(&self.page_load_windows, unix_now, stale_before);
+        cleanup_page_window_map(&self.page_load_host_windows, unix_now, stale_before);
     }
 }
 
@@ -718,14 +760,17 @@ fn request_client_ip(request: &UnifiedHttpRequest) -> Option<std::net::IpAddr> {
 
 fn classify_request(request: &UnifiedHttpRequest, route_path: &str) -> RequestKind {
     let method = request.method.to_ascii_uppercase();
-    if looks_like_static_asset(route_path) || has_static_fetch_dest(request) {
-        return RequestKind::StaticAsset;
-    }
-
     let accept = request
         .get_header("accept")
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
+    let content_type = request
+        .get_header("content-type")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if is_api_like_request(&method, route_path, &accept, &content_type) {
+        return RequestKind::ApiLike;
+    }
     if request
         .get_header("sec-fetch-dest")
         .map(|value| value.eq_ignore_ascii_case("document"))
@@ -736,17 +781,8 @@ fn classify_request(request: &UnifiedHttpRequest, route_path: &str) -> RequestKi
         return RequestKind::Document;
     }
 
-    let content_type = request
-        .get_header("content-type")
-        .map(|value| value.to_ascii_lowercase())
-        .unwrap_or_default();
-    if method != "GET"
-        || method == "OPTIONS"
-        || route_path.starts_with("/api/")
-        || accept.contains("application/json")
-        || content_type.contains("application/json")
-    {
-        return RequestKind::ApiLike;
+    if is_static_asset_request(request, route_path, &method, &accept) {
+        return RequestKind::StaticAsset;
     }
 
     RequestKind::Other
@@ -762,6 +798,42 @@ fn has_static_fetch_dest(request: &UnifiedHttpRequest) -> bool {
             )
         })
         .unwrap_or(false)
+}
+
+fn is_api_like_request(method: &str, route_path: &str, accept: &str, content_type: &str) -> bool {
+    ((method != "GET") && (method != "HEAD"))
+        || method == "OPTIONS"
+        || route_path.starts_with("/api/")
+        || accept.contains("application/json")
+        || content_type.contains("application/json")
+}
+
+fn is_static_asset_request(
+    request: &UnifiedHttpRequest,
+    route_path: &str,
+    method: &str,
+    accept: &str,
+) -> bool {
+    if method != "GET" && method != "HEAD" {
+        return false;
+    }
+
+    if looks_like_static_asset(route_path) {
+        return true;
+    }
+
+    if !has_static_fetch_dest(request) {
+        return false;
+    }
+
+    // Treat Sec-Fetch-Dest as a hint only; require a compatible Accept to reduce spoofing.
+    accept.is_empty()
+        || accept == "*/*"
+        || accept.contains("image/")
+        || accept.contains("text/css")
+        || accept.contains("javascript")
+        || accept.contains("font/")
+        || accept.contains("application/font")
 }
 
 fn referer_host_path(request: &UnifiedHttpRequest) -> Option<(String, String)> {
@@ -780,6 +852,10 @@ fn referer_host_path(request: &UnifiedHttpRequest) -> Option<(String, String)> {
 
 fn page_window_key(client_ip: std::net::IpAddr, host: &str, document_path: &str) -> String {
     format!("{client_ip}|{host}|{document_path}")
+}
+
+fn page_host_window_key(client_ip: std::net::IpAddr, host: &str) -> String {
+    format!("{client_ip}|{host}")
 }
 
 fn challenge_mode(request: &UnifiedHttpRequest, route_path: &str) -> HtmlResponseMode {
@@ -846,7 +922,7 @@ fn looks_like_static_asset(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     [
         ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".woff", ".woff2",
-        ".ttf", ".map", ".json", ".txt", ".xml",
+        ".ttf", ".map",
     ]
     .iter()
     .any(|suffix| lower.ends_with(suffix))
@@ -972,6 +1048,53 @@ mod tests {
         );
 
         assert!(guard.inspect_request(&mut img).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn hard_multiplier_configuration_can_force_block_for_subresources() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 100,
+            route_block_threshold: 2,
+            hard_route_block_multiplier: 1,
+            page_load_grace_secs: 5,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        let mut doc = request("/index.html");
+        doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        assert!(guard.inspect_request(&mut doc).await.is_none());
+
+        let mut first_img = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/assets/a.png".to_string(),
+        );
+        first_img.set_client_ip("203.0.113.10".to_string());
+        first_img.add_header("host".to_string(), "example.com".to_string());
+        first_img.add_header(
+            "referer".to_string(),
+            "https://example.com/index.html".to_string(),
+        );
+        assert!(guard.inspect_request(&mut first_img).await.is_none());
+
+        let mut second_img = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/assets/a.png".to_string(),
+        );
+        second_img.set_client_ip("203.0.113.10".to_string());
+        second_img.add_header("host".to_string(), "example.com".to_string());
+        second_img.add_header(
+            "referer".to_string(),
+            "https://example.com/index.html".to_string(),
+        );
+        let result = guard.inspect_request(&mut second_img).await;
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().action,
+            crate::core::InspectionAction::Respond
+        );
     }
 
     #[test]

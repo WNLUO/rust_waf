@@ -99,6 +99,14 @@ pub struct CcDefenseConfig {
     pub page_subresource_weight_percent: u8,
     #[serde(default = "default_cc_page_load_grace_secs")]
     pub page_load_grace_secs: u64,
+    #[serde(default = "default_cc_hard_route_block_multiplier")]
+    pub hard_route_block_multiplier: u8,
+    #[serde(default = "default_cc_hard_host_block_multiplier")]
+    pub hard_host_block_multiplier: u8,
+    #[serde(default = "default_cc_hard_ip_block_multiplier")]
+    pub hard_ip_block_multiplier: u8,
+    #[serde(default = "default_cc_hard_hot_path_block_multiplier")]
+    pub hard_hot_path_block_multiplier: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,6 +271,22 @@ const fn default_cc_page_load_grace_secs() -> u64 {
     3
 }
 
+const fn default_cc_hard_route_block_multiplier() -> u8 {
+    4
+}
+
+const fn default_cc_hard_host_block_multiplier() -> u8 {
+    4
+}
+
+const fn default_cc_hard_ip_block_multiplier() -> u8 {
+    4
+}
+
+const fn default_cc_hard_hot_path_block_multiplier() -> u8 {
+    3
+}
+
 const fn default_safeline_intercept_max_body_bytes() -> usize {
     32 * 1024
 }
@@ -327,6 +351,10 @@ impl Default for CcDefenseConfig {
             static_request_weight_percent: default_cc_static_request_weight_percent(),
             page_subresource_weight_percent: default_cc_page_subresource_weight_percent(),
             page_load_grace_secs: default_cc_page_load_grace_secs(),
+            hard_route_block_multiplier: default_cc_hard_route_block_multiplier(),
+            hard_host_block_multiplier: default_cc_hard_host_block_multiplier(),
+            hard_ip_block_multiplier: default_cc_hard_ip_block_multiplier(),
+            hard_hot_path_block_multiplier: default_cc_hard_hot_path_block_multiplier(),
         }
     }
 }

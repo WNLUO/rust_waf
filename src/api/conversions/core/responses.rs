@@ -172,6 +172,10 @@ impl CcDefenseConfigResponse {
             static_request_weight_percent: config.static_request_weight_percent,
             page_subresource_weight_percent: config.page_subresource_weight_percent,
             page_load_grace_secs: config.page_load_grace_secs,
+            hard_route_block_multiplier: config.hard_route_block_multiplier,
+            hard_host_block_multiplier: config.hard_host_block_multiplier,
+            hard_ip_block_multiplier: config.hard_ip_block_multiplier,
+            hard_hot_path_block_multiplier: config.hard_hot_path_block_multiplier,
         }
     }
 }

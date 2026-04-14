@@ -192,6 +192,18 @@ impl CcDefenseConfigRequest {
             page_load_grace_secs: self
                 .page_load_grace_secs
                 .unwrap_or(defaults.page_load_grace_secs),
+            hard_route_block_multiplier: self
+                .hard_route_block_multiplier
+                .unwrap_or(defaults.hard_route_block_multiplier),
+            hard_host_block_multiplier: self
+                .hard_host_block_multiplier
+                .unwrap_or(defaults.hard_host_block_multiplier),
+            hard_ip_block_multiplier: self
+                .hard_ip_block_multiplier
+                .unwrap_or(defaults.hard_ip_block_multiplier),
+            hard_hot_path_block_multiplier: self
+                .hard_hot_path_block_multiplier
+                .unwrap_or(defaults.hard_hot_path_block_multiplier),
         }
     }
 }

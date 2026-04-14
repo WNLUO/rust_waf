@@ -141,9 +141,7 @@ impl MetricsCollector {
             proxy_successes,
             proxy_failures: self.proxy_failures.load(Ordering::Relaxed),
             proxy_fail_close_rejections: self.proxy_fail_close_rejections.load(Ordering::Relaxed),
-            l4_bucket_budget_rejections: self
-                .l4_bucket_budget_rejections
-                .load(Ordering::Relaxed),
+            l4_bucket_budget_rejections: self.l4_bucket_budget_rejections.load(Ordering::Relaxed),
             tls_pre_handshake_rejections: self.tls_pre_handshake_rejections.load(Ordering::Relaxed),
             tls_handshake_timeouts: self.tls_handshake_timeouts.load(Ordering::Relaxed),
             upstream_healthcheck_successes: self

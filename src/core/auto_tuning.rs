@@ -47,20 +47,13 @@ pub struct AutoTuningControllerState {
 #[derive(Debug, Clone)]
 pub struct AutoTuningDecision {
     pub next_config: Config,
-    pub reason: String,
-    pub diff: Vec<String>,
     pub requires_l4_refresh: bool,
-    pub cooldown_until: Option<i64>,
-    pub rollback: bool,
 }
 
 #[derive(Debug, Clone)]
 struct MetricDeltas {
     proxied_requests_delta: u64,
     proxy_successes_delta: u64,
-    tls_handshake_timeouts_delta: u64,
-    l4_bucket_budget_rejections_delta: u64,
-    proxy_latency_micros_total_delta: u64,
     handshake_timeout_rate_percent: f64,
     bucket_reject_rate_percent: f64,
     avg_proxy_latency_ms: u64,
@@ -165,7 +158,8 @@ pub fn run_control_step(
         rollback_config.auto_tuning = config.auto_tuning.clone();
         rollback_config = rollback_config.normalized();
 
-        let cooldown_until = Some(now + (config.auto_tuning.cooldown_secs as i64).saturating_mul(2));
+        let cooldown_until =
+            Some(now + (config.auto_tuning.cooldown_secs as i64).saturating_mul(2));
         state.cooldown_until = cooldown_until;
         state.rollback_timestamps.push(now);
         runtime.rollback_count_24h = state.rollback_timestamps.len() as u32;
@@ -182,11 +176,7 @@ pub fn run_control_step(
 
         return Some(AutoTuningDecision {
             next_config: rollback_config,
-            reason: "rollback_due_to_metric_regression".to_string(),
-            diff: vec!["restored previous stable runtime config".to_string()],
             requires_l4_refresh: true,
-            cooldown_until,
-            rollback: true,
         });
     }
 
@@ -232,8 +222,13 @@ pub fn run_control_step(
         "handshake" => {
             if !is_pinned(config, "l7_config.tls_handshake_timeout_ms") {
                 let before = next.l7_config.tls_handshake_timeout_ms;
-                next.l7_config.tls_handshake_timeout_ms =
-                    adjust_u64(before, config.auto_tuning.max_step_percent, true, 500, 60_000);
+                next.l7_config.tls_handshake_timeout_ms = adjust_u64(
+                    before,
+                    config.auto_tuning.max_step_percent,
+                    true,
+                    500,
+                    60_000,
+                );
                 diff.push(format!(
                     "l7_config.tls_handshake_timeout_ms: {} -> {}",
                     before, next.l7_config.tls_handshake_timeout_ms
@@ -274,11 +269,7 @@ pub fn run_control_step(
 
     Some(AutoTuningDecision {
         next_config: next,
-        reason: format!("adjust_for_{}", action),
-        diff,
         requires_l4_refresh: touched_l4,
-        cooldown_until,
-        rollback: false,
     })
 }
 
@@ -361,11 +352,7 @@ fn apply_bootstrap_recommendation(
 
     Some(AutoTuningDecision {
         next_config: next,
-        reason: "bootstrap_recommendation_apply".to_string(),
-        diff,
         requires_l4_refresh: touched_l4,
-        cooldown_until,
-        rollback: false,
     })
 }
 
@@ -400,7 +387,8 @@ fn should_rollback(
 
     deltas.handshake_timeout_rate_percent
         > config.auto_tuning.slo.tls_handshake_timeout_rate_percent * 1.8
-        || deltas.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent * 1.8
+        || deltas.bucket_reject_rate_percent
+            > config.auto_tuning.slo.bucket_reject_rate_percent * 1.8
 }
 
 fn update_consecutive_counters(
@@ -523,15 +511,23 @@ fn adjust_u32_field(
             next.l4_config.behavior_normal_connection_budget_per_minute
         }
         "l4_config.behavior_suspicious_connection_budget_per_minute" => {
-            next.l4_config.behavior_suspicious_connection_budget_per_minute
+            next.l4_config
+                .behavior_suspicious_connection_budget_per_minute
         }
         "l4_config.behavior_high_risk_connection_budget_per_minute" => {
-            next.l4_config.behavior_high_risk_connection_budget_per_minute
+            next.l4_config
+                .behavior_high_risk_connection_budget_per_minute
         }
         _ => return false,
     };
 
-    let after = adjust_u32(before, config.auto_tuning.max_step_percent, increase, min, max);
+    let after = adjust_u32(
+        before,
+        config.auto_tuning.max_step_percent,
+        increase,
+        min,
+        max,
+    );
     if before == after {
         return false;
     }
@@ -541,10 +537,12 @@ fn adjust_u32_field(
             next.l4_config.behavior_normal_connection_budget_per_minute = after;
         }
         "l4_config.behavior_suspicious_connection_budget_per_minute" => {
-            next.l4_config.behavior_suspicious_connection_budget_per_minute = after;
+            next.l4_config
+                .behavior_suspicious_connection_budget_per_minute = after;
         }
         "l4_config.behavior_high_risk_connection_budget_per_minute" => {
-            next.l4_config.behavior_high_risk_connection_budget_per_minute = after;
+            next.l4_config
+                .behavior_high_risk_connection_budget_per_minute = after;
         }
         _ => return false,
     }
@@ -576,7 +574,13 @@ fn adjust_u16_field(
         _ => return false,
     };
 
-    let after = adjust_u16(before, config.auto_tuning.max_step_percent, increase, min, max);
+    let after = adjust_u16(
+        before,
+        config.auto_tuning.max_step_percent,
+        increase,
+        min,
+        max,
+    );
     if before == after {
         return false;
     }
@@ -611,10 +615,12 @@ fn set_u32_if_unpinned(
             next.l4_config.behavior_normal_connection_budget_per_minute
         }
         "l4_config.behavior_suspicious_connection_budget_per_minute" => {
-            next.l4_config.behavior_suspicious_connection_budget_per_minute
+            next.l4_config
+                .behavior_suspicious_connection_budget_per_minute
         }
         "l4_config.behavior_high_risk_connection_budget_per_minute" => {
-            next.l4_config.behavior_high_risk_connection_budget_per_minute
+            next.l4_config
+                .behavior_high_risk_connection_budget_per_minute
         }
         _ => return false,
     };
@@ -628,10 +634,12 @@ fn set_u32_if_unpinned(
             next.l4_config.behavior_normal_connection_budget_per_minute = value
         }
         "l4_config.behavior_suspicious_connection_budget_per_minute" => {
-            next.l4_config.behavior_suspicious_connection_budget_per_minute = value
+            next.l4_config
+                .behavior_suspicious_connection_budget_per_minute = value
         }
         "l4_config.behavior_high_risk_connection_budget_per_minute" => {
-            next.l4_config.behavior_high_risk_connection_budget_per_minute = value
+            next.l4_config
+                .behavior_high_risk_connection_budget_per_minute = value
         }
         _ => return false,
     }
@@ -697,8 +705,10 @@ fn compute_deltas(previous: &MetricsSnapshot, current: &MetricsSnapshot) -> Metr
         .saturating_sub(previous.proxy_latency_micros_total);
 
     let denominator = proxied_requests_delta.max(1) as f64;
-    let handshake_timeout_rate_percent = (tls_handshake_timeouts_delta as f64 * 100.0) / denominator;
-    let bucket_reject_rate_percent = (l4_bucket_budget_rejections_delta as f64 * 100.0) / denominator;
+    let handshake_timeout_rate_percent =
+        (tls_handshake_timeouts_delta as f64 * 100.0) / denominator;
+    let bucket_reject_rate_percent =
+        (l4_bucket_budget_rejections_delta as f64 * 100.0) / denominator;
     let avg_proxy_latency_ms = if proxy_successes_delta > 0 {
         ((proxy_latency_micros_total_delta / proxy_successes_delta) / 1000).max(1)
     } else {
@@ -708,9 +718,6 @@ fn compute_deltas(previous: &MetricsSnapshot, current: &MetricsSnapshot) -> Metr
     MetricDeltas {
         proxied_requests_delta,
         proxy_successes_delta,
-        tls_handshake_timeouts_delta,
-        l4_bucket_budget_rejections_delta,
-        proxy_latency_micros_total_delta,
         handshake_timeout_rate_percent,
         bucket_reject_rate_percent,
         avg_proxy_latency_ms,
@@ -775,8 +782,7 @@ fn recommend(config: &Config, profile: &SystemProfile) -> AutoTuningRecommendati
         (3000.0 + low_capacity_penalty * 900.0 + intent_timeout_bonus).round() as u64;
     let tls_handshake_timeout_ms = tls_handshake_timeout_ms.clamp(1500, 15_000);
 
-    let reject_threshold = (330.0
-        - (capacity_factor * 8.0)
+    let reject_threshold = (330.0 - (capacity_factor * 8.0)
         + match config.auto_tuning.intent {
             AutoTuningIntent::Conservative => 25.0,
             AutoTuningIntent::Balanced => 0.0,
@@ -785,8 +791,7 @@ fn recommend(config: &Config, profile: &SystemProfile) -> AutoTuningRecommendati
     .round() as u16;
     let reject_threshold = reject_threshold.clamp(220, 450);
 
-    let critical_reject_threshold = (220.0
-        - (capacity_factor * 5.0)
+    let critical_reject_threshold = (220.0 - (capacity_factor * 5.0)
         + match config.auto_tuning.intent {
             AutoTuningIntent::Conservative => 20.0,
             AutoTuningIntent::Balanced => 0.0,

@@ -56,6 +56,7 @@ const {
   loading: l7Loading,
   saveConfig: saveL7Config,
   saving: savingL7,
+  stats: l7Stats,
   successMessage: l7SuccessMessage,
   trustedProxyCidrsText,
 } = useAdminL7()
@@ -237,6 +238,7 @@ useFlashMessages({
             v-if="!l7Loading"
             :form="l7ConfigForm"
             :trusted-proxy-cidrs-text="trustedProxyCidrsText"
+            :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
             :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
             :drop-unmatched-requests-disabled="saving || loading"
             @update:form="Object.assign(l7ConfigForm, $event)"

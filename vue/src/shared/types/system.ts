@@ -20,6 +20,7 @@ export interface MetricsResponse {
   proxy_successes: number
   proxy_failures: number
   proxy_fail_close_rejections: number
+  l4_bucket_budget_rejections: number
   upstream_healthcheck_successes: number
   upstream_healthcheck_failures: number
   proxy_latency_micros_total: number

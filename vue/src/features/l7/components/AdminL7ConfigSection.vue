@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
+import type { AutoTuningRuntimePayload } from '@/features/l7/types/l7'
 import {
   listFieldClass,
   numberInputClass,
@@ -10,6 +11,7 @@ import {
 const props = defineProps<{
   form: L7ConfigForm
   trustedProxyCidrsText: string
+  autoTuningRuntime?: AutoTuningRuntimePayload | null
   dropUnmatchedRequests: boolean
   dropUnmatchedRequestsDisabled?: boolean
 }>()
@@ -614,6 +616,26 @@ const safelineResponseBodySource = computed({
           placeholder="例如：l7_config.tls_handshake_timeout_ms"
         />
       </label>
+
+      <div
+        v-if="autoTuningRuntime"
+        class="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-stone-600"
+      >
+        <p>
+          当前状态: {{ autoTuningRuntime.controller_state }} | CPU:
+          {{ autoTuningRuntime.detected_cpu_cores }} |
+          内存上限(MB): {{ autoTuningRuntime.detected_memory_limit_mb ?? 'unknown' }}
+        </p>
+        <p class="mt-1">
+          观测值: 握手超时率 {{ autoTuningRuntime.last_observed_tls_handshake_timeout_rate_percent.toFixed(2) }}%
+          / 预算拒绝率 {{ autoTuningRuntime.last_observed_bucket_reject_rate_percent.toFixed(2) }}%
+          / 平均代理延迟 {{ autoTuningRuntime.last_observed_avg_proxy_latency_ms }}ms
+        </p>
+        <p class="mt-1">
+          最近动作: {{ autoTuningRuntime.last_adjust_reason || 'none' }} |
+          24h 回滚: {{ autoTuningRuntime.rollback_count_24h }}
+        </p>
+      </div>
     </div>
 
     <div class="mt-4 border-t border-slate-200 pt-4">

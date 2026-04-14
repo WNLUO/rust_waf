@@ -114,14 +114,10 @@ async function saveAllSettings() {
   savingAll.value = true
   try {
     const saveSystemOk = await saveSettings()
-    const saveL4Ok = adaptiveProtectionEnabled.value
-      ? true
-      : await saveL4Config()
+    const saveL4Ok = await saveL4Config()
     const saveAdvancedGlobalOk =
       (await advancedGlobalSectionRef.value?.saveSettings()) ?? true
-    const saveL7Ok = adaptiveProtectionEnabled.value
-      ? true
-      : await saveL7Config()
+    const saveL7Ok = await saveL7Config()
 
     if (
       !saveSystemOk ||
@@ -312,6 +308,9 @@ useFlashMessages({
             <p>
               自适应防护已接管 L4 连接预算、延迟和拒绝阈值。这里的细粒度参数已从常规入口收起，避免线上继续依赖手工阈值。
             </p>
+            <p>
+              与自动化无关的连接速率、SYN 阈值、跟踪容量、封禁表容量、状态保留和 Bloom 缩放仍然保留在下方主表单中。
+            </p>
             <div class="flex flex-wrap items-center gap-3">
               <button
                 class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
@@ -326,6 +325,7 @@ useFlashMessages({
           <AdminL4ConfigFormCard
             v-else
             :form="l4ConfigForm"
+            :hide-adaptive-managed-sections="adaptiveProtectionEnabled"
             @update:form="Object.assign(l4ConfigForm, $event)"
           />
         </section>
@@ -357,6 +357,9 @@ useFlashMessages({
             <p>
               自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，常规场景不再建议手动维护这一组数值。
             </p>
+            <p>
+              与自动化无关的 HTTP 协议、上游健康检查、超时、Bloom、SafeLine 接管和 HTTP/3 参数仍然保留在下方主表单中，避免这些运行项被一起隐藏。
+            </p>
             <div class="flex flex-wrap items-center gap-3">
               <button
                 class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
@@ -375,6 +378,7 @@ useFlashMessages({
             :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
             :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
             :drop-unmatched-requests-disabled="saving || loading"
+            :hide-adaptive-managed-sections="adaptiveProtectionEnabled"
             @update:form="Object.assign(l7ConfigForm, $event)"
             @update:drop-unmatched-requests="
               systemSettings.drop_unmatched_requests = $event

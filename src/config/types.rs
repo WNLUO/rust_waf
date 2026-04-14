@@ -57,6 +57,8 @@ pub struct ConsoleSettings {
     #[serde(default)]
     pub cdn_525_diagnostic_mode: bool,
     #[serde(default)]
+    pub client_identity_debug_enabled: bool,
+    #[serde(default)]
     pub emergency_mode: bool,
     #[serde(default)]
     pub notes: String,

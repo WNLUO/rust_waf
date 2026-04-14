@@ -46,6 +46,11 @@ const cdn525DiagnosticMode = computed({
   set: (value: boolean) =>
     updateSystemSettings({ cdn_525_diagnostic_mode: value }),
 })
+const clientIdentityDebugEnabled = computed({
+  get: () => props.systemSettings.client_identity_debug_enabled,
+  set: (value: boolean) =>
+    updateSystemSettings({ client_identity_debug_enabled: value }),
+})
 const adaptiveProtectionEnabled = computed({
   get: () => props.systemSettings.adaptive_protection.enabled,
   set: (value: boolean) =>
@@ -468,6 +473,26 @@ function truncateCertificateName(name: string, maxLength = 18) {
               </p>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-200/90 bg-white/90 p-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm font-semibold text-stone-900">调试与诊断</p>
+            <p class="mt-1 text-xs leading-5 text-slate-500">
+              仅在排查真实 IP 透传、代理链路或请求身份识别问题时临时开启。
+              开启后每个到达 Rust 的 HTTP 请求都会额外写入一条身份调试事件。
+            </p>
+          </div>
+          <label class="inline-flex items-center gap-3">
+            <span class="text-xs font-medium text-slate-500">身份调试事件</span>
+            <input
+              v-model="clientIdentityDebugEnabled"
+              type="checkbox"
+              class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+          </label>
         </div>
       </section>
   </div>

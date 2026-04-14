@@ -8,6 +8,7 @@ export function createDefaultSystemSettings(): SystemSettingsForm {
     gateway_name: '玄枢防护网关',
     drop_unmatched_requests: false,
     cdn_525_diagnostic_mode: false,
+    client_identity_debug_enabled: false,
     adaptive_protection: {
       enabled: true,
       mode: 'balanced',

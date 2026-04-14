@@ -75,6 +75,7 @@ impl Default for ConsoleSettings {
             gateway_name: default_gateway_name(),
             drop_unmatched_requests: false,
             cdn_525_diagnostic_mode: false,
+            client_identity_debug_enabled: false,
             emergency_mode: false,
             notes: String::new(),
         }

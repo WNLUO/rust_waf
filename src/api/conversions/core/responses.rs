@@ -31,6 +31,9 @@ impl SettingsResponse {
             gateway_name: config.console_settings.gateway_name.clone(),
             drop_unmatched_requests: config.console_settings.drop_unmatched_requests,
             cdn_525_diagnostic_mode: config.console_settings.cdn_525_diagnostic_mode,
+            client_identity_debug_enabled: config
+                .console_settings
+                .client_identity_debug_enabled,
             adaptive_protection: AdaptiveProtectionConfigResponse::from_config(
                 &config.adaptive_protection,
             ),

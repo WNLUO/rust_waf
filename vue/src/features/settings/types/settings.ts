@@ -49,6 +49,7 @@ export interface SettingsPayload {
   gateway_name: string
   drop_unmatched_requests: boolean
   cdn_525_diagnostic_mode: boolean
+  client_identity_debug_enabled: boolean
   adaptive_protection: AdaptiveProtectionSettingsPayload
   https_listen_addr: string
   default_certificate_id: number | null
@@ -61,6 +62,7 @@ export interface SettingsUpdatePayload {
   gateway_name: string
   drop_unmatched_requests: boolean
   cdn_525_diagnostic_mode: boolean
+  client_identity_debug_enabled: boolean
   adaptive_protection: AdaptiveProtectionSettingsPayload
   https_listen_addr: string
   default_certificate_id: number | null

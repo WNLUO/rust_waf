@@ -4,6 +4,7 @@ import type { L4ConfigForm } from '@/features/l4/utils/adminL4'
 const props = defineProps<{
   form: L4ConfigForm
   compatibilityMode?: boolean
+  hideAdaptiveManagedSections?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -135,7 +136,10 @@ function patchForm(patch: Partial<L4ConfigForm>) {
       </label>
     </div>
 
-    <div class="space-y-2 border-t border-slate-200 pt-3">
+    <div
+      v-if="!hideAdaptiveManagedSections"
+      class="space-y-2 border-t border-slate-200 pt-3"
+    >
       <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
 
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3">

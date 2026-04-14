@@ -15,6 +15,7 @@ const props = defineProps<{
   dropUnmatchedRequests: boolean
   dropUnmatchedRequestsDisabled?: boolean
   compatibilityMode?: boolean
+  hideAdaptiveManagedSections?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -790,7 +791,10 @@ const safelineResponseBodySource = computed({
       </label>
     </div>
 
-    <div class="mt-4 border-t border-slate-200 pt-4">
+    <div
+      v-if="!hideAdaptiveManagedSections"
+      class="mt-4 border-t border-slate-200 pt-4"
+    >
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <label class="text-sm text-stone-700">
         运行档位
@@ -1173,7 +1177,10 @@ const safelineResponseBodySource = computed({
       </div>
     </div>
 
-    <div class="mt-3 border-t border-slate-200 pt-6">
+    <div
+      v-if="!hideAdaptiveManagedSections"
+      class="mt-3 border-t border-slate-200 pt-6"
+    >
       <div
         class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
       >

@@ -175,6 +175,14 @@ pub(crate) fn persist_http_identity_debug_event(
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
 ) {
+    if !context
+        .config_snapshot()
+        .console_settings
+        .client_identity_debug_enabled
+    {
+        return;
+    }
+
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };

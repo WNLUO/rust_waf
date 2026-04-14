@@ -372,7 +372,8 @@ const parseEventDetails = (event: SecurityEventItem) => {
 }
 
 const hasClientIdentityDebug = (event: SecurityEventItem) =>
-  Boolean(parseEventDetails(event)?.client_identity)
+  Boolean(parseEventDetails(event)?.client_identity) &&
+  event.layer.toLowerCase() === 'l7'
 
 const openClientIdentityDebug = (event: SecurityEventItem) => {
   const details = parseEventDetails(event)

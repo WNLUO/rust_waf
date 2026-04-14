@@ -397,6 +397,8 @@ impl SettingsUpdateRequest {
         current.console_settings.gateway_name = self.gateway_name;
         current.console_settings.drop_unmatched_requests = self.drop_unmatched_requests;
         current.console_settings.cdn_525_diagnostic_mode = self.cdn_525_diagnostic_mode;
+        current.console_settings.client_identity_debug_enabled =
+            self.client_identity_debug_enabled;
         current.adaptive_protection = self.adaptive_protection.into_config()?;
         current.gateway_config = GatewayConfig {
             https_listen_addr,

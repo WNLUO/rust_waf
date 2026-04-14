@@ -17,6 +17,8 @@ pub(crate) async fn handle_http1_connection(
         .unwrap_or_else(|| "unknown".to_string());
     let opened_at = std::time::Instant::now();
     let mut bucket_key = None;
+    let skip_l4_connection_budget =
+        should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
 
     loop {
         let mut request = http1_handler
@@ -50,23 +52,27 @@ pub(crate) async fn handle_http1_connection(
                 ));
             }
         }
-        if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), bucket_key.as_ref()) {
-            let policy = inspector.connection_admission_policy(bucket_key);
-            maybe_delay_policy(&policy).await;
-            if policy.reject_new_connections {
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_l4_bucket_budget_rejection();
+        if !skip_l4_connection_budget {
+            if let (Some(inspector), Some(bucket_key)) =
+                (context.l4_inspector(), bucket_key.as_ref())
+            {
+                let policy = inspector.connection_admission_policy(bucket_key);
+                maybe_delay_policy(&policy).await;
+                if policy.reject_new_connections {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        metrics.record_l4_bucket_budget_rejection();
+                    }
+                    http1_handler
+                        .write_response(
+                            &mut stream,
+                            429,
+                            "Too Many Requests",
+                            b"bucket connection budget exceeded",
+                        )
+                        .await?;
+                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                    return Ok(());
                 }
-                http1_handler
-                    .write_response(
-                        &mut stream,
-                        429,
-                        "Too Many Requests",
-                        b"bucket connection budget exceeded",
-                    )
-                    .await?;
-                inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
-                return Ok(());
             }
         }
         prepare_request_for_routing(context.as_ref(), &mut request);

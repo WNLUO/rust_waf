@@ -8,6 +8,8 @@ pub(crate) async fn handle_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+    let skip_l4_connection_budget =
+        should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet);
     if l4_result.should_persist_event() {
@@ -24,18 +26,20 @@ pub(crate) async fn handle_connection(
         return Ok(());
     }
 
-    if let Some(inspector) = context.l4_inspector() {
-        let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "http");
-        maybe_delay_policy(&policy).await;
-        if policy.reject_new_connections {
-            debug!(
-                "Rejecting TCP connection from {} due to coarse admission pressure",
-                peer_addr
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_l4_bucket_budget_rejection();
+    if !skip_l4_connection_budget {
+        if let Some(inspector) = context.l4_inspector() {
+            let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "http");
+            maybe_delay_policy(&policy).await;
+            if policy.reject_new_connections {
+                debug!(
+                    "Rejecting TCP connection from {} due to coarse admission pressure",
+                    peer_addr
+                );
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_l4_bucket_budget_rejection();
+                }
+                return Ok(());
             }
-            return Ok(());
         }
     }
 
@@ -62,6 +66,8 @@ pub(crate) async fn handle_tls_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+    let skip_l4_connection_budget =
+        should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let config = context.config_snapshot();
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet);
@@ -79,25 +85,27 @@ pub(crate) async fn handle_tls_connection(
         return Ok(());
     }
 
-    if let Some(inspector) = context.l4_inspector() {
-        let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "tls");
-        maybe_delay_policy(&policy).await;
-        if policy.reject_new_connections {
-            debug!(
+    if !skip_l4_connection_budget {
+        if let Some(inspector) = context.l4_inspector() {
+            let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "tls");
+            maybe_delay_policy(&policy).await;
+            if policy.reject_new_connections {
+                debug!(
                 "Rejecting TLS connection from {} before handshake due to coarse admission pressure",
                 peer_addr
             );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_tls_pre_handshake_rejection();
-                metrics.record_l4_bucket_budget_rejection();
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_tls_pre_handshake_rejection();
+                    metrics.record_l4_bucket_budget_rejection();
+                }
+                persist_tls_transport_event(
+                    context.as_ref(),
+                    &packet,
+                    "block",
+                    "tls pre-handshake admission rejected: coarse admission pressure".to_string(),
+                );
+                return Ok(());
             }
-            persist_tls_transport_event(
-                context.as_ref(),
-                &packet,
-                "block",
-                "tls pre-handshake admission rejected: coarse admission pressure".to_string(),
-            );
-            return Ok(());
         }
     }
 
@@ -166,25 +174,27 @@ pub(crate) async fn handle_tls_connection(
             alpn.as_deref().unwrap_or("tls"),
         )
     });
-    if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), l4_bucket.as_ref()) {
-        let policy = inspector.connection_admission_policy(bucket_key);
-        maybe_delay_policy(&policy).await;
-        if policy.reject_new_connections {
-            debug!(
-                "Rejecting TLS connection from {} due to bucket admission pressure",
-                peer_addr
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_l4_bucket_budget_rejection();
+    if !skip_l4_connection_budget {
+        if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), l4_bucket.as_ref()) {
+            let policy = inspector.connection_admission_policy(bucket_key);
+            maybe_delay_policy(&policy).await;
+            if policy.reject_new_connections {
+                debug!(
+                    "Rejecting TLS connection from {} due to bucket admission pressure",
+                    peer_addr
+                );
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_l4_bucket_budget_rejection();
+                }
+                persist_tls_transport_event(
+                    context.as_ref(),
+                    &packet,
+                    "block",
+                    "tls post-handshake admission rejected: bucket admission pressure".to_string(),
+                );
+                inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                return Ok(());
             }
-            persist_tls_transport_event(
-                context.as_ref(),
-                &packet,
-                "block",
-                "tls post-handshake admission rejected: bucket admission pressure".to_string(),
-            );
-            inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
-            return Ok(());
         }
     }
 

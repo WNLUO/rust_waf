@@ -8,6 +8,26 @@ pub(crate) async fn maybe_delay_request(request: &crate::protocol::UnifiedHttpRe
     }
 }
 
+pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
+    context: &crate::core::WafContext,
+    peer_ip: std::net::IpAddr,
+) -> bool {
+    let config = context.config_snapshot();
+    if matches!(
+        config.gateway_config.source_ip_strategy,
+        crate::config::SourceIpStrategy::Connection
+    ) {
+        return false;
+    }
+
+    config
+        .l7_config
+        .trusted_proxy_cidrs
+        .iter()
+        .filter_map(|cidr| cidr.parse::<ipnet::IpNet>().ok())
+        .any(|network| network.contains(&peer_ip))
+}
+
 pub(crate) async fn maybe_delay_policy(policy: &crate::l4::behavior::L4AdaptivePolicy) {
     if policy.suggested_delay_ms > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(policy.suggested_delay_ms)).await;

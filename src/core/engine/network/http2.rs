@@ -30,6 +30,8 @@ pub(crate) async fn handle_http2_connection(
     let bucket_key = Arc::new(std::sync::Mutex::new(None));
     let bucket_key_for_callback = Arc::clone(&bucket_key);
     let opened_at = std::time::Instant::now();
+    let skip_l4_connection_budget =
+        should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
 
     http2_handler
         .serve_connection(
@@ -73,7 +75,7 @@ pub(crate) async fn handle_http2_connection(
                                 .replace(key);
                         }
                     }
-                    if first_registration {
+                    if first_registration && !skip_l4_connection_budget {
                         if let Some(inspector) = context.l4_inspector() {
                             let current_bucket_key = {
                                 bucket_key

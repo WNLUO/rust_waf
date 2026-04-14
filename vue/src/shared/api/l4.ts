@@ -14,6 +14,7 @@ export function updateL4Config(
     | 'runtime_profile'
     | 'adaptive_managed_fields'
     | 'adaptive_runtime'
+    | 'advanced_compatibility'
   >,
 ) {
   return apiRequest<WriteStatusResponse>('/l4/config', {

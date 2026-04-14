@@ -87,6 +87,9 @@ const lastUpdatedLabel = computed(() => {
         <p class="mt-2 text-sm leading-6 text-stone-700">
           当前系统压力为 {{ meta.adaptive_runtime.system_pressure }}，连接预算、延迟和拒绝阈值都按运行时状态自动调整。这里保留的是观测视图，不再建议把 L4 当成手工调阈值页面。
         </p>
+        <p class="mt-2 text-xs leading-5 text-slate-500">
+          旧的行为引擎细粒度字段已归档到 `advanced_compatibility` 兼容层，主视图只展示当前生效值。
+        </p>
       </section>
       <AdminL4OverviewSection
         :format-number="formatNumber"

@@ -88,6 +88,11 @@ export interface AutoTuningRuntimePayload {
   }
 }
 
+export interface L7AdvancedCompatibilityPayload {
+  persisted_cc_defense: CcDefenseConfigPayload
+  persisted_auto_tuning: AutoTuningConfigPayload
+}
+
 export interface L7ConfigPayload {
   max_request_size: number
   trusted_proxy_cidrs: string[]
@@ -113,6 +118,7 @@ export interface L7ConfigPayload {
   runtime_profile: 'minimal' | 'standard' | string
   adaptive_managed_fields: boolean
   adaptive_runtime: AdaptiveProtectionRuntimePayload
+  advanced_compatibility: L7AdvancedCompatibilityPayload
   listen_addrs: string[]
   upstream_endpoint: string
   http3_enabled: boolean

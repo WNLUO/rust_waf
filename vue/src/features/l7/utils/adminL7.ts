@@ -2,7 +2,10 @@ import type { L7ConfigPayload } from '@/features/l7/types/l7'
 
 export type L7ConfigForm = Omit<
   L7ConfigPayload,
-  'runtime_enabled' | 'adaptive_managed_fields' | 'adaptive_runtime'
+  | 'runtime_enabled'
+  | 'adaptive_managed_fields'
+  | 'adaptive_runtime'
+  | 'advanced_compatibility'
 >
 
 export const numberInputClass =

@@ -24,6 +24,27 @@ export interface TrustedCdnConfigPayload {
   aliyun_esa: TrustedCdnAliyunEsaPayload
 }
 
+export interface L4AdvancedCompatibilityPayload {
+  persisted_behavior_event_channel_capacity: number
+  persisted_behavior_drop_critical_threshold: number
+  persisted_behavior_fallback_ratio_percent: number
+  persisted_behavior_overload_blocked_connections_threshold: number
+  persisted_behavior_overload_active_connections_threshold: number
+  persisted_behavior_normal_connection_budget_per_minute: number
+  persisted_behavior_suspicious_connection_budget_per_minute: number
+  persisted_behavior_high_risk_connection_budget_per_minute: number
+  persisted_behavior_high_overload_budget_scale_percent: number
+  persisted_behavior_critical_overload_budget_scale_percent: number
+  persisted_behavior_high_overload_delay_ms: number
+  persisted_behavior_critical_overload_delay_ms: number
+  persisted_behavior_soft_delay_threshold_percent: number
+  persisted_behavior_hard_delay_threshold_percent: number
+  persisted_behavior_soft_delay_ms: number
+  persisted_behavior_hard_delay_ms: number
+  persisted_behavior_reject_threshold_percent: number
+  persisted_behavior_critical_reject_threshold_percent: number
+}
+
 export interface L4ConfigPayload {
   ddos_protection_enabled: boolean
   advanced_ddos_enabled: boolean
@@ -57,6 +78,7 @@ export interface L4ConfigPayload {
   runtime_profile: 'minimal' | 'standard' | string
   adaptive_managed_fields: boolean
   adaptive_runtime: AdaptiveProtectionRuntimePayload
+  advanced_compatibility: L4AdvancedCompatibilityPayload
   trusted_cdn: TrustedCdnConfigPayload
 }
 

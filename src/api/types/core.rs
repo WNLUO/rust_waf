@@ -57,6 +57,7 @@ pub struct L4ConfigResponse {
     pub(crate) runtime_profile: String,
     pub(crate) adaptive_managed_fields: bool,
     pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
+    pub(crate) advanced_compatibility: L4AdvancedCompatibilityResponse,
     pub(crate) trusted_cdn: TrustedCdnConfigResponse,
 }
 
@@ -118,6 +119,7 @@ pub struct L7ConfigResponse {
     pub(crate) runtime_profile: String,
     pub(crate) adaptive_managed_fields: bool,
     pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
+    pub(crate) advanced_compatibility: L7AdvancedCompatibilityResponse,
     pub(crate) listen_addrs: Vec<String>,
     pub(crate) upstream_endpoint: String,
     pub(crate) http3_enabled: bool,
@@ -254,6 +256,34 @@ pub struct AdaptiveProtectionL7RuntimeResponse {
     pub(crate) ip_challenge_threshold: u32,
     pub(crate) ip_block_threshold: u32,
     pub(crate) challenge_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct L4AdvancedCompatibilityResponse {
+    pub(crate) persisted_behavior_event_channel_capacity: usize,
+    pub(crate) persisted_behavior_drop_critical_threshold: u64,
+    pub(crate) persisted_behavior_fallback_ratio_percent: u8,
+    pub(crate) persisted_behavior_overload_blocked_connections_threshold: u64,
+    pub(crate) persisted_behavior_overload_active_connections_threshold: u64,
+    pub(crate) persisted_behavior_normal_connection_budget_per_minute: u32,
+    pub(crate) persisted_behavior_suspicious_connection_budget_per_minute: u32,
+    pub(crate) persisted_behavior_high_risk_connection_budget_per_minute: u32,
+    pub(crate) persisted_behavior_high_overload_budget_scale_percent: u8,
+    pub(crate) persisted_behavior_critical_overload_budget_scale_percent: u8,
+    pub(crate) persisted_behavior_high_overload_delay_ms: u64,
+    pub(crate) persisted_behavior_critical_overload_delay_ms: u64,
+    pub(crate) persisted_behavior_soft_delay_threshold_percent: u16,
+    pub(crate) persisted_behavior_hard_delay_threshold_percent: u16,
+    pub(crate) persisted_behavior_soft_delay_ms: u64,
+    pub(crate) persisted_behavior_hard_delay_ms: u64,
+    pub(crate) persisted_behavior_reject_threshold_percent: u16,
+    pub(crate) persisted_behavior_critical_reject_threshold_percent: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct L7AdvancedCompatibilityResponse {
+    pub(crate) persisted_cc_defense: CcDefenseConfigResponse,
+    pub(crate) persisted_auto_tuning: AutoTuningConfigResponse,
 }
 
 #[derive(Debug, Deserialize, Default)]

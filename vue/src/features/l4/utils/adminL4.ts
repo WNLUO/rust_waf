@@ -8,6 +8,7 @@ export type L4ConfigForm = Omit<
   | 'runtime_profile'
   | 'adaptive_managed_fields'
   | 'adaptive_runtime'
+  | 'advanced_compatibility'
 >
 
 export function createDefaultL4ConfigForm(): L4ConfigForm {

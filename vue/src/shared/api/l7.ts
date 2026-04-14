@@ -8,7 +8,10 @@ export function fetchL7Config() {
 export function updateL7Config(
   payload: Omit<
     L7ConfigPayload,
-    'runtime_enabled' | 'adaptive_managed_fields' | 'adaptive_runtime'
+    | 'runtime_enabled'
+    | 'adaptive_managed_fields'
+    | 'adaptive_runtime'
+    | 'advanced_compatibility'
   >,
 ) {
   return apiRequest<WriteStatusResponse>('/l7/config', {

@@ -100,6 +100,58 @@ impl L4ConfigResponse {
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
             adaptive_managed_fields: config.adaptive_protection.enabled,
             adaptive_runtime: AdaptiveProtectionRuntimeResponse::from_snapshot(adaptive_runtime),
+            advanced_compatibility: L4AdvancedCompatibilityResponse {
+                persisted_behavior_event_channel_capacity: config
+                    .l4_config
+                    .behavior_event_channel_capacity,
+                persisted_behavior_drop_critical_threshold: config
+                    .l4_config
+                    .behavior_drop_critical_threshold,
+                persisted_behavior_fallback_ratio_percent: config
+                    .l4_config
+                    .behavior_fallback_ratio_percent,
+                persisted_behavior_overload_blocked_connections_threshold: config
+                    .l4_config
+                    .behavior_overload_blocked_connections_threshold,
+                persisted_behavior_overload_active_connections_threshold: config
+                    .l4_config
+                    .behavior_overload_active_connections_threshold,
+                persisted_behavior_normal_connection_budget_per_minute: config
+                    .l4_config
+                    .behavior_normal_connection_budget_per_minute,
+                persisted_behavior_suspicious_connection_budget_per_minute: config
+                    .l4_config
+                    .behavior_suspicious_connection_budget_per_minute,
+                persisted_behavior_high_risk_connection_budget_per_minute: config
+                    .l4_config
+                    .behavior_high_risk_connection_budget_per_minute,
+                persisted_behavior_high_overload_budget_scale_percent: config
+                    .l4_config
+                    .behavior_high_overload_budget_scale_percent,
+                persisted_behavior_critical_overload_budget_scale_percent: config
+                    .l4_config
+                    .behavior_critical_overload_budget_scale_percent,
+                persisted_behavior_high_overload_delay_ms: config
+                    .l4_config
+                    .behavior_high_overload_delay_ms,
+                persisted_behavior_critical_overload_delay_ms: config
+                    .l4_config
+                    .behavior_critical_overload_delay_ms,
+                persisted_behavior_soft_delay_threshold_percent: config
+                    .l4_config
+                    .behavior_soft_delay_threshold_percent,
+                persisted_behavior_hard_delay_threshold_percent: config
+                    .l4_config
+                    .behavior_hard_delay_threshold_percent,
+                persisted_behavior_soft_delay_ms: config.l4_config.behavior_soft_delay_ms,
+                persisted_behavior_hard_delay_ms: config.l4_config.behavior_hard_delay_ms,
+                persisted_behavior_reject_threshold_percent: config
+                    .l4_config
+                    .behavior_reject_threshold_percent,
+                persisted_behavior_critical_reject_threshold_percent: config
+                    .l4_config
+                    .behavior_critical_reject_threshold_percent,
+            },
             trusted_cdn: TrustedCdnConfigResponse {
                 manual_cidrs: config.l4_config.trusted_cdn.manual_cidrs.clone(),
                 effective_cidrs: config.l4_config.trusted_cdn.effective_cidrs(),
@@ -203,6 +255,12 @@ impl L7ConfigResponse {
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
             adaptive_managed_fields: config.adaptive_protection.enabled,
             adaptive_runtime: AdaptiveProtectionRuntimeResponse::from_snapshot(adaptive_runtime),
+            advanced_compatibility: L7AdvancedCompatibilityResponse {
+                persisted_cc_defense: CcDefenseConfigResponse::from_config(
+                    &config.l7_config.cc_defense,
+                ),
+                persisted_auto_tuning: AutoTuningConfigResponse::from_config(&config.auto_tuning),
+            },
             listen_addrs: config.listen_addrs.clone(),
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             http3_enabled: config.http3_config.enabled,
@@ -416,6 +474,12 @@ mod tests {
         assert_eq!(response.behavior_soft_delay_ms, 44);
         assert_eq!(response.behavior_reject_threshold_percent, 333);
         assert_eq!(response.adaptive_runtime.l4.hard_delay_ms, 88);
+        assert_eq!(
+            response
+                .advanced_compatibility
+                .persisted_behavior_normal_connection_budget_per_minute,
+            config.l4_config.behavior_normal_connection_budget_per_minute
+        );
     }
 
     #[test]
@@ -455,6 +519,13 @@ mod tests {
         assert_eq!(response.cc_defense.delay_ms, 280);
         assert_eq!(response.cc_defense.ip_challenge_threshold, 30);
         assert_eq!(response.cc_defense.route_block_threshold, 24);
+        assert_eq!(
+            response
+                .advanced_compatibility
+                .persisted_cc_defense
+                .ip_challenge_threshold,
+            config.l7_config.cc_defense.ip_challenge_threshold
+        );
     }
 }
 

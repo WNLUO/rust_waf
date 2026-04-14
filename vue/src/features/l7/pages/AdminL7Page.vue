@@ -85,6 +85,9 @@ const lastUpdatedLabel = computed(() => {
         <p class="mt-2 text-sm leading-6 text-stone-700">
           当前系统压力为 {{ meta.adaptive_runtime.system_pressure }}。CC 窗口、延迟和 challenge / block 阈值会按运行时状态自动收紧或放宽，这里优先作为观测面板使用。
         </p>
+        <p class="mt-2 text-xs leading-5 text-slate-500">
+          旧的 CC 阈值和自动调优细项已归档到 `advanced_compatibility` 兼容层，主视图优先展示自动控制器当前生效策略。
+        </p>
       </section>
       <AdminL7OverviewSection
         :config-form="configForm"

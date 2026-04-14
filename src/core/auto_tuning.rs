@@ -1,5 +1,5 @@
 use crate::config::{AutoTuningIntent, AutoTuningMode, Config};
-use crate::metrics::MetricsSnapshot;
+use crate::metrics::{MetricsSnapshot, ProxyTrafficMetricsSnapshot};
 
 use super::system_profile::{detect_system_profile, SystemProfile};
 
@@ -40,7 +40,16 @@ pub struct AutoTuningEffectEvaluationSnapshot {
     pub handshake_timeout_rate_delta_percent: f64,
     pub bucket_reject_rate_delta_percent: f64,
     pub avg_proxy_latency_delta_ms: i64,
+    pub traffic_segments: Vec<AutoTuningTrafficSegmentEvaluationSnapshot>,
     pub summary: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoTuningTrafficSegmentEvaluationSnapshot {
+    pub request_kind: String,
+    pub sample_requests: u64,
+    pub avg_proxy_latency_delta_ms: i64,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +79,7 @@ struct MetricDeltas {
     handshake_timeout_rate_percent: f64,
     bucket_reject_rate_percent: f64,
     avg_proxy_latency_ms: u64,
+    traffic_segments: [TrafficSegmentDelta; 3],
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +96,13 @@ enum AutoTuningActionKind {
     Handshake,
     Budget,
     Latency,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TrafficSegmentDelta {
+    request_kind: &'static str,
+    proxied_requests_delta: u64,
+    avg_proxy_latency_ms: u64,
 }
 
 pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
@@ -777,6 +794,26 @@ fn compute_deltas(previous: &MetricsSnapshot, current: &MetricsSnapshot) -> Metr
         handshake_timeout_rate_percent,
         bucket_reject_rate_percent,
         avg_proxy_latency_ms,
+        traffic_segments: [
+            compute_traffic_segment_delta("document", &previous.document_proxy, &current.document_proxy),
+            compute_traffic_segment_delta("api", &previous.api_proxy, &current.api_proxy),
+            compute_traffic_segment_delta("static", &previous.static_proxy, &current.static_proxy),
+        ],
+    }
+}
+
+fn compute_traffic_segment_delta(
+    request_kind: &'static str,
+    previous: &ProxyTrafficMetricsSnapshot,
+    current: &ProxyTrafficMetricsSnapshot,
+) -> TrafficSegmentDelta {
+    let proxied_requests_delta = current
+        .proxied_requests
+        .saturating_sub(previous.proxied_requests);
+    TrafficSegmentDelta {
+        request_kind,
+        proxied_requests_delta,
+        avg_proxy_latency_ms: (current.average_proxy_latency_micros / 1000).max(1),
     }
 }
 
@@ -804,6 +841,7 @@ fn maybe_finalize_effect_evaluation(
             handshake_timeout_rate_delta_percent: 0.0,
             bucket_reject_rate_delta_percent: 0.0,
             avg_proxy_latency_delta_ms: 0,
+            traffic_segments: Vec::new(),
             summary: format!(
                 "waiting for more post-adjust traffic after {}",
                 pending.reason
@@ -820,6 +858,7 @@ fn maybe_finalize_effect_evaluation(
             handshake_timeout_rate_delta_percent: 0.0,
             bucket_reject_rate_delta_percent: 0.0,
             avg_proxy_latency_delta_ms: 0,
+            traffic_segments: Vec::new(),
             summary: format!(
                 "insufficient post-adjust traffic to evaluate {}",
                 pending.reason
@@ -845,6 +884,12 @@ fn evaluate_effect_against_baseline(
         current.bucket_reject_rate_percent - pending.baseline.bucket_reject_rate_percent;
     let latency_delta =
         current.avg_proxy_latency_ms as i64 - pending.baseline.avg_proxy_latency_ms as i64;
+    let traffic_segments = current
+        .traffic_segments
+        .iter()
+        .zip(pending.baseline.traffic_segments.iter())
+        .map(|(current_segment, baseline_segment)| evaluate_traffic_segment(current_segment, baseline_segment))
+        .collect::<Vec<_>>();
 
     let score = match pending.action_kind {
         AutoTuningActionKind::Handshake => {
@@ -907,6 +952,7 @@ fn evaluate_effect_against_baseline(
         handshake_timeout_rate_delta_percent: handshake_delta,
         bucket_reject_rate_delta_percent: bucket_delta,
         avg_proxy_latency_delta_ms: latency_delta,
+        traffic_segments,
         summary: format!(
             "{} after {} with {} focus (handshake {:+.2}pp, bucket {:+.2}pp, latency {:+}ms)",
             status, pending.reason, focus, handshake_delta, bucket_delta, latency_delta
@@ -960,6 +1006,7 @@ fn arm_effect_evaluation(
         handshake_timeout_rate_delta_percent: 0.0,
         bucket_reject_rate_delta_percent: 0.0,
         avg_proxy_latency_delta_ms: 0,
+        traffic_segments: Vec::new(),
         summary: format!("waiting to evaluate {}", reason),
     });
 }
@@ -990,6 +1037,23 @@ fn deltas_from_runtime(runtime: &AutoTuningRuntimeSnapshot) -> MetricDeltas {
         handshake_timeout_rate_percent: runtime.last_observed_tls_handshake_timeout_rate_percent,
         bucket_reject_rate_percent: runtime.last_observed_bucket_reject_rate_percent,
         avg_proxy_latency_ms: runtime.last_observed_avg_proxy_latency_ms,
+        traffic_segments: [
+            TrafficSegmentDelta {
+                request_kind: "document",
+                proxied_requests_delta: 0,
+                avg_proxy_latency_ms: 0,
+            },
+            TrafficSegmentDelta {
+                request_kind: "api",
+                proxied_requests_delta: 0,
+                avg_proxy_latency_ms: 0,
+            },
+            TrafficSegmentDelta {
+                request_kind: "static",
+                proxied_requests_delta: 0,
+                avg_proxy_latency_ms: 0,
+            },
+        ],
     }
 }
 
@@ -1011,7 +1075,30 @@ fn rollback_effect_snapshot(
         handshake_timeout_rate_delta_percent: 0.0,
         bucket_reject_rate_delta_percent: 0.0,
         avg_proxy_latency_delta_ms: 0,
+        traffic_segments: Vec::new(),
         summary,
+    }
+}
+
+fn evaluate_traffic_segment(
+    current: &TrafficSegmentDelta,
+    baseline: &TrafficSegmentDelta,
+) -> AutoTuningTrafficSegmentEvaluationSnapshot {
+    let latency_delta = current.avg_proxy_latency_ms as i64 - baseline.avg_proxy_latency_ms as i64;
+    let status = if current.proxied_requests_delta < 5 {
+        "low_sample"
+    } else if latency_delta <= -50 {
+        "improved"
+    } else if latency_delta >= 100 {
+        "regressed"
+    } else {
+        "stable"
+    };
+    AutoTuningTrafficSegmentEvaluationSnapshot {
+        request_kind: current.request_kind.to_string(),
+        sample_requests: current.proxied_requests_delta,
+        avg_proxy_latency_delta_ms: latency_delta,
+        status: status.to_string(),
     }
 }
 

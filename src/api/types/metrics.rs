@@ -122,7 +122,16 @@ pub struct AutoTuningEffectEvaluationResponse {
     pub(crate) handshake_timeout_rate_delta_percent: f64,
     pub(crate) bucket_reject_rate_delta_percent: f64,
     pub(crate) avg_proxy_latency_delta_ms: i64,
+    pub(crate) traffic_segments: Vec<AutoTuningTrafficSegmentEvaluationResponse>,
     pub(crate) summary: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AutoTuningTrafficSegmentEvaluationResponse {
+    pub(crate) request_kind: String,
+    pub(crate) sample_requests: u64,
+    pub(crate) avg_proxy_latency_delta_ms: i64,
+    pub(crate) status: String,
 }
 
 #[derive(Debug, Serialize)]

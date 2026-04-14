@@ -380,7 +380,7 @@ pub(crate) async fn handle_http1_connection(
                     return Ok(());
                 }
                 if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_proxy_attempt();
+                    metrics.record_proxy_attempt_with_kind(proxy_traffic_kind(&request));
                 }
                 let proxy_started_at = Instant::now();
                 let proxy_result = if config.gateway_config.enable_ntlm {
@@ -408,7 +408,10 @@ pub(crate) async fn handle_http1_connection(
                 match proxy_result {
                     Ok(response) => {
                         if let Some(metrics) = context.metrics.as_ref() {
-                            metrics.record_proxy_success(proxy_started_at.elapsed());
+                            metrics.record_proxy_success_with_kind(
+                                proxy_traffic_kind(&request),
+                                proxy_started_at.elapsed(),
+                            );
                         }
                         context.traffic_map.record_egress(
                             traffic_source_ip.clone(),
@@ -491,7 +494,7 @@ pub(crate) async fn handle_http1_connection(
                             false,
                         );
                         if let Some(metrics) = context.metrics.as_ref() {
-                            metrics.record_proxy_failure();
+                            metrics.record_proxy_failure_with_kind(proxy_traffic_kind(&request));
                         }
                         context.set_upstream_health(false, Some(err.to_string()));
                         warn!(

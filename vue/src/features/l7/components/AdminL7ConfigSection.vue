@@ -202,6 +202,34 @@ function formatSignedInteger(value: number) {
   return normalized > 0 ? `+${normalized}` : `${normalized}`
 }
 
+function segmentLabel(kind: string) {
+  switch (kind) {
+    case 'document':
+      return '页面'
+    case 'api':
+      return 'API'
+    case 'static':
+      return '静态资源'
+    default:
+      return kind
+  }
+}
+
+function segmentStatusLabel(status: string) {
+  switch (status) {
+    case 'improved':
+      return '改善'
+    case 'regressed':
+      return '恶化'
+    case 'stable':
+      return '基本稳定'
+    case 'low_sample':
+      return '样本偏少'
+    default:
+      return status
+  }
+}
+
 function updateCcDefense(patch: Partial<L7ConfigForm['cc_defense']>) {
   updateForm('cc_defense', {
     ...props.form.cc_defense,
@@ -705,6 +733,20 @@ const safelineResponseBodySource = computed({
           </p>
           <p class="mt-1">
             说明: {{ autoEffectEvaluation.summary }}
+          </p>
+          <p
+            v-if="autoEffectEvaluation.traffic_segments.length"
+            class="mt-1"
+          >
+            分层观测:
+            {{
+              autoEffectEvaluation.traffic_segments
+                .map(
+                  (segment) =>
+                    `${segmentLabel(segment.request_kind)} ${segmentStatusLabel(segment.status)} (${segment.sample_requests} req / ${formatSignedInteger(segment.avg_proxy_latency_delta_ms)}ms)`,
+                )
+                .join(' | ')
+            }}
           </p>
         </template>
       </div>

@@ -82,6 +82,12 @@ export interface AutoTuningRuntimePayload {
     handshake_timeout_rate_delta_percent: number
     bucket_reject_rate_delta_percent: number
     avg_proxy_latency_delta_ms: number
+    traffic_segments: Array<{
+      request_kind: 'document' | 'api' | 'static' | string
+      sample_requests: number
+      avg_proxy_latency_delta_ms: number
+      status: 'improved' | 'regressed' | 'stable' | 'low_sample' | string
+    }>
     summary: string
   } | null
   last_observed_tls_handshake_timeout_rate_percent: number

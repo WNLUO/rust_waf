@@ -25,6 +25,30 @@ pub struct MetricsCollector {
     upstream_healthcheck_successes: AtomicU64,
     upstream_healthcheck_failures: AtomicU64,
     proxy_latency_micros_total: AtomicU64,
+    document_proxy_requests: AtomicU64,
+    document_proxy_successes: AtomicU64,
+    document_proxy_failures: AtomicU64,
+    document_proxy_latency_micros_total: AtomicU64,
+    api_proxy_requests: AtomicU64,
+    api_proxy_successes: AtomicU64,
+    api_proxy_failures: AtomicU64,
+    api_proxy_latency_micros_total: AtomicU64,
+    static_proxy_requests: AtomicU64,
+    static_proxy_successes: AtomicU64,
+    static_proxy_failures: AtomicU64,
+    static_proxy_latency_micros_total: AtomicU64,
+    other_proxy_requests: AtomicU64,
+    other_proxy_successes: AtomicU64,
+    other_proxy_failures: AtomicU64,
+    other_proxy_latency_micros_total: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ProxyTrafficKind {
+    Document,
+    Api,
+    Static,
+    Other,
 }
 
 impl MetricsCollector {
@@ -53,6 +77,22 @@ impl MetricsCollector {
             upstream_healthcheck_successes: AtomicU64::new(0),
             upstream_healthcheck_failures: AtomicU64::new(0),
             proxy_latency_micros_total: AtomicU64::new(0),
+            document_proxy_requests: AtomicU64::new(0),
+            document_proxy_successes: AtomicU64::new(0),
+            document_proxy_failures: AtomicU64::new(0),
+            document_proxy_latency_micros_total: AtomicU64::new(0),
+            api_proxy_requests: AtomicU64::new(0),
+            api_proxy_successes: AtomicU64::new(0),
+            api_proxy_failures: AtomicU64::new(0),
+            api_proxy_latency_micros_total: AtomicU64::new(0),
+            static_proxy_requests: AtomicU64::new(0),
+            static_proxy_successes: AtomicU64::new(0),
+            static_proxy_failures: AtomicU64::new(0),
+            static_proxy_latency_micros_total: AtomicU64::new(0),
+            other_proxy_requests: AtomicU64::new(0),
+            other_proxy_successes: AtomicU64::new(0),
+            other_proxy_failures: AtomicU64::new(0),
+            other_proxy_latency_micros_total: AtomicU64::new(0),
         }
     }
 
@@ -74,17 +114,40 @@ impl MetricsCollector {
     }
 
     pub fn record_proxy_attempt(&self) {
-        self.proxied_requests.fetch_add(1, Ordering::Relaxed);
+        self.record_proxy_attempt_with_kind(ProxyTrafficKind::Other);
     }
 
     pub fn record_proxy_success(&self, latency: std::time::Duration) {
-        self.proxy_successes.fetch_add(1, Ordering::Relaxed);
-        self.proxy_latency_micros_total
-            .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
+        self.record_proxy_success_with_kind(ProxyTrafficKind::Other, latency);
     }
 
     pub fn record_proxy_failure(&self) {
+        self.record_proxy_failure_with_kind(ProxyTrafficKind::Other);
+    }
+
+    pub fn record_proxy_attempt_with_kind(&self, kind: ProxyTrafficKind) {
+        self.proxied_requests.fetch_add(1, Ordering::Relaxed);
+        self.proxy_requests_counter(kind).fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_proxy_success_with_kind(
+        &self,
+        kind: ProxyTrafficKind,
+        latency: std::time::Duration,
+    ) {
+        self.proxy_successes.fetch_add(1, Ordering::Relaxed);
+        self.proxy_latency_micros_total
+            .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
+        self.proxy_successes_counter(kind)
+            .fetch_add(1, Ordering::Relaxed);
+        self.proxy_latency_counter(kind)
+            .fetch_add(latency.as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn record_proxy_failure_with_kind(&self, kind: ProxyTrafficKind) {
         self.proxy_failures.fetch_add(1, Ordering::Relaxed);
+        self.proxy_failures_counter(kind)
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_fail_close_rejection(&self) {
@@ -151,6 +214,42 @@ impl MetricsCollector {
         }
     }
 
+    fn proxy_requests_counter(&self, kind: ProxyTrafficKind) -> &AtomicU64 {
+        match kind {
+            ProxyTrafficKind::Document => &self.document_proxy_requests,
+            ProxyTrafficKind::Api => &self.api_proxy_requests,
+            ProxyTrafficKind::Static => &self.static_proxy_requests,
+            ProxyTrafficKind::Other => &self.other_proxy_requests,
+        }
+    }
+
+    fn proxy_successes_counter(&self, kind: ProxyTrafficKind) -> &AtomicU64 {
+        match kind {
+            ProxyTrafficKind::Document => &self.document_proxy_successes,
+            ProxyTrafficKind::Api => &self.api_proxy_successes,
+            ProxyTrafficKind::Static => &self.static_proxy_successes,
+            ProxyTrafficKind::Other => &self.other_proxy_successes,
+        }
+    }
+
+    fn proxy_failures_counter(&self, kind: ProxyTrafficKind) -> &AtomicU64 {
+        match kind {
+            ProxyTrafficKind::Document => &self.document_proxy_failures,
+            ProxyTrafficKind::Api => &self.api_proxy_failures,
+            ProxyTrafficKind::Static => &self.static_proxy_failures,
+            ProxyTrafficKind::Other => &self.other_proxy_failures,
+        }
+    }
+
+    fn proxy_latency_counter(&self, kind: ProxyTrafficKind) -> &AtomicU64 {
+        match kind {
+            ProxyTrafficKind::Document => &self.document_proxy_latency_micros_total,
+            ProxyTrafficKind::Api => &self.api_proxy_latency_micros_total,
+            ProxyTrafficKind::Static => &self.static_proxy_latency_micros_total,
+            ProxyTrafficKind::Other => &self.other_proxy_latency_micros_total,
+        }
+    }
+
     pub fn get_stats(&self) -> MetricsSnapshot {
         let proxy_successes = self.proxy_successes.load(Ordering::Relaxed);
         let proxy_latency_micros_total = self.proxy_latency_micros_total.load(Ordering::Relaxed);
@@ -191,6 +290,27 @@ impl MetricsCollector {
             } else {
                 proxy_latency_micros_total / proxy_successes
             },
+            document_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Document),
+            api_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Api),
+            static_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Static),
+            other_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Other),
+        }
+    }
+
+    fn proxy_traffic_snapshot(&self, kind: ProxyTrafficKind) -> ProxyTrafficMetricsSnapshot {
+        let requests = self.proxy_requests_counter(kind).load(Ordering::Relaxed);
+        let successes = self.proxy_successes_counter(kind).load(Ordering::Relaxed);
+        let failures = self.proxy_failures_counter(kind).load(Ordering::Relaxed);
+        let latency_micros_total = self.proxy_latency_counter(kind).load(Ordering::Relaxed);
+        ProxyTrafficMetricsSnapshot {
+            proxied_requests: requests,
+            proxy_successes: successes,
+            proxy_failures: failures,
+            average_proxy_latency_micros: if successes == 0 {
+                0
+            } else {
+                latency_micros_total / successes
+            },
         }
     }
 }
@@ -221,6 +341,18 @@ pub struct MetricsSnapshot {
     pub upstream_healthcheck_successes: u64,
     pub upstream_healthcheck_failures: u64,
     pub proxy_latency_micros_total: u64,
+    pub average_proxy_latency_micros: u64,
+    pub document_proxy: ProxyTrafficMetricsSnapshot,
+    pub api_proxy: ProxyTrafficMetricsSnapshot,
+    pub static_proxy: ProxyTrafficMetricsSnapshot,
+    pub other_proxy: ProxyTrafficMetricsSnapshot,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProxyTrafficMetricsSnapshot {
+    pub proxied_requests: u64,
+    pub proxy_successes: u64,
+    pub proxy_failures: u64,
     pub average_proxy_latency_micros: u64,
 }
 
@@ -276,5 +408,9 @@ mod tests {
         assert_eq!(snapshot.upstream_healthcheck_failures, 1);
         assert_eq!(snapshot.proxy_latency_micros_total, 4_000);
         assert_eq!(snapshot.average_proxy_latency_micros, 4_000);
+        assert_eq!(snapshot.other_proxy.proxied_requests, 1);
+        assert_eq!(snapshot.other_proxy.proxy_successes, 1);
+        assert_eq!(snapshot.other_proxy.proxy_failures, 1);
+        assert_eq!(snapshot.other_proxy.average_proxy_latency_micros, 4_000);
     }
 }

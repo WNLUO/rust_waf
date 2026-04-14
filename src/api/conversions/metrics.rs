@@ -1,5 +1,6 @@
 use super::super::types::{
     AutoTuningEffectEvaluationResponse, AutoTuningRecommendationResponse,
+    AutoTuningTrafficSegmentEvaluationResponse,
     AutoTuningRuntimeResponse, L4StatsResponse, L7StatsResponse,
 };
 use crate::core::WafContext;
@@ -182,6 +183,16 @@ impl L7StatsResponse {
                         bucket_reject_rate_delta_percent: value
                             .bucket_reject_rate_delta_percent,
                         avg_proxy_latency_delta_ms: value.avg_proxy_latency_delta_ms,
+                        traffic_segments: value
+                            .traffic_segments
+                            .into_iter()
+                            .map(|segment| AutoTuningTrafficSegmentEvaluationResponse {
+                                request_kind: segment.request_kind,
+                                sample_requests: segment.sample_requests,
+                                avg_proxy_latency_delta_ms: segment.avg_proxy_latency_delta_ms,
+                                status: segment.status,
+                            })
+                            .collect(),
                         summary: value.summary,
                     }
                 }),

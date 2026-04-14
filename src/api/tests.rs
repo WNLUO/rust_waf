@@ -64,6 +64,10 @@ fn test_build_metrics_response_with_sources() {
             upstream_healthcheck_failures: 1,
             proxy_latency_micros_total: 40_000,
             average_proxy_latency_micros: 5_000,
+            document_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
+            api_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
+            static_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
+            other_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
         }),
         4,
         Some(crate::storage::StorageMetricsSummary {

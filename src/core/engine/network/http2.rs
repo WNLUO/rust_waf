@@ -340,7 +340,7 @@ pub(crate) async fn handle_http2_connection(
                             });
                         }
                         if let Some(metrics) = context.metrics.as_ref() {
-                            metrics.record_proxy_attempt();
+                            metrics.record_proxy_attempt_with_kind(proxy_traffic_kind(&request));
                         }
                         let proxy_started_at = Instant::now();
                         match proxy_http_request(
@@ -355,7 +355,10 @@ pub(crate) async fn handle_http2_connection(
                         {
                             Ok(response) => {
                                 if let Some(metrics) = context.metrics.as_ref() {
-                                    metrics.record_proxy_success(proxy_started_at.elapsed());
+                                    metrics.record_proxy_success_with_kind(
+                                        proxy_traffic_kind(&request),
+                                        proxy_started_at.elapsed(),
+                                    );
                                 }
                                 context.traffic_map.record_egress(
                                     traffic_source_ip.clone(),
@@ -431,7 +434,9 @@ pub(crate) async fn handle_http2_connection(
                                     false,
                                 );
                                 if let Some(metrics) = context.metrics.as_ref() {
-                                    metrics.record_proxy_failure();
+                                    metrics.record_proxy_failure_with_kind(
+                                        proxy_traffic_kind(&request),
+                                    );
                                 }
                                 context.set_upstream_health(false, Some(err.to_string()));
                                 warn!(

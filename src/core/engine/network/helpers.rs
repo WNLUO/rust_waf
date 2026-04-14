@@ -70,6 +70,17 @@ pub(crate) fn record_l7_cc_metrics(
     }
 }
 
+pub(crate) fn proxy_traffic_kind(
+    request: &crate::protocol::UnifiedHttpRequest,
+) -> crate::metrics::ProxyTrafficKind {
+    match request.get_metadata("l7.cc.request_kind").map(String::as_str) {
+        Some("document") => crate::metrics::ProxyTrafficKind::Document,
+        Some("api") => crate::metrics::ProxyTrafficKind::Api,
+        Some("static") => crate::metrics::ProxyTrafficKind::Static,
+        _ => crate::metrics::ProxyTrafficKind::Other,
+    }
+}
+
 pub(crate) fn request_in_critical_overload(request: &crate::protocol::UnifiedHttpRequest) -> bool {
     request
         .get_metadata("l4.overload_level")

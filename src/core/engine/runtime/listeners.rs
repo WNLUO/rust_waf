@@ -51,6 +51,64 @@ fn is_benign_http2_disconnect_message(message: &str) -> bool {
             || message.contains("connection closed"))
 }
 
+fn semaphore_pressure(context: &WafContext, semaphore: &Semaphore) -> (usize, usize, u64) {
+    let total = context.config_snapshot().max_concurrent_tasks.max(1);
+    let available = semaphore.available_permits().min(total);
+    let used = total.saturating_sub(available);
+    let usage_percent = (used as u64).saturating_mul(100) / total as u64;
+    (available, total, usage_percent)
+}
+
+fn adaptive_permit_wait_ms(context: &WafContext, semaphore: &Semaphore) -> u64 {
+    let (_, _, usage_percent) = semaphore_pressure(context, semaphore);
+    let auto = context.auto_tuning_snapshot();
+    let cpu_cores = auto.detected_cpu_cores.max(1);
+    let memory_mb = auto.detected_memory_limit_mb.unwrap_or(2048);
+
+    // Lower-capacity nodes need a slightly wider queueing window under burst load.
+    let mut wait_ms = if cpu_cores <= 2 || memory_mb < 1024 {
+        140
+    } else {
+        80
+    };
+
+    if usage_percent >= 98 {
+        wait_ms *= 4;
+    } else if usage_percent >= 92 {
+        wait_ms *= 3;
+    } else if usage_percent >= 85 {
+        wait_ms *= 2;
+    }
+
+    wait_ms.clamp(40, 800)
+}
+
+async fn acquire_permit_auto(
+    context: &WafContext,
+    semaphore: Arc<Semaphore>,
+    peer_addr: std::net::SocketAddr,
+    channel: &str,
+) -> Option<OwnedSemaphorePermit> {
+    if let Ok(permit) = semaphore.clone().try_acquire_owned() {
+        return Some(permit);
+    }
+
+    let wait_ms = adaptive_permit_wait_ms(context, semaphore.as_ref());
+    let wait = std::time::Duration::from_millis(wait_ms);
+    match tokio::time::timeout(wait, semaphore.clone().acquire_owned()).await {
+        Ok(Ok(permit)) => Some(permit),
+        Ok(Err(_)) => None,
+        Err(_) => {
+            let (available, total, usage_percent) = semaphore_pressure(context, semaphore.as_ref());
+            warn!(
+                "Dropping {} connection from {} after adaptive wait {}ms (permits {}/{}, usage {}%)",
+                channel, peer_addr, wait_ms, available, total, usage_percent
+            );
+            None
+        }
+    }
+}
+
 impl EntryListenerRuntime {
     pub(super) fn global() -> Arc<Self> {
         ENTRY_LISTENER_RUNTIME
@@ -329,21 +387,19 @@ async fn spawn_http_entry_listener(
                 accept_result = listener.accept() => {
                     match accept_result {
                         Ok((stream, peer_addr)) => {
-                            match connection_semaphore.clone().try_acquire_owned() {
-                                Ok(permit) => {
-                                    let ctx = Arc::clone(&context);
-                                    tokio::spawn(async move {
-                                        if let Err(err) = handle_connection(ctx, stream, peer_addr, permit).await {
-                                            warn!("Connection handling failed: {}", err);
-                                        }
-                                    });
-                                }
-                                Err(_) => {
-                                    warn!(
-                                        "Dropping connection from {} due to concurrency limit",
-                                        peer_addr
-                                    );
-                                }
+                            if let Some(permit) = acquire_permit_auto(
+                                context.as_ref(),
+                                Arc::clone(&connection_semaphore),
+                                peer_addr,
+                                "HTTP",
+                            )
+                            .await {
+                                let ctx = Arc::clone(&context);
+                                tokio::spawn(async move {
+                                    if let Err(err) = handle_connection(ctx, stream, peer_addr, permit).await {
+                                        warn!("Connection handling failed: {}", err);
+                                    }
+                                });
                             }
                         }
                         Err(err) => {
@@ -383,29 +439,27 @@ async fn spawn_https_entry_listener(
                 accept_result = listener.accept() => {
                     match accept_result {
                         Ok((stream, peer_addr)) => {
-                            match connection_semaphore.clone().try_acquire_owned() {
-                                Ok(permit) => {
-                                    let ctx = Arc::clone(&context);
-                                    let acceptor = tls_acceptor.clone();
-                                    tokio::spawn(async move {
-                                        if let Err(err) = handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await {
-                                            if is_benign_tls_disconnect(&err) {
-                                                debug!(
-                                                    "TLS connection closed without close_notify from {}: {}",
-                                                    peer_addr, err
-                                                );
-                                            } else {
-                                                warn!("TLS connection handling failed: {}", err);
-                                            }
+                            if let Some(permit) = acquire_permit_auto(
+                                context.as_ref(),
+                                Arc::clone(&connection_semaphore),
+                                peer_addr,
+                                "TLS",
+                            )
+                            .await {
+                                let ctx = Arc::clone(&context);
+                                let acceptor = tls_acceptor.clone();
+                                tokio::spawn(async move {
+                                    if let Err(err) = handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await {
+                                        if is_benign_tls_disconnect(&err) {
+                                            debug!(
+                                                "TLS connection closed without close_notify from {}: {}",
+                                                peer_addr, err
+                                            );
+                                        } else {
+                                            warn!("TLS connection handling failed: {}", err);
                                         }
-                                    });
-                                }
-                                Err(_) => {
-                                    warn!(
-                                        "Dropping TLS connection from {} due to concurrency limit",
-                                        peer_addr
-                                    );
-                                }
+                                    }
+                                });
                             }
                         }
                         Err(err) => {
@@ -464,30 +518,28 @@ async fn spawn_http3_listener(
                 accept_result = endpoint.accept() => {
                     match accept_result {
                         Some(incoming) => {
-                            match connection_semaphore.clone().try_acquire_owned() {
-                                Ok(permit) => {
-                                    let ctx = Arc::clone(&context);
-                                    let remote_addr = incoming.remote_address();
-                                    tokio::spawn(async move {
-                                        if let Err(err) =
-                                            handle_http3_quic_connection(
-                                                ctx,
-                                                incoming,
-                                                remote_addr,
-                                                permit,
-                                            )
-                                            .await
-                                        {
-                                            warn!("HTTP/3 connection handling failed: {}", err);
-                                        }
-                                    });
-                                }
-                                Err(_) => {
-                                    warn!(
-                                        "Dropping HTTP/3 connection on {} due to concurrency limit",
-                                        task_addr
-                                    );
-                                }
+                            let remote_addr = incoming.remote_address();
+                            if let Some(permit) = acquire_permit_auto(
+                                context.as_ref(),
+                                Arc::clone(&connection_semaphore),
+                                remote_addr,
+                                "HTTP/3",
+                            )
+                            .await {
+                                let ctx = Arc::clone(&context);
+                                tokio::spawn(async move {
+                                    if let Err(err) =
+                                        handle_http3_quic_connection(
+                                            ctx,
+                                            incoming,
+                                            remote_addr,
+                                            permit,
+                                        )
+                                        .await
+                                    {
+                                        warn!("HTTP/3 connection handling failed: {}", err);
+                                    }
+                                });
                             }
                         }
                         None => break,

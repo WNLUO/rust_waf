@@ -6,6 +6,7 @@ pub(crate) async fn handle_http1_connection(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
+    connection_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let config = context.config_snapshot();
     let http1_handler = Http1Handler::new();
@@ -76,6 +77,30 @@ pub(crate) async fn handle_http1_connection(
                 }
             }
         }
+        let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
+            context.as_ref(),
+            Arc::clone(&connection_semaphore),
+            peer_addr,
+            "HTTP/1.1 request",
+        )
+        .await
+        else {
+            http1_handler
+                .write_response_with_headers(
+                    &mut stream,
+                    503,
+                    "Service Unavailable",
+                    &[("Retry-After".to_string(), "5".to_string())],
+                    b"gateway overloaded, retry later",
+                )
+                .await?;
+            if let Some(bucket_key) = bucket_key.as_ref() {
+                if let Some(inspector) = context.l4_inspector() {
+                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                }
+            }
+            return Ok(());
+        };
         prepare_request_for_routing(context.as_ref(), &mut request);
         let matched_site = resolve_gateway_site(context.as_ref(), &request);
         if let Some(site) = matched_site.as_ref() {

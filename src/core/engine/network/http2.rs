@@ -6,6 +6,7 @@ pub(crate) async fn handle_http2_connection(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
+    connection_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let config = context.config_snapshot();
     let http2_config = &config.l7_config.http2_config;
@@ -46,6 +47,7 @@ pub(crate) async fn handle_http2_connection(
                 let connection_id = connection_id_for_callback.clone();
                 let registered = Arc::clone(&registered);
                 let bucket_key = Arc::clone(&bucket_key_for_callback);
+                let connection_semaphore = Arc::clone(&connection_semaphore);
 
                 async move {
                     let config = context.config_snapshot();
@@ -100,6 +102,20 @@ pub(crate) async fn handle_http2_connection(
                             }
                         }
                     }
+                    let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
+                        context.as_ref(),
+                        Arc::clone(&connection_semaphore),
+                        peer_addr,
+                        "HTTP/2 request",
+                    )
+                    .await
+                    else {
+                        return Ok(Http2Response {
+                            status_code: 503,
+                            headers: vec![("retry-after".to_string(), "5".to_string())],
+                            body: b"gateway overloaded, retry later".to_vec(),
+                        });
+                    };
                     prepare_request_for_routing(context.as_ref(), &mut request);
                     let matched_site = resolve_gateway_site(context.as_ref(), &request);
                     if let Some(site) = matched_site.as_ref() {

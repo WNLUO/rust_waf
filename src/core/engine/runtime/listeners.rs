@@ -439,8 +439,17 @@ async fn spawn_http_entry_listener(
                             )
                             .await {
                                 let ctx = Arc::clone(&context);
+                                let business_semaphore = Arc::clone(&connection_semaphore);
                                 tokio::spawn(async move {
-                                    if let Err(err) = handle_connection(ctx, stream, peer_addr, permit).await {
+                                    if let Err(err) = handle_connection(
+                                        ctx,
+                                        stream,
+                                        peer_addr,
+                                        permit,
+                                        business_semaphore,
+                                    )
+                                    .await
+                                    {
                                         warn!("Connection handling failed: {}", err);
                                     }
                                 });
@@ -579,7 +588,7 @@ async fn spawn_http3_listener(
                     match accept_result {
                         Some(incoming) => {
                             let remote_addr = incoming.remote_address();
-                            if let Some(permit) = acquire_permit_auto(
+                            if let Some(setup_permit) = acquire_permit_auto(
                                 context.as_ref(),
                                 Arc::clone(&connection_semaphore),
                                 remote_addr,
@@ -587,13 +596,15 @@ async fn spawn_http3_listener(
                             )
                             .await {
                                 let ctx = Arc::clone(&context);
+                                let business_semaphore = Arc::clone(&connection_semaphore);
                                 tokio::spawn(async move {
                                     if let Err(err) =
                                         handle_http3_quic_connection(
                                             ctx,
                                             incoming,
                                             remote_addr,
-                                            permit,
+                                            setup_permit,
+                                            business_semaphore,
                                         )
                                         .await
                                     {

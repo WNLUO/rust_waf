@@ -65,6 +65,7 @@ pub(crate) async fn detect_and_handle_protocol<S>(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
+    connection_semaphore: Arc<Semaphore>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -100,8 +101,26 @@ where
 
     match detected_version {
         HttpVersion::Http2_0 if config.l7_config.http2_config.enabled => {
-            handle_http2_connection(context, stream, peer_addr, packet, extra_metadata).await
+            handle_http2_connection(
+                context,
+                stream,
+                peer_addr,
+                packet,
+                extra_metadata,
+                connection_semaphore,
+            )
+            .await
         }
-        _ => handle_http1_connection(context, stream, peer_addr, packet, extra_metadata).await,
+        _ => {
+            handle_http1_connection(
+                context,
+                stream,
+                peer_addr,
+                packet,
+                extra_metadata,
+                connection_semaphore,
+            )
+            .await
+        }
     }
 }

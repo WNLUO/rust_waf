@@ -6,7 +6,8 @@ pub(crate) async fn handle_http3_quic_connection(
     context: Arc<WafContext>,
     incoming: QuinnIncoming,
     local_addr: SocketAddr,
-    _permit: OwnedSemaphorePermit,
+    setup_permit: OwnedSemaphorePermit,
+    connection_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let connection = incoming.await?;
     let peer_addr = connection.remote_address();
@@ -65,6 +66,7 @@ pub(crate) async fn handle_http3_quic_connection(
     let mut h3_connection = h3::server::builder()
         .build(H3QuinnConnection::new(connection))
         .await?;
+    drop(setup_permit);
 
     loop {
         match h3_connection.accept().await {
@@ -72,9 +74,16 @@ pub(crate) async fn handle_http3_quic_connection(
                 let context = Arc::clone(&context);
                 let packet = packet.clone();
                 let http3_handler = Http3Handler::new(context.config_snapshot().http3_config);
+                let connection_semaphore = Arc::clone(&connection_semaphore);
                 tokio::spawn(async move {
-                    if let Err(err) =
-                        handle_http3_request(context, packet, http3_handler, resolver).await
+                    if let Err(err) = handle_http3_request(
+                        context,
+                        packet,
+                        http3_handler,
+                        resolver,
+                        connection_semaphore,
+                    )
+                    .await
                     {
                         warn!("HTTP/3 request failed: {}", err);
                     }
@@ -101,6 +110,7 @@ async fn handle_http3_request(
     packet: PacketInfo,
     http3_handler: Http3Handler,
     resolver: h3::server::RequestResolver<H3QuinnConnection, Bytes>,
+    connection_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let config = context.config_snapshot();
     let peer_addr = std::net::SocketAddr::new(packet.source_ip, packet.source_port);
@@ -123,6 +133,24 @@ async fn handle_http3_request(
     unified.add_metadata("udp.peer".to_string(), packet.source_ip.to_string());
     unified.add_metadata("udp.local".to_string(), packet.dest_ip.to_string());
     apply_client_identity(context.as_ref(), peer_addr, &mut unified);
+    let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
+        context.as_ref(),
+        Arc::clone(&connection_semaphore),
+        peer_addr,
+        "HTTP/3 request",
+    )
+    .await
+    else {
+        send_http3_response(
+            &mut stream,
+            503,
+            &[("retry-after".to_string(), "5".to_string())],
+            b"gateway overloaded, retry later".to_vec(),
+            None,
+        )
+        .await?;
+        return Ok(());
+    };
     prepare_request_for_routing(context.as_ref(), &mut unified);
     let matched_site = resolve_gateway_site(context.as_ref(), &unified);
     if let Some(site) = matched_site.as_ref() {

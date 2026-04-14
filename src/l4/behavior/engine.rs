@@ -81,13 +81,22 @@ impl L4BehaviorEngine {
     }
 
     pub fn pre_admission_policy(&self, peer_ip: IpAddr, transport: &str) -> L4AdaptivePolicy {
+        self.pre_admission_policy_for_peer(peer_ip, transport, BucketPeerKind::DirectClient)
+    }
+
+    pub fn pre_admission_policy_for_peer(
+        &self,
+        peer_ip: IpAddr,
+        transport: &str,
+        peer_kind: BucketPeerKind,
+    ) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
         let tuning = self
             .tuning
             .read()
             .expect("behavior tuning lock poisoned")
             .clone();
-        self.aggregate_for_peer_transport(peer_ip, canonicalize_transport(transport))
+        self.aggregate_for_peer_transport(peer_ip, canonicalize_transport(transport), peer_kind)
             .map(|bucket| policy_from_runtime(&bucket, overload_level.clone(), &tuning))
             .unwrap_or_else(|| default_policy(overload_level, &tuning))
     }
@@ -100,8 +109,9 @@ impl L4BehaviorEngine {
         alpn: Option<&str>,
         transport: &str,
         protocol_hint: &str,
+        peer_kind: BucketPeerKind,
     ) -> BucketKey {
-        let key = BucketKey::from_parts(packet.source_ip, authority, alpn, transport);
+        let key = BucketKey::from_parts(packet.source_ip, peer_kind, authority, alpn, transport);
         self.try_send(BehaviorEvent::ConnectionOpened {
             key: key.clone(),
             connection_id,
@@ -251,6 +261,7 @@ impl L4BehaviorEngine {
                 let policy = policy_from_runtime(bucket, overload_level.clone(), &tuning);
                 L4BucketSnapshot {
                     peer_ip: entry.key().peer_ip.to_string(),
+                    peer_kind: entry.key().peer_kind,
                     authority: entry.key().authority.clone(),
                     alpn: entry.key().alpn,
                     transport: entry.key().transport,
@@ -377,10 +388,14 @@ impl L4BehaviorEngine {
         &self,
         peer_ip: IpAddr,
         transport: BucketTransport,
+        peer_kind: BucketPeerKind,
     ) -> Option<BucketRuntime> {
         let mut aggregate: Option<BucketRuntime> = None;
         for entry in self.buckets.iter() {
             if entry.key().peer_ip != peer_ip {
+                continue;
+            }
+            if entry.key().peer_kind != peer_kind {
                 continue;
             }
             if transport != BucketTransport::Unknown && entry.key().transport != transport {
@@ -388,7 +403,11 @@ impl L4BehaviorEngine {
             }
             let bucket = entry.value();
             let next = aggregate.get_or_insert_with(|| {
-                BucketRuntime::new(bucket.last_seen_instant, bucket.last_seen_at)
+                BucketRuntime::new(
+                    bucket.peer_kind,
+                    bucket.last_seen_instant,
+                    bucket.last_seen_at,
+                )
             });
             next.last_seen_at = next.last_seen_at.max(bucket.last_seen_at);
             next.last_seen_instant = next.last_seen_instant.max(bucket.last_seen_instant);

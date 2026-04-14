@@ -49,6 +49,7 @@ pub(crate) async fn handle_http1_connection(
                     None,
                     transport,
                     "http/1.1",
+                    skip_l4_connection_budget,
                 ));
             }
         }

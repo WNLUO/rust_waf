@@ -7,12 +7,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 impl BucketKey {
     pub fn from_parts(
         peer_ip: IpAddr,
+        peer_kind: BucketPeerKind,
         authority: Option<&str>,
         alpn: Option<&str>,
         transport: &str,
     ) -> Self {
         Self {
             peer_ip,
+            peer_kind,
             authority: canonicalize_authority(authority),
             alpn: canonicalize_alpn(alpn),
             transport: canonicalize_transport(transport),
@@ -39,12 +41,19 @@ impl BucketKey {
                 _ if request.get_metadata("tls.sni").is_some() => "tls",
                 _ => "http",
             });
-        Self::from_parts(peer_ip, authority, alpn, transport)
+        Self::from_parts(
+            peer_ip,
+            request_bucket_peer_kind(peer_ip, request),
+            authority,
+            alpn,
+            transport,
+        )
     }
 
     pub(super) fn coarse(&self) -> Self {
         Self {
             peer_ip: self.peer_ip,
+            peer_kind: self.peer_kind,
             authority: self.authority.clone(),
             alpn: BucketAlpn::Unknown,
             transport: self.transport,
@@ -54,6 +63,7 @@ impl BucketKey {
     pub(super) fn peer_only(&self) -> Self {
         Self {
             peer_ip: self.peer_ip,
+            peer_kind: self.peer_kind,
             authority: "*".to_string(),
             alpn: BucketAlpn::Unknown,
             transport: BucketTransport::Unknown,
@@ -62,8 +72,9 @@ impl BucketKey {
 }
 
 impl BucketRuntime {
-    pub(super) fn new(now: Instant, unix_now: i64) -> Self {
+    pub(super) fn new(peer_kind: BucketPeerKind, now: Instant, unix_now: i64) -> Self {
         Self {
+            peer_kind,
             last_seen_at: unix_now,
             last_seen_instant: now,
             state_since: unix_now,
@@ -106,9 +117,9 @@ pub(super) async fn worker_loop(
         };
 
         {
-            let mut bucket = buckets
-                .entry(key.clone())
-                .or_insert_with(|| BucketRuntime::new(Instant::now(), unix_timestamp()));
+            let mut bucket = buckets.entry(key.clone()).or_insert_with(|| {
+                BucketRuntime::new(key.peer_kind, Instant::now(), unix_timestamp())
+            });
             match event {
                 BehaviorEvent::ConnectionOpened {
                     connection_id,
@@ -236,4 +247,53 @@ pub(super) fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn request_bucket_peer_kind(peer_ip: IpAddr, request: &UnifiedHttpRequest) -> BucketPeerKind {
+    match request
+        .get_metadata("network.client_ip_source")
+        .map(String::as_str)
+    {
+        Some("forwarded_header") | Some("proxy_protocol") => {
+            return BucketPeerKind::DirectClient;
+        }
+        _ => {}
+    }
+
+    let peer_matches_socket = request
+        .get_metadata("network.peer_ip")
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .map(|socket_peer| socket_peer == peer_ip)
+        .unwrap_or(false);
+    if !peer_matches_socket {
+        return BucketPeerKind::DirectClient;
+    }
+
+    if forwarded_header_ip(request).is_some_and(|forwarded_ip| forwarded_ip != peer_ip) {
+        return BucketPeerKind::TrustedProxy;
+    }
+
+    BucketPeerKind::DirectClient
+}
+
+fn forwarded_header_ip(request: &UnifiedHttpRequest) -> Option<IpAddr> {
+    request
+        .get_header("cf-connecting-ip")
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .or_else(|| {
+            request
+                .get_header("true-client-ip")
+                .and_then(|value| value.parse::<IpAddr>().ok())
+        })
+        .or_else(|| {
+            request
+                .get_header("x-forwarded-for")
+                .and_then(|value| value.split(',').next())
+                .and_then(|value| value.trim().parse::<IpAddr>().ok())
+        })
+        .or_else(|| {
+            request
+                .get_header("x-real-ip")
+                .and_then(|value| value.parse::<IpAddr>().ok())
+        })
 }

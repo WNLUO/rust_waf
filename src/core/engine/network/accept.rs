@@ -28,7 +28,11 @@ pub(crate) async fn handle_connection(
 
     if !skip_l4_connection_budget {
         if let Some(inspector) = context.l4_inspector() {
-            let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "http");
+            let policy = inspector.coarse_connection_admission_policy(
+                packet.source_ip,
+                "http",
+                skip_l4_connection_budget,
+            );
             maybe_delay_policy(&policy).await;
             if policy.reject_new_connections {
                 debug!(
@@ -87,7 +91,11 @@ pub(crate) async fn handle_tls_connection(
 
     if !skip_l4_connection_budget {
         if let Some(inspector) = context.l4_inspector() {
-            let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "tls");
+            let policy = inspector.coarse_connection_admission_policy(
+                packet.source_ip,
+                "tls",
+                skip_l4_connection_budget,
+            );
             maybe_delay_policy(&policy).await;
             if policy.reject_new_connections {
                 warn!(
@@ -195,6 +203,7 @@ pub(crate) async fn handle_tls_connection(
             alpn.as_deref(),
             "tls",
             alpn.as_deref().unwrap_or("tls"),
+            skip_l4_connection_budget,
         )
     });
     if !skip_l4_connection_budget {

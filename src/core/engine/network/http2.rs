@@ -68,6 +68,7 @@ pub(crate) async fn handle_http2_connection(
                                     .map(String::as_str)
                                     .unwrap_or("http"),
                                 "h2",
+                                skip_l4_connection_budget,
                             );
                             bucket_key
                                 .lock()

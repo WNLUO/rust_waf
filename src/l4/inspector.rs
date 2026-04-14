@@ -199,6 +199,7 @@ impl L4Inspector {
         alpn: Option<&str>,
         transport: &str,
         protocol_hint: &str,
+        trusted_proxy_peer: bool,
     ) -> crate::l4::behavior::BucketKey {
         self.behavior_engine.observe_connection_open(
             connection_id,
@@ -207,6 +208,11 @@ impl L4Inspector {
             alpn,
             transport,
             protocol_hint,
+            if trusted_proxy_peer {
+                crate::l4::behavior::BucketPeerKind::TrustedProxy
+            } else {
+                crate::l4::behavior::BucketPeerKind::DirectClient
+            },
         )
     }
 
@@ -239,9 +245,17 @@ impl L4Inspector {
         &self,
         peer_ip: std::net::IpAddr,
         transport: &str,
+        trusted_proxy_peer: bool,
     ) -> crate::l4::behavior::L4AdaptivePolicy {
-        self.behavior_engine
-            .pre_admission_policy(peer_ip, transport)
+        self.behavior_engine.pre_admission_policy_for_peer(
+            peer_ip,
+            transport,
+            if trusted_proxy_peer {
+                crate::l4::behavior::BucketPeerKind::TrustedProxy
+            } else {
+                crate::l4::behavior::BucketPeerKind::DirectClient
+            },
+        )
     }
 
     pub fn update_behavior_tuning(&self, config: &L4Config) {

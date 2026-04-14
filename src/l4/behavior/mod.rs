@@ -84,9 +84,17 @@ enum BehaviorEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BucketKey {
     pub peer_ip: IpAddr,
+    pub peer_kind: BucketPeerKind,
     pub authority: String,
     pub alpn: BucketAlpn,
     pub transport: BucketTransport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BucketPeerKind {
+    DirectClient,
+    TrustedProxy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -109,6 +117,7 @@ pub enum BucketTransport {
 
 #[derive(Debug, Clone)]
 struct BucketRuntime {
+    peer_kind: BucketPeerKind,
     last_seen_at: i64,
     last_seen_instant: Instant,
     state_since: i64,
@@ -158,6 +167,7 @@ pub struct L4BucketPolicySnapshot {
 #[derive(Debug, Clone, Serialize)]
 pub struct L4BucketSnapshot {
     pub peer_ip: String,
+    pub peer_kind: BucketPeerKind,
     pub authority: String,
     pub alpn: BucketAlpn,
     pub transport: BucketTransport,
@@ -260,6 +270,7 @@ mod tests {
                 Some("h2"),
                 "tls",
                 "h2",
+                BucketPeerKind::DirectClient,
             );
         }
 
@@ -287,6 +298,7 @@ mod tests {
             Some("h2"),
             "tls",
             "h2",
+            BucketPeerKind::DirectClient,
         );
         let _ = engine.observe_connection_open(
             "b".to_string(),
@@ -295,8 +307,17 @@ mod tests {
             None,
             "http",
             "http/1.1",
+            BucketPeerKind::DirectClient,
         );
-        let _ = engine.observe_connection_open("c".to_string(), &p3, None, None, "tcp", "unknown");
+        let _ = engine.observe_connection_open(
+            "c".to_string(),
+            &p3,
+            None,
+            None,
+            "tcp",
+            "unknown",
+            BucketPeerKind::DirectClient,
+        );
 
         sleep(Duration::from_millis(50)).await;
         let snapshot = engine.snapshot(0, 0);
@@ -330,6 +351,7 @@ mod tests {
                 Some("h2"),
                 "tls",
                 "h2",
+                BucketPeerKind::DirectClient,
             ));
         }
 
@@ -372,6 +394,7 @@ mod tests {
                 Some("h2"),
                 "tls",
                 "h2",
+                BucketPeerKind::DirectClient,
             );
         }
 
@@ -379,5 +402,39 @@ mod tests {
         let snapshot = engine.snapshot(0, 0);
         assert!(snapshot.overview.dropped_events > 0);
         assert_ne!(snapshot.overview.overload_level, L4OverloadLevel::Critical);
+    }
+
+    #[tokio::test]
+    async fn trusted_proxy_connections_degrade_without_rejecting() {
+        let engine = L4BehaviorEngine::new(&L4Config {
+            max_tracked_ips: 16,
+            behavior_normal_connection_budget_per_minute: 24,
+            behavior_suspicious_connection_budget_per_minute: 12,
+            behavior_high_risk_connection_budget_per_minute: 6,
+            ..L4Config::default()
+        });
+        engine.start();
+        let p = packet(41);
+        let mut key = None;
+
+        for idx in 0..240 {
+            key = Some(engine.observe_connection_open(
+                format!("proxy-{idx}"),
+                &PacketInfo {
+                    timestamp: idx,
+                    ..p.clone()
+                },
+                Some("cdn.example"),
+                Some("h2"),
+                "tls",
+                "h2",
+                BucketPeerKind::TrustedProxy,
+            ));
+        }
+
+        sleep(Duration::from_millis(50)).await;
+        let policy = engine.connection_admission_for_key(&key.expect("bucket key"));
+        assert!(policy.suggested_delay_ms > 0 || policy.disable_keepalive);
+        assert!(!policy.reject_new_connections);
     }
 }

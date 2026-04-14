@@ -10,41 +10,91 @@ pub(super) fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) 
         bucket.total_requests as f64 / bucket.total_connections as f64
     };
     let active_connections = f64::from(bucket.active_connections);
-    let short_lifetime_penalty =
-        if bucket.avg_connection_lifetime_ms > 0.0 && bucket.avg_connection_lifetime_ms < 1500.0 {
-            12.0
-        } else {
-            0.0
-        };
-
-    let raw_score = (recent_connections * 1.8)
-        + recent_requests
-        + (recent_feedback * 18.0)
-        + (active_connections * 6.0)
-        + if requests_per_connection < 1.2 && bucket.total_connections > 10 {
-            12.0
-        } else {
-            0.0
+    let short_lifetime_penalty = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+        0.0
+    } else if bucket.avg_connection_lifetime_ms > 0.0 && bucket.avg_connection_lifetime_ms < 1500.0
+    {
+        12.0
+    } else {
+        0.0
+    };
+    let connection_weight = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 0.6,
+        BucketPeerKind::DirectClient => 1.8,
+    };
+    let request_weight = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 0.6,
+        BucketPeerKind::DirectClient => 1.0,
+    };
+    let feedback_weight = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 4.0,
+        BucketPeerKind::DirectClient => 18.0,
+    };
+    let active_weight = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 1.5,
+        BucketPeerKind::DirectClient => 6.0,
+    };
+    let low_rpc_penalty = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+        0.0
+    } else if requests_per_connection < 1.2 && bucket.total_connections > 10 {
+        12.0
+    } else {
+        0.0
+    };
+    let authority_penalty = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+        0.0
+    } else if bucket.authority_unknown() {
+        6.0
+    } else {
+        0.0
+    };
+    let enforcement_feedback = if bucket.l7_block_hits + bucket.safeline_hits > 0 {
+        let score = (((bucket.l7_block_hits + bucket.safeline_hits) as f64
+            / bucket.total_requests.max(1) as f64)
+            * 100.0)
+            .min(20.0);
+        match bucket.peer_kind {
+            BucketPeerKind::TrustedProxy => score.min(5.0),
+            BucketPeerKind::DirectClient => score,
         }
+    } else {
+        0.0
+    };
+
+    let raw_score = (recent_connections * connection_weight)
+        + (recent_requests * request_weight)
+        + (recent_feedback * feedback_weight)
+        + (active_connections * active_weight)
+        + low_rpc_penalty
         + short_lifetime_penalty
-        + if bucket.authority_unknown() { 6.0 } else { 0.0 }
-        + if bucket.l7_block_hits + bucket.safeline_hits > 0 {
-            (((bucket.l7_block_hits + bucket.safeline_hits) as f64
-                / bucket.total_requests.max(1) as f64)
-                * 100.0)
-                .min(20.0)
-        } else {
-            0.0
-        };
+        + authority_penalty
+        + enforcement_feedback;
 
     let next_score = (bucket.score_ewma * 0.7) + (raw_score.min(100.0) * 0.3);
     bucket.score_ewma = next_score;
 
+    let suspicious_threshold = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 50.0,
+        BucketPeerKind::DirectClient => 30.0,
+    };
+    let high_threshold = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 85.0,
+        BucketPeerKind::DirectClient => 70.0,
+    };
+    let suspicious_decay_threshold = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 30.0,
+        BucketPeerKind::DirectClient => 18.0,
+    };
+    let high_decay_threshold = match bucket.peer_kind {
+        BucketPeerKind::TrustedProxy => 60.0,
+        BucketPeerKind::DirectClient => 50.0,
+    };
+
     let next_risk = match bucket.risk_level {
         L4BucketRiskLevel::Normal => {
-            if next_score >= 70.0 {
+            if next_score >= high_threshold {
                 L4BucketRiskLevel::High
-            } else if next_score >= 30.0 {
+            } else if next_score >= suspicious_threshold {
                 L4BucketRiskLevel::Suspicious
             } else {
                 L4BucketRiskLevel::Normal
@@ -53,9 +103,9 @@ pub(super) fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) 
         L4BucketRiskLevel::Suspicious => {
             if bucket.cooldown_until > unix_now {
                 L4BucketRiskLevel::Suspicious
-            } else if next_score >= 70.0 {
+            } else if next_score >= high_threshold {
                 L4BucketRiskLevel::High
-            } else if next_score <= 18.0 {
+            } else if next_score <= suspicious_decay_threshold {
                 L4BucketRiskLevel::Normal
             } else {
                 L4BucketRiskLevel::Suspicious
@@ -64,7 +114,7 @@ pub(super) fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) 
         L4BucketRiskLevel::High => {
             if bucket.cooldown_until > unix_now {
                 L4BucketRiskLevel::High
-            } else if next_score <= 50.0 {
+            } else if next_score <= high_decay_threshold {
                 L4BucketRiskLevel::Suspicious
             } else {
                 L4BucketRiskLevel::High
@@ -89,6 +139,9 @@ pub(super) fn policy_from_runtime(
         L4BucketRiskLevel::Suspicious => tuning.suspicious_connection_budget_per_minute,
         L4BucketRiskLevel::High => tuning.high_risk_connection_budget_per_minute,
     };
+    if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+        budget = budget.saturating_mul(4);
+    }
     let mut delay_ms = 0u64;
     match overload_level {
         L4OverloadLevel::High => {
@@ -126,6 +179,11 @@ pub(super) fn policy_from_runtime(
             budget,
             tuning.critical_reject_threshold_percent,
         ));
+    let reject_new_connections = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+        false
+    } else {
+        reject_new_connections
+    };
 
     L4AdaptivePolicy {
         risk_level: bucket.risk_level.clone(),

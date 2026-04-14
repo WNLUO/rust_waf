@@ -34,7 +34,11 @@ pub(crate) async fn handle_http3_quic_connection(
 
     if !skip_l4_connection_budget {
         if let Some(inspector) = context.l4_inspector() {
-            let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "udp");
+            let policy = inspector.coarse_connection_admission_policy(
+                packet.source_ip,
+                "udp",
+                skip_l4_connection_budget,
+            );
             if policy.reject_new_connections {
                 debug!(
                     "Dropping UDP datagram from {} due to coarse admission pressure",
@@ -53,6 +57,7 @@ pub(crate) async fn handle_http3_quic_connection(
             Some("h3"),
             "udp",
             "h3",
+            skip_l4_connection_budget,
         )
     });
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { Activity, ArrowUpRight, Shield, TimerReset } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
@@ -6,7 +7,7 @@ import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import type { L7ConfigForm } from '@/features/l7/utils/adminL7'
 import type { L7StatsPayload } from '@/shared/types'
 
-defineProps<{
+const props = defineProps<{
   configForm: L7ConfigForm
   failureModeLabel: string
   formatLatency: (micros?: number) => string
@@ -25,6 +26,229 @@ defineProps<{
   upstreamStatusText: string
   upstreamStatusType: 'success' | 'warning' | 'error' | 'muted' | 'info'
 }>()
+
+const hotspotView = ref<'host' | 'route'>('host')
+
+const autoEffectEvaluation = computed(() => props.stats?.auto_tuning.last_effect_evaluation ?? null)
+
+const autoRiskLeaderboard = computed(() => {
+  const segments = autoEffectEvaluation.value?.segments ?? []
+  return [...segments]
+    .filter((segment) => segment.status !== 'low_sample')
+    .sort((left, right) => {
+      const leftScore =
+        (left.status === 'regressed' ? 1000 : left.status === 'stable' ? 300 : 0) +
+        left.sample_requests * 10 +
+        Math.max(left.avg_proxy_latency_delta_ms, 0) +
+        Math.max(left.failure_rate_delta_percent, 0) * 20
+      const rightScore =
+        (right.status === 'regressed' ? 1000 : right.status === 'stable' ? 300 : 0) +
+        right.sample_requests * 10 +
+        Math.max(right.avg_proxy_latency_delta_ms, 0) +
+        Math.max(right.failure_rate_delta_percent, 0) * 20
+      return rightScore - leftScore
+    })
+    .slice(0, 5)
+})
+
+const autoRiskByHost = computed(() => {
+  const buckets = new Map<
+    string,
+    {
+      host: string
+      sample_requests: number
+      regressed_count: number
+      stable_count: number
+      max_latency_delta_ms: number
+      max_failure_rate_delta_percent: number
+      top_label: string
+    }
+  >()
+
+  for (const segment of autoEffectEvaluation.value?.segments ?? []) {
+    const host = segment.host || ''
+    if (!host) continue
+    const entry = buckets.get(host) ?? {
+      host,
+      sample_requests: 0,
+      regressed_count: 0,
+      stable_count: 0,
+      max_latency_delta_ms: 0,
+      max_failure_rate_delta_percent: 0,
+      top_label: segmentLabel(segment),
+    }
+    entry.sample_requests += segment.sample_requests
+    if (segment.status === 'regressed') entry.regressed_count += 1
+    if (segment.status === 'stable') entry.stable_count += 1
+    entry.max_latency_delta_ms = Math.max(entry.max_latency_delta_ms, Math.max(segment.avg_proxy_latency_delta_ms, 0))
+    entry.max_failure_rate_delta_percent = Math.max(
+      entry.max_failure_rate_delta_percent,
+      Math.max(segment.failure_rate_delta_percent, 0),
+    )
+    if (segment.status === 'regressed') entry.top_label = segmentLabel(segment)
+    buckets.set(host, entry)
+  }
+
+  return [...buckets.values()]
+    .sort((left, right) => {
+      const leftScore =
+        left.regressed_count * 1000 +
+        left.sample_requests * 10 +
+        left.max_latency_delta_ms +
+        left.max_failure_rate_delta_percent * 20
+      const rightScore =
+        right.regressed_count * 1000 +
+        right.sample_requests * 10 +
+        right.max_latency_delta_ms +
+        right.max_failure_rate_delta_percent * 20
+      return rightScore - leftScore
+    })
+    .slice(0, 4)
+})
+
+const autoRiskByRoute = computed(() => {
+  const buckets = new Map<
+    string,
+    {
+      route: string
+      sample_requests: number
+      regressed_count: number
+      stable_count: number
+      max_latency_delta_ms: number
+      max_failure_rate_delta_percent: number
+      top_label: string
+    }
+  >()
+
+  for (const segment of autoEffectEvaluation.value?.segments ?? []) {
+    const route = segment.route || ''
+    if (!route) continue
+    const entry = buckets.get(route) ?? {
+      route,
+      sample_requests: 0,
+      regressed_count: 0,
+      stable_count: 0,
+      max_latency_delta_ms: 0,
+      max_failure_rate_delta_percent: 0,
+      top_label: segmentLabel(segment),
+    }
+    entry.sample_requests += segment.sample_requests
+    if (segment.status === 'regressed') entry.regressed_count += 1
+    if (segment.status === 'stable') entry.stable_count += 1
+    entry.max_latency_delta_ms = Math.max(entry.max_latency_delta_ms, Math.max(segment.avg_proxy_latency_delta_ms, 0))
+    entry.max_failure_rate_delta_percent = Math.max(
+      entry.max_failure_rate_delta_percent,
+      Math.max(segment.failure_rate_delta_percent, 0),
+    )
+    if (segment.status === 'regressed') entry.top_label = segmentLabel(segment)
+    buckets.set(route, entry)
+  }
+
+  return [...buckets.values()]
+    .sort((left, right) => {
+      const leftScore =
+        left.regressed_count * 1000 +
+        left.sample_requests * 10 +
+        left.max_latency_delta_ms +
+        left.max_failure_rate_delta_percent * 20
+      const rightScore =
+        right.regressed_count * 1000 +
+        right.sample_requests * 10 +
+        right.max_latency_delta_ms +
+        right.max_failure_rate_delta_percent * 20
+      return rightScore - leftScore
+    })
+    .slice(0, 6)
+})
+
+const hotspotHeatmapCards = computed(() =>
+  hotspotView.value === 'host' ? autoRiskByHost.value : autoRiskByRoute.value,
+)
+
+function formatSignedNumber(value: number, digits = 2) {
+  const normalized = Number.isFinite(value) ? value : 0
+  const fixed = normalized.toFixed(digits)
+  return normalized > 0 ? `+${fixed}` : fixed
+}
+
+function formatSignedInteger(value: number) {
+  const normalized = Number.isFinite(value) ? Math.round(value) : 0
+  return normalized > 0 ? `+${normalized}` : `${normalized}`
+}
+
+function requestKindLabel(kind: string) {
+  switch (kind) {
+    case 'document':
+      return '页面'
+    case 'api':
+      return 'API'
+    case 'static':
+      return '静态资源'
+    default:
+      return kind
+  }
+}
+
+function segmentLabel(segment: {
+  scope_type: string
+  host: string | null
+  route: string | null
+  request_kind: string
+  scope_key: string
+}) {
+  switch (segment.scope_type) {
+    case 'request_kind':
+      return `流量 ${requestKindLabel(segment.request_kind)}`
+    case 'host':
+      return `Host ${segment.host || segment.scope_key}`
+    case 'route':
+      return `Route ${segment.route || segment.scope_key}`
+    case 'host_route':
+      return `${segment.host || 'unknown-host'} ${segment.route || 'unknown-route'}`
+    default:
+      return segment.scope_key
+  }
+}
+
+function segmentStatusLabel(status: string) {
+  switch (status) {
+    case 'improved':
+      return '改善'
+    case 'regressed':
+      return '恶化'
+    case 'stable':
+      return '基本稳定'
+    case 'low_sample':
+      return '样本偏少'
+    default:
+      return status
+  }
+}
+
+function riskSeverityClass(status: string) {
+  switch (status) {
+    case 'regressed':
+      return 'border-rose-200 bg-rose-50 text-rose-700'
+    case 'stable':
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    case 'improved':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-600'
+  }
+}
+
+function hotspotCardClass(item: { regressed_count: number; stable_count: number }) {
+  if (item.regressed_count > 0) return 'border-rose-200 bg-rose-50 text-rose-700'
+  if (item.stable_count > 0) return 'border-amber-200 bg-amber-50 text-amber-700'
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+}
+
+function hotspotViewButtonClass(view: 'host' | 'route') {
+  return hotspotView.value === view
+    ? 'border-blue-500 bg-blue-50 text-blue-700'
+    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+}
 </script>
 
 <template>
@@ -306,6 +530,96 @@ defineProps<{
             {{ formatNumber(configForm.http3_qpack_table_size) }}
           </p>
         </div>
+      </div>
+    </CyberCard>
+  </section>
+
+  <section
+    v-if="autoEffectEvaluation"
+    class="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]"
+  >
+    <CyberCard
+      title="业务风险榜单"
+      sub-title="按最新分层效果评估汇总热点风险段"
+    >
+      <div class="space-y-2">
+        <div
+          v-for="segment in autoRiskLeaderboard"
+          :key="`${segment.scope_type}-${segment.scope_key}`"
+          class="rounded-xl border px-3 py-3"
+          :class="riskSeverityClass(segment.status)"
+        >
+          <p class="text-sm font-semibold">
+            {{ segmentLabel(segment) }}
+          </p>
+          <p class="mt-2 text-xs leading-5">
+            {{ segmentStatusLabel(segment.status) }} |
+            样本 {{ segment.sample_requests }} |
+            延迟 {{ formatSignedInteger(segment.avg_proxy_latency_delta_ms) }}ms |
+            失败率 {{ formatSignedNumber(segment.failure_rate_delta_percent) }}pp
+          </p>
+        </div>
+        <p
+          v-if="!autoRiskLeaderboard.length"
+          class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500"
+        >
+          当前还没有足够的分层风险样本。
+        </p>
+      </div>
+    </CyberCard>
+
+    <CyberCard
+      title="热点图视图"
+      sub-title="在 Host 与 Route 两个维度切换查看热点热区"
+    >
+      <template #header-action>
+        <div class="self-end flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-full border px-3 py-1 text-xs font-semibold transition"
+            :class="hotspotViewButtonClass('host')"
+            @click="hotspotView = 'host'"
+          >
+            Host
+          </button>
+          <button
+            type="button"
+            class="rounded-full border px-3 py-1 text-xs font-semibold transition"
+            :class="hotspotViewButtonClass('route')"
+            @click="hotspotView = 'route'"
+          >
+            Route
+          </button>
+        </div>
+      </template>
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-2">
+        <div
+          v-for="item in hotspotHeatmapCards"
+          :key="'host' in item ? item.host : item.route"
+          class="rounded-xl border px-3 py-3 shadow-sm"
+          :class="hotspotCardClass(item)"
+        >
+          <p class="text-sm font-semibold">
+            {{ 'host' in item ? item.host : item.route }}
+          </p>
+          <p class="mt-2 text-xs leading-5">
+            风险段 {{ item.regressed_count + item.stable_count }} |
+            样本 {{ item.sample_requests }}
+          </p>
+          <p class="mt-1 text-xs leading-5">
+            热度 {{ formatSignedInteger(item.max_latency_delta_ms) }}ms /
+            {{ formatSignedNumber(item.max_failure_rate_delta_percent) }}pp
+          </p>
+          <p class="mt-2 text-xs leading-5 opacity-80">
+            主要热点: {{ item.top_label }}
+          </p>
+        </div>
+        <p
+          v-if="!hotspotHeatmapCards.length"
+          class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500 md:col-span-2"
+        >
+          当前热点图还没有可展示的 Host / Route 风险样本。
+        </p>
       </div>
     </CyberCard>
   </section>

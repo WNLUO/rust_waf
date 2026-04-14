@@ -384,7 +384,6 @@ useFlashMessages({
           </div>
 
           <AdminL7AdvancedGlobalSection
-            v-if="!adaptiveProtectionEnabled"
             ref="advancedGlobalSectionRef"
           />
         </section>

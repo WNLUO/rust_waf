@@ -186,12 +186,31 @@ pub(crate) fn resolve_client_ip(
     peer_addr: std::net::SocketAddr,
     request: &UnifiedHttpRequest,
 ) -> (std::net::IpAddr, &'static str, Option<String>) {
-    if !peer_is_trusted_proxy(context, peer_addr.ip()) {
+    let config = context.config_snapshot();
+    let gateway = &config.gateway_config;
+    let trusted_proxy_peer = peer_is_trusted_proxy(context, peer_addr.ip());
+
+    if matches!(gateway.source_ip_strategy, crate::config::SourceIpStrategy::Header) {
+        let resolved = if gateway.custom_source_ip_header.trim().is_empty() {
+            None
+        } else {
+            request
+                .get_header(&gateway.custom_source_ip_header)
+                .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+                .map(|ip| (ip, Some(gateway.custom_source_ip_header.clone())))
+        };
+
+        return if let Some((ip, header)) = resolved {
+            (ip, "forwarded_header", header)
+        } else {
+            (peer_addr.ip(), "socket_peer", None)
+        };
+    }
+
+    if !trusted_proxy_peer {
         return (peer_addr.ip(), "socket_peer", None);
     }
 
-    let config = context.config_snapshot();
-    let gateway = &config.gateway_config;
     let resolved = match gateway.source_ip_strategy {
         crate::config::SourceIpStrategy::Connection => None,
         crate::config::SourceIpStrategy::XForwardedForFirst => request
@@ -210,16 +229,7 @@ pub(crate) fn resolve_client_ip(
             .get_header("x-forwarded-for")
             .and_then(|value| extract_forwarded_ip_from_right(value, 2))
             .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
-        crate::config::SourceIpStrategy::Header => {
-            if gateway.custom_source_ip_header.trim().is_empty() {
-                None
-            } else {
-                request
-                    .get_header(&gateway.custom_source_ip_header)
-                    .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
-                    .map(|ip| (ip, Some(gateway.custom_source_ip_header.clone())))
-            }
-        }
+        crate::config::SourceIpStrategy::Header => None,
         crate::config::SourceIpStrategy::ProxyProtocol => request
             .get_metadata("proxy_protocol_source_ip")
             .and_then(|value| value.parse::<std::net::IpAddr>().ok())

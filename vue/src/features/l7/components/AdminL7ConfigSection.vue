@@ -158,6 +158,158 @@ const autoPinnedFieldsText = computed({
 const autoEffectEvaluation = computed(
   () => props.autoTuningRuntime?.last_effect_evaluation ?? null,
 )
+const hotspotView = ref<'host' | 'route'>('host')
+
+const autoRiskLeaderboard = computed(() => {
+  const segments = autoEffectEvaluation.value?.segments ?? []
+  return [...segments]
+    .filter((segment) => segment.status !== 'low_sample')
+    .sort((left, right) => {
+      const leftScore =
+        (left.status === 'regressed' ? 1000 : left.status === 'stable' ? 300 : 0) +
+        left.sample_requests * 10 +
+        Math.max(left.avg_proxy_latency_delta_ms, 0) +
+        Math.max(left.failure_rate_delta_percent, 0) * 20
+      const rightScore =
+        (right.status === 'regressed' ? 1000 : right.status === 'stable' ? 300 : 0) +
+        right.sample_requests * 10 +
+        Math.max(right.avg_proxy_latency_delta_ms, 0) +
+        Math.max(right.failure_rate_delta_percent, 0) * 20
+      return rightScore - leftScore
+    })
+    .slice(0, 5)
+})
+
+const autoRiskByHost = computed(() => {
+  const buckets = new Map<
+    string,
+    {
+      host: string
+      sample_requests: number
+      regressed_count: number
+      stable_count: number
+      max_latency_delta_ms: number
+      max_failure_rate_delta_percent: number
+      top_label: string
+    }
+  >()
+
+  for (const segment of autoEffectEvaluation.value?.segments ?? []) {
+    const host =
+      segment.host ||
+      (segment.scope_type === 'host_route'
+        ? segment.scope_key.split(' ')[0] || segment.scope_key
+        : '')
+    if (!host) continue
+    const entry = buckets.get(host) ?? {
+      host,
+      sample_requests: 0,
+      regressed_count: 0,
+      stable_count: 0,
+      max_latency_delta_ms: 0,
+      max_failure_rate_delta_percent: 0,
+      top_label: segmentLabel(segment),
+    }
+    entry.sample_requests += segment.sample_requests
+    if (segment.status === 'regressed') entry.regressed_count += 1
+    if (segment.status === 'stable') entry.stable_count += 1
+    entry.max_latency_delta_ms = Math.max(
+      entry.max_latency_delta_ms,
+      Math.max(segment.avg_proxy_latency_delta_ms, 0),
+    )
+    entry.max_failure_rate_delta_percent = Math.max(
+      entry.max_failure_rate_delta_percent,
+      Math.max(segment.failure_rate_delta_percent, 0),
+    )
+    if (
+      segment.status === 'regressed' &&
+      entry.top_label === host
+    ) {
+      entry.top_label = segmentLabel(segment)
+    }
+    buckets.set(host, entry)
+  }
+
+  return [...buckets.values()]
+    .sort((left, right) => {
+      const leftScore =
+        left.regressed_count * 1000 +
+        left.sample_requests * 10 +
+        left.max_latency_delta_ms +
+        left.max_failure_rate_delta_percent * 20
+      const rightScore =
+        right.regressed_count * 1000 +
+        right.sample_requests * 10 +
+        right.max_latency_delta_ms +
+        right.max_failure_rate_delta_percent * 20
+      return rightScore - leftScore
+    })
+    .slice(0, 4)
+})
+
+const autoRiskByRoute = computed(() => {
+  const buckets = new Map<
+    string,
+    {
+      route: string
+      sample_requests: number
+      regressed_count: number
+      stable_count: number
+      max_latency_delta_ms: number
+      max_failure_rate_delta_percent: number
+      top_label: string
+    }
+  >()
+
+  for (const segment of autoEffectEvaluation.value?.segments ?? []) {
+    const route = segment.route || (segment.scope_type === 'route' ? segment.scope_key : '')
+    if (!route) continue
+    const entry = buckets.get(route) ?? {
+      route,
+      sample_requests: 0,
+      regressed_count: 0,
+      stable_count: 0,
+      max_latency_delta_ms: 0,
+      max_failure_rate_delta_percent: 0,
+      top_label: segmentLabel(segment),
+    }
+    entry.sample_requests += segment.sample_requests
+    if (segment.status === 'regressed') entry.regressed_count += 1
+    if (segment.status === 'stable') entry.stable_count += 1
+    entry.max_latency_delta_ms = Math.max(
+      entry.max_latency_delta_ms,
+      Math.max(segment.avg_proxy_latency_delta_ms, 0),
+    )
+    entry.max_failure_rate_delta_percent = Math.max(
+      entry.max_failure_rate_delta_percent,
+      Math.max(segment.failure_rate_delta_percent, 0),
+    )
+    if (segment.status === 'regressed' && entry.top_label === route) {
+      entry.top_label = segmentLabel(segment)
+    }
+    buckets.set(route, entry)
+  }
+
+  return [...buckets.values()]
+    .sort((left, right) => {
+      const leftScore =
+        left.regressed_count * 1000 +
+        left.sample_requests * 10 +
+        left.max_latency_delta_ms +
+        left.max_failure_rate_delta_percent * 20
+      const rightScore =
+        right.regressed_count * 1000 +
+        right.sample_requests * 10 +
+        right.max_latency_delta_ms +
+        right.max_failure_rate_delta_percent * 20
+      return rightScore - leftScore
+    })
+    .slice(0, 6)
+})
+
+const hotspotHeatmapCards = computed(() =>
+  hotspotView.value === 'host' ? autoRiskByHost.value : autoRiskByRoute.value,
+)
 
 const autoEffectStatusLabel = computed(() => {
   switch (autoEffectEvaluation.value?.status) {
@@ -288,6 +440,34 @@ function adjustReasonLabel(reason: string | null) {
     default:
       return reason || 'none'
   }
+}
+
+function riskSeverityClass(status: string) {
+  switch (status) {
+    case 'regressed':
+      return 'border-rose-200 bg-rose-50 text-rose-700'
+    case 'stable':
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    case 'improved':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-600'
+  }
+}
+
+function hostRiskSeverityClass(item: {
+  regressed_count: number
+  stable_count: number
+}) {
+  if (item.regressed_count > 0) return 'border-rose-200 bg-rose-50 text-rose-700'
+  if (item.stable_count > 0) return 'border-amber-200 bg-amber-50 text-amber-700'
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+}
+
+function hotspotViewButtonClass(view: 'host' | 'route') {
+  return hotspotView.value === view
+    ? 'border-blue-500 bg-blue-50 text-blue-700'
+    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
 }
 
 function updateCcDefense(patch: Partial<L7ConfigForm['cc_defense']>) {
@@ -815,6 +995,83 @@ const safelineResponseBodySource = computed({
                 .join(' | ')
             }}
           </p>
+          <div
+            v-if="autoRiskLeaderboard.length"
+            class="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3"
+          >
+            <p class="text-xs font-semibold tracking-wider text-slate-600">
+              业务风险榜单
+            </p>
+            <div class="mt-2 space-y-2">
+              <div
+                v-for="segment in autoRiskLeaderboard"
+                :key="`${segment.scope_type}-${segment.scope_key}`"
+                class="rounded-lg border px-3 py-2"
+                :class="riskSeverityClass(segment.status)"
+              >
+                <p class="text-xs font-semibold">
+                  {{ segmentLabel(segment) }}
+                </p>
+                <p class="mt-1 text-[11px] leading-5">
+                  {{ segmentStatusLabel(segment.status) }} |
+                  样本 {{ segment.sample_requests }} |
+                  延迟 {{ formatSignedInteger(segment.avg_proxy_latency_delta_ms) }}ms |
+                  失败率 {{ formatSignedNumber(segment.failure_rate_delta_percent) }}pp
+                </p>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="autoRiskByHost.length || autoRiskByRoute.length"
+            class="mt-3 rounded-lg border border-slate-200 bg-white/75 p-3"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <p class="text-xs font-semibold tracking-wider text-slate-600">
+                热点图视图
+              </p>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-full border px-3 py-1 text-[11px] font-semibold transition"
+                  :class="hotspotViewButtonClass('host')"
+                  @click="hotspotView = 'host'"
+                >
+                  Host
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full border px-3 py-1 text-[11px] font-semibold transition"
+                  :class="hotspotViewButtonClass('route')"
+                  @click="hotspotView = 'route'"
+                >
+                  Route
+                </button>
+              </div>
+            </div>
+            <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              <div
+                v-for="item in hotspotHeatmapCards"
+                :key="'host' in item ? item.host : item.route"
+                class="rounded-xl border px-3 py-3 shadow-sm transition"
+                :class="hostRiskSeverityClass(item)"
+              >
+                <p class="text-xs font-semibold">
+                  {{ 'host' in item ? item.host : item.route }}
+                </p>
+                <p class="mt-1 text-[11px] leading-5">
+                  风险段 {{ item.regressed_count + item.stable_count }} |
+                  样本 {{ item.sample_requests }}
+                </p>
+                <p class="mt-1 text-[11px] leading-5">
+                  热度 {{ formatSignedInteger(item.max_latency_delta_ms) }}ms /
+                  {{ formatSignedNumber(item.max_failure_rate_delta_percent) }}pp
+                </p>
+                <p class="mt-2 text-[11px] leading-5 opacity-80">
+                  主要热点: {{ item.top_label }}
+                </p>
+              </div>
+            </div>
+          </div>
         </template>
       </div>
     </div>

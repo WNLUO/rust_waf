@@ -330,7 +330,8 @@ pub fn run_control_step(
         runtime.controller_state = "stable".to_string();
         return None;
     };
-    let action_context = action_trigger_context(config, action, &deltas);
+    let dominant_segment = dominant_segment_for_action(action, &deltas);
+    let action_context = action_trigger_context(config, action, &deltas, dominant_segment);
 
     if matches!(config.auto_tuning.mode, AutoTuningMode::Observe)
         || !config.auto_tuning.runtime_adjust_enabled
@@ -374,12 +375,38 @@ pub fn run_control_step(
             touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, true);
         }
         "budget" => {
-            touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, true);
-            touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, true);
+            if let Some(segment) = dominant_segment {
+                if matches!(segment.scope_type, "route" | "host_route") {
+                    adjust_cc_route_thresholds(&mut next, config, &mut diff, true);
+                    adjust_cc_delay_ms(&mut next, config, &mut diff, false);
+                } else if segment.scope_type == "host" {
+                    adjust_cc_host_thresholds(&mut next, config, &mut diff, true);
+                    adjust_cc_delay_ms(&mut next, config, &mut diff, false);
+                } else {
+                    touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, true);
+                    touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, true);
+                }
+            } else {
+                touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, true);
+                touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, true);
+            }
         }
         "latency" => {
-            touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, false);
-            touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, false);
+            if let Some(segment) = dominant_segment {
+                if matches!(segment.scope_type, "route" | "host_route") {
+                    adjust_cc_route_thresholds(&mut next, config, &mut diff, false);
+                    adjust_cc_delay_ms(&mut next, config, &mut diff, true);
+                } else if segment.scope_type == "host" {
+                    adjust_cc_host_thresholds(&mut next, config, &mut diff, false);
+                    adjust_cc_delay_ms(&mut next, config, &mut diff, true);
+                } else {
+                    touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, false);
+                    touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, false);
+                }
+            } else {
+                touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, false);
+                touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, false);
+            }
         }
         _ => {}
     }
@@ -673,6 +700,80 @@ fn adjust_l4_reject_thresholds(
     touched
 }
 
+fn adjust_cc_route_thresholds(
+    next: &mut Config,
+    config: &Config,
+    diff: &mut Vec<String>,
+    increase: bool,
+) {
+    adjust_cc_u32_field(
+        config,
+        next,
+        "l7_config.cc_defense.route_challenge_threshold",
+        diff,
+        increase,
+        3,
+        10_000,
+    );
+    adjust_cc_u32_field(
+        config,
+        next,
+        "l7_config.cc_defense.route_block_threshold",
+        diff,
+        increase,
+        3,
+        10_000,
+    );
+}
+
+fn adjust_cc_host_thresholds(
+    next: &mut Config,
+    config: &Config,
+    diff: &mut Vec<String>,
+    increase: bool,
+) {
+    adjust_cc_u32_field(
+        config,
+        next,
+        "l7_config.cc_defense.host_challenge_threshold",
+        diff,
+        increase,
+        5,
+        10_000,
+    );
+    adjust_cc_u32_field(
+        config,
+        next,
+        "l7_config.cc_defense.host_block_threshold",
+        diff,
+        increase,
+        5,
+        10_000,
+    );
+}
+
+fn adjust_cc_delay_ms(next: &mut Config, config: &Config, diff: &mut Vec<String>, increase: bool) {
+    if is_pinned(config, "l7_config.cc_defense.delay_ms") {
+        return;
+    }
+    let before = next.l7_config.cc_defense.delay_ms;
+    let after = adjust_u64(
+        before,
+        config.auto_tuning.max_step_percent,
+        increase,
+        10,
+        5_000,
+    );
+    if before == after {
+        return;
+    }
+    next.l7_config.cc_defense.delay_ms = after;
+    diff.push(format!(
+        "l7_config.cc_defense.delay_ms: {} -> {}",
+        before, after
+    ));
+}
+
 fn adjust_u32_field(
     config: &Config,
     next: &mut Config,
@@ -723,6 +824,66 @@ fn adjust_u32_field(
         "l4_config.behavior_high_risk_connection_budget_per_minute" => {
             next.l4_config
                 .behavior_high_risk_connection_budget_per_minute = after;
+        }
+        _ => return false,
+    }
+
+    diff.push(format!("{}: {} -> {}", field, before, after));
+    true
+}
+
+fn adjust_cc_u32_field(
+    config: &Config,
+    next: &mut Config,
+    field: &str,
+    diff: &mut Vec<String>,
+    increase: bool,
+    min: u32,
+    max: u32,
+) -> bool {
+    if is_pinned(config, field) {
+        return false;
+    }
+
+    let before = match field {
+        "l7_config.cc_defense.route_challenge_threshold" => {
+            next.l7_config.cc_defense.route_challenge_threshold
+        }
+        "l7_config.cc_defense.route_block_threshold" => {
+            next.l7_config.cc_defense.route_block_threshold
+        }
+        "l7_config.cc_defense.host_challenge_threshold" => {
+            next.l7_config.cc_defense.host_challenge_threshold
+        }
+        "l7_config.cc_defense.host_block_threshold" => {
+            next.l7_config.cc_defense.host_block_threshold
+        }
+        _ => return false,
+    };
+
+    let after = adjust_u32(
+        before,
+        config.auto_tuning.max_step_percent,
+        increase,
+        min,
+        max,
+    );
+    if before == after {
+        return false;
+    }
+
+    match field {
+        "l7_config.cc_defense.route_challenge_threshold" => {
+            next.l7_config.cc_defense.route_challenge_threshold = after
+        }
+        "l7_config.cc_defense.route_block_threshold" => {
+            next.l7_config.cc_defense.route_block_threshold = after
+        }
+        "l7_config.cc_defense.host_challenge_threshold" => {
+            next.l7_config.cc_defense.host_challenge_threshold = after
+        }
+        "l7_config.cc_defense.host_block_threshold" => {
+            next.l7_config.cc_defense.host_block_threshold = after
         }
         _ => return false,
     }
@@ -1397,6 +1558,7 @@ fn action_trigger_context(
     config: &Config,
     action: &str,
     deltas: &MetricDeltas,
+    dominant_segment: Option<&TrafficSegmentDelta>,
 ) -> Option<ActionTriggerContext> {
     match action {
         "handshake" => Some(ActionTriggerContext {
@@ -1407,7 +1569,7 @@ fn action_trigger_context(
                 config.auto_tuning.slo.tls_handshake_timeout_rate_percent
             ),
         }),
-        "budget" => dominant_segment_for_action(action, deltas).map_or_else(
+        "budget" => dominant_segment.map_or_else(
             || {
                 Some(ActionTriggerContext {
                     reason_code: "adjust_for_budget_global".to_string(),
@@ -1431,7 +1593,7 @@ fn action_trigger_context(
                 })
             },
         ),
-        "latency" => dominant_segment_for_action(action, deltas).map_or_else(
+        "latency" => dominant_segment.map_or_else(
             || {
                 Some(ActionTriggerContext {
                     reason_code: "adjust_for_latency_global".to_string(),
@@ -1911,5 +2073,82 @@ mod tests {
             "hot route regression should trigger rollback"
         );
         assert_eq!(runtime.controller_state, "rollback");
+    }
+
+    #[test]
+    fn hot_route_budget_pressure_prefers_route_threshold_adjustment() {
+        let mut config = Config::default();
+        config.auto_tuning.mode = AutoTuningMode::Active;
+        config.auto_tuning.runtime_adjust_enabled = true;
+        config.auto_tuning.control_interval_secs = 10;
+        config.auto_tuning.cooldown_secs = 30;
+
+        let original_route_threshold = config.l7_config.cc_defense.route_challenge_threshold;
+        let original_l4_budget = config
+            .l4_config
+            .behavior_normal_connection_budget_per_minute;
+
+        let mut runtime = super::build_runtime_snapshot(&config);
+        let mut state = AutoTuningControllerState::default();
+
+        let warmup = MetricsSnapshot {
+            proxied_requests: 100,
+            proxy_successes: 100,
+            proxy_latency_micros_total: 100_000_000,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &warmup, 100).is_none());
+        state.bootstrap_applied = true;
+
+        for (index, proxied_requests) in [140_u64, 180, 220].into_iter().enumerate() {
+            let metrics = MetricsSnapshot {
+                proxied_requests,
+                proxy_successes: proxied_requests,
+                proxy_latency_micros_total: proxied_requests * 1_000_000,
+                top_route_segments: vec![crate::metrics::ProxyTrafficSegmentSnapshot {
+                    scope_type: "route".to_string(),
+                    scope_key: "/checkout|api".to_string(),
+                    host: None,
+                    route: Some("/checkout".to_string()),
+                    request_kind: "api".to_string(),
+                    proxied_requests: 12 + index as u64 * 10,
+                    proxy_successes: 8 + index as u64 * 8,
+                    proxy_failures: 4 + index as u64 * 2,
+                    average_proxy_latency_micros: 110_000,
+                }],
+                ..MetricsSnapshot::default()
+            };
+            let decision = run_control_step(
+                &config,
+                &mut runtime,
+                &mut state,
+                &metrics,
+                110 + index as i64 * 10,
+            );
+            if index < 2 {
+                assert!(decision.is_none());
+            } else {
+                let decision = decision.expect("third hot-route budget window should adjust");
+                assert_eq!(
+                    runtime.last_adjust_reason.as_deref(),
+                    Some("adjust_for_budget_hot_route")
+                );
+                assert!(
+                    decision
+                        .next_config
+                        .l7_config
+                        .cc_defense
+                        .route_challenge_threshold
+                        > original_route_threshold
+                );
+                assert_eq!(
+                    decision
+                        .next_config
+                        .l4_config
+                        .behavior_normal_connection_budget_per_minute,
+                    original_l4_budget
+                );
+            }
+        }
     }
 }

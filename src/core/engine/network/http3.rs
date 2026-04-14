@@ -253,6 +253,7 @@ async fn handle_http3_request(
     }
 
     prepare_request_for_proxy(context.as_ref(), &mut unified);
+    persist_http_identity_debug_event(context.as_ref(), &packet, &unified);
 
     let request_dump = unified.to_inspection_string();
     let traffic_source_ip = unified

@@ -170,6 +170,53 @@ pub(crate) fn persist_http_inspection_event(
     store.enqueue_security_event(event);
 }
 
+pub(crate) fn persist_http_identity_debug_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+) {
+    let config = context.config_snapshot();
+    if !matches!(
+        config.gateway_config.source_ip_strategy,
+        crate::config::SourceIpStrategy::Header
+    ) {
+        return;
+    }
+
+    let configured_header = config.gateway_config.custom_source_ip_header;
+    if configured_header.trim().is_empty() || request.get_header(&configured_header).is_none() {
+        return;
+    }
+
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    let mut event = SecurityEventRecord::now(
+        "L7",
+        "log",
+        "client identity debug".to_string(),
+        request
+            .client_ip
+            .clone()
+            .unwrap_or_else(|| packet.source_ip.to_string()),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    );
+    event.http_method = Some(request.method.clone());
+    event.uri = Some(request.uri.clone());
+    event.http_version = Some(request.version.to_string());
+    event.details_json = build_request_identity_details_with_header(
+        &configured_header,
+        request,
+        packet,
+    );
+
+    store.enqueue_security_event(event);
+}
+
 pub(crate) fn persist_safeline_intercept_event(
     context: &WafContext,
     packet: &PacketInfo,
@@ -251,6 +298,14 @@ fn build_request_identity_details(
         .config_snapshot()
         .gateway_config
         .custom_source_ip_header;
+    build_request_identity_details_with_header(&configured_header, request, packet)
+}
+
+fn build_request_identity_details_with_header(
+    configured_header: &str,
+    request: &UnifiedHttpRequest,
+    packet: &PacketInfo,
+) -> Option<String> {
     let client_ip = request
         .client_ip
         .clone()

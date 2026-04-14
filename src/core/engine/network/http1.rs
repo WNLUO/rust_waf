@@ -283,6 +283,7 @@ pub(crate) async fn handle_http1_connection(
         }
 
         prepare_request_for_proxy(context.as_ref(), &mut request);
+        persist_http_identity_debug_event(context.as_ref(), packet, &request);
 
         debug!("HTTP/1.1 request: {} {}", request.method, request.uri);
 

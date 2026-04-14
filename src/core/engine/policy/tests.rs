@@ -78,4 +78,47 @@ async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
         request.get_header("x-forwarded-for").map(String::as_str),
         Some("198.51.100.8")
     );
+    assert_eq!(
+        request
+            .get_metadata("network.trusted_proxy_peer")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        request
+            .get_metadata("network.client_ip_unresolved")
+            .map(String::as_str),
+        Some("false")
+    );
+}
+
+#[tokio::test]
+async fn apply_client_identity_marks_unresolved_client_ip_for_trusted_proxy() {
+    let mut config = crate::config::Config::default();
+    config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
+    config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::XForwardedForFirst;
+    let context = WafContext::new(config).await.unwrap();
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+
+    apply_client_identity(&context, "203.0.113.10:443".parse().unwrap(), &mut request);
+
+    assert_eq!(
+        request
+            .get_metadata("network.trusted_proxy_peer")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        request
+            .get_metadata("network.client_ip_source")
+            .map(String::as_str),
+        Some("socket_peer")
+    );
+    assert_eq!(
+        request
+            .get_metadata("network.client_ip_unresolved")
+            .map(String::as_str),
+        Some("true")
+    );
 }

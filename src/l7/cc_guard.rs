@@ -1007,6 +1007,16 @@ mod tests {
         request
     }
 
+    fn unresolved_proxy_request(uri: &str) -> UnifiedHttpRequest {
+        let mut request = request(uri);
+        request.add_metadata("network.trusted_proxy_peer".to_string(), "true".to_string());
+        request.add_metadata(
+            "network.client_ip_unresolved".to_string(),
+            "true".to_string(),
+        );
+        request
+    }
+
     #[tokio::test]
     async fn issues_challenge_when_route_rate_crosses_threshold() {
         let config = CcDefenseConfig {
@@ -1113,6 +1123,44 @@ mod tests {
         assert_eq!(
             result.unwrap().action,
             crate::core::InspectionAction::Respond
+        );
+    }
+
+    #[tokio::test]
+    async fn unresolved_proxy_identity_degrades_with_delay_instead_of_challenge_or_block() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 2,
+            route_block_threshold: 2,
+            host_challenge_threshold: 2,
+            host_block_threshold: 2,
+            ip_challenge_threshold: 2,
+            ip_block_threshold: 2,
+            delay_threshold_percent: 50,
+            delay_ms: 1,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        let mut first = unresolved_proxy_request("/search?q=1");
+        let first_result = guard.inspect_request(&mut first).await;
+        assert!(first_result.is_none());
+        assert_eq!(
+            first.get_metadata("l7.cc.action").map(String::as_str),
+            Some("delay:1ms")
+        );
+
+        let mut second = unresolved_proxy_request("/search?q=2");
+        let second_result = guard.inspect_request(&mut second).await;
+        assert!(second_result.is_none());
+        assert_eq!(
+            second.get_metadata("l7.cc.action").map(String::as_str),
+            Some("delay:1ms")
+        );
+        assert_eq!(
+            second
+                .get_metadata("l7.cc.client_identity_unresolved")
+                .map(String::as_str),
+            Some("true")
         );
     }
 

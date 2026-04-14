@@ -435,6 +435,8 @@ mod tests {
         sleep(Duration::from_millis(50)).await;
         let policy = engine.connection_admission_for_key(&key.expect("bucket key"));
         assert!(policy.suggested_delay_ms > 0 || policy.disable_keepalive);
+        assert!(policy.disable_keepalive);
+        assert!(policy.prefer_early_close);
         assert!(!policy.reject_new_connections);
     }
 }

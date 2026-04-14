@@ -74,6 +74,13 @@ export function useAdminL7() {
           headers: [...payload.safeline_intercept.response_template.headers],
         },
       },
+      auto_tuning: {
+        ...payload.auto_tuning,
+        pinned_fields: [...payload.auto_tuning.pinned_fields],
+        slo: {
+          ...payload.auto_tuning.slo,
+        },
+      },
     })
 
     meta.value = {
@@ -350,6 +357,67 @@ export function useAdminL7() {
             value: header.value.trim(),
           }))
           .filter((header) => header.key)
+      configForm.auto_tuning.bootstrap_secs = clampInteger(
+        configForm.auto_tuning.bootstrap_secs,
+        10,
+        300,
+        60,
+      )
+      configForm.auto_tuning.control_interval_secs = clampInteger(
+        configForm.auto_tuning.control_interval_secs,
+        10,
+        300,
+        30,
+      )
+      configForm.auto_tuning.cooldown_secs = clampInteger(
+        configForm.auto_tuning.cooldown_secs,
+        30,
+        900,
+        120,
+      )
+      configForm.auto_tuning.max_step_percent = clampInteger(
+        configForm.auto_tuning.max_step_percent,
+        1,
+        25,
+        8,
+      )
+      configForm.auto_tuning.rollback_window_minutes = clampInteger(
+        configForm.auto_tuning.rollback_window_minutes,
+        5,
+        120,
+        10,
+      )
+      configForm.auto_tuning.slo.tls_handshake_timeout_rate_percent = clampFloat(
+        configForm.auto_tuning.slo.tls_handshake_timeout_rate_percent,
+        0.1,
+        20,
+        0.3,
+      )
+      configForm.auto_tuning.slo.bucket_reject_rate_percent = clampFloat(
+        configForm.auto_tuning.slo.bucket_reject_rate_percent,
+        0.1,
+        25,
+        0.5,
+      )
+      configForm.auto_tuning.slo.p95_proxy_latency_ms = clampInteger(
+        configForm.auto_tuning.slo.p95_proxy_latency_ms,
+        50,
+        30_000,
+        800,
+      )
+      configForm.auto_tuning.pinned_fields = [
+        ...new Set(
+          configForm.auto_tuning.pinned_fields
+            .map((item) => item.trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ].slice(0, 64)
+      if (
+        configForm.auto_tuning.mode === 'off' ||
+        configForm.auto_tuning.mode === 'observe'
+      ) {
+        configForm.auto_tuning.runtime_adjust_enabled = false
+      }
 
       if (!configForm.bloom_enabled) {
         configForm.bloom_false_positive_verification = false

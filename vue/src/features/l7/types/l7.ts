@@ -43,6 +43,43 @@ export interface CcDefenseConfigPayload {
   hard_hot_path_block_multiplier: number
 }
 
+export interface AutoSloTargetsPayload {
+  tls_handshake_timeout_rate_percent: number
+  bucket_reject_rate_percent: number
+  p95_proxy_latency_ms: number
+}
+
+export interface AutoTuningConfigPayload {
+  mode: 'off' | 'observe' | 'active' | string
+  intent: 'conservative' | 'balanced' | 'aggressive' | string
+  runtime_adjust_enabled: boolean
+  bootstrap_secs: number
+  control_interval_secs: number
+  cooldown_secs: number
+  max_step_percent: number
+  rollback_window_minutes: number
+  pinned_fields: string[]
+  slo: AutoSloTargetsPayload
+}
+
+export interface AutoTuningRuntimePayload {
+  mode: 'off' | 'observe' | 'active' | string
+  intent: 'conservative' | 'balanced' | 'aggressive' | string
+  controller_state: string
+  detected_cpu_cores: number
+  detected_memory_limit_mb: number | null
+  last_adjust_at: number | null
+  last_adjust_reason: string | null
+  recommendation: {
+    l4_normal_connection_budget_per_minute: number
+    l4_suspicious_connection_budget_per_minute: number
+    l4_high_risk_connection_budget_per_minute: number
+    l4_reject_threshold_percent: number
+    l4_critical_reject_threshold_percent: number
+    tls_handshake_timeout_ms: number
+  }
+}
+
 export interface L7ConfigPayload {
   max_request_size: number
   trusted_proxy_cidrs: string[]
@@ -81,6 +118,7 @@ export interface L7ConfigPayload {
   http3_enable_tls13: boolean
   cc_defense: CcDefenseConfigPayload
   safeline_intercept: SafeLineInterceptConfigPayload
+  auto_tuning: AutoTuningConfigPayload
 }
 
 export interface L7StatsPayload {
@@ -107,4 +145,5 @@ export interface L7StatsPayload {
   http3_listener_addr: string | null
   http3_status: string
   http3_last_error: string | null
+  auto_tuning: AutoTuningRuntimePayload
 }

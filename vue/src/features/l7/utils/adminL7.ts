@@ -81,5 +81,21 @@ export function createDefaultL7ConfigForm(): L7ConfigForm {
         headers: [{ key: 'cache-control', value: 'no-store' }],
       },
     },
+    auto_tuning: {
+      mode: 'observe',
+      intent: 'balanced',
+      runtime_adjust_enabled: false,
+      bootstrap_secs: 60,
+      control_interval_secs: 30,
+      cooldown_secs: 120,
+      max_step_percent: 8,
+      rollback_window_minutes: 10,
+      pinned_fields: [],
+      slo: {
+        tls_handshake_timeout_rate_percent: 0.3,
+        bucket_reject_rate_percent: 0.5,
+        p95_proxy_latency_ms: 800,
+      },
+    },
   }
 }

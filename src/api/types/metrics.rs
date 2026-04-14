@@ -82,4 +82,27 @@ pub struct L7StatsResponse {
     pub(crate) http3_listener_addr: Option<String>,
     pub(crate) http3_status: String,
     pub(crate) http3_last_error: Option<String>,
+    pub(crate) auto_tuning: AutoTuningRuntimeResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AutoTuningRuntimeResponse {
+    pub(crate) mode: String,
+    pub(crate) intent: String,
+    pub(crate) controller_state: String,
+    pub(crate) detected_cpu_cores: usize,
+    pub(crate) detected_memory_limit_mb: Option<u64>,
+    pub(crate) last_adjust_at: Option<i64>,
+    pub(crate) last_adjust_reason: Option<String>,
+    pub(crate) recommendation: AutoTuningRecommendationResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AutoTuningRecommendationResponse {
+    pub(crate) l4_normal_connection_budget_per_minute: u32,
+    pub(crate) l4_suspicious_connection_budget_per_minute: u32,
+    pub(crate) l4_high_risk_connection_budget_per_minute: u32,
+    pub(crate) l4_reject_threshold_percent: u16,
+    pub(crate) l4_critical_reject_threshold_percent: u16,
+    pub(crate) tls_handshake_timeout_ms: u64,
 }

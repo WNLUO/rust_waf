@@ -1,8 +1,10 @@
+mod auto_tuning;
 pub mod engine;
 mod engine_maintenance;
 mod engine_tls;
 pub mod gateway;
 pub mod packet;
+mod system_profile;
 pub mod traffic_map;
 
 use crate::config::Config;
@@ -19,6 +21,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
+pub use auto_tuning::{AutoTuningRecommendationSnapshot, AutoTuningRuntimeSnapshot};
 pub use engine::WafEngine;
 pub use packet::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
@@ -58,6 +61,7 @@ pub struct WafContext {
     pub traffic_map: traffic_map::TrafficMapCollector,
     upstream_health: RwLock<UpstreamHealthSnapshot>,
     http3_runtime: RwLock<Http3RuntimeSnapshot>,
+    auto_tuning_runtime: RwLock<AutoTuningRuntimeSnapshot>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -89,6 +93,7 @@ impl WafContext {
             load_rule_engine_state(&config, sqlite_store.as_deref()).await?;
         let gateway_runtime = GatewayRuntime::load(&config, sqlite_store.as_deref()).await?;
         let http_processor = HttpTrafficProcessor::new(&config.l7_config);
+        let auto_tuning_runtime = auto_tuning::build_runtime_snapshot(&config);
 
         Ok(Self {
             runtime_config: Arc::new(RwLock::new(config.clone())),
@@ -126,6 +131,7 @@ impl WafContext {
                 },
                 last_error: None,
             }),
+            auto_tuning_runtime: RwLock::new(auto_tuning_runtime),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -157,6 +163,18 @@ impl WafContext {
         {
             let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
             *guard = refreshed_guard;
+        }
+        {
+            let mut guard = self
+                .auto_tuning_runtime
+                .write()
+                .expect("auto_tuning_runtime lock poisoned");
+            *guard = auto_tuning::build_runtime_snapshot(
+                &self
+                    .runtime_config
+                    .read()
+                    .expect("runtime_config lock poisoned"),
+            );
         }
         self.refresh_http3_runtime_metadata();
     }
@@ -225,6 +243,13 @@ impl WafContext {
         self.http3_runtime
             .read()
             .expect("http3_runtime lock poisoned")
+            .clone()
+    }
+
+    pub fn auto_tuning_snapshot(&self) -> AutoTuningRuntimeSnapshot {
+        self.auto_tuning_runtime
+            .read()
+            .expect("auto_tuning_runtime lock poisoned")
             .clone()
     }
 

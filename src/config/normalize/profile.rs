@@ -208,3 +208,37 @@ pub(super) fn normalize_l4_behavior_thresholds(config: &mut Config) {
             1_000,
         );
 }
+
+pub(super) fn normalize_auto_tuning_settings(config: &mut Config) {
+    config.auto_tuning.bootstrap_secs = clamp_u64(config.auto_tuning.bootstrap_secs, 10, 300, 60);
+    config.auto_tuning.control_interval_secs =
+        clamp_u64(config.auto_tuning.control_interval_secs, 10, 300, 30);
+    config.auto_tuning.cooldown_secs = clamp_u64(config.auto_tuning.cooldown_secs, 30, 900, 120);
+    config.auto_tuning.max_step_percent = config.auto_tuning.max_step_percent.clamp(1, 25);
+    config.auto_tuning.rollback_window_minutes =
+        clamp_u64(config.auto_tuning.rollback_window_minutes, 5, 120, 10);
+    config.auto_tuning.slo.tls_handshake_timeout_rate_percent = config
+        .auto_tuning
+        .slo
+        .tls_handshake_timeout_rate_percent
+        .clamp(0.1, 20.0);
+    config.auto_tuning.slo.bucket_reject_rate_percent = config
+        .auto_tuning
+        .slo
+        .bucket_reject_rate_percent
+        .clamp(0.1, 25.0);
+    config.auto_tuning.slo.p95_proxy_latency_ms =
+        clamp_u64(config.auto_tuning.slo.p95_proxy_latency_ms, 50, 30_000, 800);
+    config.auto_tuning.pinned_fields = normalize_string_list(&config.auto_tuning.pinned_fields)
+        .into_iter()
+        .map(|field| field.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    config.auto_tuning.pinned_fields.truncate(64);
+
+    match config.auto_tuning.mode {
+        AutoTuningMode::Off | AutoTuningMode::Observe => {
+            config.auto_tuning.runtime_adjust_enabled = false;
+        }
+        AutoTuningMode::Active => {}
+    }
+}

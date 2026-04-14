@@ -1,6 +1,7 @@
 use super::helpers::{
-    normalize_https_listen_addr_input, parse_safeline_intercept_action,
-    parse_safeline_intercept_match_mode, parse_source_ip_strategy, parse_upstream_failure_mode,
+    normalize_https_listen_addr_input, parse_auto_tuning_intent, parse_auto_tuning_mode,
+    parse_safeline_intercept_action, parse_safeline_intercept_match_mode, parse_source_ip_strategy,
+    parse_upstream_failure_mode,
 };
 use super::*;
 
@@ -160,6 +161,9 @@ impl L7ConfigUpdateRequest {
         if let Some(safeline_intercept) = self.safeline_intercept {
             current.l7_config.safeline_intercept = safeline_intercept.into_config()?;
         }
+        if let Some(auto_tuning) = self.auto_tuning {
+            current.auto_tuning = auto_tuning.into_config()?;
+        }
 
         Ok(current.normalized())
     }
@@ -223,6 +227,27 @@ impl SafeLineInterceptConfigRequest {
             .map_err(|err| format!("SafeLine 自定义响应模板无效: {}", err))?;
 
         Ok(config)
+    }
+}
+
+impl AutoTuningConfigRequest {
+    pub(crate) fn into_config(self) -> Result<crate::config::AutoTuningConfig, String> {
+        Ok(crate::config::AutoTuningConfig {
+            mode: parse_auto_tuning_mode(&self.mode)?,
+            intent: parse_auto_tuning_intent(&self.intent)?,
+            runtime_adjust_enabled: self.runtime_adjust_enabled,
+            bootstrap_secs: self.bootstrap_secs,
+            control_interval_secs: self.control_interval_secs,
+            cooldown_secs: self.cooldown_secs,
+            max_step_percent: self.max_step_percent,
+            rollback_window_minutes: self.rollback_window_minutes,
+            pinned_fields: self.pinned_fields,
+            slo: crate::config::AutoSloTargets {
+                tls_handshake_timeout_rate_percent: self.slo.tls_handshake_timeout_rate_percent,
+                bucket_reject_rate_percent: self.slo.bucket_reject_rate_percent,
+                p95_proxy_latency_ms: self.slo.p95_proxy_latency_ms,
+            },
+        })
     }
 }
 

@@ -8,6 +8,7 @@ impl Config {
         normalize_base_config(&mut self);
         profile::normalize_profile_settings(&mut self);
         profile::normalize_l4_behavior_thresholds(&mut self);
+        profile::normalize_auto_tuning_settings(&mut self);
         gateway_and_integrations::normalize_l7_settings(&mut self);
 
         if !self.bloom_enabled {

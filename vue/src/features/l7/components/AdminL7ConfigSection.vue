@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
-import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
   listFieldClass,
   numberInputClass,
@@ -67,6 +66,91 @@ const http3CertificatePath = fieldModel('http3_certificate_path')
 const http3PrivateKeyPath = fieldModel('http3_private_key_path')
 const http3ConnectionMigration = fieldModel('http3_enable_connection_migration')
 const http3Tls13Enabled = fieldModel('http3_enable_tls13')
+
+function updateAutoTuning(patch: Partial<L7ConfigForm['auto_tuning']>) {
+  updateForm('auto_tuning', {
+    ...props.form.auto_tuning,
+    ...patch,
+  })
+}
+
+function updateAutoTuningSlo(patch: Partial<L7ConfigForm['auto_tuning']['slo']>) {
+  updateAutoTuning({
+    slo: {
+      ...props.form.auto_tuning.slo,
+      ...patch,
+    },
+  })
+}
+
+const autoTuningMode = computed({
+  get: () => props.form.auto_tuning.mode,
+  set: (value: string) => updateAutoTuning({ mode: value }),
+})
+
+const autoTuningIntent = computed({
+  get: () => props.form.auto_tuning.intent,
+  set: (value: string) => updateAutoTuning({ intent: value }),
+})
+
+const autoRuntimeAdjustEnabled = computed({
+  get: () => props.form.auto_tuning.runtime_adjust_enabled,
+  set: (value: boolean) => updateAutoTuning({ runtime_adjust_enabled: value }),
+})
+
+const autoBootstrapSecs = computed({
+  get: () => props.form.auto_tuning.bootstrap_secs,
+  set: (value: number) => updateAutoTuning({ bootstrap_secs: value }),
+})
+
+const autoControlIntervalSecs = computed({
+  get: () => props.form.auto_tuning.control_interval_secs,
+  set: (value: number) => updateAutoTuning({ control_interval_secs: value }),
+})
+
+const autoCooldownSecs = computed({
+  get: () => props.form.auto_tuning.cooldown_secs,
+  set: (value: number) => updateAutoTuning({ cooldown_secs: value }),
+})
+
+const autoMaxStepPercent = computed({
+  get: () => props.form.auto_tuning.max_step_percent,
+  set: (value: number) => updateAutoTuning({ max_step_percent: value }),
+})
+
+const autoRollbackWindowMinutes = computed({
+  get: () => props.form.auto_tuning.rollback_window_minutes,
+  set: (value: number) => updateAutoTuning({ rollback_window_minutes: value }),
+})
+
+const autoTlsHandshakeTimeoutRatePercent = computed({
+  get: () => props.form.auto_tuning.slo.tls_handshake_timeout_rate_percent,
+  set: (value: number) =>
+    updateAutoTuningSlo({ tls_handshake_timeout_rate_percent: value }),
+})
+
+const autoBucketRejectRatePercent = computed({
+  get: () => props.form.auto_tuning.slo.bucket_reject_rate_percent,
+  set: (value: number) =>
+    updateAutoTuningSlo({ bucket_reject_rate_percent: value }),
+})
+
+const autoP95ProxyLatencyMs = computed({
+  get: () => props.form.auto_tuning.slo.p95_proxy_latency_ms,
+  set: (value: number) => updateAutoTuningSlo({ p95_proxy_latency_ms: value }),
+})
+
+const autoPinnedFieldsText = computed({
+  get: () => props.form.auto_tuning.pinned_fields.join('\n'),
+  set: (value: string) => {
+    updateAutoTuning({
+      pinned_fields: value
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    })
+  },
+})
 
 function updateCcDefense(patch: Partial<L7ConfigForm['cc_defense']>) {
   updateForm('cc_defense', {
@@ -287,43 +371,6 @@ const safelineResponseBodySource = computed({
     updateSafelineResponseTemplate({ body_source: value }),
 })
 
-const safelineResponseGzip = computed({
-  get: () => props.form.safeline_intercept.response_template.gzip,
-  set: (value: boolean) => updateSafelineResponseTemplate({ gzip: value }),
-})
-
-const safelineResponseBodyText = computed({
-  get: () => props.form.safeline_intercept.response_template.body_text,
-  set: (value: string) => updateSafelineResponseTemplate({ body_text: value }),
-})
-
-const safelineResponseBodyFilePath = computed({
-  get: () => props.form.safeline_intercept.response_template.body_file_path,
-  set: (value: string) =>
-    updateSafelineResponseTemplate({ body_file_path: value }),
-})
-
-const safelineResponseHeadersText = computed({
-  get: () =>
-    props.form.safeline_intercept.response_template.headers
-      .map((header) => `${header.key}: ${header.value}`)
-      .join('\n'),
-  set: (value: string) => {
-    const headers = value
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [key, ...rest] = line.split(':')
-        return {
-          key: key?.trim() || '',
-          value: rest.join(':').trim(),
-        }
-      })
-      .filter((header) => header.key)
-    updateSafelineResponseTemplate({ headers })
-  },
-})
 </script>
 
 <template>
@@ -442,6 +489,131 @@ const safelineResponseHeadersText = computed({
         </select>
         </label>
       </div>
+    </div>
+
+    <div class="mt-4 border-t border-slate-200 pt-4">
+      <div
+        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+      >
+        <div>
+          <p class="text-sm tracking-wider text-blue-700">自动调优 (Phase 1)</p>
+        </div>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>运行时微调</span>
+          <input
+            v-model="autoRuntimeAdjustEnabled"
+            :disabled="autoTuningMode !== 'active'"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+      </div>
+
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <label class="text-sm text-stone-700">
+          调优模式
+          <select
+            v-model="autoTuningMode"
+            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+          >
+            <option value="off">关闭</option>
+            <option value="observe">观察模式</option>
+            <option value="active">主动模式</option>
+          </select>
+        </label>
+        <label class="text-sm text-stone-700">
+          防护强度
+          <select
+            v-model="autoTuningIntent"
+            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+          >
+            <option value="conservative">保守</option>
+            <option value="balanced">均衡</option>
+            <option value="aggressive">激进</option>
+          </select>
+        </label>
+        <label class="text-sm text-stone-700">
+          启动探测窗口(s)
+          <input
+            v-model.number="autoBootstrapSecs"
+            type="number"
+            min="10"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          控制周期(s)
+          <input
+            v-model.number="autoControlIntervalSecs"
+            type="number"
+            min="10"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          冷却时间(s)
+          <input
+            v-model.number="autoCooldownSecs"
+            type="number"
+            min="30"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          单步最大调整(%)
+          <input
+            v-model.number="autoMaxStepPercent"
+            type="number"
+            min="1"
+            max="25"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          回滚窗口(分钟)
+          <input
+            v-model.number="autoRollbackWindowMinutes"
+            type="number"
+            min="5"
+            :class="numberInputClass"
+          />
+        </label>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="l7-inline-field text-sm text-stone-700"
+          >握手超时率目标(%)<input
+            v-model.number="autoTlsHandshakeTimeoutRatePercent"
+            type="number"
+            min="0.1"
+            step="0.1"
+            :class="numberInputClass"
+        /></label>
+        <label class="l7-inline-field text-sm text-stone-700"
+          >预算误拒绝率目标(%)<input
+            v-model.number="autoBucketRejectRatePercent"
+            type="number"
+            min="0.1"
+            step="0.1"
+            :class="numberInputClass"
+        /></label>
+        <label class="l7-inline-field text-sm text-stone-700"
+          >P95 代理延迟目标(ms)<input
+            v-model.number="autoP95ProxyLatencyMs"
+            type="number"
+            min="50"
+            :class="numberInputClass"
+        /></label>
+      </div>
+
+      <label class="mt-4 block text-sm text-stone-700">
+        锁定字段 (一行一个，锁定后不受自动调优影响)
+        <textarea
+          v-model="autoPinnedFieldsText"
+          :class="listFieldClass"
+          placeholder="例如：l7_config.tls_handshake_timeout_ms"
+        />
+      </label>
     </div>
 
     <div class="mt-4 border-t border-slate-200 pt-4">

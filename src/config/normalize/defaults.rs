@@ -33,6 +33,7 @@ impl Default for Config {
             console_settings: ConsoleSettings::default(),
             integrations: IntegrationsConfig::default(),
             admin_api_auth: AdminApiAuthConfig::default(),
+            auto_tuning: AutoTuningConfig::default(),
         }
         .normalized()
     }

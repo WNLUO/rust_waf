@@ -122,3 +122,43 @@ pub(super) fn parse_safeline_intercept_match_mode(
         )),
     }
 }
+
+pub(super) fn auto_tuning_mode_label(mode: AutoTuningMode) -> &'static str {
+    match mode {
+        AutoTuningMode::Off => "off",
+        AutoTuningMode::Observe => "observe",
+        AutoTuningMode::Active => "active",
+    }
+}
+
+pub(super) fn parse_auto_tuning_mode(value: &str) -> Result<AutoTuningMode, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "off" => Ok(AutoTuningMode::Off),
+        "observe" => Ok(AutoTuningMode::Observe),
+        "active" => Ok(AutoTuningMode::Active),
+        other => Err(format!(
+            "自动调优模式仅支持 off、observe、active，收到 '{}'",
+            other
+        )),
+    }
+}
+
+pub(super) fn auto_tuning_intent_label(intent: AutoTuningIntent) -> &'static str {
+    match intent {
+        AutoTuningIntent::Conservative => "conservative",
+        AutoTuningIntent::Balanced => "balanced",
+        AutoTuningIntent::Aggressive => "aggressive",
+    }
+}
+
+pub(super) fn parse_auto_tuning_intent(value: &str) -> Result<AutoTuningIntent, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "conservative" => Ok(AutoTuningIntent::Conservative),
+        "balanced" => Ok(AutoTuningIntent::Balanced),
+        "aggressive" => Ok(AutoTuningIntent::Aggressive),
+        other => Err(format!(
+            "自动调优强度仅支持 conservative、balanced、aggressive，收到 '{}'",
+            other
+        )),
+    }
+}

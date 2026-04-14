@@ -1,6 +1,7 @@
 use super::helpers::{
-    display_https_listen_port, safeline_intercept_action_label,
-    safeline_intercept_match_mode_label, source_ip_strategy_label, upstream_failure_mode_label,
+    auto_tuning_intent_label, auto_tuning_mode_label, display_https_listen_port,
+    safeline_intercept_action_label, safeline_intercept_match_mode_label, source_ip_strategy_label,
+    upstream_failure_mode_label,
 };
 use super::*;
 
@@ -148,6 +149,7 @@ impl L7ConfigResponse {
             safeline_intercept: SafeLineInterceptConfigResponse::from_config(
                 &config.l7_config.safeline_intercept,
             ),
+            auto_tuning: AutoTuningConfigResponse::from_config(&config.auto_tuning),
         }
     }
 }
@@ -215,6 +217,27 @@ impl SafeLineSettingsResponse {
             blocklist_sync_path: config.blocklist_sync_path.clone(),
             blocklist_delete_path: config.blocklist_delete_path.clone(),
             blocklist_ip_group_ids: config.blocklist_ip_group_ids.clone(),
+        }
+    }
+}
+
+impl AutoTuningConfigResponse {
+    pub(crate) fn from_config(config: &crate::config::AutoTuningConfig) -> Self {
+        Self {
+            mode: auto_tuning_mode_label(config.mode).to_string(),
+            intent: auto_tuning_intent_label(config.intent).to_string(),
+            runtime_adjust_enabled: config.runtime_adjust_enabled,
+            bootstrap_secs: config.bootstrap_secs,
+            control_interval_secs: config.control_interval_secs,
+            cooldown_secs: config.cooldown_secs,
+            max_step_percent: config.max_step_percent,
+            rollback_window_minutes: config.rollback_window_minutes,
+            pinned_fields: config.pinned_fields.clone(),
+            slo: AutoSloTargetsResponse {
+                tls_handshake_timeout_rate_percent: config.slo.tls_handshake_timeout_rate_percent,
+                bucket_reject_rate_percent: config.slo.bucket_reject_rate_percent,
+                p95_proxy_latency_ms: config.slo.p95_proxy_latency_ms,
+            },
         }
     }
 }

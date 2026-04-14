@@ -1,4 +1,6 @@
-use super::super::types::{L4StatsResponse, L7StatsResponse};
+use super::super::types::{
+    AutoTuningRecommendationResponse, AutoTuningRuntimeResponse, L4StatsResponse, L7StatsResponse,
+};
 use crate::core::WafContext;
 
 impl L4StatsResponse {
@@ -69,6 +71,7 @@ impl L7StatsResponse {
         let metrics = context.metrics_snapshot();
         let upstream = context.upstream_health_snapshot();
         let http3 = context.http3_runtime_snapshot();
+        let auto = context.auto_tuning_snapshot();
 
         Self {
             enabled: true,
@@ -129,6 +132,39 @@ impl L7StatsResponse {
             http3_listener_addr: http3.listener_addr,
             http3_status: http3.status,
             http3_last_error: http3.last_error,
+            auto_tuning: AutoTuningRuntimeResponse {
+                mode: match auto.mode {
+                    crate::config::AutoTuningMode::Off => "off".to_string(),
+                    crate::config::AutoTuningMode::Observe => "observe".to_string(),
+                    crate::config::AutoTuningMode::Active => "active".to_string(),
+                },
+                intent: match auto.intent {
+                    crate::config::AutoTuningIntent::Conservative => "conservative".to_string(),
+                    crate::config::AutoTuningIntent::Balanced => "balanced".to_string(),
+                    crate::config::AutoTuningIntent::Aggressive => "aggressive".to_string(),
+                },
+                controller_state: auto.controller_state,
+                detected_cpu_cores: auto.detected_cpu_cores,
+                detected_memory_limit_mb: auto.detected_memory_limit_mb,
+                last_adjust_at: auto.last_adjust_at,
+                last_adjust_reason: auto.last_adjust_reason,
+                recommendation: AutoTuningRecommendationResponse {
+                    l4_normal_connection_budget_per_minute: auto
+                        .recommendation
+                        .l4_normal_connection_budget_per_minute,
+                    l4_suspicious_connection_budget_per_minute: auto
+                        .recommendation
+                        .l4_suspicious_connection_budget_per_minute,
+                    l4_high_risk_connection_budget_per_minute: auto
+                        .recommendation
+                        .l4_high_risk_connection_budget_per_minute,
+                    l4_reject_threshold_percent: auto.recommendation.l4_reject_threshold_percent,
+                    l4_critical_reject_threshold_percent: auto
+                        .recommendation
+                        .l4_critical_reject_threshold_percent,
+                    tls_handshake_timeout_ms: auto.recommendation.tls_handshake_timeout_ms,
+                },
+            },
         }
     }
 }

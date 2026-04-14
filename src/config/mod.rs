@@ -17,7 +17,8 @@ pub use self::rules::{
     Severity,
 };
 pub use self::types::{
-    AdminApiAuthConfig, Config, ConsoleSettings, IntegrationsConfig, RuntimeProfile, SafeLineConfig,
+    AdminApiAuthConfig, AutoSloTargets, AutoTuningConfig, AutoTuningIntent, AutoTuningMode, Config,
+    ConsoleSettings, IntegrationsConfig, RuntimeProfile, SafeLineConfig,
 };
 pub use gateway::{
     GatewayConfig, HeaderOperation, HeaderOperationAction, HeaderOperationScope, SourceIpStrategy,

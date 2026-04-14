@@ -42,6 +42,8 @@ pub struct Config {
     pub integrations: IntegrationsConfig,
     #[serde(default)]
     pub admin_api_auth: AdminApiAuthConfig,
+    #[serde(default)]
+    pub auto_tuning: AutoTuningConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +112,58 @@ pub struct SafeLineConfig {
     pub blocklist_ip_group_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoTuningConfig {
+    #[serde(default)]
+    pub mode: AutoTuningMode,
+    #[serde(default)]
+    pub intent: AutoTuningIntent,
+    #[serde(default = "default_auto_runtime_adjust_enabled")]
+    pub runtime_adjust_enabled: bool,
+    #[serde(default = "default_auto_bootstrap_secs")]
+    pub bootstrap_secs: u64,
+    #[serde(default = "default_auto_control_interval_secs")]
+    pub control_interval_secs: u64,
+    #[serde(default = "default_auto_cooldown_secs")]
+    pub cooldown_secs: u64,
+    #[serde(default = "default_auto_max_step_percent")]
+    pub max_step_percent: u8,
+    #[serde(default = "default_auto_rollback_window_minutes")]
+    pub rollback_window_minutes: u64,
+    #[serde(default)]
+    pub pinned_fields: Vec<String>,
+    #[serde(default)]
+    pub slo: AutoSloTargets,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoSloTargets {
+    #[serde(default = "default_auto_tls_handshake_timeout_rate_percent")]
+    pub tls_handshake_timeout_rate_percent: f64,
+    #[serde(default = "default_auto_bucket_reject_rate_percent")]
+    pub bucket_reject_rate_percent: f64,
+    #[serde(default = "default_auto_p95_proxy_latency_ms")]
+    pub p95_proxy_latency_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoTuningMode {
+    Off,
+    #[default]
+    Observe,
+    Active,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoTuningIntent {
+    Conservative,
+    #[default]
+    Balanced,
+    Aggressive,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProfile {
@@ -121,5 +175,68 @@ pub enum RuntimeProfile {
 impl RuntimeProfile {
     pub fn is_minimal(self) -> bool {
         matches!(self, Self::Minimal)
+    }
+}
+
+const fn default_auto_runtime_adjust_enabled() -> bool {
+    false
+}
+
+const fn default_auto_bootstrap_secs() -> u64 {
+    60
+}
+
+const fn default_auto_control_interval_secs() -> u64 {
+    30
+}
+
+const fn default_auto_cooldown_secs() -> u64 {
+    120
+}
+
+const fn default_auto_max_step_percent() -> u8 {
+    8
+}
+
+const fn default_auto_rollback_window_minutes() -> u64 {
+    10
+}
+
+const fn default_auto_tls_handshake_timeout_rate_percent() -> f64 {
+    0.3
+}
+
+const fn default_auto_bucket_reject_rate_percent() -> f64 {
+    0.5
+}
+
+const fn default_auto_p95_proxy_latency_ms() -> u64 {
+    800
+}
+
+impl Default for AutoTuningConfig {
+    fn default() -> Self {
+        Self {
+            mode: AutoTuningMode::default(),
+            intent: AutoTuningIntent::default(),
+            runtime_adjust_enabled: default_auto_runtime_adjust_enabled(),
+            bootstrap_secs: default_auto_bootstrap_secs(),
+            control_interval_secs: default_auto_control_interval_secs(),
+            cooldown_secs: default_auto_cooldown_secs(),
+            max_step_percent: default_auto_max_step_percent(),
+            rollback_window_minutes: default_auto_rollback_window_minutes(),
+            pinned_fields: Vec::new(),
+            slo: AutoSloTargets::default(),
+        }
+    }
+}
+
+impl Default for AutoSloTargets {
+    fn default() -> Self {
+        Self {
+            tls_handshake_timeout_rate_percent: default_auto_tls_handshake_timeout_rate_percent(),
+            bucket_reject_rate_percent: default_auto_bucket_reject_rate_percent(),
+            p95_proxy_latency_ms: default_auto_p95_proxy_latency_ms(),
+        }
     }
 }

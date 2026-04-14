@@ -94,6 +94,7 @@ pub struct L7ConfigResponse {
     pub(crate) http3_enable_tls13: bool,
     pub(crate) cc_defense: CcDefenseConfigResponse,
     pub(crate) safeline_intercept: SafeLineInterceptConfigResponse,
+    pub(crate) auto_tuning: AutoTuningConfigResponse,
 }
 
 #[derive(Debug, Serialize)]
@@ -197,6 +198,51 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) cc_defense: Option<CcDefenseConfigRequest>,
     #[serde(default)]
     pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
+    #[serde(default)]
+    pub(crate) auto_tuning: Option<AutoTuningConfigRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoTuningConfigResponse {
+    pub(crate) mode: String,
+    pub(crate) intent: String,
+    pub(crate) runtime_adjust_enabled: bool,
+    pub(crate) bootstrap_secs: u64,
+    pub(crate) control_interval_secs: u64,
+    pub(crate) cooldown_secs: u64,
+    pub(crate) max_step_percent: u8,
+    pub(crate) rollback_window_minutes: u64,
+    pub(crate) pinned_fields: Vec<String>,
+    pub(crate) slo: AutoSloTargetsResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AutoSloTargetsResponse {
+    pub(crate) tls_handshake_timeout_rate_percent: f64,
+    pub(crate) bucket_reject_rate_percent: f64,
+    pub(crate) p95_proxy_latency_ms: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AutoTuningConfigRequest {
+    pub(crate) mode: String,
+    pub(crate) intent: String,
+    pub(crate) runtime_adjust_enabled: bool,
+    pub(crate) bootstrap_secs: u64,
+    pub(crate) control_interval_secs: u64,
+    pub(crate) cooldown_secs: u64,
+    pub(crate) max_step_percent: u8,
+    pub(crate) rollback_window_minutes: u64,
+    #[serde(default)]
+    pub(crate) pinned_fields: Vec<String>,
+    pub(crate) slo: AutoSloTargetsRequest,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AutoSloTargetsRequest {
+    pub(crate) tls_handshake_timeout_rate_percent: f64,
+    pub(crate) bucket_reject_rate_percent: f64,
+    pub(crate) p95_proxy_latency_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

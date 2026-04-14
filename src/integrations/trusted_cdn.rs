@@ -56,6 +56,7 @@ impl TrustedCdnProviderSyncResult {
 pub fn build_sync_client() -> Result<Client> {
     Client::builder()
         .user_agent("rust-waf/trusted-cdn-sync")
+        .http1_only()
         .build()
         .map_err(Into::into)
 }

@@ -186,3 +186,29 @@ async fn inspect_blocked_client_ip_matches_resolved_forwarded_client_ip() {
     assert_eq!(result.layer, InspectionLayer::L7);
     assert!(result.reason.contains("198.51.100.25"));
 }
+
+#[tokio::test]
+async fn inspect_blocked_client_ip_skips_socket_peer_when_header_strategy_unresolved() {
+    let mut config = crate::config::Config::default();
+    config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
+    config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
+    let context = WafContext::new(config).await.unwrap();
+
+    let store = context.sqlite_store.as_ref().unwrap();
+    let blocked_at = unix_timestamp();
+    store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+        "111.123.42.35".to_string(),
+        "cdn node ban".to_string(),
+        blocked_at,
+        blocked_at + 3600,
+    ));
+    store.flush().await.unwrap();
+
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+
+    apply_client_identity(&context, "111.123.42.35:443".parse().unwrap(), &mut request);
+
+    let result = inspect_blocked_client_ip(&context, &request).await;
+    assert!(result.is_none());
+}

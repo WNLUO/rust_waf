@@ -48,6 +48,16 @@ pub(crate) async fn inspect_blocked_client_ip(
     context: &WafContext,
     request: &UnifiedHttpRequest,
 ) -> Option<InspectionResult> {
+    let config = context.config_snapshot();
+    let client_ip_source = request.get_metadata("network.client_ip_source").map(String::as_str);
+    if matches!(
+        config.gateway_config.source_ip_strategy,
+        crate::config::SourceIpStrategy::Header
+    ) && client_ip_source == Some("socket_peer")
+    {
+        return None;
+    }
+
     let client_ip = request.client_ip.as_deref()?.trim();
     if client_ip.is_empty() {
         return None;

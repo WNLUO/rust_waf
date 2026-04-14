@@ -84,6 +84,15 @@ pub(crate) async fn handle_tls_connection(
                 "Rejecting TLS connection from {} before handshake due to coarse admission pressure",
                 peer_addr
             );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_tls_pre_handshake_rejection();
+            }
+            persist_tls_transport_event(
+                context.as_ref(),
+                &packet,
+                "block",
+                "tls pre-handshake admission rejected: coarse admission pressure".to_string(),
+            );
             return Ok(());
         }
     }
@@ -93,12 +102,38 @@ pub(crate) async fn handle_tls_connection(
     let connection_id = next_connection_id(peer_addr, local_addr, "tls");
     metadata.push(("network.connection_id".to_string(), connection_id.clone()));
 
-    let tls_stream = tokio::time::timeout(
+    let tls_stream = match tokio::time::timeout(
         std::time::Duration::from_millis(config.l7_config.tls_handshake_timeout_ms),
         tls_acceptor.accept(stream),
     )
     .await
-    .map_err(|_| anyhow::anyhow!("TLS handshake timed out"))??;
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(err)) => {
+            persist_tls_transport_event(
+                context.as_ref(),
+                &packet,
+                "alert",
+                format!("tls handshake failed: {}", err),
+            );
+            return Err(err.into());
+        }
+        Err(_) => {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_tls_handshake_timeout();
+            }
+            persist_tls_transport_event(
+                context.as_ref(),
+                &packet,
+                "alert",
+                format!(
+                    "tls handshake timed out after {}ms",
+                    config.l7_config.tls_handshake_timeout_ms
+                ),
+            );
+            return Err(anyhow::anyhow!("TLS handshake timed out"));
+        }
+    };
     let alpn = tls_stream
         .get_ref()
         .1
@@ -135,6 +170,12 @@ pub(crate) async fn handle_tls_connection(
                 "Rejecting TLS connection from {} due to bucket admission pressure",
                 peer_addr
             );
+            persist_tls_transport_event(
+                context.as_ref(),
+                &packet,
+                "block",
+                "tls post-handshake admission rejected: bucket admission pressure".to_string(),
+            );
             inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
             return Ok(());
         }
@@ -152,4 +193,26 @@ pub(crate) async fn handle_tls_connection(
         inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
     }
     result
+}
+
+fn persist_tls_transport_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    action: &str,
+    reason: String,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    store.enqueue_security_event(SecurityEventRecord::now(
+        "L4",
+        action,
+        reason,
+        packet.source_ip.to_string(),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    ));
 }

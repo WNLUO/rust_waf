@@ -53,6 +53,8 @@ fn test_build_metrics_response_with_sources() {
             proxy_successes: 8,
             proxy_failures: 2,
             proxy_fail_close_rejections: 1,
+            tls_pre_handshake_rejections: 2,
+            tls_handshake_timeouts: 3,
             upstream_healthcheck_successes: 5,
             upstream_healthcheck_failures: 1,
             proxy_latency_micros_total: 40_000,
@@ -99,6 +101,8 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.proxy_successes, 8);
     assert_eq!(response.proxy_failures, 2);
     assert_eq!(response.proxy_fail_close_rejections, 1);
+    assert_eq!(response.tls_pre_handshake_rejections, 2);
+    assert_eq!(response.tls_handshake_timeouts, 3);
     assert_eq!(response.upstream_healthcheck_successes, 5);
     assert_eq!(response.upstream_healthcheck_failures, 1);
     assert_eq!(response.proxy_latency_micros_total, 40_000);

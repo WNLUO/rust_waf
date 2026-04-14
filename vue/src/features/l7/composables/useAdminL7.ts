@@ -301,6 +301,30 @@ export function useAdminL7() {
       )
       configForm.cc_defense.challenge_cookie_name =
         configForm.cc_defense.challenge_cookie_name.trim().toLowerCase() || 'rwaf_cc'
+      configForm.cc_defense.hard_route_block_multiplier = clampInteger(
+        configForm.cc_defense.hard_route_block_multiplier,
+        1,
+        20,
+        4,
+      )
+      configForm.cc_defense.hard_host_block_multiplier = clampInteger(
+        configForm.cc_defense.hard_host_block_multiplier,
+        1,
+        20,
+        4,
+      )
+      configForm.cc_defense.hard_ip_block_multiplier = clampInteger(
+        configForm.cc_defense.hard_ip_block_multiplier,
+        1,
+        20,
+        4,
+      )
+      configForm.cc_defense.hard_hot_path_block_multiplier = clampInteger(
+        configForm.cc_defense.hard_hot_path_block_multiplier,
+        1,
+        20,
+        3,
+      )
       configForm.safeline_intercept.max_body_bytes = clampInteger(
         configForm.safeline_intercept.max_body_bytes,
         256,

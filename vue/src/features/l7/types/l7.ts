@@ -37,6 +37,10 @@ export interface CcDefenseConfigPayload {
   delay_ms: number
   challenge_ttl_secs: number
   challenge_cookie_name: string
+  hard_route_block_multiplier: number
+  hard_host_block_multiplier: number
+  hard_ip_block_multiplier: number
+  hard_hot_path_block_multiplier: number
 }
 
 export interface L7ConfigPayload {

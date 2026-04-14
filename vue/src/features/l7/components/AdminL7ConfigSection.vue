@@ -145,6 +145,27 @@ const ccChallengeCookieName = computed({
   set: (value: string) => updateCcDefense({ challenge_cookie_name: value }),
 })
 
+const ccHardRouteBlockMultiplier = computed({
+  get: () => props.form.cc_defense.hard_route_block_multiplier,
+  set: (value: number) => updateCcDefense({ hard_route_block_multiplier: value }),
+})
+
+const ccHardHostBlockMultiplier = computed({
+  get: () => props.form.cc_defense.hard_host_block_multiplier,
+  set: (value: number) => updateCcDefense({ hard_host_block_multiplier: value }),
+})
+
+const ccHardIpBlockMultiplier = computed({
+  get: () => props.form.cc_defense.hard_ip_block_multiplier,
+  set: (value: number) => updateCcDefense({ hard_ip_block_multiplier: value }),
+})
+
+const ccHardHotPathBlockMultiplier = computed({
+  get: () => props.form.cc_defense.hard_hot_path_block_multiplier,
+  set: (value: number) =>
+    updateCcDefense({ hard_hot_path_block_multiplier: value }),
+})
+
 function updateSafelineIntercept(
   patch: Partial<L7ConfigForm['safeline_intercept']>,
 ) {
@@ -632,6 +653,38 @@ const safelineResponseHeadersText = computed({
             v-model="ccChallengeCookieName"
             type="text"
             placeholder="例如 rwaf_cc"
+            :class="numberInputClass"
+        /></label>
+        <label class="l7-inline-field text-sm text-stone-700"
+          >硬阈值-路由倍率<input
+            v-model.number="ccHardRouteBlockMultiplier"
+            type="number"
+            min="1"
+            max="20"
+            :class="numberInputClass"
+        /></label>
+        <label class="l7-inline-field text-sm text-stone-700"
+          >硬阈值-Host 倍率<input
+            v-model.number="ccHardHostBlockMultiplier"
+            type="number"
+            min="1"
+            max="20"
+            :class="numberInputClass"
+        /></label>
+        <label class="l7-inline-field text-sm text-stone-700"
+          >硬阈值-IP 倍率<input
+            v-model.number="ccHardIpBlockMultiplier"
+            type="number"
+            min="1"
+            max="20"
+            :class="numberInputClass"
+        /></label>
+        <label class="l7-inline-field text-sm text-stone-700"
+          >硬阈值-热点路径倍率<input
+            v-model.number="ccHardHotPathBlockMultiplier"
+            type="number"
+            min="1"
+            max="20"
             :class="numberInputClass"
         /></label>
       </div>

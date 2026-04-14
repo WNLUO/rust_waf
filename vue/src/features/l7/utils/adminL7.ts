@@ -59,6 +59,10 @@ export function createDefaultL7ConfigForm(): L7ConfigForm {
       delay_ms: 150,
       challenge_ttl_secs: 1800,
       challenge_cookie_name: 'rwaf_cc',
+      hard_route_block_multiplier: 4,
+      hard_host_block_multiplier: 4,
+      hard_ip_block_multiplier: 4,
+      hard_hot_path_block_multiplier: 3,
     },
     safeline_intercept: {
       enabled: true,

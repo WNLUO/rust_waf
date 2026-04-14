@@ -16,6 +16,8 @@ Use this when the user asks to:
 - refresh tables, diagrams, screenshots, test results, or wording
 - prepare a cleaner final HTML thesis version
 
+The default expectation is not just to patch text. You should also check whether figures, screenshots, SVG diagrams, captions, and figure numbering still match the code.
+
 ## Files To Read First
 
 Always start with:
@@ -28,6 +30,12 @@ Then read only the code files related to the user's latest change.
 If formatting matters in the request, also read:
 
 4. `paper/thesis-update-skill/references/template_requirements.md`
+
+If the change may affect UI, workflow, or architecture visuals, also inspect:
+
+5. image references inside `paper/rust_waf_thesis.html`
+6. files under `paper/canva-assets/`
+7. any other local figure assets referenced by the thesis, such as standalone `.svg`, `.png`, or `.jpg` files under `paper/`
 
 ## Thesis Template Requirements
 
@@ -88,27 +96,60 @@ Pay extra attention to these possible mismatches:
 - claims exceeding the real implementation
 - test numbers becoming stale after code changes
 - screenshots no longer matching the current UI
+- SVG diagrams still showing old module names, old page structure, or old data flow
+- thesis text being updated while figure captions and referenced figure numbers stay stale
 - references count or composition falling outside the expected range
 - revisions becoming so large that they may affect AI/checking risk
 - the thesis title drifting away from the already fixed submission title
+
+## Figure And Asset Audit
+
+Every thesis-sync pass should include a lightweight figure audit.
+
+At minimum:
+
+1. List the current figures referenced by `paper/rust_waf_thesis.html`.
+2. Decide which of them are affected by the latest code change.
+3. Check whether each affected figure has three things aligned:
+   - image content
+   - caption text
+   - surrounding paragraph claims
+4. If a UI page changed materially, do not only update prose; explicitly decide whether to:
+   - keep the old screenshot
+   - replace the screenshot
+   - add a new screenshot
+5. If architecture or workflow changed materially, explicitly decide whether to:
+   - keep the old SVG
+   - patch an existing SVG
+   - create a new SVG under `paper/canva-assets/`
+6. If no figure change is needed, state why in the log instead of silently skipping it.
+
+Common triggers that should make you review figures:
+
+- page layout, labels, cards, dialog structure, or navigation changed
+- system architecture modules or boundaries changed
+- request flow, event flow, or persistence flow changed
+- a new control panel page or major feature page was added
+- figure numbering shifted because a new figure was inserted
 
 ## Update Workflow
 
 1. Identify what changed in the program.
 2. Map the change to thesis sections.
-3. Prefer local edits over broad rewrites.
-4. Preserve the existing title unless the user explicitly changes it.
-5. Keep chapter structure stable unless the user asks for a restructure.
-6. If UI changed, refresh screenshots only for affected pages.
-7. If backend behavior changed, check whether these sections need updates:
+3. Audit impacted figures, screenshots, SVGs, captions, and figure numbering before editing prose.
+4. Prefer local edits over broad rewrites.
+5. Preserve the existing title unless the user explicitly changes it.
+6. Keep chapter structure stable unless the user asks for a restructure.
+7. If UI changed, refresh screenshots only for affected pages, but do not skip the figure audit.
+8. If backend behavior changed, check whether these sections need updates:
    - abstract
    - Chapter 3 overall design
    - Chapter 4 implementation details
    - Chapter 5 testing and analysis
-8. If tests or build results changed, update the exact statements in the thesis.
-9. If a code feature was removed, remove or tone down the matching thesis claim.
-10. Do not claim capabilities that the code does not actually implement.
-11. If formatting is being refined, preserve the template-derived style baseline:
+9. If tests or build results changed, update the exact statements in the thesis.
+10. If a code feature was removed, remove or tone down the matching thesis claim.
+11. Do not claim capabilities that the code does not actually implement.
+12. If formatting is being refined, preserve the template-derived style baseline:
    - A4-like page setup
    - Chinese body text close to `宋体` 12 pt
    - blackface major headings
@@ -120,6 +161,9 @@ Pay extra attention to these possible mismatches:
 - Prefer editing the existing `paper/rust_waf_thesis.html` file.
 - Keep the paper “design and implementation” oriented.
 - Keep tables, diagrams, and screenshots aligned with the actual codebase.
+- When code changes touch visual structure, assume “text + figure + caption” is a bundle and review all three together.
+- Do not leave old SVG wording in place just because the text has been patched.
+- Do not add a brand-new figure unless it improves thesis fidelity; but when an existing figure becomes misleading, prefer updating it instead of preserving it for convenience.
 - Avoid turning the paper into an AI/security theory survey disconnected from the project.
 - When uncertain, describe the implementation conservatively.
 - When formatting is uncertain, prefer “closer to extracted template evidence” over visual improvisation.
@@ -132,6 +176,23 @@ When screenshots are needed:
 2. Capture only the pages relevant to the changed feature.
 3. Replace only the affected figure blocks in the thesis.
 4. If exporting to single-file HTML, embed images directly.
+
+When SVG diagrams are needed:
+
+1. Prefer updating existing assets under `paper/canva-assets/` when the visual concept is the same.
+2. Use filenames that reflect the content rather than the chapter number.
+3. After changing an SVG, verify the corresponding caption and nearby text still match.
+4. If a new SVG replaces an old concept, remove or stop referencing the stale asset to avoid future confusion.
+
+## End-Of-Task Checklist
+
+Before finishing a thesis update, quickly confirm:
+
+- text claims match the current code
+- test numbers and build results were checked from commands, not memory
+- each impacted figure was reviewed
+- captions and figure numbering are still correct
+- the log entry records whether screenshots / SVGs were refreshed or intentionally kept
 
 ## Good Prompt For Next Time
 
@@ -150,4 +211,6 @@ The log should record:
 - what changed in the code
 - which thesis sections were updated
 - whether screenshots were refreshed
+- whether SVG diagrams or other figure assets were refreshed
+- which figures were checked but intentionally left unchanged
 - whether claims/tests/metrics changed

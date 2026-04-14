@@ -177,3 +177,22 @@ When continuing to update the thesis:
    - screenshots
 4. If code changes are minor, only patch the affected subsection and keep the rest stable.
 5. Be conservative with claims to help reduce mismatch and checking risk.
+
+## 10. Figure And Screenshot Maintenance Guidance
+
+The template clues in this file are mostly about layout, but future thesis updates should also keep figures maintainable.
+
+Practical rules:
+
+1. Every UI-related code change should trigger a quick review of the referenced screenshot or figure block in the thesis.
+2. Every architecture or workflow-related code change should trigger a quick review of the corresponding SVG diagram, figure caption, and explanatory paragraph.
+3. If the image is still accurate enough, it may be kept, but that should be an explicit decision rather than an omission.
+4. Figure captions should be specific enough to match the actual page or flow being shown, and should be updated together with the image.
+5. If figure numbering changes because a new figure is inserted, update both the caption order and any nearby textual references.
+6. For this project, assets under `paper/canva-assets/` should be treated as thesis source materials rather than optional extras.
+
+Recommended minimum habit for each thesis-sync task:
+
+- review text
+- review tests
+- review impacted figures

@@ -27,17 +27,24 @@
     <text x="800" y="826" text-anchor="middle" fill="#7F5A97" font-size="18">规则匹配 / respond /</text>
     <text x="800" y="852" text-anchor="middle" fill="#7F5A97" font-size="18">alert / allow</text>
 
+    <rect x="160" y="724" width="340" height="148" rx="24" fill="#FCEBEC" stroke="#DF9AA2" stroke-width="2"/>
+    <text x="330" y="770" text-anchor="middle" fill="#8A3744" font-size="26" font-weight="700">事件审计与</text>
+    <text x="330" y="802" text-anchor="middle" fill="#8A3744" font-size="26" font-weight="700">SQLite 落库</text>
+    <text x="330" y="832" text-anchor="middle" fill="#A15C67" font-size="18">security_events /</text>
+    <text x="330" y="858" text-anchor="middle" fill="#A15C67" font-size="18">blocked_ips / 同步状态</text>
+
     <rect x="1100" y="724" width="340" height="148" rx="24" fill="#FBEFD8" stroke="#D8AE59" stroke-width="2"/>
     <text x="1270" y="770" text-anchor="middle" fill="#7B5410" font-size="26" font-weight="700">网关代理与</text>
     <text x="1270" y="802" text-anchor="middle" fill="#7B5410" font-size="26" font-weight="700">上游治理</text>
     <text x="1270" y="832" text-anchor="middle" fill="#8A6B34" font-size="18">站点匹配 / 证书 /</text>
-    <text x="1270" y="858" text-anchor="middle" fill="#8A6B34" font-size="18">健康检查 / 转发</text>
+    <text x="1270" y="858" text-anchor="middle" fill="#8A6B34" font-size="18">健康检查 / SafeLine / 转发</text>
   </g>
 
   <path d="M800 256V304" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
   <path d="M800 390V438" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
   <path d="M800 524V580" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
   <path d="M800 676V724" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
+  <path d="M620 772H500" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
   <path d="M980 772H1100" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
   <path d="M620 486C500 486 410 532 410 580" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
 
@@ -45,8 +52,9 @@
   <path d="M800 422L788 404H812L800 422Z" fill="#7D8C99"/>
   <path d="M800 558L788 540H812L800 558Z" fill="#7D8C99"/>
   <path d="M800 702L788 684H812L800 702Z" fill="#7D8C99"/>
+  <path d="M522 772L540 760V784L522 772Z" fill="#7D8C99"/>
   <path d="M1078 772L1060 760V784L1078 772Z" fill="#7D8C99"/>
 
   <text x="116" y="892" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">建议配套讲解：L4 负责“先粗筛”，L7 负责“再精判”，</text>
-  <text x="116" y="924" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">若未被阻断则继续进入多站点网关转发与持久化审计链路。</text>
+  <text x="116" y="924" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">命中后进入事件审计链路，未被阻断则继续进入多站点网关转发与联动治理。</text>
 </svg>

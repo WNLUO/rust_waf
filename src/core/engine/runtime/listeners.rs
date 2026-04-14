@@ -110,7 +110,7 @@ fn adaptive_permit_wait_ms_for_peer(
     }
 }
 
-async fn acquire_permit_auto(
+pub(crate) async fn acquire_permit_auto(
     context: &WafContext,
     semaphore: Arc<Semaphore>,
     peer_addr: std::net::SocketAddr,
@@ -466,6 +466,13 @@ async fn spawn_https_entry_listener(
     let listener = TcpListener::bind(addr).await?;
     let addr_string = listener.local_addr()?.to_string();
     info!("TLS inspection listener started on {}", addr_string);
+    let handshake_limit = context
+        .config_snapshot()
+        .max_concurrent_tasks
+        .max(1)
+        .saturating_mul(4)
+        .clamp(64, 4096);
+    let handshake_semaphore = Arc::new(Semaphore::new(handshake_limit));
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
     let task_addr = addr_string.clone();
     let task = tokio::spawn(async move {
@@ -478,17 +485,26 @@ async fn spawn_https_entry_listener(
                 accept_result = listener.accept() => {
                     match accept_result {
                         Ok((stream, peer_addr)) => {
-                            if let Some(permit) = acquire_permit_auto(
+                            if let Some(handshake_permit) = acquire_permit_auto(
                                 context.as_ref(),
-                                Arc::clone(&connection_semaphore),
+                                Arc::clone(&handshake_semaphore),
                                 peer_addr,
-                                "TLS",
+                                "TLS handshake",
                             )
                             .await {
                                 let ctx = Arc::clone(&context);
                                 let acceptor = tls_acceptor.clone();
+                                let business_semaphore = Arc::clone(&connection_semaphore);
                                 tokio::spawn(async move {
-                                    if let Err(err) = handle_tls_connection(ctx, acceptor, stream, peer_addr, permit).await {
+                                    if let Err(err) = handle_tls_connection(
+                                        ctx,
+                                        acceptor,
+                                        stream,
+                                        peer_addr,
+                                        handshake_permit,
+                                        business_semaphore,
+                                    )
+                                    .await {
                                         if is_benign_tls_disconnect(&err) {
                                             debug!(
                                                 "TLS connection closed without close_notify from {}: {}",

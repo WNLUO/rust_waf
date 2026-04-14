@@ -67,7 +67,8 @@ pub(crate) async fn handle_tls_connection(
     tls_acceptor: TlsAcceptor,
     stream: TcpStream,
     peer_addr: std::net::SocketAddr,
-    _permit: OwnedSemaphorePermit,
+    handshake_permit: OwnedSemaphorePermit,
+    connection_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
@@ -184,6 +185,21 @@ pub(crate) async fn handle_tls_connection(
             );
             return Err(anyhow::anyhow!("TLS handshake timed out"));
         }
+    };
+    drop(handshake_permit);
+    let Some(_connection_permit) = crate::core::engine::runtime::acquire_permit_auto(
+        context.as_ref(),
+        Arc::clone(&connection_semaphore),
+        peer_addr,
+        "TLS post-handshake",
+    )
+    .await
+    else {
+        warn!(
+            "Dropping TLS connection from {} after successful handshake because no post-handshake business permit became available",
+            peer_addr
+        );
+        return Ok(());
     };
     let alpn = tls_stream
         .get_ref()

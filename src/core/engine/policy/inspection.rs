@@ -306,6 +306,12 @@ fn build_request_identity_details_with_header(
     } else {
         request.get_header(&configured_header).cloned()
     };
+    let mut headers = request
+        .headers
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+    headers.sort_by(|left, right| left.0.cmp(&right.0));
     let payload = json!({
         "client_identity": {
             "resolved_client_ip": client_ip,
@@ -318,6 +324,8 @@ fn build_request_identity_details_with_header(
             "configured_real_ip_header_value": source_header_value,
             "x_real_ip": request.get_header("x-real-ip").cloned(),
             "x_forwarded_for": request.get_header("x-forwarded-for").cloned(),
+            "http_version": request.version.to_string(),
+            "headers": headers,
         }
     });
 

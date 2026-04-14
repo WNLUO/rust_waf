@@ -175,22 +175,13 @@ pub(crate) fn persist_http_identity_debug_event(
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
 ) {
-    let config = context.config_snapshot();
-    if !matches!(
-        config.gateway_config.source_ip_strategy,
-        crate::config::SourceIpStrategy::Header
-    ) {
-        return;
-    }
-
-    let configured_header = config.gateway_config.custom_source_ip_header;
-    if configured_header.trim().is_empty() || request.get_header(&configured_header).is_none() {
-        return;
-    }
-
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };
+    let configured_header = context
+        .config_snapshot()
+        .gateway_config
+        .custom_source_ip_header;
 
     let mut event = SecurityEventRecord::now(
         "L7",

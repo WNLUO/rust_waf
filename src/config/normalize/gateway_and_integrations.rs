@@ -19,6 +19,67 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .map(|cidr| cidr.trim().to_string())
         .filter(|cidr| !cidr.is_empty())
         .collect();
+    config.l4_config.trusted_cdn.manual_cidrs =
+        normalize_cidr_list(&config.l4_config.trusted_cdn.manual_cidrs);
+    config.l4_config.trusted_cdn.edgeone_overseas.synced_cidrs =
+        normalize_cidr_list(&config.l4_config.trusted_cdn.edgeone_overseas.synced_cidrs);
+    config
+        .l4_config
+        .trusted_cdn
+        .edgeone_overseas
+        .last_sync_message = config
+        .l4_config
+        .trusted_cdn
+        .edgeone_overseas
+        .last_sync_message
+        .trim()
+        .to_string();
+    config.l4_config.trusted_cdn.aliyun_esa.site_id = config
+        .l4_config
+        .trusted_cdn
+        .aliyun_esa
+        .site_id
+        .trim()
+        .to_string();
+    config.l4_config.trusted_cdn.aliyun_esa.access_key_id = config
+        .l4_config
+        .trusted_cdn
+        .aliyun_esa
+        .access_key_id
+        .trim()
+        .to_string();
+    config.l4_config.trusted_cdn.aliyun_esa.access_key_secret = config
+        .l4_config
+        .trusted_cdn
+        .aliyun_esa
+        .access_key_secret
+        .trim()
+        .to_string();
+    config.l4_config.trusted_cdn.aliyun_esa.endpoint = config
+        .l4_config
+        .trusted_cdn
+        .aliyun_esa
+        .endpoint
+        .trim()
+        .to_string();
+    if config.l4_config.trusted_cdn.aliyun_esa.endpoint.is_empty() {
+        config.l4_config.trusted_cdn.aliyun_esa.endpoint =
+            crate::config::l4::TrustedCdnAliyunEsaConfig::default().endpoint;
+    }
+    config.l4_config.trusted_cdn.aliyun_esa.synced_cidrs =
+        normalize_cidr_list(&config.l4_config.trusted_cdn.aliyun_esa.synced_cidrs);
+    config.l4_config.trusted_cdn.aliyun_esa.last_sync_message = config
+        .l4_config
+        .trusted_cdn
+        .aliyun_esa
+        .last_sync_message
+        .trim()
+        .to_string();
+    config.l4_config.trusted_cdn.sync_interval_value = config
+        .l4_config
+        .trusted_cdn
+        .sync_interval_value
+        .clamp(1, 365);
     config.l7_config.cc_defense.request_window_secs =
         clamp_u64(config.l7_config.cc_defense.request_window_secs, 3, 120, 10);
     config.l7_config.cc_defense.ip_challenge_threshold = config
@@ -155,6 +216,20 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
             .response_template
             .content_type = default_rule_response_content_type();
     }
+}
+
+fn normalize_cidr_list(values: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for cidr in values
+        .iter()
+        .map(|cidr| cidr.trim())
+        .filter(|cidr| !cidr.is_empty())
+    {
+        if !normalized.iter().any(|item| item == cidr) {
+            normalized.push(cidr.to_string());
+        }
+    }
+    normalized
 }
 
 pub(super) fn normalize_console_and_gateway(config: &mut Config) {

@@ -31,6 +31,18 @@ const modeText = (mode: string) => {
   return '放行'
 }
 
+const peerKindText = (peerKind: L4BucketItem['peer_kind']) => {
+  if (peerKind === 'trusted_proxy') return '可信代理'
+  if (peerKind === 'direct_client') return '直接客户端'
+  return peerKind || '未知来源'
+}
+
+const peerKindType = (peerKind: L4BucketItem['peer_kind']) => {
+  if (peerKind === 'trusted_proxy') return 'warning'
+  if (peerKind === 'direct_client') return 'success'
+  return 'muted'
+}
+
 const hasL7Signals = (bucket: L4BucketItem) =>
   bucket.l7_block_hits > 0 || bucket.safeline_hits > 0
 </script>
@@ -108,6 +120,11 @@ const hasL7Signals = (bucket: L4BucketItem) =>
                 <div class="font-mono font-semibold text-stone-900">
                   {{ bucket.peer_ip }}
                 </div>
+                <StatusBadge
+                  :text="peerKindText(bucket.peer_kind)"
+                  :type="peerKindType(bucket.peer_kind)"
+                  compact
+                />
                 <div class="text-xs text-slate-500">
                   {{ bucket.authority }} / {{ bucket.alpn }} / {{ bucket.transport }}
                 </div>

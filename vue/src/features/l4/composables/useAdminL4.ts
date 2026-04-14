@@ -81,6 +81,20 @@ export function useAdminL4() {
         payload.behavior_reject_threshold_percent,
       behavior_critical_reject_threshold_percent:
         payload.behavior_critical_reject_threshold_percent,
+      trusted_cdn: {
+        manual_cidrs: [...payload.trusted_cdn.manual_cidrs],
+        effective_cidrs: [...payload.trusted_cdn.effective_cidrs],
+        sync_interval_value: payload.trusted_cdn.sync_interval_value,
+        sync_interval_unit: payload.trusted_cdn.sync_interval_unit,
+        edgeone_overseas: {
+          ...payload.trusted_cdn.edgeone_overseas,
+          synced_cidrs: [...payload.trusted_cdn.edgeone_overseas.synced_cidrs],
+        },
+        aliyun_esa: {
+          ...payload.trusted_cdn.aliyun_esa,
+          synced_cidrs: [...payload.trusted_cdn.aliyun_esa.synced_cidrs],
+        },
+      },
     })
 
     meta.value = {
@@ -263,6 +277,12 @@ export function useAdminL4() {
         1,
         10_000,
         200,
+      )
+      configForm.trusted_cdn.sync_interval_value = clampInteger(
+        configForm.trusted_cdn.sync_interval_value,
+        1,
+        365,
+        12,
       )
 
       const response = await updateL4Config({ ...configForm })

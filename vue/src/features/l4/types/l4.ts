@@ -1,3 +1,27 @@
+export interface TrustedCdnProviderPayload {
+  enabled: boolean
+  synced_cidrs: string[]
+  last_synced_at: number | null
+  last_sync_status: 'idle' | 'success' | 'error' | string
+  last_sync_message: string
+}
+
+export interface TrustedCdnAliyunEsaPayload extends TrustedCdnProviderPayload {
+  site_id: string
+  access_key_id: string
+  access_key_secret: string
+  endpoint: string
+}
+
+export interface TrustedCdnConfigPayload {
+  manual_cidrs: string[]
+  effective_cidrs: string[]
+  sync_interval_value: number
+  sync_interval_unit: 'minute' | 'hour' | 'day' | string
+  edgeone_overseas: TrustedCdnProviderPayload
+  aliyun_esa: TrustedCdnAliyunEsaPayload
+}
+
 export interface L4ConfigPayload {
   ddos_protection_enabled: boolean
   advanced_ddos_enabled: boolean
@@ -29,6 +53,7 @@ export interface L4ConfigPayload {
   bloom_enabled: boolean
   bloom_false_positive_verification: boolean
   runtime_profile: 'minimal' | 'standard' | string
+  trusted_cdn: TrustedCdnConfigPayload
 }
 
 export interface L4ConnectionStats {
@@ -113,6 +138,7 @@ export interface L4BucketPolicy {
 
 export interface L4BucketItem {
   peer_ip: string
+  peer_kind: 'direct_client' | 'trusted_proxy' | string
   authority: string
   alpn: string
   transport: string

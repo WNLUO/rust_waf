@@ -36,5 +36,29 @@ export function createDefaultL4ConfigForm(): L4ConfigForm {
     behavior_hard_delay_ms: 60,
     behavior_reject_threshold_percent: 300,
     behavior_critical_reject_threshold_percent: 200,
+    trusted_cdn: {
+      manual_cidrs: [],
+      effective_cidrs: [],
+      sync_interval_value: 12,
+      sync_interval_unit: 'hour',
+      edgeone_overseas: {
+        enabled: false,
+        synced_cidrs: [],
+        last_synced_at: null,
+        last_sync_status: 'idle',
+        last_sync_message: '',
+      },
+      aliyun_esa: {
+        enabled: false,
+        site_id: '',
+        access_key_id: '',
+        access_key_secret: '',
+        endpoint: 'esa.cn-hangzhou.aliyuncs.com',
+        synced_cidrs: [],
+        last_synced_at: null,
+        last_sync_status: 'idle',
+        last_sync_message: '',
+      },
+    },
   }
 }

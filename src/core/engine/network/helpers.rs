@@ -21,8 +21,7 @@ pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
     }
 
     config
-        .l7_config
-        .trusted_proxy_cidrs
+        .effective_trusted_proxy_cidrs()
         .iter()
         .filter_map(|cidr| cidr.parse::<ipnet::IpNet>().ok())
         .any(|network| network.contains(&peer_ip))

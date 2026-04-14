@@ -53,6 +53,39 @@ pub struct L4ConfigResponse {
     pub(crate) bloom_enabled: bool,
     pub(crate) bloom_false_positive_verification: bool,
     pub(crate) runtime_profile: String,
+    pub(crate) trusted_cdn: TrustedCdnConfigResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrustedCdnConfigResponse {
+    pub(crate) manual_cidrs: Vec<String>,
+    pub(crate) effective_cidrs: Vec<String>,
+    pub(crate) sync_interval_value: u64,
+    pub(crate) sync_interval_unit: String,
+    pub(crate) edgeone_overseas: TrustedCdnProviderResponse,
+    pub(crate) aliyun_esa: TrustedCdnAliyunEsaResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrustedCdnProviderResponse {
+    pub(crate) enabled: bool,
+    pub(crate) synced_cidrs: Vec<String>,
+    pub(crate) last_synced_at: Option<i64>,
+    pub(crate) last_sync_status: String,
+    pub(crate) last_sync_message: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrustedCdnAliyunEsaResponse {
+    pub(crate) enabled: bool,
+    pub(crate) site_id: String,
+    pub(crate) access_key_id: String,
+    pub(crate) access_key_secret: String,
+    pub(crate) endpoint: String,
+    pub(crate) synced_cidrs: Vec<String>,
+    pub(crate) last_synced_at: Option<i64>,
+    pub(crate) last_sync_status: String,
+    pub(crate) last_sync_message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -157,6 +190,42 @@ pub struct L4ConfigUpdateRequest {
     pub(crate) behavior_hard_delay_ms: u64,
     pub(crate) behavior_reject_threshold_percent: u16,
     pub(crate) behavior_critical_reject_threshold_percent: u16,
+    #[serde(default)]
+    pub(crate) trusted_cdn: TrustedCdnConfigRequest,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TrustedCdnConfigRequest {
+    #[serde(default)]
+    pub(crate) manual_cidrs: Vec<String>,
+    #[serde(default)]
+    pub(crate) sync_interval_value: u64,
+    #[serde(default)]
+    pub(crate) sync_interval_unit: String,
+    #[serde(default)]
+    pub(crate) edgeone_overseas: TrustedCdnProviderRequest,
+    #[serde(default)]
+    pub(crate) aliyun_esa: TrustedCdnAliyunEsaRequest,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TrustedCdnProviderRequest {
+    #[serde(default)]
+    pub(crate) enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct TrustedCdnAliyunEsaRequest {
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) site_id: String,
+    #[serde(default)]
+    pub(crate) access_key_id: String,
+    #[serde(default)]
+    pub(crate) access_key_secret: String,
+    #[serde(default)]
+    pub(crate) endpoint: String,
 }
 
 #[derive(Debug, Deserialize)]

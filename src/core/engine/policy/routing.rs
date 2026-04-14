@@ -240,8 +240,7 @@ fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> boo
 
     let config = context.config_snapshot();
     config
-        .l7_config
-        .trusted_proxy_cidrs
+        .effective_trusted_proxy_cidrs()
         .iter()
         .filter_map(|cidr| cidr.parse::<IpNet>().ok())
         .any(|network| network.contains(&peer_ip))

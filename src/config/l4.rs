@@ -47,6 +47,76 @@ pub struct L4Config {
     pub behavior_reject_threshold_percent: u16,
     #[serde(default = "default_behavior_critical_reject_threshold_percent")]
     pub behavior_critical_reject_threshold_percent: u16,
+    #[serde(default)]
+    pub trusted_cdn: TrustedCdnConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustedCdnConfig {
+    #[serde(default)]
+    pub manual_cidrs: Vec<String>,
+    #[serde(default = "default_trusted_cdn_sync_interval_value")]
+    pub sync_interval_value: u64,
+    #[serde(default)]
+    pub sync_interval_unit: TrustedCdnSyncIntervalUnit,
+    #[serde(default)]
+    pub edgeone_overseas: TrustedCdnEdgeOneConfig,
+    #[serde(default)]
+    pub aliyun_esa: TrustedCdnAliyunEsaConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedCdnSyncIntervalUnit {
+    #[default]
+    Minute,
+    Hour,
+    Day,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustedCdnEdgeOneConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub synced_cidrs: Vec<String>,
+    #[serde(default)]
+    pub last_synced_at: Option<i64>,
+    #[serde(default)]
+    pub last_sync_status: TrustedCdnSyncStatus,
+    #[serde(default)]
+    pub last_sync_message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustedCdnAliyunEsaConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub site_id: String,
+    #[serde(default)]
+    pub access_key_id: String,
+    #[serde(default)]
+    pub access_key_secret: String,
+    #[serde(default = "default_aliyun_esa_endpoint")]
+    pub endpoint: String,
+    #[serde(default)]
+    pub synced_cidrs: Vec<String>,
+    #[serde(default)]
+    pub last_synced_at: Option<i64>,
+    #[serde(default)]
+    pub last_sync_status: TrustedCdnSyncStatus,
+    #[serde(default)]
+    pub last_sync_message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustedCdnSyncStatus {
+    #[default]
+    Idle,
+    Success,
+    Error,
 }
 
 const fn default_bloom_filter_scale() -> f64 {
@@ -125,6 +195,82 @@ const fn default_behavior_critical_reject_threshold_percent() -> u16 {
     200
 }
 
+const fn default_trusted_cdn_sync_interval_value() -> u64 {
+    12
+}
+
+fn default_aliyun_esa_endpoint() -> String {
+    "esa.cn-hangzhou.aliyuncs.com".to_string()
+}
+
+impl TrustedCdnConfig {
+    pub fn sync_interval_secs(&self) -> u64 {
+        let base = self.sync_interval_value.max(1);
+        match self.sync_interval_unit {
+            TrustedCdnSyncIntervalUnit::Minute => base.saturating_mul(60),
+            TrustedCdnSyncIntervalUnit::Hour => base.saturating_mul(60 * 60),
+            TrustedCdnSyncIntervalUnit::Day => base.saturating_mul(60 * 60 * 24),
+        }
+    }
+
+    pub fn enabled_synced_cidrs(&self) -> Vec<String> {
+        let mut cidrs = Vec::new();
+        if self.edgeone_overseas.enabled {
+            cidrs.extend(self.edgeone_overseas.synced_cidrs.iter().cloned());
+        }
+        if self.aliyun_esa.enabled {
+            cidrs.extend(self.aliyun_esa.synced_cidrs.iter().cloned());
+        }
+        cidrs
+    }
+
+    pub fn effective_cidrs(&self) -> Vec<String> {
+        let mut cidrs = self.manual_cidrs.clone();
+        cidrs.extend(self.enabled_synced_cidrs());
+        cidrs
+    }
+}
+
+impl Default for TrustedCdnConfig {
+    fn default() -> Self {
+        Self {
+            manual_cidrs: Vec::new(),
+            sync_interval_value: default_trusted_cdn_sync_interval_value(),
+            sync_interval_unit: TrustedCdnSyncIntervalUnit::default(),
+            edgeone_overseas: TrustedCdnEdgeOneConfig::default(),
+            aliyun_esa: TrustedCdnAliyunEsaConfig::default(),
+        }
+    }
+}
+
+impl Default for TrustedCdnEdgeOneConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            synced_cidrs: Vec::new(),
+            last_synced_at: None,
+            last_sync_status: TrustedCdnSyncStatus::Idle,
+            last_sync_message: String::new(),
+        }
+    }
+}
+
+impl Default for TrustedCdnAliyunEsaConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            site_id: String::new(),
+            access_key_id: String::new(),
+            access_key_secret: String::new(),
+            endpoint: default_aliyun_esa_endpoint(),
+            synced_cidrs: Vec::new(),
+            last_synced_at: None,
+            last_sync_status: TrustedCdnSyncStatus::Idle,
+            last_sync_message: String::new(),
+        }
+    }
+}
+
 impl Default for L4Config {
     fn default() -> Self {
         Self {
@@ -162,6 +308,7 @@ impl Default for L4Config {
             behavior_reject_threshold_percent: default_behavior_reject_threshold_percent(),
             behavior_critical_reject_threshold_percent:
                 default_behavior_critical_reject_threshold_percent(),
+            trusted_cdn: TrustedCdnConfig::default(),
         }
     }
 }

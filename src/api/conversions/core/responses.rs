@@ -1,6 +1,7 @@
 use super::helpers::{
     auto_tuning_intent_label, auto_tuning_mode_label, display_https_listen_port,
     safeline_intercept_action_label, safeline_intercept_match_mode_label, source_ip_strategy_label,
+    trusted_cdn_sync_interval_unit_label, trusted_cdn_sync_status_label,
     upstream_failure_mode_label,
 };
 use super::*;
@@ -92,6 +93,68 @@ impl L4ConfigResponse {
             bloom_enabled: config.bloom_enabled,
             bloom_false_positive_verification: config.l4_bloom_false_positive_verification,
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+            trusted_cdn: TrustedCdnConfigResponse {
+                manual_cidrs: config.l4_config.trusted_cdn.manual_cidrs.clone(),
+                effective_cidrs: config.l4_config.trusted_cdn.effective_cidrs(),
+                sync_interval_value: config.l4_config.trusted_cdn.sync_interval_value,
+                sync_interval_unit: trusted_cdn_sync_interval_unit_label(
+                    config.l4_config.trusted_cdn.sync_interval_unit,
+                )
+                .to_string(),
+                edgeone_overseas: TrustedCdnProviderResponse {
+                    enabled: config.l4_config.trusted_cdn.edgeone_overseas.enabled,
+                    synced_cidrs: config
+                        .l4_config
+                        .trusted_cdn
+                        .edgeone_overseas
+                        .synced_cidrs
+                        .clone(),
+                    last_synced_at: config.l4_config.trusted_cdn.edgeone_overseas.last_synced_at,
+                    last_sync_status: trusted_cdn_sync_status_label(
+                        config
+                            .l4_config
+                            .trusted_cdn
+                            .edgeone_overseas
+                            .last_sync_status,
+                    )
+                    .to_string(),
+                    last_sync_message: config
+                        .l4_config
+                        .trusted_cdn
+                        .edgeone_overseas
+                        .last_sync_message
+                        .clone(),
+                },
+                aliyun_esa: TrustedCdnAliyunEsaResponse {
+                    enabled: config.l4_config.trusted_cdn.aliyun_esa.enabled,
+                    site_id: config.l4_config.trusted_cdn.aliyun_esa.site_id.clone(),
+                    access_key_id: config
+                        .l4_config
+                        .trusted_cdn
+                        .aliyun_esa
+                        .access_key_id
+                        .clone(),
+                    access_key_secret: config
+                        .l4_config
+                        .trusted_cdn
+                        .aliyun_esa
+                        .access_key_secret
+                        .clone(),
+                    endpoint: config.l4_config.trusted_cdn.aliyun_esa.endpoint.clone(),
+                    synced_cidrs: config.l4_config.trusted_cdn.aliyun_esa.synced_cidrs.clone(),
+                    last_synced_at: config.l4_config.trusted_cdn.aliyun_esa.last_synced_at,
+                    last_sync_status: trusted_cdn_sync_status_label(
+                        config.l4_config.trusted_cdn.aliyun_esa.last_sync_status,
+                    )
+                    .to_string(),
+                    last_sync_message: config
+                        .l4_config
+                        .trusted_cdn
+                        .aliyun_esa
+                        .last_sync_message
+                        .clone(),
+                },
+            },
         }
     }
 }

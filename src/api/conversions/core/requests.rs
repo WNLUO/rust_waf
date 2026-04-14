@@ -1,7 +1,7 @@
 use super::helpers::{
     normalize_https_listen_addr_input, parse_auto_tuning_intent, parse_auto_tuning_mode,
     parse_safeline_intercept_action, parse_safeline_intercept_match_mode, parse_source_ip_strategy,
-    parse_upstream_failure_mode,
+    parse_trusted_cdn_sync_interval_unit, parse_upstream_failure_mode,
 };
 use super::*;
 
@@ -40,6 +40,9 @@ impl HeaderOperationPayload {
 
 impl L4ConfigUpdateRequest {
     pub(crate) fn into_config(self, mut current: Config) -> Config {
+        let previous_trusted_cdn = current.l4_config.trusted_cdn.clone();
+        let previous_edgeone = previous_trusted_cdn.edgeone_overseas;
+        let previous_aliyun_esa = previous_trusted_cdn.aliyun_esa;
         current.l4_config = L4Config {
             ddos_protection_enabled: self.ddos_protection_enabled,
             advanced_ddos_enabled: self.advanced_ddos_enabled,
@@ -75,6 +78,32 @@ impl L4ConfigUpdateRequest {
             behavior_reject_threshold_percent: self.behavior_reject_threshold_percent,
             behavior_critical_reject_threshold_percent: self
                 .behavior_critical_reject_threshold_percent,
+            trusted_cdn: crate::config::l4::TrustedCdnConfig {
+                manual_cidrs: self.trusted_cdn.manual_cidrs,
+                sync_interval_value: self.trusted_cdn.sync_interval_value,
+                sync_interval_unit: parse_trusted_cdn_sync_interval_unit(
+                    &self.trusted_cdn.sync_interval_unit,
+                )
+                .unwrap_or_default(),
+                edgeone_overseas: crate::config::l4::TrustedCdnEdgeOneConfig {
+                    enabled: self.trusted_cdn.edgeone_overseas.enabled,
+                    synced_cidrs: previous_edgeone.synced_cidrs,
+                    last_synced_at: previous_edgeone.last_synced_at,
+                    last_sync_status: previous_edgeone.last_sync_status,
+                    last_sync_message: previous_edgeone.last_sync_message,
+                },
+                aliyun_esa: crate::config::l4::TrustedCdnAliyunEsaConfig {
+                    enabled: self.trusted_cdn.aliyun_esa.enabled,
+                    site_id: self.trusted_cdn.aliyun_esa.site_id,
+                    access_key_id: self.trusted_cdn.aliyun_esa.access_key_id,
+                    access_key_secret: self.trusted_cdn.aliyun_esa.access_key_secret,
+                    endpoint: self.trusted_cdn.aliyun_esa.endpoint,
+                    synced_cidrs: previous_aliyun_esa.synced_cidrs,
+                    last_synced_at: previous_aliyun_esa.last_synced_at,
+                    last_sync_status: previous_aliyun_esa.last_sync_status,
+                    last_sync_message: previous_aliyun_esa.last_sync_message,
+                },
+            },
         };
 
         current.normalized()

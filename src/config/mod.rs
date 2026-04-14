@@ -27,6 +27,25 @@ pub use http3::Http3Config;
 pub use l4::L4Config;
 pub use l7::L7Config;
 
+impl Config {
+    pub fn effective_trusted_proxy_cidrs(&self) -> Vec<String> {
+        let mut cidrs = Vec::new();
+
+        for cidr in &self.l7_config.trusted_proxy_cidrs {
+            if !cidrs.iter().any(|item| item == cidr) {
+                cidrs.push(cidr.clone());
+            }
+        }
+        for cidr in self.l4_config.trusted_cdn.effective_cidrs() {
+            if !cidrs.iter().any(|item| item == &cidr) {
+                cidrs.push(cidr);
+            }
+        }
+
+        cidrs
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +114,17 @@ mod tests {
     #[test]
     fn normalized_cleans_real_ip_headers_and_trusted_proxy_cidrs() {
         let config = Config {
+            l4_config: L4Config {
+                trusted_cdn: l4::TrustedCdnConfig {
+                    manual_cidrs: vec![
+                        " 192.0.2.0/24 ".to_string(),
+                        "".to_string(),
+                        "192.0.2.0/24".to_string(),
+                    ],
+                    ..l4::TrustedCdnConfig::default()
+                },
+                ..L4Config::default()
+            },
             l7_config: L7Config {
                 real_ip_headers: vec![
                     " X-Forwarded-For ".to_string(),
@@ -122,6 +152,43 @@ mod tests {
         assert_eq!(
             config.l7_config.trusted_proxy_cidrs,
             vec!["203.0.113.0/24".to_string(), "198.51.100.10/32".to_string()]
+        );
+        assert_eq!(
+            config.l4_config.trusted_cdn.manual_cidrs,
+            vec!["192.0.2.0/24".to_string()]
+        );
+    }
+
+    #[test]
+    fn effective_trusted_proxy_cidrs_merge_global_and_trusted_cdn() {
+        let config = Config {
+            l4_config: L4Config {
+                trusted_cdn: l4::TrustedCdnConfig {
+                    manual_cidrs: vec!["192.0.2.0/24".to_string()],
+                    edgeone_overseas: l4::TrustedCdnEdgeOneConfig {
+                        enabled: true,
+                        synced_cidrs: vec!["198.51.100.0/24".to_string()],
+                        ..l4::TrustedCdnEdgeOneConfig::default()
+                    },
+                    ..l4::TrustedCdnConfig::default()
+                },
+                ..L4Config::default()
+            },
+            l7_config: L7Config {
+                trusted_proxy_cidrs: vec!["203.0.113.0/24".to_string()],
+                ..L7Config::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(
+            config.effective_trusted_proxy_cidrs(),
+            vec![
+                "203.0.113.0/24".to_string(),
+                "192.0.2.0/24".to_string(),
+                "198.51.100.0/24".to_string()
+            ]
         );
     }
 

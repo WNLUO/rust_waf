@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminL4ConfigFormCard from '@/features/l4/components/AdminL4ConfigFormCard.vue'
+import AdminTrustedCdnDialog from '@/features/l4/components/AdminTrustedCdnDialog.vue'
 import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
 import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
 import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
@@ -62,6 +63,7 @@ const {
 } = useAdminL7()
 
 const savingAll = ref(false)
+const trustedCdnDialogOpen = ref(false)
 const advancedGlobalSectionRef = ref<{
   saveSettings: () => Promise<boolean>
 } | null>(null)
@@ -96,6 +98,13 @@ async function saveAllSettings() {
     }
   } finally {
     savingAll.value = false
+  }
+}
+
+async function saveTrustedCdnSettings() {
+  const ok = await saveL4Config()
+  if (ok) {
+    trustedCdnDialogOpen.value = false
   }
 }
 
@@ -178,6 +187,12 @@ useFlashMessages({
               <p class="text-sm tracking-wider text-blue-700">L4 管理</p>
             </div>
             <div class="flex items-center gap-2">
+              <button
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
+                @click="trustedCdnDialogOpen = true"
+              >
+                可信CDN配置
+              </button>
               <label
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
               >
@@ -267,6 +282,14 @@ useFlashMessages({
       @update:upload-certificate-domains-text="
         uploadCertificateDomainsText = $event
       "
+    />
+
+    <AdminTrustedCdnDialog
+      :form="l4ConfigForm"
+      :is-open="trustedCdnDialogOpen"
+      :saving="savingL4"
+      @close="trustedCdnDialogOpen = false"
+      @save="saveTrustedCdnSettings"
     />
   </AppLayout>
 </template>

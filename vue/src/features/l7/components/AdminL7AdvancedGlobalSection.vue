@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
+import { Plus, Trash2 } from 'lucide-vue-next'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
 import type { GlobalSettingsPayload, HeaderOperationItem } from '@/shared/types'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
@@ -187,14 +187,6 @@ onMounted(loadSettings)
       <div>
         <p class="text-sm tracking-wider text-blue-700">高级配置</p>
       </div>
-      <button
-        :disabled="loading"
-        class="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-        @click="loadSettings"
-      >
-        <RefreshCw :size="12" :class="{ 'animate-spin': loading }" />
-        刷新
-      </button>
     </div>
 
     <div

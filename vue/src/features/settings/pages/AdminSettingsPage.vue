@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RefreshCw, Save } from 'lucide-vue-next'
+import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminL4ConfigFormCard from '@/features/l4/components/AdminL4ConfigFormCard.vue'
 import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
@@ -45,8 +45,6 @@ const {
   configForm: l4ConfigForm,
   error: l4Error,
   loading: l4Loading,
-  refreshAll: refreshL4,
-  refreshing: refreshingL4,
   saveConfig: saveL4Config,
   saving: savingL4,
   successMessage: l4SuccessMessage,
@@ -56,8 +54,6 @@ const {
   configForm: l7ConfigForm,
   error: l7Error,
   loading: l7Loading,
-  refreshAll: refreshL7,
-  refreshing: refreshingL7,
   saveConfig: saveL7Config,
   saving: savingL7,
   successMessage: l7SuccessMessage,
@@ -201,14 +197,6 @@ useFlashMessages({
                   class="ui-switch"
                 />
               </label>
-              <button
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-                :disabled="refreshingL4"
-                @click="refreshL4()"
-              >
-                <RefreshCw :size="14" :class="{ 'animate-spin': refreshingL4 }" />
-                刷新
-              </button>
             </div>
           </div>
 
@@ -236,14 +224,6 @@ useFlashMessages({
                 <p class="text-sm tracking-wider text-blue-700">L7 管理</p>
               </div>
               <div class="flex items-center gap-2">
-                <button
-                  :disabled="refreshingL7"
-                  class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-4 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700 disabled:opacity-60"
-                  @click="refreshL7()"
-                >
-                  <RefreshCw :size="14" :class="{ 'animate-spin': refreshingL7 }" />
-                  刷新
-                </button>
               </div>
             </div>
 

@@ -223,11 +223,8 @@ function truncateCertificateName(name: string, maxLength = 18) {
                 <input
                   v-model="safeLineVerifyTls"
                   type="checkbox"
-                  class="peer sr-only"
+                  class="ui-switch"
                 />
-                <span
-                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
-                ></span>
                 <span>校验证书</span>
               </label>
               <div class="h-3 w-px bg-slate-200"></div>
@@ -235,33 +232,24 @@ function truncateCertificateName(name: string, maxLength = 18) {
                 <input
                   v-model="safeLineAutoSyncEvents"
                   type="checkbox"
-                  class="peer sr-only"
+                  class="ui-switch"
                 />
-                <span
-                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
-                ></span>
                 <span>同步事件</span>
               </label>
               <label class="inline-flex items-center gap-2 text-xs text-stone-700">
                 <input
                   v-model="safeLineAutoSyncPush"
                   type="checkbox"
-                  class="peer sr-only"
+                  class="ui-switch"
                 />
-                <span
-                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
-                ></span>
                 <span>推送封禁</span>
               </label>
               <label class="inline-flex items-center gap-2 text-xs text-stone-700">
                 <input
                   v-model="safeLineAutoSyncPull"
                   type="checkbox"
-                  class="peer sr-only"
+                  class="ui-switch"
                 />
-                <span
-                  class="relative h-5 w-9 rounded-full bg-slate-300 transition peer-checked:bg-blue-600 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-4"
-                ></span>
                 <span>回流封禁</span>
               </label>
               <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
@@ -370,5 +358,41 @@ function truncateCertificateName(name: string, maxLength = 18) {
 
 .no-spinner {
   -moz-appearance: textfield;
+}
+
+.ui-switch {
+  appearance: none;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  background: rgb(203 213 225);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.ui-switch::after {
+  content: '';
+  position: absolute;
+  top: 0.125rem;
+  left: 0.125rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background: white;
+  transition: transform 0.2s ease;
+}
+
+.ui-switch:checked {
+  background: rgb(37 99 235);
+}
+
+.ui-switch:checked::after {
+  transform: translateX(1rem);
+}
+
+.ui-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 </style>

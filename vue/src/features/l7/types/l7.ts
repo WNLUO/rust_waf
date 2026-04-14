@@ -75,6 +75,15 @@ export interface AutoTuningRuntimePayload {
   last_adjust_diff: string[]
   rollback_count_24h: number
   cooldown_until: number | null
+  last_effect_evaluation: {
+    status: 'pending' | 'improved' | 'regressed' | 'mixed' | 'inconclusive' | string
+    observed_at: number | null
+    sample_requests: number
+    handshake_timeout_rate_delta_percent: number
+    bucket_reject_rate_delta_percent: number
+    avg_proxy_latency_delta_ms: number
+    summary: string
+  } | null
   last_observed_tls_handshake_timeout_rate_percent: number
   last_observed_bucket_reject_rate_percent: number
   last_observed_avg_proxy_latency_ms: number

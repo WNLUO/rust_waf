@@ -76,7 +76,16 @@ struct MetricDeltas {
 struct PendingEffectEvaluation {
     adjust_at: i64,
     reason: String,
+    action_kind: AutoTuningActionKind,
     baseline: MetricDeltas,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AutoTuningActionKind {
+    Bootstrap,
+    Handshake,
+    Budget,
+    Latency,
 }
 
 pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
@@ -300,6 +309,9 @@ pub fn run_control_step(
             .last_adjust_reason
             .clone()
             .unwrap_or_else(|| "adjustment".to_string()),
+        action_kind_for_adjust_reason(
+            runtime.last_adjust_reason.as_deref().unwrap_or("adjustment"),
+        ),
         deltas,
     );
 
@@ -390,6 +402,7 @@ fn apply_bootstrap_recommendation(
         state,
         now,
         "bootstrap_recommendation_apply".to_string(),
+        AutoTuningActionKind::Bootstrap,
         deltas_from_runtime(runtime),
     );
 
@@ -833,30 +846,55 @@ fn evaluate_effect_against_baseline(
     let latency_delta =
         current.avg_proxy_latency_ms as i64 - pending.baseline.avg_proxy_latency_ms as i64;
 
-    let mut improved = 0u8;
-    let mut regressed = 0u8;
+    let score = match pending.action_kind {
+        AutoTuningActionKind::Handshake => {
+            score_percent_delta(handshake_delta, tolerance_percent(
+                pending.baseline.handshake_timeout_rate_percent,
+                0.05,
+            )) * 2
+                + score_percent_delta(
+                    bucket_delta,
+                    tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
+                )
+                + score_latency_delta(latency_delta)
+        }
+        AutoTuningActionKind::Budget => {
+            score_percent_delta(
+                bucket_delta,
+                tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
+            ) * 2
+                + score_percent_delta(handshake_delta, tolerance_percent(
+                    pending.baseline.handshake_timeout_rate_percent,
+                    0.05,
+                ))
+                + score_latency_delta(latency_delta)
+        }
+        AutoTuningActionKind::Latency => {
+            score_latency_delta(latency_delta) * 2
+                + score_percent_delta(handshake_delta, tolerance_percent(
+                    pending.baseline.handshake_timeout_rate_percent,
+                    0.05,
+                ))
+                + score_percent_delta(
+                    bucket_delta,
+                    tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
+                )
+        }
+        AutoTuningActionKind::Bootstrap => {
+            score_percent_delta(handshake_delta, tolerance_percent(
+                pending.baseline.handshake_timeout_rate_percent,
+                0.05,
+            )) + score_percent_delta(
+                bucket_delta,
+                tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
+            ) + score_latency_delta(latency_delta)
+        }
+    };
 
-    score_metric_delta(
-        handshake_delta,
-        tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
-        &mut improved,
-        &mut regressed,
-    );
-    score_metric_delta(
-        bucket_delta,
-        tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
-        &mut improved,
-        &mut regressed,
-    );
-    if latency_delta <= -50 {
-        improved = improved.saturating_add(1);
-    } else if latency_delta >= 100 {
-        regressed = regressed.saturating_add(1);
-    }
-
-    let status = if regressed > improved {
+    let focus = action_kind_label(pending.action_kind);
+    let status = if score <= -2 {
         "regressed"
-    } else if improved > regressed {
+    } else if score >= 2 {
         "improved"
     } else {
         "mixed"
@@ -870,17 +908,30 @@ fn evaluate_effect_against_baseline(
         bucket_reject_rate_delta_percent: bucket_delta,
         avg_proxy_latency_delta_ms: latency_delta,
         summary: format!(
-            "{} after {} (handshake {:+.2}pp, bucket {:+.2}pp, latency {:+}ms)",
-            status, pending.reason, handshake_delta, bucket_delta, latency_delta
+            "{} after {} with {} focus (handshake {:+.2}pp, bucket {:+.2}pp, latency {:+}ms)",
+            status, pending.reason, focus, handshake_delta, bucket_delta, latency_delta
         ),
     }
 }
 
-fn score_metric_delta(delta: f64, tolerance: f64, improved: &mut u8, regressed: &mut u8) {
+fn score_percent_delta(delta: f64, tolerance: f64) -> i8 {
     if delta <= -tolerance {
-        *improved = improved.saturating_add(1);
+        1
     } else if delta >= tolerance {
-        *regressed = regressed.saturating_add(1);
+        -1
+    } else {
+        0
+    }
+}
+
+fn score_latency_delta(delta_ms: i64) -> i8 {
+    if delta_ms <= -50 {
+        1
+    } else if delta_ms >= 100 {
+        -1
+    }
+    else {
+        0
     }
 }
 
@@ -893,11 +944,13 @@ fn arm_effect_evaluation(
     state: &mut AutoTuningControllerState,
     now: i64,
     reason: String,
+    action_kind: AutoTuningActionKind,
     baseline: MetricDeltas,
 ) {
     state.pending_effect_evaluation = Some(PendingEffectEvaluation {
         adjust_at: now,
         reason: reason.clone(),
+        action_kind,
         baseline,
     });
     runtime.last_effect_evaluation = Some(AutoTuningEffectEvaluationSnapshot {
@@ -909,6 +962,25 @@ fn arm_effect_evaluation(
         avg_proxy_latency_delta_ms: 0,
         summary: format!("waiting to evaluate {}", reason),
     });
+}
+
+fn action_kind_for_adjust_reason(reason: &str) -> AutoTuningActionKind {
+    match reason {
+        "adjust_for_handshake" => AutoTuningActionKind::Handshake,
+        "adjust_for_budget" => AutoTuningActionKind::Budget,
+        "adjust_for_latency" => AutoTuningActionKind::Latency,
+        "bootstrap_recommendation_apply" => AutoTuningActionKind::Bootstrap,
+        _ => AutoTuningActionKind::Bootstrap,
+    }
+}
+
+fn action_kind_label(action: AutoTuningActionKind) -> &'static str {
+    match action {
+        AutoTuningActionKind::Bootstrap => "bootstrap",
+        AutoTuningActionKind::Handshake => "handshake",
+        AutoTuningActionKind::Budget => "budget",
+        AutoTuningActionKind::Latency => "latency",
+    }
 }
 
 fn deltas_from_runtime(runtime: &AutoTuningRuntimeSnapshot) -> MetricDeltas {

@@ -155,6 +155,53 @@ const autoPinnedFieldsText = computed({
   },
 })
 
+const autoEffectEvaluation = computed(
+  () => props.autoTuningRuntime?.last_effect_evaluation ?? null,
+)
+
+const autoEffectStatusLabel = computed(() => {
+  switch (autoEffectEvaluation.value?.status) {
+    case 'pending':
+      return '观察中'
+    case 'improved':
+      return '已改善'
+    case 'regressed':
+      return '已恶化'
+    case 'mixed':
+      return '结果混合'
+    case 'inconclusive':
+      return '证据不足'
+    default:
+      return autoEffectEvaluation.value?.status || '未知'
+  }
+})
+
+const autoEffectStatusClass = computed(() => {
+  switch (autoEffectEvaluation.value?.status) {
+    case 'improved':
+      return 'text-emerald-700'
+    case 'regressed':
+      return 'text-rose-700'
+    case 'mixed':
+      return 'text-amber-700'
+    case 'pending':
+      return 'text-blue-700'
+    default:
+      return 'text-stone-700'
+  }
+})
+
+function formatSignedNumber(value: number, digits = 2) {
+  const normalized = Number.isFinite(value) ? value : 0
+  const fixed = normalized.toFixed(digits)
+  return normalized > 0 ? `+${fixed}` : fixed
+}
+
+function formatSignedInteger(value: number) {
+  const normalized = Number.isFinite(value) ? Math.round(value) : 0
+  return normalized > 0 ? `+${normalized}` : `${normalized}`
+}
+
 function updateCcDefense(patch: Partial<L7ConfigForm['cc_defense']>) {
   updateForm('cc_defense', {
     ...props.form.cc_defense,
@@ -642,6 +689,24 @@ const safelineResponseBodySource = computed({
           最近动作: {{ autoTuningRuntime.last_adjust_reason || 'none' }} |
           24h 回滚: {{ autoTuningRuntime.rollback_count_24h }}
         </p>
+        <template v-if="autoEffectEvaluation">
+          <p class="mt-1">
+            最近效果:
+            <span :class="autoEffectStatusClass">{{ autoEffectStatusLabel }}</span>
+            | 样本 {{ autoEffectEvaluation.sample_requests }}
+            <span v-if="autoEffectEvaluation.observed_at !== null">
+              | 评估时间 {{ new Date(autoEffectEvaluation.observed_at * 1000).toLocaleString() }}
+            </span>
+          </p>
+          <p class="mt-1">
+            变化: 握手超时率 {{ formatSignedNumber(autoEffectEvaluation.handshake_timeout_rate_delta_percent) }}pp
+            / 预算拒绝率 {{ formatSignedNumber(autoEffectEvaluation.bucket_reject_rate_delta_percent) }}pp
+            / 平均代理延迟 {{ formatSignedInteger(autoEffectEvaluation.avg_proxy_latency_delta_ms) }}ms
+          </p>
+          <p class="mt-1">
+            说明: {{ autoEffectEvaluation.summary }}
+          </p>
+        </template>
       </div>
     </div>
 

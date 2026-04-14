@@ -8,6 +8,18 @@ pub(crate) async fn maybe_delay_request(request: &crate::protocol::UnifiedHttpRe
     }
 }
 
+pub(crate) fn peer_is_configured_trusted_proxy(
+    context: &crate::core::WafContext,
+    peer_ip: std::net::IpAddr,
+) -> bool {
+    context
+        .config_snapshot()
+        .effective_trusted_proxy_cidrs()
+        .iter()
+        .filter_map(|cidr| cidr.parse::<ipnet::IpNet>().ok())
+        .any(|network| network.contains(&peer_ip))
+}
+
 pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
     context: &crate::core::WafContext,
     peer_ip: std::net::IpAddr,
@@ -20,11 +32,7 @@ pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
         return false;
     }
 
-    config
-        .effective_trusted_proxy_cidrs()
-        .iter()
-        .filter_map(|cidr| cidr.parse::<ipnet::IpNet>().ok())
-        .any(|network| network.contains(&peer_ip))
+    peer_is_configured_trusted_proxy(context, peer_ip)
 }
 
 pub(crate) async fn maybe_delay_policy(policy: &crate::l4::behavior::L4AdaptivePolicy) {

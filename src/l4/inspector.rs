@@ -70,7 +70,11 @@ impl L4Inspector {
         Ok(())
     }
 
-    pub fn inspect_packet(&self, packet: &PacketInfo) -> InspectionResult {
+    pub fn inspect_packet(
+        &self,
+        packet: &PacketInfo,
+        trusted_proxy_peer: bool,
+    ) -> InspectionResult {
         debug!("Inspecting packet at L4 layer");
 
         let port = packet.dest_port.to_string();
@@ -78,27 +82,29 @@ impl L4Inspector {
         // Track connection
         self.connection_manager.track(packet);
 
-        match self.connection_manager.check_rate_limit(&packet.source_ip) {
-            RateLimitDecision::Allowed => {}
-            RateLimitDecision::Rejected => {
-                self.record_port_event(&port, |stats| {
-                    stats.increment_block();
-                });
-                self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                return InspectionResult::block(
-                    InspectionLayer::L4,
-                    "Connection rejected by L4 rate limiter",
-                );
-            }
-            RateLimitDecision::RejectedAndBlocked => {
-                self.record_port_event(&port, |stats| {
-                    stats.increment_block();
-                });
-                self.defense_actions.fetch_add(1, Ordering::Relaxed);
-                return InspectionResult::block_and_persist_ip(
-                    InspectionLayer::L4,
-                    "Connection rejected by L4 rate limiter",
-                );
+        if !trusted_proxy_peer {
+            match self.connection_manager.check_rate_limit(&packet.source_ip) {
+                RateLimitDecision::Allowed => {}
+                RateLimitDecision::Rejected => {
+                    self.record_port_event(&port, |stats| {
+                        stats.increment_block();
+                    });
+                    self.defense_actions.fetch_add(1, Ordering::Relaxed);
+                    return InspectionResult::block(
+                        InspectionLayer::L4,
+                        "Connection rejected by L4 rate limiter",
+                    );
+                }
+                RateLimitDecision::RejectedAndBlocked => {
+                    self.record_port_event(&port, |stats| {
+                        stats.increment_block();
+                    });
+                    self.defense_actions.fetch_add(1, Ordering::Relaxed);
+                    return InspectionResult::block_and_persist_ip(
+                        InspectionLayer::L4,
+                        "Connection rejected by L4 rate limiter",
+                    );
+                }
             }
         }
 
@@ -159,7 +165,7 @@ impl L4Inspector {
         }
 
         // DDoS detection (simplified)
-        if self.ddos_enabled && self.detect_simple_ddos(packet) {
+        if self.ddos_enabled && !trusted_proxy_peer && self.detect_simple_ddos(packet) {
             let blocked = self.connection_manager.block_ip(
                 &packet.source_ip,
                 "connection flood detected",

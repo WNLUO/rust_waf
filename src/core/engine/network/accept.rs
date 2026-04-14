@@ -8,10 +8,11 @@ pub(crate) async fn handle_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
 
-    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
     if l4_result.should_persist_event() {
         persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
     }
@@ -70,11 +71,12 @@ pub(crate) async fn handle_tls_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
+    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let config = context.config_snapshot();
 
-    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
     if l4_result.should_persist_event() {
         persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
     }

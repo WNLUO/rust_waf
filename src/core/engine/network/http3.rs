@@ -11,12 +11,13 @@ pub(crate) async fn handle_http3_quic_connection(
     let connection = incoming.await?;
     let peer_addr = connection.remote_address();
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::UDP);
+    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let connection_id = next_connection_id(peer_addr, local_addr, "h3");
     let opened_at = std::time::Instant::now();
 
-    let l4_result = inspect_transport_layers(context.as_ref(), &packet);
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
     if l4_result.should_persist_event() {
         persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
     }

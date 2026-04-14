@@ -83,6 +83,25 @@ fn adaptive_permit_wait_ms(context: &WafContext, semaphore: &Semaphore) -> u64 {
     wait_ms.clamp(40, 800)
 }
 
+fn adaptive_permit_wait_ms_for_peer(
+    context: &WafContext,
+    semaphore: &Semaphore,
+    peer_addr: std::net::SocketAddr,
+    channel: &str,
+) -> u64 {
+    let wait_ms = adaptive_permit_wait_ms(context, semaphore);
+    let trusted_proxy_peer =
+        crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
+
+    if trusted_proxy_peer && channel.eq_ignore_ascii_case("TLS") {
+        (wait_ms.saturating_mul(2)).clamp(wait_ms, 1_500)
+    } else if trusted_proxy_peer {
+        (wait_ms.saturating_mul(2)).clamp(wait_ms, 1_200)
+    } else {
+        wait_ms
+    }
+}
+
 async fn acquire_permit_auto(
     context: &WafContext,
     semaphore: Arc<Semaphore>,
@@ -93,7 +112,7 @@ async fn acquire_permit_auto(
         return Some(permit);
     }
 
-    let wait_ms = adaptive_permit_wait_ms(context, semaphore.as_ref());
+    let wait_ms = adaptive_permit_wait_ms_for_peer(context, semaphore.as_ref(), peer_addr, channel);
     let wait = std::time::Duration::from_millis(wait_ms);
     match tokio::time::timeout(wait, semaphore.clone().acquire_owned()).await {
         Ok(Ok(permit)) => Some(permit),

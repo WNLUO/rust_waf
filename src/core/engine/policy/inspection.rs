@@ -92,9 +92,10 @@ fn inspect_l7_rules(
 pub(crate) fn inspect_transport_layers(
     context: &WafContext,
     packet: &PacketInfo,
+    trusted_proxy_peer: bool,
 ) -> InspectionResult {
     if let Some(l4_inspector) = context.l4_inspector() {
-        let l4_result = l4_inspector.inspect_packet(packet);
+        let l4_result = l4_inspector.inspect_packet(packet, trusted_proxy_peer);
         if l4_result.blocked || l4_result.should_persist_event() {
             return l4_result;
         }

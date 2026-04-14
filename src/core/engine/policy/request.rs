@@ -7,9 +7,19 @@ pub(crate) fn apply_client_identity(
 ) {
     let (resolved_client_ip, source_label, source_header_name) =
         resolve_client_ip(context, peer_addr, request);
+    let trusted_proxy_peer = context
+        .config_snapshot()
+        .effective_trusted_proxy_cidrs()
+        .iter()
+        .filter_map(|cidr| cidr.parse::<ipnet::IpNet>().ok())
+        .any(|network| network.contains(&peer_addr.ip()));
     let used_forwarded_header = source_label != "socket_peer";
 
     request.set_client_ip(resolved_client_ip.to_string());
+    request.add_metadata(
+        "network.trusted_proxy_peer".to_string(),
+        trusted_proxy_peer.to_string(),
+    );
     request.add_metadata("network.peer_ip".to_string(), peer_addr.ip().to_string());
     request.add_metadata(
         "network.client_ip".to_string(),
@@ -18,6 +28,10 @@ pub(crate) fn apply_client_identity(
     request.add_metadata(
         "network.client_ip_source".to_string(),
         source_label.to_string(),
+    );
+    request.add_metadata(
+        "network.client_ip_unresolved".to_string(),
+        (trusted_proxy_peer && source_label == "socket_peer").to_string(),
     );
 
     apply_proxy_headers(

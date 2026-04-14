@@ -114,6 +114,10 @@ impl L7CcGuard {
         let method = request.method.to_ascii_uppercase();
         let request_kind = classify_request(request, &route_path);
         let html_mode = challenge_mode(request, &route_path);
+        let client_identity_unresolved = request
+            .get_metadata("network.client_ip_unresolved")
+            .map(|value| value == "true")
+            .unwrap_or(false);
         let verified = self.has_valid_challenge_cookie(request, client_ip, &host);
         let now = Instant::now();
         let unix_now = unix_timestamp();
@@ -229,6 +233,10 @@ impl L7CcGuard {
             hot_path_effective.to_string(),
         );
         request.add_metadata("l7.cc.challenge_verified".to_string(), verified.to_string());
+        request.add_metadata(
+            "l7.cc.client_identity_unresolved".to_string(),
+            client_identity_unresolved.to_string(),
+        );
 
         self.maybe_cleanup(unix_now);
 
@@ -266,16 +274,17 @@ impl L7CcGuard {
             || ip_count >= hard_ip_block_threshold
             || hot_path_count >= hard_hot_path_block_threshold;
 
-        if hard_block
-            || (!low_risk_subresource
-                && (route_effective >= route_block_threshold
-                    || host_effective >= host_block_threshold
-                    || ip_effective >= ip_block_threshold
-                    || (hot_path_effective >= hot_path_block_threshold
-                        && route_effective >= self.config.route_challenge_threshold.max(3))))
+        if !client_identity_unresolved
+            && (hard_block
+                || (!low_risk_subresource
+                    && (route_effective >= route_block_threshold
+                        || host_effective >= host_block_threshold
+                        || ip_effective >= ip_block_threshold
+                        || (hot_path_effective >= hot_path_block_threshold
+                            && route_effective >= self.config.route_challenge_threshold.max(3)))))
         {
             let reason = format!(
-                "l7 cc guard throttled request: kind={} page_subresource={} ip={} host={} route={} hot_path={} raw_ip={} raw_host={} raw_route={} raw_hot_path={} verified={}",
+                "l7 cc guard throttled request: kind={} page_subresource={} ip={} host={} route={} hot_path={} raw_ip={} raw_host={} raw_route={} raw_hot_path={} verified={} identity_unresolved={}",
                 request_kind.as_str(),
                 is_page_subresource,
                 ip_effective,
@@ -286,7 +295,8 @@ impl L7CcGuard {
                 host_count,
                 route_count,
                 hot_path_count,
-                verified
+                verified,
+                client_identity_unresolved,
             );
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
             return Some(InspectionResult::respond(
@@ -313,7 +323,8 @@ impl L7CcGuard {
             .hot_path_challenge_threshold
             .saturating_mul(challenge_multiplier);
 
-        if !verified
+        if !client_identity_unresolved
+            && !verified
             && !low_risk_subresource
             && (route_effective >= route_challenge_threshold
                 || host_effective >= host_challenge_threshold
@@ -338,17 +349,25 @@ impl L7CcGuard {
             ));
         }
 
-        let delay_threshold = u32::from(self.config.delay_threshold_percent)
+        let delay_threshold_percent = if client_identity_unresolved {
+            self.config
+                .delay_threshold_percent
+                .saturating_sub(20)
+                .max(10)
+        } else {
+            self.config.delay_threshold_percent
+        };
+        let delay_threshold = u32::from(delay_threshold_percent)
             .saturating_mul(self.config.route_challenge_threshold.max(1))
             / 100;
         if self.config.delay_ms > 0
             && (route_effective >= delay_threshold.max(1)
                 || host_effective
-                    >= u32::from(self.config.delay_threshold_percent)
+                    >= u32::from(delay_threshold_percent)
                         .saturating_mul(self.config.host_challenge_threshold.max(1))
                         / 100
                 || ip_effective
-                    >= u32::from(self.config.delay_threshold_percent)
+                    >= u32::from(delay_threshold_percent)
                         .saturating_mul(self.config.ip_challenge_threshold.max(1))
                         / 100)
         {

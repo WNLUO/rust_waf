@@ -453,10 +453,10 @@ mod tests {
             false,
         );
 
-        assert!(!inspector.inspect_packet(&packet(8080)).blocked);
-        assert!(!inspector.inspect_packet(&packet(8080)).blocked);
+        assert!(!inspector.inspect_packet(&packet(8080), false).blocked);
+        assert!(!inspector.inspect_packet(&packet(8080), false).blocked);
 
-        let result = inspector.inspect_packet(&packet(8080));
+        let result = inspector.inspect_packet(&packet(8080), false);
         assert!(result.blocked);
         assert_eq!(result.layer, InspectionLayer::L4);
         assert!(result.reason.contains("DDoS attack detected"));

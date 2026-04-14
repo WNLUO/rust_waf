@@ -179,17 +179,45 @@ pub(super) fn policy_from_runtime(
             budget,
             tuning.critical_reject_threshold_percent,
         ));
-    let reject_new_connections = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+    let trusted_proxy = bucket.peer_kind == BucketPeerKind::TrustedProxy;
+    let reject_new_connections = if trusted_proxy {
         false
     } else {
         reject_new_connections
     };
+    let mut disable_keepalive = !matches!(bucket.risk_level, L4BucketRiskLevel::Normal);
+    let mut prefer_early_close = !matches!(bucket.risk_level, L4BucketRiskLevel::Normal);
+
+    if trusted_proxy {
+        let proxy_pressure = bucket.active_connections >= budget.max(1)
+            || matches!(
+                overload_level,
+                L4OverloadLevel::High | L4OverloadLevel::Critical
+            )
+            || !matches!(bucket.risk_level, L4BucketRiskLevel::Normal);
+        if proxy_pressure {
+            disable_keepalive = true;
+            prefer_early_close = true;
+        }
+
+        delay_ms = match bucket.risk_level {
+            L4BucketRiskLevel::Normal => delay_ms,
+            L4BucketRiskLevel::Suspicious => delay_ms.max(tuning.soft_delay_ms.max(20)),
+            L4BucketRiskLevel::High => delay_ms.max(tuning.hard_delay_ms.max(45)),
+        };
+
+        delay_ms = match overload_level {
+            L4OverloadLevel::Normal => delay_ms,
+            L4OverloadLevel::High => delay_ms.max(tuning.high_overload_delay_ms.max(25)),
+            L4OverloadLevel::Critical => delay_ms.max(tuning.critical_overload_delay_ms.max(60)),
+        };
+    }
 
     L4AdaptivePolicy {
         risk_level: bucket.risk_level.clone(),
         risk_score: bucket.score_ewma.round().clamp(0.0, 100.0) as u32,
-        disable_keepalive: !matches!(bucket.risk_level, L4BucketRiskLevel::Normal),
-        prefer_early_close: !matches!(bucket.risk_level, L4BucketRiskLevel::Normal),
+        disable_keepalive,
+        prefer_early_close,
         reject_new_connections,
         connection_budget_per_minute: budget.max(5),
         suggested_delay_ms: delay_ms,

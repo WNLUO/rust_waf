@@ -135,6 +135,9 @@ onMounted(loadPage)
           class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
+          <p class="mt-1 text-xs leading-5 text-slate-500">
+            这里的 Header 与可信代理配置会直接影响自适应 L7 对真实客户端的识别精度。它们属于入口解析配置，不建议当作手工防护阈值使用。
+          </p>
           <div class="mt-4 grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
             <label class="space-y-1.5">
               <span class="text-xs text-slate-500">获取方式</span>

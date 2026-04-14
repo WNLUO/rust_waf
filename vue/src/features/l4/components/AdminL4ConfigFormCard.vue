@@ -3,6 +3,7 @@ import type { L4ConfigForm } from '@/features/l4/utils/adminL4'
 
 const props = defineProps<{
   form: L4ConfigForm
+  compatibilityMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +21,12 @@ function patchForm(patch: Partial<L4ConfigForm>) {
 
 <template>
   <section class="space-y-3">
+    <div
+      v-if="compatibilityMode"
+      class="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900"
+    >
+      当前处于 L4 兼容模式。这里编辑的是历史细粒度参数，仅用于旧策略回滚或特殊排障，不是自动控制器的主入口。
+    </div>
     <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
       <label :class="numberFieldClass">
         <span :class="numberLabelClass">每秒连接速率阈值</span>

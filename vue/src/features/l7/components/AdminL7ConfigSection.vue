@@ -14,6 +14,7 @@ const props = defineProps<{
   autoTuningRuntime?: AutoTuningRuntimePayload | null
   dropUnmatchedRequests: boolean
   dropUnmatchedRequestsDisabled?: boolean
+  compatibilityMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -379,6 +380,12 @@ const safelineResponseBodySource = computed({
   <section
     class="rounded-xl border border-white/80 bg-white/78 p-4 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
   >
+    <div
+      v-if="compatibilityMode"
+      class="mb-4 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm leading-6 text-amber-900"
+    >
+      当前处于 L7 兼容模式。这里编辑的是历史 CC / 自动调优细粒度参数，仅用于旧策略回滚或专项排障，不作为自动控制器的常规入口。
+    </div>
     <div
       class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
     >

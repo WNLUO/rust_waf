@@ -43,6 +43,7 @@ const {
 } = useAdminSettings()
 
 const {
+  compatibilityForm: l4CompatibilityForm,
   configForm: l4ConfigForm,
   error: l4Error,
   loading: l4Loading,
@@ -54,6 +55,7 @@ const {
 } = useAdminL4()
 
 const {
+  compatibilityForm: l7CompatibilityForm,
   configForm: l7ConfigForm,
   error: l7Error,
   loading: l7Loading,
@@ -326,8 +328,9 @@ useFlashMessages({
             </div>
             <AdminL4ConfigFormCard
               v-if="l4CompatibilityOpen"
-              :form="l4ConfigForm"
-              @update:form="Object.assign(l4ConfigForm, $event)"
+              :form="l4CompatibilityForm"
+              compatibility-mode
+              @update:form="Object.assign(l4CompatibilityForm, $event)"
             />
           </div>
           <AdminL4ConfigFormCard
@@ -382,12 +385,13 @@ useFlashMessages({
             </div>
             <AdminL7ConfigSection
               v-if="l7CompatibilityOpen"
-              :form="l7ConfigForm"
+              :form="l7CompatibilityForm"
+              compatibility-mode
               :trusted-proxy-cidrs-text="trustedProxyCidrsText"
               :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
               :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
               :drop-unmatched-requests-disabled="saving || loading"
-              @update:form="Object.assign(l7ConfigForm, $event)"
+              @update:form="Object.assign(l7CompatibilityForm, $event)"
               @update:drop-unmatched-requests="
                 systemSettings.drop_unmatched_requests = $event
               "

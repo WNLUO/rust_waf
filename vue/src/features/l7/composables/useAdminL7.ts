@@ -62,15 +62,13 @@ export function useAdminL7() {
   })
 
   const configForm = reactive<L7ConfigForm>(createDefaultL7ConfigForm())
+  const compatibilityForm = reactive<L7ConfigForm>(createDefaultL7ConfigForm())
 
-  const applyConfig = (payload: L7ConfigPayload) => {
-    Object.assign(configForm, {
+  const assignBaseFields = (target: L7ConfigForm, payload: L7ConfigPayload) => {
+    Object.assign(target, {
       ...payload,
       trusted_proxy_cidrs: [...payload.trusted_proxy_cidrs],
       listen_addrs: [...payload.listen_addrs],
-      cc_defense: {
-        ...payload.cc_defense,
-      },
       safeline_intercept: {
         ...payload.safeline_intercept,
         response_template: {
@@ -78,11 +76,35 @@ export function useAdminL7() {
           headers: [...payload.safeline_intercept.response_template.headers],
         },
       },
+    })
+  }
+
+  const applyConfig = (payload: L7ConfigPayload) => {
+    assignBaseFields(configForm, payload)
+    Object.assign(configForm, {
+      cc_defense: {
+        ...payload.cc_defense,
+      },
       auto_tuning: {
         ...payload.auto_tuning,
         pinned_fields: [...payload.auto_tuning.pinned_fields],
         slo: {
           ...payload.auto_tuning.slo,
+        },
+      },
+    })
+    assignBaseFields(compatibilityForm, payload)
+    Object.assign(compatibilityForm, {
+      cc_defense: {
+        ...payload.advanced_compatibility.persisted_cc_defense,
+      },
+      auto_tuning: {
+        ...payload.advanced_compatibility.persisted_auto_tuning,
+        pinned_fields: [
+          ...payload.advanced_compatibility.persisted_auto_tuning.pinned_fields,
+        ],
+        slo: {
+          ...payload.advanced_compatibility.persisted_auto_tuning.slo,
         },
       },
     })
@@ -140,306 +162,308 @@ export function useAdminL7() {
     successMessage.value = ''
 
     try {
-      configForm.max_request_size = clampInteger(
-        configForm.max_request_size,
+      const targetForm = compatibilityMode ? compatibilityForm : configForm
+
+      targetForm.max_request_size = clampInteger(
+        targetForm.max_request_size,
         1024,
         16_777_216,
         8192,
       )
-      configForm.first_byte_timeout_ms = clampInteger(
-        configForm.first_byte_timeout_ms,
+      targetForm.first_byte_timeout_ms = clampInteger(
+        targetForm.first_byte_timeout_ms,
         100,
         60_000,
         2000,
       )
-      configForm.read_idle_timeout_ms = clampInteger(
-        configForm.read_idle_timeout_ms,
+      targetForm.read_idle_timeout_ms = clampInteger(
+        targetForm.read_idle_timeout_ms,
         100,
         300_000,
         5000,
       )
-      configForm.tls_handshake_timeout_ms = clampInteger(
-        configForm.tls_handshake_timeout_ms,
+      targetForm.tls_handshake_timeout_ms = clampInteger(
+        targetForm.tls_handshake_timeout_ms,
         500,
         60_000,
         3000,
       )
-      configForm.proxy_connect_timeout_ms = clampInteger(
-        configForm.proxy_connect_timeout_ms,
+      targetForm.proxy_connect_timeout_ms = clampInteger(
+        targetForm.proxy_connect_timeout_ms,
         100,
         60_000,
         1500,
       )
-      configForm.proxy_write_timeout_ms = clampInteger(
-        configForm.proxy_write_timeout_ms,
+      targetForm.proxy_write_timeout_ms = clampInteger(
+        targetForm.proxy_write_timeout_ms,
         100,
         300_000,
         3000,
       )
-      configForm.proxy_read_timeout_ms = clampInteger(
-        configForm.proxy_read_timeout_ms,
+      targetForm.proxy_read_timeout_ms = clampInteger(
+        targetForm.proxy_read_timeout_ms,
         100,
         300_000,
         10000,
       )
-      configForm.upstream_healthcheck_interval_secs = clampInteger(
-        configForm.upstream_healthcheck_interval_secs,
+      targetForm.upstream_healthcheck_interval_secs = clampInteger(
+        targetForm.upstream_healthcheck_interval_secs,
         1,
         86_400,
         5,
       )
-      configForm.upstream_healthcheck_timeout_ms = clampInteger(
-        configForm.upstream_healthcheck_timeout_ms,
+      targetForm.upstream_healthcheck_timeout_ms = clampInteger(
+        targetForm.upstream_healthcheck_timeout_ms,
         100,
         60_000,
         1000,
       )
-      configForm.bloom_filter_scale = clampFloat(
-        configForm.bloom_filter_scale,
+      targetForm.bloom_filter_scale = clampFloat(
+        targetForm.bloom_filter_scale,
         0.1,
         4,
         1,
       )
-      configForm.http2_max_concurrent_streams = clampInteger(
-        configForm.http2_max_concurrent_streams,
+      targetForm.http2_max_concurrent_streams = clampInteger(
+        targetForm.http2_max_concurrent_streams,
         1,
         10_000,
         100,
       )
-      configForm.http2_max_frame_size = clampInteger(
-        configForm.http2_max_frame_size,
+      targetForm.http2_max_frame_size = clampInteger(
+        targetForm.http2_max_frame_size,
         1024,
         16_777_216,
         16384,
       )
-      configForm.http2_initial_window_size = clampInteger(
-        configForm.http2_initial_window_size,
+      targetForm.http2_initial_window_size = clampInteger(
+        targetForm.http2_initial_window_size,
         1024,
         16_777_216,
         65535,
       )
-      configForm.http3_max_concurrent_streams = clampInteger(
-        configForm.http3_max_concurrent_streams,
+      targetForm.http3_max_concurrent_streams = clampInteger(
+        targetForm.http3_max_concurrent_streams,
         1,
         1000,
         100,
       )
-      configForm.http3_idle_timeout_secs = clampInteger(
-        configForm.http3_idle_timeout_secs,
+      targetForm.http3_idle_timeout_secs = clampInteger(
+        targetForm.http3_idle_timeout_secs,
         1,
         86_400,
         300,
       )
-      configForm.http3_mtu = clampInteger(
-        configForm.http3_mtu,
+      targetForm.http3_mtu = clampInteger(
+        targetForm.http3_mtu,
         1200,
         1500,
         1350,
       )
-      configForm.http3_max_frame_size = clampInteger(
-        configForm.http3_max_frame_size,
+      targetForm.http3_max_frame_size = clampInteger(
+        targetForm.http3_max_frame_size,
         65536,
         16_777_215,
         65536,
       )
-      configForm.http3_qpack_table_size = clampInteger(
-        configForm.http3_qpack_table_size,
+      targetForm.http3_qpack_table_size = clampInteger(
+        targetForm.http3_qpack_table_size,
         1024,
         65536,
         4096,
       )
-      configForm.cc_defense.request_window_secs = clampInteger(
-        configForm.cc_defense.request_window_secs,
+      targetForm.cc_defense.request_window_secs = clampInteger(
+        targetForm.cc_defense.request_window_secs,
         3,
         120,
         10,
       )
-      configForm.cc_defense.ip_challenge_threshold = clampInteger(
-        configForm.cc_defense.ip_challenge_threshold,
+      targetForm.cc_defense.ip_challenge_threshold = clampInteger(
+        targetForm.cc_defense.ip_challenge_threshold,
         10,
         10000,
         60,
       )
-      configForm.cc_defense.ip_block_threshold = clampInteger(
-        configForm.cc_defense.ip_block_threshold,
-        configForm.cc_defense.ip_challenge_threshold,
+      targetForm.cc_defense.ip_block_threshold = clampInteger(
+        targetForm.cc_defense.ip_block_threshold,
+        targetForm.cc_defense.ip_challenge_threshold,
         20000,
         120,
       )
-      configForm.cc_defense.host_challenge_threshold = clampInteger(
-        configForm.cc_defense.host_challenge_threshold,
+      targetForm.cc_defense.host_challenge_threshold = clampInteger(
+        targetForm.cc_defense.host_challenge_threshold,
         5,
-        configForm.cc_defense.ip_challenge_threshold,
+        targetForm.cc_defense.ip_challenge_threshold,
         48,
       )
-      configForm.cc_defense.host_block_threshold = clampInteger(
-        configForm.cc_defense.host_block_threshold,
-        configForm.cc_defense.host_challenge_threshold,
-        configForm.cc_defense.ip_block_threshold,
+      targetForm.cc_defense.host_block_threshold = clampInteger(
+        targetForm.cc_defense.host_block_threshold,
+        targetForm.cc_defense.host_challenge_threshold,
+        targetForm.cc_defense.ip_block_threshold,
         96,
       )
-      configForm.cc_defense.route_challenge_threshold = clampInteger(
-        configForm.cc_defense.route_challenge_threshold,
+      targetForm.cc_defense.route_challenge_threshold = clampInteger(
+        targetForm.cc_defense.route_challenge_threshold,
         3,
-        configForm.cc_defense.host_challenge_threshold,
+        targetForm.cc_defense.host_challenge_threshold,
         24,
       )
-      configForm.cc_defense.route_block_threshold = clampInteger(
-        configForm.cc_defense.route_block_threshold,
-        configForm.cc_defense.route_challenge_threshold,
-        configForm.cc_defense.host_block_threshold,
+      targetForm.cc_defense.route_block_threshold = clampInteger(
+        targetForm.cc_defense.route_block_threshold,
+        targetForm.cc_defense.route_challenge_threshold,
+        targetForm.cc_defense.host_block_threshold,
         48,
       )
-      configForm.cc_defense.hot_path_challenge_threshold = clampInteger(
-        configForm.cc_defense.hot_path_challenge_threshold,
+      targetForm.cc_defense.hot_path_challenge_threshold = clampInteger(
+        targetForm.cc_defense.hot_path_challenge_threshold,
         32,
         200000,
         800,
       )
-      configForm.cc_defense.hot_path_block_threshold = clampInteger(
-        configForm.cc_defense.hot_path_block_threshold,
-        configForm.cc_defense.hot_path_challenge_threshold,
+      targetForm.cc_defense.hot_path_block_threshold = clampInteger(
+        targetForm.cc_defense.hot_path_block_threshold,
+        targetForm.cc_defense.hot_path_challenge_threshold,
         400000,
         1600,
       )
-      configForm.cc_defense.delay_threshold_percent = clampInteger(
-        configForm.cc_defense.delay_threshold_percent,
+      targetForm.cc_defense.delay_threshold_percent = clampInteger(
+        targetForm.cc_defense.delay_threshold_percent,
         25,
         95,
         70,
       )
-      configForm.cc_defense.delay_ms = clampInteger(
-        configForm.cc_defense.delay_ms,
+      targetForm.cc_defense.delay_ms = clampInteger(
+        targetForm.cc_defense.delay_ms,
         0,
         5000,
         150,
       )
-      configForm.cc_defense.challenge_ttl_secs = clampInteger(
-        configForm.cc_defense.challenge_ttl_secs,
+      targetForm.cc_defense.challenge_ttl_secs = clampInteger(
+        targetForm.cc_defense.challenge_ttl_secs,
         30,
         86400,
         1800,
       )
-      configForm.cc_defense.challenge_cookie_name =
-        configForm.cc_defense.challenge_cookie_name.trim().toLowerCase() || 'rwaf_cc'
-      configForm.cc_defense.hard_route_block_multiplier = clampInteger(
-        configForm.cc_defense.hard_route_block_multiplier,
+      targetForm.cc_defense.challenge_cookie_name =
+        targetForm.cc_defense.challenge_cookie_name.trim().toLowerCase() || 'rwaf_cc'
+      targetForm.cc_defense.hard_route_block_multiplier = clampInteger(
+        targetForm.cc_defense.hard_route_block_multiplier,
         1,
         20,
         4,
       )
-      configForm.cc_defense.hard_host_block_multiplier = clampInteger(
-        configForm.cc_defense.hard_host_block_multiplier,
+      targetForm.cc_defense.hard_host_block_multiplier = clampInteger(
+        targetForm.cc_defense.hard_host_block_multiplier,
         1,
         20,
         4,
       )
-      configForm.cc_defense.hard_ip_block_multiplier = clampInteger(
-        configForm.cc_defense.hard_ip_block_multiplier,
+      targetForm.cc_defense.hard_ip_block_multiplier = clampInteger(
+        targetForm.cc_defense.hard_ip_block_multiplier,
         1,
         20,
         4,
       )
-      configForm.cc_defense.hard_hot_path_block_multiplier = clampInteger(
-        configForm.cc_defense.hard_hot_path_block_multiplier,
+      targetForm.cc_defense.hard_hot_path_block_multiplier = clampInteger(
+        targetForm.cc_defense.hard_hot_path_block_multiplier,
         1,
         20,
         3,
       )
-      configForm.safeline_intercept.max_body_bytes = clampInteger(
-        configForm.safeline_intercept.max_body_bytes,
+      targetForm.safeline_intercept.max_body_bytes = clampInteger(
+        targetForm.safeline_intercept.max_body_bytes,
         256,
         524288,
         32768,
       )
-      configForm.safeline_intercept.block_duration_secs = clampInteger(
-        configForm.safeline_intercept.block_duration_secs,
+      targetForm.safeline_intercept.block_duration_secs = clampInteger(
+        targetForm.safeline_intercept.block_duration_secs,
         30,
         86400,
         600,
       )
-      configForm.safeline_intercept.response_template.status_code = clampInteger(
-        configForm.safeline_intercept.response_template.status_code,
+      targetForm.safeline_intercept.response_template.status_code = clampInteger(
+        targetForm.safeline_intercept.response_template.status_code,
         100,
         599,
         403,
       )
-      configForm.safeline_intercept.response_template.headers =
-        configForm.safeline_intercept.response_template.headers
+      targetForm.safeline_intercept.response_template.headers =
+        targetForm.safeline_intercept.response_template.headers
           .map((header) => ({
             key: header.key.trim(),
             value: header.value.trim(),
           }))
           .filter((header) => header.key)
-      configForm.auto_tuning.bootstrap_secs = clampInteger(
-        configForm.auto_tuning.bootstrap_secs,
+      targetForm.auto_tuning.bootstrap_secs = clampInteger(
+        targetForm.auto_tuning.bootstrap_secs,
         10,
         300,
         60,
       )
-      configForm.auto_tuning.control_interval_secs = clampInteger(
-        configForm.auto_tuning.control_interval_secs,
+      targetForm.auto_tuning.control_interval_secs = clampInteger(
+        targetForm.auto_tuning.control_interval_secs,
         10,
         300,
         30,
       )
-      configForm.auto_tuning.cooldown_secs = clampInteger(
-        configForm.auto_tuning.cooldown_secs,
+      targetForm.auto_tuning.cooldown_secs = clampInteger(
+        targetForm.auto_tuning.cooldown_secs,
         30,
         900,
         120,
       )
-      configForm.auto_tuning.max_step_percent = clampInteger(
-        configForm.auto_tuning.max_step_percent,
+      targetForm.auto_tuning.max_step_percent = clampInteger(
+        targetForm.auto_tuning.max_step_percent,
         1,
         25,
         8,
       )
-      configForm.auto_tuning.rollback_window_minutes = clampInteger(
-        configForm.auto_tuning.rollback_window_minutes,
+      targetForm.auto_tuning.rollback_window_minutes = clampInteger(
+        targetForm.auto_tuning.rollback_window_minutes,
         5,
         120,
         10,
       )
-      configForm.auto_tuning.slo.tls_handshake_timeout_rate_percent = clampFloat(
-        configForm.auto_tuning.slo.tls_handshake_timeout_rate_percent,
+      targetForm.auto_tuning.slo.tls_handshake_timeout_rate_percent = clampFloat(
+        targetForm.auto_tuning.slo.tls_handshake_timeout_rate_percent,
         0.1,
         20,
         0.3,
       )
-      configForm.auto_tuning.slo.bucket_reject_rate_percent = clampFloat(
-        configForm.auto_tuning.slo.bucket_reject_rate_percent,
+      targetForm.auto_tuning.slo.bucket_reject_rate_percent = clampFloat(
+        targetForm.auto_tuning.slo.bucket_reject_rate_percent,
         0.1,
         25,
         0.5,
       )
-      configForm.auto_tuning.slo.p95_proxy_latency_ms = clampInteger(
-        configForm.auto_tuning.slo.p95_proxy_latency_ms,
+      targetForm.auto_tuning.slo.p95_proxy_latency_ms = clampInteger(
+        targetForm.auto_tuning.slo.p95_proxy_latency_ms,
         50,
         30_000,
         800,
       )
-      configForm.auto_tuning.pinned_fields = [
+      targetForm.auto_tuning.pinned_fields = [
         ...new Set(
-          configForm.auto_tuning.pinned_fields
+          targetForm.auto_tuning.pinned_fields
             .map((item) => item.trim().toLowerCase())
             .filter(Boolean),
         ),
       ].slice(0, 64)
       if (
-        configForm.auto_tuning.mode === 'off' ||
-        configForm.auto_tuning.mode === 'observe'
+        targetForm.auto_tuning.mode === 'off' ||
+        targetForm.auto_tuning.mode === 'observe'
       ) {
-        configForm.auto_tuning.runtime_adjust_enabled = false
+        targetForm.auto_tuning.runtime_adjust_enabled = false
       }
 
-      if (!configForm.bloom_enabled) {
-        configForm.bloom_false_positive_verification = false
+      if (!targetForm.bloom_enabled) {
+        targetForm.bloom_false_positive_verification = false
       }
 
       const response = compatibilityMode
-        ? await updateL7CompatibilityConfig({ ...configForm })
-        : await updateL7Config({ ...configForm })
+        ? await updateL7CompatibilityConfig({ ...targetForm })
+        : await updateL7Config({ ...targetForm })
       successMessage.value = response.message
       await refreshAll()
       return true
@@ -544,6 +568,7 @@ export function useAdminL7() {
 
   return {
     blockL7Rules,
+    compatibilityForm,
     configForm,
     enabledL7Rules,
     error,

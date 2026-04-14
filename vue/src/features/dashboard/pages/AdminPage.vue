@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { fetchTrafficMap } from '@/shared/api/dashboard'
 import { fetchBlockedIps, fetchSecurityEvents } from '@/shared/api/events'
-import { fetchL4Stats } from '@/shared/api/l4'
+import { fetchL4Config, fetchL4Stats } from '@/shared/api/l4'
 import { fetchL7Config, fetchL7Stats } from '@/shared/api/l7'
 import { fetchRulesList } from '@/shared/api/rules'
 import { fetchHealth, fetchMetrics } from '@/shared/api/system'
@@ -10,6 +10,7 @@ import type {
   BlockedIpsResponse,
   BlockedIpItem,
   DashboardPayload,
+  L4ConfigPayload,
   L4StatsPayload,
   L7ConfigPayload,
   L7StatsPayload,
@@ -44,6 +45,7 @@ const dashboard = ref<DashboardPayload | null>(null)
 const trafficMap = ref<TrafficMapResponse | null>(null)
 const trafficEvents = ref<TrafficEventDelta[]>([])
 const l4Stats = ref<L4StatsPayload | null>(null)
+const l4Config = ref<L4ConfigPayload | null>(null)
 const l7Stats = ref<L7StatsPayload | null>(null)
 const l7Config = ref<L7ConfigPayload | null>(null)
 const loading = ref(true)
@@ -120,6 +122,23 @@ const autoSlo = computed(() => l7Config.value?.auto_tuning.slo ?? {
   tls_handshake_timeout_rate_percent: 0.3,
   bucket_reject_rate_percent: 0.5,
   p95_proxy_latency_ms: 800,
+})
+
+const adaptiveRuntime = computed(
+  () => l7Config.value?.adaptive_runtime ?? l4Config.value?.adaptive_runtime ?? null,
+)
+const adaptiveManaged = computed(
+  () =>
+    l7Config.value?.adaptive_managed_fields ||
+    l4Config.value?.adaptive_managed_fields ||
+    false,
+)
+const adaptivePressureType = computed(() => {
+  const pressure = adaptiveRuntime.value?.system_pressure ?? 'normal'
+  if (pressure === 'attack') return 'error' as const
+  if (pressure === 'high') return 'warning' as const
+  if (pressure === 'elevated') return 'info' as const
+  return 'success' as const
 })
 
 const calcAutoState = (observed: number, target: number) => {
@@ -247,7 +266,7 @@ const fetchData = async (showLoader = false) => {
   if (showLoader) loading.value = true
   refreshing.value = true
   try {
-    const [health, metrics, rules, events, blockedIps, l4StatsPayload, l7StatsPayload, l7ConfigPayload] = await Promise.all([
+    const [health, metrics, rules, events, blockedIps, l4StatsPayload, l4ConfigPayload, l7StatsPayload, l7ConfigPayload] = await Promise.all([
       fetchHealth(),
       fetchMetrics(),
       fetchRulesList(),
@@ -263,6 +282,7 @@ const fetchData = async (showLoader = false) => {
         sort_by: 'blocked_at',
       }),
       fetchL4Stats(),
+      fetchL4Config(),
       fetchL7Stats(),
       fetchL7Config(),
     ])
@@ -277,6 +297,7 @@ const fetchData = async (showLoader = false) => {
 
     applyMetrics(metrics)
     l4Stats.value = l4StatsPayload
+    l4Config.value = l4ConfigPayload
     l7Stats.value = l7StatsPayload
     l7Config.value = l7ConfigPayload
     error.value = ''
@@ -435,6 +456,52 @@ onMounted(() => {
           hint="已完成验证并继续放行"
           :icon="ArrowUpRight"
         />
+      </section>
+
+      <section
+        v-if="adaptiveManaged && adaptiveRuntime"
+        class="rounded-xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(240,253,244,0.92),rgba(236,253,245,0.88),rgba(239,246,255,0.9))] p-4 shadow-sm"
+      >
+        <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <p class="text-sm tracking-wider text-emerald-700">Adaptive Protection</p>
+              <StatusBadge
+                :text="adaptiveRuntime.system_pressure"
+                :type="adaptivePressureType"
+              />
+            </div>
+            <p class="text-sm leading-6 text-stone-700">
+              当前按 {{ adaptiveRuntime.mode }} / {{ adaptiveRuntime.goal }} 自动调节 L4 与 L7。首页展示的是运行时主策略，不再把细粒度阈值当主操作面板。
+            </p>
+          </div>
+          <div class="grid gap-3 text-sm text-stone-700 md:grid-cols-2">
+            <div class="rounded-lg border border-white/80 bg-white/70 p-3">
+              <p class="text-xs text-slate-500">L4 连接预算</p>
+              <p class="mt-1 font-semibold text-stone-900">
+                {{ adaptiveRuntime.l4.normal_connection_budget_per_minute }} / {{ adaptiveRuntime.l4.suspicious_connection_budget_per_minute }} / {{ adaptiveRuntime.l4.high_risk_connection_budget_per_minute }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-white/80 bg-white/70 p-3">
+              <p class="text-xs text-slate-500">L7 Challenge / Block</p>
+              <p class="mt-1 font-semibold text-stone-900">
+                {{ adaptiveRuntime.l7.ip_challenge_threshold }} / {{ adaptiveRuntime.l7.ip_block_threshold }}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div
+          v-if="adaptiveRuntime.reasons.length"
+          class="mt-3 flex flex-wrap gap-2"
+        >
+          <span
+            v-for="reason in adaptiveRuntime.reasons"
+            :key="reason"
+            class="rounded-full border border-white/80 bg-white/70 px-2.5 py-1 text-xs text-stone-700"
+          >
+            {{ reason }}
+          </span>
+        </div>
       </section>
 
       <section class="grid grid-cols-1 gap-4 xl:grid-cols-2">

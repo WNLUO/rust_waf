@@ -106,11 +106,12 @@ pub fn run_control_step(
 ) -> Option<AutoTuningDecision> {
     runtime.mode = config.auto_tuning.mode;
     runtime.intent = config.auto_tuning.intent;
-    runtime.recommendation = recommend(config, &detect_system_profile());
 
     if !should_tick(config, state, now) {
         return None;
     }
+
+    runtime.recommendation = recommend(config, &detect_system_profile());
 
     prune_rollback_timestamps(state, now);
     runtime.rollback_count_24h = state.rollback_timestamps.len() as u32;
@@ -147,6 +148,8 @@ pub fn run_control_step(
             return None;
         }
         state.cooldown_until = None;
+        // Cooldown ended and no rollback was triggered: treat current config as stable.
+        state.baseline_before_adjust = None;
         runtime.cooldown_until = None;
     }
 

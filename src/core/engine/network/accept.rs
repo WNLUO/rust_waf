@@ -32,6 +32,9 @@ pub(crate) async fn handle_connection(
                 "Rejecting TCP connection from {} due to coarse admission pressure",
                 peer_addr
             );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_l4_bucket_budget_rejection();
+            }
             return Ok(());
         }
     }
@@ -86,6 +89,7 @@ pub(crate) async fn handle_tls_connection(
             );
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_tls_pre_handshake_rejection();
+                metrics.record_l4_bucket_budget_rejection();
             }
             persist_tls_transport_event(
                 context.as_ref(),
@@ -170,6 +174,9 @@ pub(crate) async fn handle_tls_connection(
                 "Rejecting TLS connection from {} due to bucket admission pressure",
                 peer_addr
             );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_l4_bucket_budget_rejection();
+            }
             persist_tls_transport_event(
                 context.as_ref(),
                 &packet,

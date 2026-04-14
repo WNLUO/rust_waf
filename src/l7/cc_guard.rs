@@ -7,14 +7,14 @@ use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const BYPASS_PATHS: &[&str] = &["/.well-known/waf/browser-fingerprint-report"];
 
 #[derive(Debug)]
 pub struct L7CcGuard {
-    config: CcDefenseConfig,
+    config: RwLock<CcDefenseConfig>,
     secret: String,
     ip_buckets: DashMap<String, SlidingWindowCounter>,
     host_buckets: DashMap<String, SlidingWindowCounter>,
@@ -76,7 +76,7 @@ impl L7CcGuard {
     pub fn new(config: &CcDefenseConfig) -> Self {
         let secret = format!("{:032x}", rand::thread_rng().gen::<u128>());
         Self {
-            config: config.clone(),
+            config: RwLock::new(config.clone()),
             secret,
             ip_buckets: DashMap::new(),
             host_buckets: DashMap::new(),
@@ -92,15 +92,24 @@ impl L7CcGuard {
         }
     }
 
-    pub fn config(&self) -> &CcDefenseConfig {
-        &self.config
+    pub fn config(&self) -> CcDefenseConfig {
+        self.config
+            .read()
+            .expect("l7 cc config lock poisoned")
+            .clone()
+    }
+
+    pub fn update_config(&self, config: &CcDefenseConfig) {
+        let mut guard = self.config.write().expect("l7 cc config lock poisoned");
+        *guard = config.clone();
     }
 
     pub async fn inspect_request(
         &self,
         request: &mut UnifiedHttpRequest,
     ) -> Option<InspectionResult> {
-        if !self.config.enabled {
+        let config = self.config();
+        if !config.enabled {
             return None;
         }
 
@@ -119,17 +128,17 @@ impl L7CcGuard {
             .get_metadata("network.client_ip_unresolved")
             .map(|value| value == "true")
             .unwrap_or(false);
-        let verified = self.has_valid_challenge_cookie(request, client_ip, &host);
+        let verified = self.has_valid_challenge_cookie(request, client_ip, &host, &config);
         let now = Instant::now();
         let unix_now = unix_timestamp();
-        let window = Duration::from_secs(self.config.request_window_secs.max(1));
+        let window = Duration::from_secs(config.request_window_secs.max(1));
 
         if request_kind == RequestKind::Document {
-            self.record_page_load_window(client_ip, &host, &route_path, unix_now);
+            self.record_page_load_window(client_ip, &host, &route_path, unix_now, &config);
         }
         let is_page_subresource = request_kind == RequestKind::StaticAsset
             && self.matches_page_load_window(request, client_ip, &host, &route_path, unix_now);
-        let weight_percent = self.request_weight_percent(request_kind, is_page_subresource);
+        let weight_percent = self.request_weight_percent(request_kind, is_page_subresource, &config);
 
         let ip_count = self.observe(
             &self.ip_buckets,
@@ -239,37 +248,31 @@ impl L7CcGuard {
             client_identity_unresolved.to_string(),
         );
 
-        self.maybe_cleanup(unix_now);
+        self.maybe_cleanup(unix_now, &config);
 
         let challenge_multiplier = if verified { 3 } else { 1 };
         let block_multiplier = if verified { 2 } else { 1 };
         let low_risk_subresource = request_kind == RequestKind::StaticAsset && is_page_subresource;
 
-        let route_block_threshold = self
-            .config
-            .route_block_threshold
-            .saturating_mul(block_multiplier);
-        let host_block_threshold = self
-            .config
+        let route_block_threshold = config.route_block_threshold.saturating_mul(block_multiplier);
+        let host_block_threshold = config
             .host_block_threshold
             .saturating_mul(block_multiplier);
-        let ip_block_threshold = self
-            .config
+        let ip_block_threshold = config
             .ip_block_threshold
             .saturating_mul(block_multiplier);
-        let hot_path_block_threshold = self
-            .config
+        let hot_path_block_threshold = config
             .hot_path_block_threshold
             .saturating_mul(block_multiplier);
 
         let hard_route_block_threshold = route_block_threshold
-            .saturating_mul(u32::from(self.config.hard_route_block_multiplier));
+            .saturating_mul(u32::from(config.hard_route_block_multiplier));
         let hard_host_block_threshold =
-            host_block_threshold.saturating_mul(u32::from(self.config.hard_host_block_multiplier));
+            host_block_threshold.saturating_mul(u32::from(config.hard_host_block_multiplier));
         let hard_ip_block_threshold =
-            ip_block_threshold.saturating_mul(u32::from(self.config.hard_ip_block_multiplier));
+            ip_block_threshold.saturating_mul(u32::from(config.hard_ip_block_multiplier));
         let hard_hot_path_block_threshold = hot_path_block_threshold
-            .saturating_mul(u32::from(self.config.hard_hot_path_block_multiplier));
+            .saturating_mul(u32::from(config.hard_hot_path_block_multiplier));
         let hard_block = route_count >= hard_route_block_threshold
             || host_count >= hard_host_block_threshold
             || ip_count >= hard_ip_block_threshold
@@ -282,7 +285,7 @@ impl L7CcGuard {
                         || host_effective >= host_block_threshold
                         || ip_effective >= ip_block_threshold
                         || (hot_path_effective >= hot_path_block_threshold
-                            && route_effective >= self.config.route_challenge_threshold.max(3)))))
+                            && route_effective >= config.route_challenge_threshold.max(3)))))
         {
             let reason = format!(
                 "l7 cc guard throttled request: kind={} page_subresource={} ip={} host={} route={} hot_path={} raw_ip={} raw_host={} raw_route={} raw_hot_path={} verified={} identity_unresolved={}",
@@ -307,20 +310,15 @@ impl L7CcGuard {
             ));
         }
 
-        let route_challenge_threshold = self
-            .config
-            .route_challenge_threshold
-            .saturating_mul(challenge_multiplier);
-        let host_challenge_threshold = self
-            .config
+        let route_challenge_threshold =
+            config.route_challenge_threshold.saturating_mul(challenge_multiplier);
+        let host_challenge_threshold = config
             .host_challenge_threshold
             .saturating_mul(challenge_multiplier);
-        let ip_challenge_threshold = self
-            .config
+        let ip_challenge_threshold = config
             .ip_challenge_threshold
             .saturating_mul(challenge_multiplier);
-        let hot_path_challenge_threshold = self
-            .config
+        let hot_path_challenge_threshold = config
             .hot_path_challenge_threshold
             .saturating_mul(challenge_multiplier);
 
@@ -346,30 +344,27 @@ impl L7CcGuard {
             return Some(InspectionResult::respond(
                 InspectionLayer::L7,
                 reason.clone(),
-                self.build_challenge_response(request, client_ip, &host, &reason, html_mode),
+                self.build_challenge_response(request, client_ip, &host, &reason, html_mode, &config),
             ));
         }
 
         let delay_threshold_percent = if client_identity_unresolved {
-            self.config
-                .delay_threshold_percent
-                .saturating_sub(20)
-                .max(10)
+            config.delay_threshold_percent.saturating_sub(20).max(10)
         } else {
-            self.config.delay_threshold_percent
+            config.delay_threshold_percent
         };
         let delay_threshold = u32::from(delay_threshold_percent)
-            .saturating_mul(self.config.route_challenge_threshold.max(1))
+            .saturating_mul(config.route_challenge_threshold.max(1))
             / 100;
-        if self.config.delay_ms > 0
+        if config.delay_ms > 0
             && (route_effective >= delay_threshold.max(1)
                 || host_effective
                     >= u32::from(delay_threshold_percent)
-                        .saturating_mul(self.config.host_challenge_threshold.max(1))
+                        .saturating_mul(config.host_challenge_threshold.max(1))
                         / 100
                 || ip_effective
                     >= u32::from(delay_threshold_percent)
-                        .saturating_mul(self.config.ip_challenge_threshold.max(1))
+                        .saturating_mul(config.ip_challenge_threshold.max(1))
                         / 100)
         {
             if client_identity_unresolved {
@@ -378,7 +373,7 @@ impl L7CcGuard {
                     client_ip,
                     host,
                     route_path,
-                    self.config.delay_ms,
+                    config.delay_ms,
                     route_effective,
                     host_effective,
                     ip_effective
@@ -386,9 +381,9 @@ impl L7CcGuard {
             }
             request.add_metadata(
                 "l7.cc.action".to_string(),
-                format!("delay:{}ms", self.config.delay_ms),
+                format!("delay:{}ms", config.delay_ms),
             );
-            tokio::time::sleep(Duration::from_millis(self.config.delay_ms)).await;
+            tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
         }
 
         None
@@ -401,6 +396,7 @@ impl L7CcGuard {
         host: &str,
         reason: &str,
         mode: HtmlResponseMode,
+        config: &CcDefenseConfig,
     ) -> CustomHttpResponse {
         if mode == HtmlResponseMode::TextOnly {
             return CustomHttpResponse {
@@ -419,15 +415,15 @@ impl L7CcGuard {
             };
         }
 
-        let expires_at = unix_timestamp() + self.config.challenge_ttl_secs as i64;
+        let expires_at = unix_timestamp() + config.challenge_ttl_secs as i64;
         let nonce = format!("{:016x}", rand::thread_rng().gen::<u64>());
         let signature = sign_challenge(&self.secret, client_ip, host, expires_at, &nonce);
         let cookie_value = format!("{expires_at}:{nonce}:{signature}");
         let cookie_assignment = format!(
             "{}={}; Max-Age={}; Path=/; SameSite=Lax",
-            self.config.challenge_cookie_name,
+            config.challenge_cookie_name,
             cookie_value,
-            self.config.challenge_ttl_secs.max(30)
+            config.challenge_ttl_secs.max(30)
         );
         let reload_target =
             serde_json::to_string(&request.uri).unwrap_or_else(|_| "\"/\"".to_string());
@@ -478,8 +474,9 @@ impl L7CcGuard {
         request: &UnifiedHttpRequest,
         client_ip: std::net::IpAddr,
         host: &str,
+        config: &CcDefenseConfig,
     ) -> bool {
-        let Some(cookie_value) = cookie_value(request, &self.config.challenge_cookie_name) else {
+        let Some(cookie_value) = cookie_value(request, &config.challenge_cookie_name) else {
             return false;
         };
         let mut parts = cookie_value.splitn(3, ':');
@@ -525,12 +522,17 @@ impl L7CcGuard {
         entry.observe(now, unix_now, window, weight_percent)
     }
 
-    fn request_weight_percent(&self, kind: RequestKind, is_page_subresource: bool) -> u8 {
+    fn request_weight_percent(
+        &self,
+        kind: RequestKind,
+        is_page_subresource: bool,
+        config: &CcDefenseConfig,
+    ) -> u8 {
         if is_page_subresource {
-            return self.config.page_subresource_weight_percent;
+            return config.page_subresource_weight_percent;
         }
         match kind {
-            RequestKind::StaticAsset => self.config.static_request_weight_percent,
+            RequestKind::StaticAsset => config.static_request_weight_percent,
             _ => 100,
         }
     }
@@ -541,10 +543,11 @@ impl L7CcGuard {
         host: &str,
         document_path: &str,
         unix_now: i64,
+        config: &CcDefenseConfig,
     ) {
         let key = page_window_key(client_ip, host, document_path);
         let host_key = page_host_window_key(client_ip, host);
-        let expires_at = unix_now + self.config.page_load_grace_secs as i64;
+        let expires_at = unix_now + config.page_load_grace_secs as i64;
         let mut entry = self
             .page_load_windows
             .entry(key)
@@ -597,13 +600,13 @@ impl L7CcGuard {
             .unwrap_or(false)
     }
 
-    fn maybe_cleanup(&self, unix_now: i64) {
+    fn maybe_cleanup(&self, unix_now: i64, config: &CcDefenseConfig) {
         let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
         if !sequence.is_multiple_of(1024) {
             return;
         }
 
-        let stale_before = unix_now - (self.config.request_window_secs as i64 * 6).max(30);
+        let stale_before = unix_now - (config.request_window_secs as i64 * 6).max(30);
         cleanup_map(&self.ip_buckets, stale_before);
         cleanup_map(&self.host_buckets, stale_before);
         cleanup_map(&self.route_buckets, stale_before);
@@ -1177,6 +1180,34 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn updating_config_preserves_existing_request_history() {
+        let mut config = CcDefenseConfig {
+            route_challenge_threshold: 3,
+            route_block_threshold: 20,
+            host_challenge_threshold: 20,
+            host_block_threshold: 40,
+            ip_challenge_threshold: 20,
+            ip_block_threshold: 40,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        let mut first = request("/search?q=1");
+        assert!(guard.inspect_request(&mut first).await.is_none());
+
+        let mut second = request("/search?q=2");
+        assert!(guard.inspect_request(&mut second).await.is_none());
+
+        config.route_challenge_threshold = 2;
+        guard.update_config(&config);
+
+        let mut third = request("/search?q=3");
+        let result = guard.inspect_request(&mut third).await;
+        assert!(result.is_some(), "existing counters should survive config updates");
+        assert_eq!(result.unwrap().action, crate::core::InspectionAction::Respond);
+    }
+
     #[test]
     fn validates_signed_challenge_cookie() {
         let config = CcDefenseConfig::default();
@@ -1195,14 +1226,16 @@ mod tests {
             "cookie".to_string(),
             format!(
                 "{}={expires_at}:{nonce}:{signature}",
-                guard.config.challenge_cookie_name
+                guard.config().challenge_cookie_name
             ),
         );
 
+        let config = guard.config();
         assert!(guard.has_valid_challenge_cookie(
             &request,
             "203.0.113.10".parse().unwrap(),
-            "example.com"
+            "example.com",
+            &config,
         ));
     }
 }

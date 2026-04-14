@@ -184,11 +184,8 @@ impl WafContext {
             );
         }
         self.refresh_adaptive_protection_runtime(None);
-        {
-            let refreshed_guard = Arc::new(L7CcGuard::new(&self.effective_l7_cc_defense()));
-            let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
-            *guard = refreshed_guard;
-        }
+        let effective_cc_defense = self.effective_l7_cc_defense();
+        self.l7_cc_guard().update_config(&effective_cc_defense);
         self.refresh_l4_behavior_tuning_from_config();
         self.refresh_http3_runtime_metadata();
     }
@@ -299,8 +296,8 @@ impl WafContext {
 
         self.refresh_adaptive_protection_runtime(Some(metrics));
         self.refresh_l4_behavior_tuning_from_config();
-        let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
-        *guard = Arc::new(L7CcGuard::new(&self.effective_l7_cc_defense()));
+        let effective_cc_defense = self.effective_l7_cc_defense();
+        self.l7_cc_guard().update_config(&effective_cc_defense);
 
         Ok(())
     }

@@ -1,5 +1,7 @@
 #[cfg(feature = "http3")]
 use super::*;
+#[cfg(feature = "http3")]
+use crate::core::engine::policy::persist_http_identity_debug_event;
 
 #[cfg(feature = "http3")]
 pub(crate) async fn handle_http3_quic_connection(

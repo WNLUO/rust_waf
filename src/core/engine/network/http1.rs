@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::engine::policy::persist_http_identity_debug_event;
 
 pub(crate) async fn handle_http1_connection(
     context: Arc<WafContext>,

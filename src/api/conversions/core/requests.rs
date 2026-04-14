@@ -1,5 +1,6 @@
 use super::helpers::{
-    normalize_https_listen_addr_input, parse_auto_tuning_intent, parse_auto_tuning_mode,
+    normalize_https_listen_addr_input, parse_adaptive_protection_goal,
+    parse_adaptive_protection_mode, parse_auto_tuning_intent, parse_auto_tuning_mode,
     parse_safeline_intercept_action, parse_safeline_intercept_match_mode, parse_source_ip_strategy,
     parse_trusted_cdn_sync_interval_unit, parse_upstream_failure_mode,
 };
@@ -280,6 +281,18 @@ impl AutoTuningConfigRequest {
     }
 }
 
+impl AdaptiveProtectionConfigRequest {
+    pub(crate) fn into_config(self) -> Result<crate::config::AdaptiveProtectionConfig, String> {
+        Ok(crate::config::AdaptiveProtectionConfig {
+            enabled: self.enabled,
+            mode: parse_adaptive_protection_mode(&self.mode)?,
+            goal: parse_adaptive_protection_goal(&self.goal)?,
+            cdn_fronted: self.cdn_fronted,
+            allow_emergency_reject: self.allow_emergency_reject,
+        })
+    }
+}
+
 impl SettingsUpdateRequest {
     pub(crate) async fn into_config(
         self,
@@ -301,6 +314,7 @@ impl SettingsUpdateRequest {
         current.console_settings.gateway_name = self.gateway_name;
         current.console_settings.drop_unmatched_requests = self.drop_unmatched_requests;
         current.console_settings.cdn_525_diagnostic_mode = self.cdn_525_diagnostic_mode;
+        current.adaptive_protection = self.adaptive_protection.into_config()?;
         current.gateway_config = GatewayConfig {
             https_listen_addr,
             default_certificate_id: self.default_certificate_id,

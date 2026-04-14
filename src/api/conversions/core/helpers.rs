@@ -151,6 +151,54 @@ pub(super) fn auto_tuning_intent_label(intent: AutoTuningIntent) -> &'static str
     }
 }
 
+pub(super) fn adaptive_protection_mode_label(
+    mode: crate::config::AdaptiveProtectionMode,
+) -> &'static str {
+    match mode {
+        crate::config::AdaptiveProtectionMode::Relaxed => "relaxed",
+        crate::config::AdaptiveProtectionMode::Balanced => "balanced",
+        crate::config::AdaptiveProtectionMode::Strict => "strict",
+    }
+}
+
+pub(super) fn parse_adaptive_protection_mode(
+    value: &str,
+) -> Result<crate::config::AdaptiveProtectionMode, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "relaxed" => Ok(crate::config::AdaptiveProtectionMode::Relaxed),
+        "balanced" => Ok(crate::config::AdaptiveProtectionMode::Balanced),
+        "strict" => Ok(crate::config::AdaptiveProtectionMode::Strict),
+        other => Err(format!(
+            "自适应防护模式仅支持 relaxed、balanced、strict，收到 '{}'",
+            other
+        )),
+    }
+}
+
+pub(super) fn adaptive_protection_goal_label(
+    goal: crate::config::AdaptiveProtectionGoal,
+) -> &'static str {
+    match goal {
+        crate::config::AdaptiveProtectionGoal::AvailabilityFirst => "availability_first",
+        crate::config::AdaptiveProtectionGoal::Balanced => "balanced",
+        crate::config::AdaptiveProtectionGoal::SecurityFirst => "security_first",
+    }
+}
+
+pub(super) fn parse_adaptive_protection_goal(
+    value: &str,
+) -> Result<crate::config::AdaptiveProtectionGoal, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "availability_first" => Ok(crate::config::AdaptiveProtectionGoal::AvailabilityFirst),
+        "balanced" => Ok(crate::config::AdaptiveProtectionGoal::Balanced),
+        "security_first" => Ok(crate::config::AdaptiveProtectionGoal::SecurityFirst),
+        other => Err(format!(
+            "自适应防护目标仅支持 availability_first、balanced、security_first，收到 '{}'",
+            other
+        )),
+    }
+}
+
 pub(super) fn parse_auto_tuning_intent(value: &str) -> Result<AutoTuningIntent, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "conservative" => Ok(AutoTuningIntent::Conservative),

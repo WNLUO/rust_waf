@@ -6,6 +6,7 @@ export type L4ConfigForm = Omit<
   | 'bloom_enabled'
   | 'bloom_false_positive_verification'
   | 'runtime_profile'
+  | 'adaptive_runtime'
 >
 
 export function createDefaultL4ConfigForm(): L4ConfigForm {

@@ -1,3 +1,5 @@
+import type { AdaptiveProtectionRuntimePayload } from '@/shared/types'
+
 export interface TrustedCdnProviderPayload {
   enabled: boolean
   synced_cidrs: string[]
@@ -53,6 +55,7 @@ export interface L4ConfigPayload {
   bloom_enabled: boolean
   bloom_false_positive_verification: boolean
   runtime_profile: 'minimal' | 'standard' | string
+  adaptive_runtime: AdaptiveProtectionRuntimePayload
   trusted_cdn: TrustedCdnConfigPayload
 }
 

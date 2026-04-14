@@ -15,6 +15,7 @@ pub struct SettingsResponse {
     pub(crate) gateway_name: String,
     pub(crate) drop_unmatched_requests: bool,
     pub(crate) cdn_525_diagnostic_mode: bool,
+    pub(crate) adaptive_protection: AdaptiveProtectionConfigResponse,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
     pub(crate) api_endpoint: String,
@@ -54,6 +55,7 @@ pub struct L4ConfigResponse {
     pub(crate) bloom_enabled: bool,
     pub(crate) bloom_false_positive_verification: bool,
     pub(crate) runtime_profile: String,
+    pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
     pub(crate) trusted_cdn: TrustedCdnConfigResponse,
 }
 
@@ -113,6 +115,7 @@ pub struct L7ConfigResponse {
     pub(crate) bloom_enabled: bool,
     pub(crate) bloom_false_positive_verification: bool,
     pub(crate) runtime_profile: String,
+    pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
     pub(crate) listen_addrs: Vec<String>,
     pub(crate) upstream_endpoint: String,
     pub(crate) http3_enabled: bool,
@@ -157,6 +160,7 @@ pub struct SettingsUpdateRequest {
     pub(crate) gateway_name: String,
     pub(crate) drop_unmatched_requests: bool,
     pub(crate) cdn_525_diagnostic_mode: bool,
+    pub(crate) adaptive_protection: AdaptiveProtectionConfigRequest,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
     pub(crate) api_endpoint: String,
@@ -194,6 +198,60 @@ pub struct L4ConfigUpdateRequest {
     pub(crate) behavior_critical_reject_threshold_percent: u16,
     #[serde(default)]
     pub(crate) trusted_cdn: TrustedCdnConfigRequest,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdaptiveProtectionConfigResponse {
+    pub(crate) enabled: bool,
+    pub(crate) mode: String,
+    pub(crate) goal: String,
+    pub(crate) cdn_fronted: bool,
+    pub(crate) allow_emergency_reject: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdaptiveProtectionConfigRequest {
+    pub(crate) enabled: bool,
+    pub(crate) mode: String,
+    pub(crate) goal: String,
+    pub(crate) cdn_fronted: bool,
+    pub(crate) allow_emergency_reject: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdaptiveProtectionRuntimeResponse {
+    pub(crate) enabled: bool,
+    pub(crate) mode: String,
+    pub(crate) goal: String,
+    pub(crate) system_pressure: String,
+    pub(crate) reasons: Vec<String>,
+    pub(crate) l4: AdaptiveProtectionL4RuntimeResponse,
+    pub(crate) l7: AdaptiveProtectionL7RuntimeResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdaptiveProtectionL4RuntimeResponse {
+    pub(crate) normal_connection_budget_per_minute: u32,
+    pub(crate) suspicious_connection_budget_per_minute: u32,
+    pub(crate) high_risk_connection_budget_per_minute: u32,
+    pub(crate) soft_delay_ms: u64,
+    pub(crate) hard_delay_ms: u64,
+    pub(crate) high_overload_delay_ms: u64,
+    pub(crate) critical_overload_delay_ms: u64,
+    pub(crate) reject_threshold_percent: u16,
+    pub(crate) critical_reject_threshold_percent: u16,
+    pub(crate) emergency_reject_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AdaptiveProtectionL7RuntimeResponse {
+    pub(crate) request_window_secs: u64,
+    pub(crate) delay_ms: u64,
+    pub(crate) route_challenge_threshold: u32,
+    pub(crate) route_block_threshold: u32,
+    pub(crate) ip_challenge_threshold: u32,
+    pub(crate) ip_block_threshold: u32,
+    pub(crate) challenge_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]

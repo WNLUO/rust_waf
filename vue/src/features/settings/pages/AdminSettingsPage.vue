@@ -46,6 +46,7 @@ const {
   configForm: l4ConfigForm,
   error: l4Error,
   loading: l4Loading,
+  meta: l4Meta,
   saveConfig: saveL4Config,
   saving: savingL4,
   successMessage: l4SuccessMessage,
@@ -55,6 +56,7 @@ const {
   configForm: l7ConfigForm,
   error: l7Error,
   loading: l7Loading,
+  meta: l7Meta,
   saveConfig: saveL7Config,
   saving: savingL7,
   stats: l7Stats,
@@ -77,16 +79,41 @@ const disableSaveAll = computed(
     savingL7.value,
 )
 
+const adaptiveProtectionEnabled = computed(
+  () => systemSettings.adaptive_protection.enabled,
+)
+const adaptiveRuntime = computed(
+  () => l7Meta.value.adaptive_runtime ?? l4Meta.value.adaptive_runtime,
+)
+const adaptivePressureTone = computed(() => {
+  const pressure = adaptiveRuntime.value?.system_pressure ?? 'normal'
+  if (pressure === 'attack') return 'bg-rose-50 text-rose-700 border-rose-200'
+  if (pressure === 'high') return 'bg-amber-50 text-amber-700 border-amber-200'
+  if (pressure === 'elevated') return 'bg-sky-50 text-sky-700 border-sky-200'
+  return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+})
+const adaptivePressureLabel = computed(() => {
+  const pressure = adaptiveRuntime.value?.system_pressure ?? 'normal'
+  if (pressure === 'attack') return '攻击态'
+  if (pressure === 'high') return '高压态'
+  if (pressure === 'elevated') return '升压态'
+  return '正常态'
+})
+
 async function saveAllSettings() {
   if (savingAll.value) return
 
   savingAll.value = true
   try {
     const saveSystemOk = await saveSettings()
-    const saveL4Ok = await saveL4Config()
+    const saveL4Ok = adaptiveProtectionEnabled.value
+      ? true
+      : await saveL4Config()
     const saveAdvancedGlobalOk =
       (await advancedGlobalSectionRef.value?.saveSettings()) ?? true
-    const saveL7Ok = await saveL7Config()
+    const saveL7Ok = adaptiveProtectionEnabled.value
+      ? true
+      : await saveL7Config()
 
     if (
       !saveSystemOk ||
@@ -178,6 +205,54 @@ useFlashMessages({
         />
 
         <section
+          v-if="adaptiveProtectionEnabled && adaptiveRuntime"
+          class="rounded-xl border border-emerald-100 bg-[linear-gradient(135deg,rgba(240,253,244,0.92),rgba(236,253,245,0.88),rgba(239,246,255,0.9))] p-4 shadow-[0_18px_48px_rgba(32,72,48,0.08)]"
+        >
+          <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div class="space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm tracking-wider text-emerald-700">自适应防护状态</span>
+                <span
+                  class="rounded-full border px-3 py-1 text-xs font-medium"
+                  :class="adaptivePressureTone"
+                >
+                  {{ adaptivePressureLabel }}
+                </span>
+              </div>
+              <p class="text-sm text-stone-700">
+                当前按 {{ adaptiveRuntime.mode }} 模式、{{ adaptiveRuntime.goal }} 目标自动调节 L4 / L7。系统设置页会优先展示自动策略，高级阈值保留在兼容入口中。
+              </p>
+            </div>
+            <div class="grid gap-2 text-xs text-stone-700 md:grid-cols-2">
+              <div class="rounded-xl border border-white/70 bg-white/70 px-3 py-2">
+                <p class="text-slate-500">L4 连接预算</p>
+                <p class="mt-1 font-medium text-stone-900">
+                  {{ adaptiveRuntime.l4.normal_connection_budget_per_minute }} / {{ adaptiveRuntime.l4.suspicious_connection_budget_per_minute }} / {{ adaptiveRuntime.l4.high_risk_connection_budget_per_minute }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-white/70 bg-white/70 px-3 py-2">
+                <p class="text-slate-500">L7 阈值</p>
+                <p class="mt-1 font-medium text-stone-900">
+                  {{ adaptiveRuntime.l7.ip_challenge_threshold }} / {{ adaptiveRuntime.l7.ip_block_threshold }}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="adaptiveRuntime.reasons.length"
+            class="mt-3 flex flex-wrap gap-2 text-xs text-stone-700"
+          >
+            <span
+              v-for="reason in adaptiveRuntime.reasons"
+              :key="reason"
+              class="rounded-full border border-white/80 bg-white/70 px-2.5 py-1"
+            >
+              {{ reason }}
+            </span>
+          </div>
+        </section>
+
+        <section
           class="rounded-xl border border-white/80 bg-white/78 p-4 shadow-[0_18px_48px_rgba(90,60,30,0.08)]"
         >
           <div
@@ -222,6 +297,12 @@ useFlashMessages({
           >
             正在加载 L4 配置...
           </div>
+          <div
+            v-else-if="adaptiveProtectionEnabled"
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
+          >
+            自适应防护已接管 L4 连接预算、延迟和拒绝阈值。这里的细粒度参数已从常规入口收起，避免线上继续依赖手工阈值。需要兼容旧策略时，可暂时关闭“自适应防护”后再人工调整。
+          </div>
           <AdminL4ConfigFormCard
             v-else
             :form="l4ConfigForm"
@@ -249,8 +330,14 @@ useFlashMessages({
           >
             正在加载 L7 配置...
           </div>
+          <div
+            v-else-if="adaptiveProtectionEnabled"
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
+          >
+            自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，常规场景不再建议手动维护这一组数值。
+          </div>
           <AdminL7ConfigSection
-            v-if="!l7Loading"
+            v-else-if="!l7Loading"
             :form="l7ConfigForm"
             :trusted-proxy-cidrs-text="trustedProxyCidrsText"
             :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
@@ -264,7 +351,10 @@ useFlashMessages({
             />
           </div>
 
-          <AdminL7AdvancedGlobalSection ref="advancedGlobalSectionRef" />
+          <AdminL7AdvancedGlobalSection
+            v-if="!adaptiveProtectionEnabled"
+            ref="advancedGlobalSectionRef"
+          />
         </section>
       </div>
     </div>

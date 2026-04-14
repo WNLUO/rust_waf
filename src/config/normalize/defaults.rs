@@ -34,6 +34,7 @@ impl Default for Config {
             integrations: IntegrationsConfig::default(),
             admin_api_auth: AdminApiAuthConfig::default(),
             auto_tuning: AutoTuningConfig::default(),
+            adaptive_protection: AdaptiveProtectionConfig::default(),
         }
         .normalized()
     }
@@ -110,6 +111,18 @@ impl Default for AdminApiAuthConfig {
             enabled: false,
             bearer_token: String::new(),
             audit_enabled: default_admin_api_audit_enabled(),
+        }
+    }
+}
+
+impl Default for AdaptiveProtectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: AdaptiveProtectionMode::Balanced,
+            goal: AdaptiveProtectionGoal::Balanced,
+            cdn_fronted: true,
+            allow_emergency_reject: false,
         }
     }
 }

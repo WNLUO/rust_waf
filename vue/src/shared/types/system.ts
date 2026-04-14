@@ -36,3 +36,36 @@ export interface MetricsResponse {
   last_persisted_event_at: number | null
   last_rule_update_at: number | null
 }
+
+export interface AdaptiveProtectionL4RuntimePayload {
+  normal_connection_budget_per_minute: number
+  suspicious_connection_budget_per_minute: number
+  high_risk_connection_budget_per_minute: number
+  soft_delay_ms: number
+  hard_delay_ms: number
+  high_overload_delay_ms: number
+  critical_overload_delay_ms: number
+  reject_threshold_percent: number
+  critical_reject_threshold_percent: number
+  emergency_reject_enabled: boolean
+}
+
+export interface AdaptiveProtectionL7RuntimePayload {
+  request_window_secs: number
+  delay_ms: number
+  route_challenge_threshold: number
+  route_block_threshold: number
+  ip_challenge_threshold: number
+  ip_block_threshold: number
+  challenge_enabled: boolean
+}
+
+export interface AdaptiveProtectionRuntimePayload {
+  enabled: boolean
+  mode: string
+  goal: string
+  system_pressure: string
+  reasons: string[]
+  l4: AdaptiveProtectionL4RuntimePayload
+  l7: AdaptiveProtectionL7RuntimePayload
+}

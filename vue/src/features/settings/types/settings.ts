@@ -49,6 +49,7 @@ export interface SettingsPayload {
   gateway_name: string
   drop_unmatched_requests: boolean
   cdn_525_diagnostic_mode: boolean
+  adaptive_protection: AdaptiveProtectionSettingsPayload
   https_listen_addr: string
   default_certificate_id: number | null
   api_endpoint: string
@@ -60,9 +61,18 @@ export interface SettingsUpdatePayload {
   gateway_name: string
   drop_unmatched_requests: boolean
   cdn_525_diagnostic_mode: boolean
+  adaptive_protection: AdaptiveProtectionSettingsPayload
   https_listen_addr: string
   default_certificate_id: number | null
   api_endpoint: string
   notes: string
   safeline: SafeLineSettingsUpdatePayload
+}
+
+export interface AdaptiveProtectionSettingsPayload {
+  enabled: boolean
+  mode: 'relaxed' | 'balanced' | 'strict' | string
+  goal: 'availability_first' | 'balanced' | 'security_first' | string
+  cdn_fronted: boolean
+  allow_emergency_reject: boolean
 }

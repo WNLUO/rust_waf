@@ -1,3 +1,4 @@
+pub(crate) mod adaptive_protection;
 mod auto_tuning;
 pub mod engine;
 mod engine_maintenance;
@@ -21,6 +22,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex};
 
+pub use adaptive_protection::AdaptiveProtectionRuntimeSnapshot;
 pub use auto_tuning::{
     AutoTuningControllerState, AutoTuningRecommendationSnapshot, AutoTuningRuntimeSnapshot,
 };
@@ -65,6 +67,7 @@ pub struct WafContext {
     http3_runtime: RwLock<Http3RuntimeSnapshot>,
     auto_tuning_runtime: RwLock<AutoTuningRuntimeSnapshot>,
     auto_tuning_controller: Mutex<AutoTuningControllerState>,
+    adaptive_protection_runtime: RwLock<AdaptiveProtectionRuntimeSnapshot>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -97,17 +100,26 @@ impl WafContext {
         let gateway_runtime = GatewayRuntime::load(&config, sqlite_store.as_deref()).await?;
         let http_processor = HttpTrafficProcessor::new(&config.l7_config);
         let auto_tuning_runtime = auto_tuning::build_runtime_snapshot(&config);
+        let adaptive_protection_runtime =
+            adaptive_protection::build_runtime_snapshot(&config, &auto_tuning_runtime, None);
+        let effective_cc_defense =
+            adaptive_protection::derive_effective_cc_config(&config, &adaptive_protection_runtime);
+        let mut effective_l4_config = config.l4_config.clone();
+        adaptive_protection::apply_l4_runtime_policy(
+            &mut effective_l4_config,
+            &adaptive_protection_runtime,
+        );
 
         Ok(Self {
             runtime_config: Arc::new(RwLock::new(config.clone())),
             l4_inspector: RwLock::new(l4_enabled.then(|| {
                 Arc::new(L4Inspector::new(
-                    config.l4_config.clone(),
+                    effective_l4_config,
                     bloom_enabled,
                     l4_bloom_verification,
                 ))
             })),
-            l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&config.l7_config.cc_defense))),
+            l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&effective_cc_defense))),
             http_processor,
             rule_engine: RwLock::new(rule_engine),
             metrics,
@@ -136,6 +148,7 @@ impl WafContext {
             }),
             auto_tuning_runtime: RwLock::new(auto_tuning_runtime),
             auto_tuning_controller: Mutex::new(AutoTuningControllerState::default()),
+            adaptive_protection_runtime: RwLock::new(adaptive_protection_runtime),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -157,17 +170,6 @@ impl WafContext {
                 .expect("runtime_config lock poisoned");
             *guard = config;
         }
-        let refreshed_guard = {
-            let guard = self
-                .runtime_config
-                .read()
-                .expect("runtime_config lock poisoned");
-            Arc::new(L7CcGuard::new(&guard.l7_config.cc_defense))
-        };
-        {
-            let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
-            *guard = refreshed_guard;
-        }
         {
             let mut guard = self
                 .auto_tuning_runtime
@@ -181,6 +183,13 @@ impl WafContext {
                     .expect("runtime_config lock poisoned"),
             );
         }
+        self.refresh_adaptive_protection_runtime(None);
+        {
+            let refreshed_guard = Arc::new(L7CcGuard::new(&self.effective_l7_cc_defense()));
+            let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
+            *guard = refreshed_guard;
+        }
+        self.refresh_l4_behavior_tuning_from_config();
         self.refresh_http3_runtime_metadata();
     }
 
@@ -258,6 +267,13 @@ impl WafContext {
             .clone()
     }
 
+    pub fn adaptive_protection_snapshot(&self) -> AdaptiveProtectionRuntimeSnapshot {
+        self.adaptive_protection_runtime
+            .read()
+            .expect("adaptive_protection_runtime lock poisoned")
+            .clone()
+    }
+
     pub async fn run_auto_tuning_tick(&self) -> Result<()> {
         let Some(metrics) = self.metrics_snapshot() else {
             return Ok(());
@@ -280,6 +296,11 @@ impl WafContext {
                 self.refresh_l4_behavior_tuning_from_config();
             }
         }
+
+        self.refresh_adaptive_protection_runtime(Some(metrics));
+        self.refresh_l4_behavior_tuning_from_config();
+        let mut guard = self.l7_cc_guard.write().expect("l7_cc_guard lock poisoned");
+        *guard = Arc::new(L7CcGuard::new(&self.effective_l7_cc_defense()));
 
         Ok(())
     }
@@ -331,9 +352,14 @@ impl WafContext {
         let config = self.config_snapshot();
         let l4_enabled =
             config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
+        let mut effective_l4_config = config.l4_config.clone();
+        adaptive_protection::apply_l4_runtime_policy(
+            &mut effective_l4_config,
+            &self.adaptive_protection_snapshot(),
+        );
         let next = l4_enabled.then(|| {
             Arc::new(L4Inspector::new(
-                config.l4_config.clone(),
+                effective_l4_config,
                 config.bloom_enabled,
                 config.l4_bloom_false_positive_verification,
             ))
@@ -354,8 +380,35 @@ impl WafContext {
     pub fn refresh_l4_behavior_tuning_from_config(&self) {
         let config = self.config_snapshot();
         if let Some(inspector) = self.l4_inspector() {
-            inspector.update_behavior_tuning(&config.l4_config);
+            let mut effective_l4_config = config.l4_config.clone();
+            adaptive_protection::apply_l4_runtime_policy(
+                &mut effective_l4_config,
+                &self.adaptive_protection_snapshot(),
+            );
+            inspector.update_behavior_tuning(&effective_l4_config);
         }
+    }
+
+    fn effective_l7_cc_defense(&self) -> crate::config::l7::CcDefenseConfig {
+        adaptive_protection::derive_effective_cc_config(
+            &self.config_snapshot(),
+            &self.adaptive_protection_snapshot(),
+        )
+    }
+
+    fn refresh_adaptive_protection_runtime(
+        &self,
+        metrics: Option<crate::metrics::MetricsSnapshot>,
+    ) {
+        let config = self.config_snapshot();
+        let auto = self.auto_tuning_snapshot();
+        let snapshot =
+            adaptive_protection::build_runtime_snapshot(&config, &auto, metrics.as_ref());
+        let mut guard = self
+            .adaptive_protection_runtime
+            .write()
+            .expect("adaptive_protection_runtime lock poisoned");
+        *guard = snapshot;
     }
 
     pub async fn refresh_rules_from_storage(&self) -> Result<bool> {

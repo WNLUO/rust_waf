@@ -17,8 +17,9 @@ pub use self::rules::{
     Severity,
 };
 pub use self::types::{
-    AdminApiAuthConfig, AutoSloTargets, AutoTuningConfig, AutoTuningIntent, AutoTuningMode, Config,
-    ConsoleSettings, IntegrationsConfig, RuntimeProfile, SafeLineConfig,
+    AdaptiveProtectionConfig, AdaptiveProtectionGoal, AdaptiveProtectionMode, AdminApiAuthConfig,
+    AutoSloTargets, AutoTuningConfig, AutoTuningIntent, AutoTuningMode, Config, ConsoleSettings,
+    IntegrationsConfig, RuntimeProfile, SafeLineConfig,
 };
 pub use gateway::{
     GatewayConfig, HeaderOperation, HeaderOperationAction, HeaderOperationScope, SourceIpStrategy,

@@ -11,9 +11,11 @@ pub(super) async fn get_l4_config_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<L4ConfigResponse>> {
     let config = state.context.config_snapshot();
+    let adaptive_runtime = state.context.adaptive_protection_snapshot();
     Ok(Json(L4ConfigResponse::from_config(
         &config,
         state.context.l4_runtime_enabled(),
+        &adaptive_runtime,
     )))
 }
 
@@ -21,7 +23,12 @@ pub(super) async fn get_l7_config_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<L7ConfigResponse>> {
     let config = state.context.config_snapshot();
-    Ok(Json(L7ConfigResponse::from_config(&config, true)))
+    let adaptive_runtime = state.context.adaptive_protection_snapshot();
+    Ok(Json(L7ConfigResponse::from_config(
+        &config,
+        true,
+        &adaptive_runtime,
+    )))
 }
 
 pub(super) async fn get_global_settings_handler(

@@ -12,6 +12,7 @@ export function updateL4Config(
     | 'bloom_enabled'
     | 'bloom_false_positive_verification'
     | 'runtime_profile'
+    | 'adaptive_runtime'
   >,
 ) {
   return apiRequest<WriteStatusResponse>('/l4/config', {

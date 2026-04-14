@@ -1,7 +1,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/l4'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
-import type { L4BehaviorOverview, L4ConfigPayload, L4StatsPayload } from '@/shared/types'
+import type {
+  AdaptiveProtectionRuntimePayload,
+  L4BehaviorOverview,
+  L4ConfigPayload,
+  L4StatsPayload,
+} from '@/shared/types'
 import { useAdminRealtimeTopic } from '@/shared/realtime/adminRealtime'
 
 const clampInteger = (
@@ -37,6 +42,7 @@ export function useAdminL4() {
     bloom_enabled: true,
     bloom_false_positive_verification: true,
     runtime_profile: 'standard',
+    adaptive_runtime: null as AdaptiveProtectionRuntimePayload | null,
   })
 
   const configForm = reactive<L4ConfigForm>(createDefaultL4ConfigForm())
@@ -103,6 +109,7 @@ export function useAdminL4() {
       bloom_false_positive_verification:
         payload.bloom_false_positive_verification,
       runtime_profile: payload.runtime_profile,
+      adaptive_runtime: payload.adaptive_runtime,
     }
   }
 

@@ -561,7 +561,11 @@ mod tests {
 
     #[tokio::test]
     async fn request_level_permit_exhaustion_returns_503() {
-        let context = Arc::new(WafContext::new(crate::config::Config::default()).await.unwrap());
+        let context = Arc::new(
+            WafContext::new(crate::config::Config::default())
+                .await
+                .unwrap(),
+        );
         let peer_addr: std::net::SocketAddr = "127.0.0.1:54321".parse().unwrap();
         let local_addr: std::net::SocketAddr = "127.0.0.1:660".parse().unwrap();
         let connection_semaphore = Arc::new(Semaphore::new(0));

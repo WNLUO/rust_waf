@@ -88,6 +88,7 @@ export function useAdminSettingsState() {
       gateway_name: systemSettings.gateway_name,
       drop_unmatched_requests: systemSettings.drop_unmatched_requests,
       cdn_525_diagnostic_mode: systemSettings.cdn_525_diagnostic_mode,
+      adaptive_protection: { ...systemSettings.adaptive_protection },
       https_listen_addr: systemSettings.https_listen_addr,
       default_certificate_id: systemSettings.default_certificate_id,
       api_endpoint: systemSettings.api_endpoint,

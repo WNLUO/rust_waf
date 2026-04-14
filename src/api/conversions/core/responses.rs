@@ -1,6 +1,7 @@
 use super::helpers::{
-    auto_tuning_intent_label, auto_tuning_mode_label, display_https_listen_port,
-    safeline_intercept_action_label, safeline_intercept_match_mode_label, source_ip_strategy_label,
+    adaptive_protection_goal_label, adaptive_protection_mode_label, auto_tuning_intent_label,
+    auto_tuning_mode_label, display_https_listen_port, safeline_intercept_action_label,
+    safeline_intercept_match_mode_label, source_ip_strategy_label,
     trusted_cdn_sync_interval_unit_label, trusted_cdn_sync_status_label,
     upstream_failure_mode_label,
 };
@@ -30,6 +31,9 @@ impl SettingsResponse {
             gateway_name: config.console_settings.gateway_name.clone(),
             drop_unmatched_requests: config.console_settings.drop_unmatched_requests,
             cdn_525_diagnostic_mode: config.console_settings.cdn_525_diagnostic_mode,
+            adaptive_protection: AdaptiveProtectionConfigResponse::from_config(
+                &config.adaptive_protection,
+            ),
             https_listen_addr: display_https_listen_port(&config.gateway_config.https_listen_addr),
             default_certificate_id: config.gateway_config.default_certificate_id,
             api_endpoint: config.api_bind.clone(),
@@ -40,7 +44,11 @@ impl SettingsResponse {
 }
 
 impl L4ConfigResponse {
-    pub(crate) fn from_config(config: &Config, runtime_enabled: bool) -> Self {
+    pub(crate) fn from_config(
+        config: &Config,
+        runtime_enabled: bool,
+        adaptive_runtime: &crate::core::AdaptiveProtectionRuntimeSnapshot,
+    ) -> Self {
         Self {
             ddos_protection_enabled: config.l4_config.ddos_protection_enabled,
             advanced_ddos_enabled: config.l4_config.advanced_ddos_enabled,
@@ -94,6 +102,7 @@ impl L4ConfigResponse {
             bloom_enabled: config.bloom_enabled,
             bloom_false_positive_verification: config.l4_bloom_false_positive_verification,
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+            adaptive_runtime: AdaptiveProtectionRuntimeResponse::from_snapshot(adaptive_runtime),
             trusted_cdn: TrustedCdnConfigResponse {
                 manual_cidrs: config.l4_config.trusted_cdn.manual_cidrs.clone(),
                 effective_cidrs: config.l4_config.trusted_cdn.effective_cidrs(),
@@ -161,7 +170,11 @@ impl L4ConfigResponse {
 }
 
 impl L7ConfigResponse {
-    pub(crate) fn from_config(config: &Config, runtime_enabled: bool) -> Self {
+    pub(crate) fn from_config(
+        config: &Config,
+        runtime_enabled: bool,
+        adaptive_runtime: &crate::core::AdaptiveProtectionRuntimeSnapshot,
+    ) -> Self {
         Self {
             max_request_size: config.l7_config.max_request_size,
             trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
@@ -188,6 +201,7 @@ impl L7ConfigResponse {
             bloom_enabled: config.bloom_enabled,
             bloom_false_positive_verification: config.l7_bloom_false_positive_verification,
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+            adaptive_runtime: AdaptiveProtectionRuntimeResponse::from_snapshot(adaptive_runtime),
             listen_addrs: config.listen_addrs.clone(),
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),
             http3_enabled: config.http3_config.enabled,
@@ -257,6 +271,57 @@ impl SafeLineInterceptConfigResponse {
             response_template: RuleResponseTemplatePayload::from_template(
                 config.response_template.clone(),
             ),
+        }
+    }
+}
+
+impl AdaptiveProtectionConfigResponse {
+    pub(crate) fn from_config(config: &crate::config::AdaptiveProtectionConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            mode: adaptive_protection_mode_label(config.mode).to_string(),
+            goal: adaptive_protection_goal_label(config.goal).to_string(),
+            cdn_fronted: config.cdn_fronted,
+            allow_emergency_reject: config.allow_emergency_reject,
+        }
+    }
+}
+
+impl AdaptiveProtectionRuntimeResponse {
+    pub(crate) fn from_snapshot(snapshot: &crate::core::AdaptiveProtectionRuntimeSnapshot) -> Self {
+        Self {
+            enabled: snapshot.enabled,
+            mode: snapshot.mode.clone(),
+            goal: snapshot.goal.clone(),
+            system_pressure: snapshot.system_pressure.clone(),
+            reasons: snapshot.reasons.clone(),
+            l4: AdaptiveProtectionL4RuntimeResponse {
+                normal_connection_budget_per_minute: snapshot
+                    .l4
+                    .normal_connection_budget_per_minute,
+                suspicious_connection_budget_per_minute: snapshot
+                    .l4
+                    .suspicious_connection_budget_per_minute,
+                high_risk_connection_budget_per_minute: snapshot
+                    .l4
+                    .high_risk_connection_budget_per_minute,
+                soft_delay_ms: snapshot.l4.soft_delay_ms,
+                hard_delay_ms: snapshot.l4.hard_delay_ms,
+                high_overload_delay_ms: snapshot.l4.high_overload_delay_ms,
+                critical_overload_delay_ms: snapshot.l4.critical_overload_delay_ms,
+                reject_threshold_percent: snapshot.l4.reject_threshold_percent,
+                critical_reject_threshold_percent: snapshot.l4.critical_reject_threshold_percent,
+                emergency_reject_enabled: snapshot.l4.emergency_reject_enabled,
+            },
+            l7: AdaptiveProtectionL7RuntimeResponse {
+                request_window_secs: snapshot.l7.request_window_secs,
+                delay_ms: snapshot.l7.delay_ms,
+                route_challenge_threshold: snapshot.l7.route_challenge_threshold,
+                route_block_threshold: snapshot.l7.route_block_threshold,
+                ip_challenge_threshold: snapshot.l7.ip_challenge_threshold,
+                ip_block_threshold: snapshot.l7.ip_block_threshold,
+                challenge_enabled: snapshot.l7.challenge_enabled,
+            },
         }
     }
 }

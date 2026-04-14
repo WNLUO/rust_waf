@@ -9,6 +9,7 @@ import { fetchSecurityEvents } from '@/shared/api/events'
 import { createDefaultL7ConfigForm, type L7ConfigForm } from '@/features/l7/utils/adminL7'
 import { useAdminRealtimeTopic } from '@/shared/realtime/adminRealtime'
 import type {
+  AdaptiveProtectionRuntimePayload,
   L7ConfigPayload,
   L7StatsPayload,
   SecurityEventsResponse,
@@ -55,6 +56,7 @@ export function useAdminL7() {
   const lastUpdated = ref<number | null>(null)
   const meta = ref({
     runtime_enabled: false,
+    adaptive_runtime: null as AdaptiveProtectionRuntimePayload | null,
   })
 
   const configForm = reactive<L7ConfigForm>(createDefaultL7ConfigForm())
@@ -85,6 +87,7 @@ export function useAdminL7() {
 
     meta.value = {
       runtime_enabled: payload.runtime_enabled,
+      adaptive_runtime: payload.adaptive_runtime,
     }
   }
 

@@ -1,3 +1,5 @@
+import type { AdaptiveProtectionRuntimePayload } from '@/shared/types'
+
 export interface RuleResponseHeaderPayload {
   key: string
   value: string
@@ -109,6 +111,7 @@ export interface L7ConfigPayload {
   bloom_enabled: boolean
   bloom_false_positive_verification: boolean
   runtime_profile: 'minimal' | 'standard' | string
+  adaptive_runtime: AdaptiveProtectionRuntimePayload
   listen_addrs: string[]
   upstream_endpoint: string
   http3_enabled: boolean

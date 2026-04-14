@@ -44,6 +44,8 @@ pub struct Config {
     pub admin_api_auth: AdminApiAuthConfig,
     #[serde(default)]
     pub auto_tuning: AutoTuningConfig,
+    #[serde(default)]
+    pub adaptive_protection: AdaptiveProtectionConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +60,38 @@ pub struct ConsoleSettings {
     pub emergency_mode: bool,
     #[serde(default)]
     pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdaptiveProtectionConfig {
+    #[serde(default = "default_adaptive_protection_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: AdaptiveProtectionMode,
+    #[serde(default)]
+    pub goal: AdaptiveProtectionGoal,
+    #[serde(default = "default_adaptive_cdn_fronted")]
+    pub cdn_fronted: bool,
+    #[serde(default)]
+    pub allow_emergency_reject: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveProtectionMode {
+    Relaxed,
+    #[default]
+    Balanced,
+    Strict,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveProtectionGoal {
+    AvailabilityFirst,
+    #[default]
+    Balanced,
+    SecurityFirst,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -136,6 +170,14 @@ pub struct AutoTuningConfig {
     pub pinned_fields: Vec<String>,
     #[serde(default)]
     pub slo: AutoSloTargets,
+}
+
+const fn default_adaptive_protection_enabled() -> bool {
+    true
+}
+
+const fn default_adaptive_cdn_fronted() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

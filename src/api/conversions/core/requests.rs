@@ -300,6 +300,7 @@ impl SettingsUpdateRequest {
 
         current.console_settings.gateway_name = self.gateway_name;
         current.console_settings.drop_unmatched_requests = self.drop_unmatched_requests;
+        current.console_settings.cdn_525_diagnostic_mode = self.cdn_525_diagnostic_mode;
         current.gateway_config = GatewayConfig {
             https_listen_addr,
             default_certificate_id: self.default_certificate_id,

@@ -29,6 +29,7 @@ impl SettingsResponse {
         Self {
             gateway_name: config.console_settings.gateway_name.clone(),
             drop_unmatched_requests: config.console_settings.drop_unmatched_requests,
+            cdn_525_diagnostic_mode: config.console_settings.cdn_525_diagnostic_mode,
             https_listen_addr: display_https_listen_port(&config.gateway_config.https_listen_addr),
             default_certificate_id: config.gateway_config.default_certificate_id,
             api_endpoint: config.api_bind.clone(),

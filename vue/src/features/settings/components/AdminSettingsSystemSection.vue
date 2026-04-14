@@ -41,6 +41,11 @@ const apiEndpoint = computed({
   get: () => props.systemSettings.api_endpoint,
   set: (value: string) => updateSystemSettings({ api_endpoint: value }),
 })
+const cdn525DiagnosticMode = computed({
+  get: () => props.systemSettings.cdn_525_diagnostic_mode,
+  set: (value: boolean) =>
+    updateSystemSettings({ cdn_525_diagnostic_mode: value }),
+})
 const defaultCertificateId = computed({
   get: () => props.systemSettings.default_certificate_id,
   set: (value: number | null) =>
@@ -213,7 +218,22 @@ function truncateCertificateName(name: string, maxLength = 18) {
               </option>
             </select>
           </label>
+          <label
+            class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800"
+          >
+            <span>CDN 525 诊断模式</span>
+            <input
+              v-model="cdn525DiagnosticMode"
+              type="checkbox"
+              class="ui-switch"
+            />
+          </label>
         </div>
+
+        <p class="mt-3 text-xs leading-5 text-slate-500">
+          开启后会对可信 CDN / 代理来源放宽 TLS 握手等待与入口 permit 等待，尽量避免
+          Rust 侧自身造成 525，方便排查是否为 CDN、证书或源站链路问题。
+        </p>
 
         <div class="mt-4 border-t border-slate-100 pt-3">
           <div class="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">

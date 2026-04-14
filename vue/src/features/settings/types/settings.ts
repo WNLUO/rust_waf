@@ -48,6 +48,7 @@ export interface SafeLineTestPayload {
 export interface SettingsPayload {
   gateway_name: string
   drop_unmatched_requests: boolean
+  cdn_525_diagnostic_mode: boolean
   https_listen_addr: string
   default_certificate_id: number | null
   api_endpoint: string
@@ -58,6 +59,7 @@ export interface SettingsPayload {
 export interface SettingsUpdatePayload {
   gateway_name: string
   drop_unmatched_requests: boolean
+  cdn_525_diagnostic_mode: boolean
   https_listen_addr: string
   default_certificate_id: number | null
   api_endpoint: string

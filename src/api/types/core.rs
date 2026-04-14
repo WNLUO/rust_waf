@@ -14,6 +14,7 @@ pub struct HealthResponse {
 pub struct SettingsResponse {
     pub(crate) gateway_name: String,
     pub(crate) drop_unmatched_requests: bool,
+    pub(crate) cdn_525_diagnostic_mode: bool,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
     pub(crate) api_endpoint: String,
@@ -155,6 +156,7 @@ pub struct SafeLineSettingsResponse {
 pub struct SettingsUpdateRequest {
     pub(crate) gateway_name: String,
     pub(crate) drop_unmatched_requests: bool,
+    pub(crate) cdn_525_diagnostic_mode: bool,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
     pub(crate) api_endpoint: String,

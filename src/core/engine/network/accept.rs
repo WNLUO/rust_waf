@@ -75,6 +75,12 @@ pub(crate) async fn handle_tls_connection(
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let config = context.config_snapshot();
+    let handshake_timeout_ms =
+        if config.console_settings.cdn_525_diagnostic_mode && trusted_proxy_peer {
+            config.l7_config.tls_handshake_timeout_ms.max(10_000)
+        } else {
+            config.l7_config.tls_handshake_timeout_ms
+        };
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
     if l4_result.should_persist_event() {
@@ -130,7 +136,7 @@ pub(crate) async fn handle_tls_connection(
     metadata.push(("network.connection_id".to_string(), connection_id.clone()));
 
     let tls_stream = match tokio::time::timeout(
-        std::time::Duration::from_millis(config.l7_config.tls_handshake_timeout_ms),
+        std::time::Duration::from_millis(handshake_timeout_ms),
         tls_acceptor.accept(stream),
     )
     .await
@@ -163,7 +169,7 @@ pub(crate) async fn handle_tls_connection(
             }
             warn!(
                 "TLS handshake timed out for peer {} on {} after {}ms",
-                peer_addr, local_addr, config.l7_config.tls_handshake_timeout_ms
+                peer_addr, local_addr, handshake_timeout_ms
             );
             persist_tls_transport_event(
                 context.as_ref(),
@@ -173,7 +179,7 @@ pub(crate) async fn handle_tls_connection(
                     "tls handshake timed out peer_ip={} listener={} timeout_ms={}",
                     peer_addr.ip(),
                     local_addr,
-                    config.l7_config.tls_handshake_timeout_ms
+                    handshake_timeout_ms
                 ),
             );
             return Err(anyhow::anyhow!("TLS handshake timed out"));

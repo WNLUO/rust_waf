@@ -53,6 +53,8 @@ pub struct ConsoleSettings {
     #[serde(default)]
     pub drop_unmatched_requests: bool,
     #[serde(default)]
+    pub cdn_525_diagnostic_mode: bool,
+    #[serde(default)]
     pub emergency_mode: bool,
     #[serde(default)]
     pub notes: String,

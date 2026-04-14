@@ -90,10 +90,18 @@ fn adaptive_permit_wait_ms_for_peer(
     channel: &str,
 ) -> u64 {
     let wait_ms = adaptive_permit_wait_ms(context, semaphore);
+    let diagnostic_mode = context
+        .config_snapshot()
+        .console_settings
+        .cdn_525_diagnostic_mode;
     let trusted_proxy_peer =
         crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
 
-    if trusted_proxy_peer && channel.eq_ignore_ascii_case("TLS") {
+    if diagnostic_mode && trusted_proxy_peer && channel.eq_ignore_ascii_case("TLS") {
+        wait_ms.max(5_000)
+    } else if diagnostic_mode && trusted_proxy_peer {
+        wait_ms.max(3_000)
+    } else if trusted_proxy_peer && channel.eq_ignore_ascii_case("TLS") {
         (wait_ms.saturating_mul(2)).clamp(wait_ms, 1_500)
     } else if trusted_proxy_peer {
         (wait_ms.saturating_mul(2)).clamp(wait_ms, 1_200)

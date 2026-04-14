@@ -7,6 +7,7 @@ export function createDefaultSystemSettings(): SystemSettingsForm {
   return {
     gateway_name: '玄枢防护网关',
     drop_unmatched_requests: false,
+    cdn_525_diagnostic_mode: false,
     https_listen_addr: '',
     default_certificate_id: null,
     api_endpoint: '127.0.0.1:3740',

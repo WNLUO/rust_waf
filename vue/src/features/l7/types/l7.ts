@@ -82,10 +82,15 @@ export interface AutoTuningRuntimePayload {
     handshake_timeout_rate_delta_percent: number
     bucket_reject_rate_delta_percent: number
     avg_proxy_latency_delta_ms: number
-    traffic_segments: Array<{
-      request_kind: 'document' | 'api' | 'static' | string
+    segments: Array<{
+      scope_type: 'request_kind' | 'host' | 'route' | 'host_route' | string
+      scope_key: string
+      host: string | null
+      route: string | null
+      request_kind: 'document' | 'api' | 'static' | 'other' | string
       sample_requests: number
       avg_proxy_latency_delta_ms: number
+      failure_rate_delta_percent: number
       status: 'improved' | 'regressed' | 'stable' | 'low_sample' | string
     }>
     summary: string

@@ -202,7 +202,7 @@ function formatSignedInteger(value: number) {
   return normalized > 0 ? `+${normalized}` : `${normalized}`
 }
 
-function segmentLabel(kind: string) {
+function requestKindLabel(kind: string) {
   switch (kind) {
     case 'document':
       return '页面'
@@ -212,6 +212,27 @@ function segmentLabel(kind: string) {
       return '静态资源'
     default:
       return kind
+  }
+}
+
+function segmentLabel(segment: {
+  scope_type: string
+  host: string | null
+  route: string | null
+  request_kind: string
+  scope_key: string
+}) {
+  switch (segment.scope_type) {
+    case 'request_kind':
+      return `流量 ${requestKindLabel(segment.request_kind)}`
+    case 'host':
+      return `Host ${segment.host || segment.scope_key}`
+    case 'route':
+      return `Route ${segment.route || segment.scope_key}`
+    case 'host_route':
+      return `${segment.host || 'unknown-host'} ${segment.route || 'unknown-route'}`
+    default:
+      return segment.scope_key
   }
 }
 
@@ -735,15 +756,15 @@ const safelineResponseBodySource = computed({
             说明: {{ autoEffectEvaluation.summary }}
           </p>
           <p
-            v-if="autoEffectEvaluation.traffic_segments.length"
+            v-if="autoEffectEvaluation.segments.length"
             class="mt-1"
           >
             分层观测:
             {{
-              autoEffectEvaluation.traffic_segments
+              autoEffectEvaluation.segments
                 .map(
                   (segment) =>
-                    `${segmentLabel(segment.request_kind)} ${segmentStatusLabel(segment.status)} (${segment.sample_requests} req / ${formatSignedInteger(segment.avg_proxy_latency_delta_ms)}ms)`,
+                    `${segmentLabel(segment)} ${segmentStatusLabel(segment.status)} (${segment.sample_requests} req / ${formatSignedInteger(segment.avg_proxy_latency_delta_ms)}ms / ${formatSignedNumber(segment.failure_rate_delta_percent)}pp)`,
                 )
                 .join(' | ')
             }}

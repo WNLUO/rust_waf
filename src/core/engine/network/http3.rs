@@ -326,7 +326,8 @@ async fn handle_http3_request(
             return Ok(());
         }
         if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_proxy_attempt_with_kind(proxy_traffic_kind(&unified));
+            let labels = proxy_metric_labels(&unified);
+            metrics.record_proxy_attempt_with_labels(proxy_traffic_kind(&unified), &labels);
         }
         let proxy_started_at = Instant::now();
         match proxy_http_request(
@@ -341,9 +342,11 @@ async fn handle_http3_request(
         {
             Ok(response) => {
                 if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_proxy_success_with_kind(
+                    let labels = proxy_metric_labels(&unified);
+                    metrics.record_proxy_success_with_labels(
                         proxy_traffic_kind(&unified),
                         proxy_started_at.elapsed(),
+                        &labels,
                     );
                 }
                 context.traffic_map.record_egress(
@@ -363,7 +366,8 @@ async fn handle_http3_request(
             }
             Err(err) => {
                 if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_proxy_failure_with_kind(proxy_traffic_kind(&unified));
+                    let labels = proxy_metric_labels(&unified);
+                    metrics.record_proxy_failure_with_labels(proxy_traffic_kind(&unified), &labels);
                 }
                 context.set_upstream_health(false, Some(err.to_string()));
                 warn!(

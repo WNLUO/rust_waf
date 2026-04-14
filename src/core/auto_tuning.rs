@@ -1,5 +1,6 @@
 use crate::config::{AutoTuningIntent, AutoTuningMode, Config};
-use crate::metrics::{MetricsSnapshot, ProxyTrafficMetricsSnapshot};
+use crate::metrics::{MetricsSnapshot, ProxyTrafficMetricsSnapshot, ProxyTrafficSegmentSnapshot};
+use std::collections::BTreeMap;
 
 use super::system_profile::{detect_system_profile, SystemProfile};
 
@@ -40,15 +41,20 @@ pub struct AutoTuningEffectEvaluationSnapshot {
     pub handshake_timeout_rate_delta_percent: f64,
     pub bucket_reject_rate_delta_percent: f64,
     pub avg_proxy_latency_delta_ms: i64,
-    pub traffic_segments: Vec<AutoTuningTrafficSegmentEvaluationSnapshot>,
+    pub segments: Vec<AutoTuningEffectSegmentEvaluationSnapshot>,
     pub summary: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct AutoTuningTrafficSegmentEvaluationSnapshot {
+pub struct AutoTuningEffectSegmentEvaluationSnapshot {
+    pub scope_type: String,
+    pub scope_key: String,
+    pub host: Option<String>,
+    pub route: Option<String>,
     pub request_kind: String,
     pub sample_requests: u64,
     pub avg_proxy_latency_delta_ms: i64,
+    pub failure_rate_delta_percent: f64,
     pub status: String,
 }
 
@@ -79,7 +85,7 @@ struct MetricDeltas {
     handshake_timeout_rate_percent: f64,
     bucket_reject_rate_percent: f64,
     avg_proxy_latency_ms: u64,
-    traffic_segments: [TrafficSegmentDelta; 3],
+    segments: Vec<TrafficSegmentDelta>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,11 +104,16 @@ enum AutoTuningActionKind {
     Latency,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct TrafficSegmentDelta {
-    request_kind: &'static str,
+    scope_type: &'static str,
+    scope_key: String,
+    host: Option<String>,
+    route: Option<String>,
+    request_kind: String,
     proxied_requests_delta: u64,
     avg_proxy_latency_ms: u64,
+    failure_rate_percent: f64,
 }
 
 pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
@@ -327,7 +338,10 @@ pub fn run_control_step(
             .clone()
             .unwrap_or_else(|| "adjustment".to_string()),
         action_kind_for_adjust_reason(
-            runtime.last_adjust_reason.as_deref().unwrap_or("adjustment"),
+            runtime
+                .last_adjust_reason
+                .as_deref()
+                .unwrap_or("adjustment"),
         ),
         deltas,
     );
@@ -794,26 +808,34 @@ fn compute_deltas(previous: &MetricsSnapshot, current: &MetricsSnapshot) -> Metr
         handshake_timeout_rate_percent,
         bucket_reject_rate_percent,
         avg_proxy_latency_ms,
-        traffic_segments: [
-            compute_traffic_segment_delta("document", &previous.document_proxy, &current.document_proxy),
-            compute_traffic_segment_delta("api", &previous.api_proxy, &current.api_proxy),
-            compute_traffic_segment_delta("static", &previous.static_proxy, &current.static_proxy),
-        ],
+        segments: collect_segment_deltas(previous, current),
     }
 }
 
-fn compute_traffic_segment_delta(
-    request_kind: &'static str,
+fn compute_request_kind_segment_delta(
+    request_kind: &str,
     previous: &ProxyTrafficMetricsSnapshot,
     current: &ProxyTrafficMetricsSnapshot,
 ) -> TrafficSegmentDelta {
     let proxied_requests_delta = current
         .proxied_requests
         .saturating_sub(previous.proxied_requests);
+    let proxy_failures_delta = current
+        .proxy_failures
+        .saturating_sub(previous.proxy_failures);
     TrafficSegmentDelta {
-        request_kind,
+        scope_type: "request_kind",
+        scope_key: request_kind.to_string(),
+        host: None,
+        route: None,
+        request_kind: request_kind.to_string(),
         proxied_requests_delta,
         avg_proxy_latency_ms: (current.average_proxy_latency_micros / 1000).max(1),
+        failure_rate_percent: if proxied_requests_delta == 0 {
+            0.0
+        } else {
+            proxy_failures_delta as f64 * 100.0 / proxied_requests_delta as f64
+        },
     }
 }
 
@@ -829,7 +851,10 @@ fn maybe_finalize_effect_evaluation(
     };
 
     let min_sample_requests = 20;
-    let deadline_reached = state.cooldown_until.map(|until| now >= until).unwrap_or(false)
+    let deadline_reached = state
+        .cooldown_until
+        .map(|until| now >= until)
+        .unwrap_or(false)
         || now.saturating_sub(pending.adjust_at)
             >= (config.auto_tuning.control_interval_secs.max(1) as i64).saturating_mul(3);
 
@@ -841,7 +866,7 @@ fn maybe_finalize_effect_evaluation(
             handshake_timeout_rate_delta_percent: 0.0,
             bucket_reject_rate_delta_percent: 0.0,
             avg_proxy_latency_delta_ms: 0,
-            traffic_segments: Vec::new(),
+            segments: Vec::new(),
             summary: format!(
                 "waiting for more post-adjust traffic after {}",
                 pending.reason
@@ -858,7 +883,7 @@ fn maybe_finalize_effect_evaluation(
             handshake_timeout_rate_delta_percent: 0.0,
             bucket_reject_rate_delta_percent: 0.0,
             avg_proxy_latency_delta_ms: 0,
-            traffic_segments: Vec::new(),
+            segments: Vec::new(),
             summary: format!(
                 "insufficient post-adjust traffic to evaluate {}",
                 pending.reason
@@ -884,19 +909,19 @@ fn evaluate_effect_against_baseline(
         current.bucket_reject_rate_percent - pending.baseline.bucket_reject_rate_percent;
     let latency_delta =
         current.avg_proxy_latency_ms as i64 - pending.baseline.avg_proxy_latency_ms as i64;
-    let traffic_segments = current
-        .traffic_segments
-        .iter()
-        .zip(pending.baseline.traffic_segments.iter())
-        .map(|(current_segment, baseline_segment)| evaluate_traffic_segment(current_segment, baseline_segment))
-        .collect::<Vec<_>>();
+    let segments = evaluate_segments_against_baseline(current, &pending.baseline);
+    let layered_regression = segments.iter().any(|segment| {
+        segment.status == "regressed"
+            && matches!(segment.scope_type.as_str(), "host" | "route" | "host_route")
+    });
+    let layered_improvement = segments.iter().any(|segment| segment.status == "improved");
 
     let score = match pending.action_kind {
         AutoTuningActionKind::Handshake => {
-            score_percent_delta(handshake_delta, tolerance_percent(
-                pending.baseline.handshake_timeout_rate_percent,
-                0.05,
-            )) * 2
+            score_percent_delta(
+                handshake_delta,
+                tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
+            ) * 2
                 + score_percent_delta(
                     bucket_delta,
                     tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
@@ -908,28 +933,28 @@ fn evaluate_effect_against_baseline(
                 bucket_delta,
                 tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
             ) * 2
-                + score_percent_delta(handshake_delta, tolerance_percent(
-                    pending.baseline.handshake_timeout_rate_percent,
-                    0.05,
-                ))
+                + score_percent_delta(
+                    handshake_delta,
+                    tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
+                )
                 + score_latency_delta(latency_delta)
         }
         AutoTuningActionKind::Latency => {
             score_latency_delta(latency_delta) * 2
-                + score_percent_delta(handshake_delta, tolerance_percent(
-                    pending.baseline.handshake_timeout_rate_percent,
-                    0.05,
-                ))
+                + score_percent_delta(
+                    handshake_delta,
+                    tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
+                )
                 + score_percent_delta(
                     bucket_delta,
                     tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
                 )
         }
         AutoTuningActionKind::Bootstrap => {
-            score_percent_delta(handshake_delta, tolerance_percent(
-                pending.baseline.handshake_timeout_rate_percent,
-                0.05,
-            )) + score_percent_delta(
+            score_percent_delta(
+                handshake_delta,
+                tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
+            ) + score_percent_delta(
                 bucket_delta,
                 tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
             ) + score_latency_delta(latency_delta)
@@ -937,10 +962,12 @@ fn evaluate_effect_against_baseline(
     };
 
     let focus = action_kind_label(pending.action_kind);
-    let status = if score <= -2 {
+    let status = if score <= -2 || layered_regression {
         "regressed"
-    } else if score >= 2 {
+    } else if score >= 2 && !layered_regression {
         "improved"
+    } else if layered_improvement {
+        "mixed"
     } else {
         "mixed"
     };
@@ -952,7 +979,7 @@ fn evaluate_effect_against_baseline(
         handshake_timeout_rate_delta_percent: handshake_delta,
         bucket_reject_rate_delta_percent: bucket_delta,
         avg_proxy_latency_delta_ms: latency_delta,
-        traffic_segments,
+        segments,
         summary: format!(
             "{} after {} with {} focus (handshake {:+.2}pp, bucket {:+.2}pp, latency {:+}ms)",
             status, pending.reason, focus, handshake_delta, bucket_delta, latency_delta
@@ -975,8 +1002,7 @@ fn score_latency_delta(delta_ms: i64) -> i8 {
         1
     } else if delta_ms >= 100 {
         -1
-    }
-    else {
+    } else {
         0
     }
 }
@@ -1006,7 +1032,7 @@ fn arm_effect_evaluation(
         handshake_timeout_rate_delta_percent: 0.0,
         bucket_reject_rate_delta_percent: 0.0,
         avg_proxy_latency_delta_ms: 0,
-        traffic_segments: Vec::new(),
+        segments: Vec::new(),
         summary: format!("waiting to evaluate {}", reason),
     });
 }
@@ -1037,23 +1063,7 @@ fn deltas_from_runtime(runtime: &AutoTuningRuntimeSnapshot) -> MetricDeltas {
         handshake_timeout_rate_percent: runtime.last_observed_tls_handshake_timeout_rate_percent,
         bucket_reject_rate_percent: runtime.last_observed_bucket_reject_rate_percent,
         avg_proxy_latency_ms: runtime.last_observed_avg_proxy_latency_ms,
-        traffic_segments: [
-            TrafficSegmentDelta {
-                request_kind: "document",
-                proxied_requests_delta: 0,
-                avg_proxy_latency_ms: 0,
-            },
-            TrafficSegmentDelta {
-                request_kind: "api",
-                proxied_requests_delta: 0,
-                avg_proxy_latency_ms: 0,
-            },
-            TrafficSegmentDelta {
-                request_kind: "static",
-                proxied_requests_delta: 0,
-                avg_proxy_latency_ms: 0,
-            },
-        ],
+        segments: Vec::new(),
     }
 }
 
@@ -1075,31 +1085,174 @@ fn rollback_effect_snapshot(
         handshake_timeout_rate_delta_percent: 0.0,
         bucket_reject_rate_delta_percent: 0.0,
         avg_proxy_latency_delta_ms: 0,
-        traffic_segments: Vec::new(),
+        segments: Vec::new(),
         summary,
     }
 }
 
-fn evaluate_traffic_segment(
+fn collect_segment_deltas(
+    previous: &MetricsSnapshot,
+    current: &MetricsSnapshot,
+) -> Vec<TrafficSegmentDelta> {
+    let mut segments = vec![
+        compute_request_kind_segment_delta(
+            "document",
+            &previous.document_proxy,
+            &current.document_proxy,
+        ),
+        compute_request_kind_segment_delta("api", &previous.api_proxy, &current.api_proxy),
+        compute_request_kind_segment_delta("static", &previous.static_proxy, &current.static_proxy),
+        compute_request_kind_segment_delta("other", &previous.other_proxy, &current.other_proxy),
+    ];
+    segments.extend(collect_top_segment_deltas(
+        "host",
+        &previous.top_host_segments,
+        &current.top_host_segments,
+    ));
+    segments.extend(collect_top_segment_deltas(
+        "route",
+        &previous.top_route_segments,
+        &current.top_route_segments,
+    ));
+    segments.extend(collect_top_segment_deltas(
+        "host_route",
+        &previous.top_host_route_segments,
+        &current.top_host_route_segments,
+    ));
+    segments
+}
+
+fn collect_top_segment_deltas(
+    expected_scope: &'static str,
+    previous: &[ProxyTrafficSegmentSnapshot],
+    current: &[ProxyTrafficSegmentSnapshot],
+) -> Vec<TrafficSegmentDelta> {
+    let previous_by_key = previous
+        .iter()
+        .map(|segment| (segment.scope_key.clone(), segment))
+        .collect::<BTreeMap<_, _>>();
+    let current_by_key = current
+        .iter()
+        .map(|segment| (segment.scope_key.clone(), segment))
+        .collect::<BTreeMap<_, _>>();
+    let mut keys = previous_by_key
+        .keys()
+        .cloned()
+        .chain(current_by_key.keys().cloned())
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+
+    keys.into_iter()
+        .filter_map(|key| {
+            let current_segment = current_by_key.get(&key)?;
+            let previous_segment = previous_by_key.get(&key).copied();
+            let proxied_requests_delta = current_segment.proxied_requests.saturating_sub(
+                previous_segment
+                    .map(|item| item.proxied_requests)
+                    .unwrap_or(0),
+            );
+            let proxy_failures_delta = current_segment.proxy_failures.saturating_sub(
+                previous_segment
+                    .map(|item| item.proxy_failures)
+                    .unwrap_or(0),
+            );
+            Some(TrafficSegmentDelta {
+                scope_type: expected_scope,
+                scope_key: current_segment.scope_key.clone(),
+                host: current_segment.host.clone(),
+                route: current_segment.route.clone(),
+                request_kind: current_segment.request_kind.clone(),
+                proxied_requests_delta,
+                avg_proxy_latency_ms: (current_segment.average_proxy_latency_micros / 1000).max(1),
+                failure_rate_percent: if proxied_requests_delta == 0 {
+                    0.0
+                } else {
+                    proxy_failures_delta as f64 * 100.0 / proxied_requests_delta as f64
+                },
+            })
+        })
+        .collect()
+}
+
+fn evaluate_segments_against_baseline(
+    current: &MetricDeltas,
+    baseline: &MetricDeltas,
+) -> Vec<AutoTuningEffectSegmentEvaluationSnapshot> {
+    let baseline_by_key = baseline
+        .segments
+        .iter()
+        .map(|segment| (segment_key(segment), segment))
+        .collect::<BTreeMap<_, _>>();
+    let current_by_key = current
+        .segments
+        .iter()
+        .map(|segment| (segment_key(segment), segment))
+        .collect::<BTreeMap<_, _>>();
+    let mut keys = baseline_by_key
+        .keys()
+        .cloned()
+        .chain(current_by_key.keys().cloned())
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys.dedup();
+
+    let mut segments = keys
+        .into_iter()
+        .filter_map(|key| {
+            let current_segment = current_by_key.get(&key)?;
+            let baseline_segment = baseline_by_key.get(&key).copied();
+            Some(evaluate_segment_delta(current_segment, baseline_segment))
+        })
+        .collect::<Vec<_>>();
+    segments.sort_by(|left, right| {
+        right
+            .sample_requests
+            .cmp(&left.sample_requests)
+            .then(left.scope_type.cmp(&right.scope_type))
+            .then(left.scope_key.cmp(&right.scope_key))
+    });
+    segments.truncate(12);
+    segments
+}
+
+fn evaluate_segment_delta(
     current: &TrafficSegmentDelta,
-    baseline: &TrafficSegmentDelta,
-) -> AutoTuningTrafficSegmentEvaluationSnapshot {
-    let latency_delta = current.avg_proxy_latency_ms as i64 - baseline.avg_proxy_latency_ms as i64;
+    baseline: Option<&TrafficSegmentDelta>,
+) -> AutoTuningEffectSegmentEvaluationSnapshot {
+    let baseline_latency = baseline
+        .map(|segment| segment.avg_proxy_latency_ms)
+        .unwrap_or(0);
+    let baseline_failure_rate = baseline
+        .map(|segment| segment.failure_rate_percent)
+        .unwrap_or(0.0);
+    let latency_delta = current.avg_proxy_latency_ms as i64 - baseline_latency as i64;
+    let failure_rate_delta = current.failure_rate_percent - baseline_failure_rate;
     let status = if current.proxied_requests_delta < 5 {
         "low_sample"
-    } else if latency_delta <= -50 {
+    } else if latency_delta <= -50 && failure_rate_delta <= -1.0 {
         "improved"
-    } else if latency_delta >= 100 {
+    } else if latency_delta >= 100 || failure_rate_delta >= 2.0 {
         "regressed"
     } else {
         "stable"
     };
-    AutoTuningTrafficSegmentEvaluationSnapshot {
-        request_kind: current.request_kind.to_string(),
+
+    AutoTuningEffectSegmentEvaluationSnapshot {
+        scope_type: current.scope_type.to_string(),
+        scope_key: current.scope_key.clone(),
+        host: current.host.clone(),
+        route: current.route.clone(),
+        request_kind: current.request_kind.clone(),
         sample_requests: current.proxied_requests_delta,
         avg_proxy_latency_delta_ms: latency_delta,
+        failure_rate_delta_percent: failure_rate_delta,
         status: status.to_string(),
     }
+}
+
+fn segment_key(segment: &TrafficSegmentDelta) -> String {
+    format!("{}::{}", segment.scope_type, segment.scope_key)
 }
 
 fn adjust_u64(value: u64, percent: u8, increase: bool, min: u64, max: u64) -> u64 {
@@ -1303,7 +1456,10 @@ mod tests {
             ..MetricsSnapshot::default()
         };
         let decision = run_control_step(&config, &mut runtime, &mut state, &decision_window, 130);
-        assert!(decision.is_some(), "third consecutive high handshake window should adjust");
+        assert!(
+            decision.is_some(),
+            "third consecutive high handshake window should adjust"
+        );
         assert_eq!(
             runtime
                 .last_effect_evaluation

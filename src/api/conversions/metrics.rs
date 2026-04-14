@@ -1,7 +1,6 @@
 use super::super::types::{
-    AutoTuningEffectEvaluationResponse, AutoTuningRecommendationResponse,
-    AutoTuningTrafficSegmentEvaluationResponse,
-    AutoTuningRuntimeResponse, L4StatsResponse, L7StatsResponse,
+    AutoTuningEffectEvaluationResponse, AutoTuningEffectSegmentEvaluationResponse,
+    AutoTuningRecommendationResponse, AutoTuningRuntimeResponse, L4StatsResponse, L7StatsResponse,
 };
 use crate::core::WafContext;
 
@@ -180,16 +179,20 @@ impl L7StatsResponse {
                         sample_requests: value.sample_requests,
                         handshake_timeout_rate_delta_percent: value
                             .handshake_timeout_rate_delta_percent,
-                        bucket_reject_rate_delta_percent: value
-                            .bucket_reject_rate_delta_percent,
+                        bucket_reject_rate_delta_percent: value.bucket_reject_rate_delta_percent,
                         avg_proxy_latency_delta_ms: value.avg_proxy_latency_delta_ms,
-                        traffic_segments: value
-                            .traffic_segments
+                        segments: value
+                            .segments
                             .into_iter()
-                            .map(|segment| AutoTuningTrafficSegmentEvaluationResponse {
+                            .map(|segment| AutoTuningEffectSegmentEvaluationResponse {
+                                scope_type: segment.scope_type,
+                                scope_key: segment.scope_key,
+                                host: segment.host,
+                                route: segment.route,
                                 request_kind: segment.request_kind,
                                 sample_requests: segment.sample_requests,
                                 avg_proxy_latency_delta_ms: segment.avg_proxy_latency_delta_ms,
+                                failure_rate_delta_percent: segment.failure_rate_delta_percent,
                                 status: segment.status,
                             })
                             .collect(),

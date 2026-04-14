@@ -138,7 +138,8 @@ impl L7CcGuard {
         }
         let is_page_subresource = request_kind == RequestKind::StaticAsset
             && self.matches_page_load_window(request, client_ip, &host, &route_path, unix_now);
-        let weight_percent = self.request_weight_percent(request_kind, is_page_subresource, &config);
+        let weight_percent =
+            self.request_weight_percent(request_kind, is_page_subresource, &config);
 
         let ip_count = self.observe(
             &self.ip_buckets,
@@ -254,19 +255,17 @@ impl L7CcGuard {
         let block_multiplier = if verified { 2 } else { 1 };
         let low_risk_subresource = request_kind == RequestKind::StaticAsset && is_page_subresource;
 
-        let route_block_threshold = config.route_block_threshold.saturating_mul(block_multiplier);
-        let host_block_threshold = config
-            .host_block_threshold
+        let route_block_threshold = config
+            .route_block_threshold
             .saturating_mul(block_multiplier);
-        let ip_block_threshold = config
-            .ip_block_threshold
-            .saturating_mul(block_multiplier);
+        let host_block_threshold = config.host_block_threshold.saturating_mul(block_multiplier);
+        let ip_block_threshold = config.ip_block_threshold.saturating_mul(block_multiplier);
         let hot_path_block_threshold = config
             .hot_path_block_threshold
             .saturating_mul(block_multiplier);
 
-        let hard_route_block_threshold = route_block_threshold
-            .saturating_mul(u32::from(config.hard_route_block_multiplier));
+        let hard_route_block_threshold =
+            route_block_threshold.saturating_mul(u32::from(config.hard_route_block_multiplier));
         let hard_host_block_threshold =
             host_block_threshold.saturating_mul(u32::from(config.hard_host_block_multiplier));
         let hard_ip_block_threshold =
@@ -310,8 +309,9 @@ impl L7CcGuard {
             ));
         }
 
-        let route_challenge_threshold =
-            config.route_challenge_threshold.saturating_mul(challenge_multiplier);
+        let route_challenge_threshold = config
+            .route_challenge_threshold
+            .saturating_mul(challenge_multiplier);
         let host_challenge_threshold = config
             .host_challenge_threshold
             .saturating_mul(challenge_multiplier);
@@ -344,7 +344,9 @@ impl L7CcGuard {
             return Some(InspectionResult::respond(
                 InspectionLayer::L7,
                 reason.clone(),
-                self.build_challenge_response(request, client_ip, &host, &reason, html_mode, &config),
+                self.build_challenge_response(
+                    request, client_ip, &host, &reason, html_mode, &config,
+                ),
             ));
         }
 
@@ -1204,8 +1206,14 @@ mod tests {
 
         let mut third = request("/search?q=3");
         let result = guard.inspect_request(&mut third).await;
-        assert!(result.is_some(), "existing counters should survive config updates");
-        assert_eq!(result.unwrap().action, crate::core::InspectionAction::Respond);
+        assert!(
+            result.is_some(),
+            "existing counters should survive config updates"
+        );
+        assert_eq!(
+            result.unwrap().action,
+            crate::core::InspectionAction::Respond
+        );
     }
 
     #[test]

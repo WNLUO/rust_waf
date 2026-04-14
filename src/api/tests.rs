@@ -68,6 +68,9 @@ fn test_build_metrics_response_with_sources() {
             api_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
             static_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
             other_proxy: crate::metrics::ProxyTrafficMetricsSnapshot::default(),
+            top_host_segments: Vec::new(),
+            top_route_segments: Vec::new(),
+            top_host_route_segments: Vec::new(),
         }),
         4,
         Some(crate::storage::StorageMetricsSummary {

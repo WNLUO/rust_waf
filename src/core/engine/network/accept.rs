@@ -187,6 +187,11 @@ pub(crate) async fn handle_tls_connection(
         }
     };
     drop(handshake_permit);
+    let alpn = tls_stream
+        .get_ref()
+        .1
+        .alpn_protocol()
+        .map(|proto| String::from_utf8_lossy(proto).to_string());
     let Some(_connection_permit) = crate::core::engine::runtime::acquire_permit_auto(
         context.as_ref(),
         Arc::clone(&connection_semaphore),
@@ -199,13 +204,15 @@ pub(crate) async fn handle_tls_connection(
             "Dropping TLS connection from {} after successful handshake because no post-handshake business permit became available",
             peer_addr
         );
-        return Ok(());
+        return respond_tls_overload_after_handshake(
+            context.clone(),
+            tls_stream,
+            peer_addr,
+            local_addr,
+            alpn.as_deref(),
+        )
+        .await;
     };
-    let alpn = tls_stream
-        .get_ref()
-        .1
-        .alpn_protocol()
-        .map(|proto| String::from_utf8_lossy(proto).to_string());
     metadata.push(("transport".to_string(), "tls".to_string()));
     if let Some(protocol) = &alpn {
         metadata.push(("tls.alpn".to_string(), protocol.clone()));
@@ -272,6 +279,66 @@ pub(crate) async fn handle_tls_connection(
         inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
     }
     result
+}
+
+async fn respond_tls_overload_after_handshake<S>(
+    context: Arc<WafContext>,
+    mut tls_stream: S,
+    peer_addr: std::net::SocketAddr,
+    local_addr: std::net::SocketAddr,
+    alpn: Option<&str>,
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let body = b"gateway overloaded, retry later".to_vec();
+
+    match alpn {
+        Some("h2") if context.config_snapshot().l7_config.http2_config.enabled => {
+            let config = context.config_snapshot();
+            let http2_config = &config.l7_config.http2_config;
+            let handler = Http2Handler::new()
+                .with_max_concurrent_streams(http2_config.max_concurrent_streams)
+                .with_max_frame_size(http2_config.max_frame_size)
+                .with_priorities(http2_config.enable_priorities)
+                .with_initial_window_size(http2_config.initial_window_size);
+            let peer_ip = peer_addr.ip().to_string();
+            let listener_port = local_addr.port();
+            let max_request_size = config.l7_config.max_request_size;
+
+            handler
+                .serve_connection(
+                    tls_stream,
+                    peer_ip,
+                    listener_port,
+                    max_request_size,
+                    move |_request| {
+                        let body = body.clone();
+                        async move {
+                            Ok(Http2Response {
+                                status_code: 503,
+                                headers: vec![("retry-after".to_string(), "5".to_string())],
+                                body,
+                            })
+                        }
+                    },
+                )
+                .await?;
+        }
+        _ => {
+            Http1Handler::new()
+                .write_response_with_headers(
+                    &mut tls_stream,
+                    503,
+                    "Service Unavailable",
+                    &[("Retry-After".to_string(), "5".to_string())],
+                    &body,
+                )
+                .await?;
+        }
+    }
+
+    Ok(())
 }
 
 fn persist_tls_transport_event(

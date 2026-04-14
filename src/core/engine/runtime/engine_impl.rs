@@ -62,6 +62,11 @@ impl WafEngine {
             engine_maintenance::run_upstream_healthcheck_loop(context).await;
         });
 
+        let context = Arc::clone(&self.context);
+        tokio::spawn(async move {
+            engine_maintenance::run_auto_tuning_loop(context).await;
+        });
+
         if let Some(store) = self.context.sqlite_store.as_ref().cloned() {
             let fallback_config = startup_config.clone();
             tokio::spawn(async move {

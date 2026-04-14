@@ -38,6 +38,7 @@ pub(super) fn build_metrics_response(
         proxy_successes: snapshot.proxy_successes,
         proxy_failures: snapshot.proxy_failures,
         proxy_fail_close_rejections: snapshot.proxy_fail_close_rejections,
+        l4_bucket_budget_rejections: snapshot.l4_bucket_budget_rejections,
         tls_pre_handshake_rejections: snapshot.tls_pre_handshake_rejections,
         tls_handshake_timeouts: snapshot.tls_handshake_timeouts,
         upstream_healthcheck_successes: snapshot.upstream_healthcheck_successes,

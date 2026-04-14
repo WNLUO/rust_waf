@@ -70,6 +70,12 @@ export interface AutoTuningRuntimePayload {
   detected_memory_limit_mb: number | null
   last_adjust_at: number | null
   last_adjust_reason: string | null
+  last_adjust_diff: string[]
+  rollback_count_24h: number
+  cooldown_until: number | null
+  last_observed_tls_handshake_timeout_rate_percent: number
+  last_observed_bucket_reject_rate_percent: number
+  last_observed_avg_proxy_latency_ms: number
   recommendation: {
     l4_normal_connection_budget_per_minute: number
     l4_suspicious_connection_budget_per_minute: number
@@ -132,6 +138,7 @@ export interface L7StatsPayload {
   proxy_successes: number
   proxy_failures: number
   proxy_fail_close_rejections: number
+  l4_bucket_budget_rejections: number
   average_proxy_latency_micros: number
   upstream_healthy: boolean
   upstream_last_check_at: number | null

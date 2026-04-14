@@ -103,6 +103,9 @@ pub(crate) async fn handle_http2_connection(
                         let policy = inspector.apply_request_policy(&packet, &mut request);
                         maybe_delay_request(&request).await;
                         if policy.reject_new_connections {
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                metrics.record_l4_bucket_budget_rejection();
+                            }
                             return Ok(Http2Response {
                                 status_code: 429,
                                 headers: vec![],

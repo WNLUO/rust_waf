@@ -15,6 +15,7 @@ pub struct MetricsResponse {
     pub(crate) proxy_successes: u64,
     pub(crate) proxy_failures: u64,
     pub(crate) proxy_fail_close_rejections: u64,
+    pub(crate) l4_bucket_budget_rejections: u64,
     pub(crate) tls_pre_handshake_rejections: u64,
     pub(crate) tls_handshake_timeouts: u64,
     pub(crate) upstream_healthcheck_successes: u64,
@@ -67,6 +68,7 @@ pub struct L7StatsResponse {
     pub(crate) proxy_successes: u64,
     pub(crate) proxy_failures: u64,
     pub(crate) proxy_fail_close_rejections: u64,
+    pub(crate) l4_bucket_budget_rejections: u64,
     pub(crate) tls_pre_handshake_rejections: u64,
     pub(crate) tls_handshake_timeouts: u64,
     pub(crate) average_proxy_latency_micros: u64,
@@ -94,6 +96,12 @@ pub struct AutoTuningRuntimeResponse {
     pub(crate) detected_memory_limit_mb: Option<u64>,
     pub(crate) last_adjust_at: Option<i64>,
     pub(crate) last_adjust_reason: Option<String>,
+    pub(crate) last_adjust_diff: Vec<String>,
+    pub(crate) rollback_count_24h: u32,
+    pub(crate) cooldown_until: Option<i64>,
+    pub(crate) last_observed_tls_handshake_timeout_rate_percent: f64,
+    pub(crate) last_observed_bucket_reject_rate_percent: f64,
+    pub(crate) last_observed_avg_proxy_latency_ms: u64,
     pub(crate) recommendation: AutoTuningRecommendationResponse,
 }
 

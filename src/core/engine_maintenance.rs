@@ -185,6 +185,18 @@ pub(super) async fn run_upstream_healthcheck_loop(context: Arc<WafContext>) {
     }
 }
 
+pub(super) async fn run_auto_tuning_loop(context: Arc<WafContext>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+        if let Err(err) = context.run_auto_tuning_tick().await {
+            warn!("Auto tuning tick failed: {}", err);
+        }
+    }
+}
+
 pub(super) async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> Result<()> {
     let authority = crate::core::gateway::parse_upstream_endpoint(upstream_addr)?.authority;
     tokio::time::timeout(

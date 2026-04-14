@@ -19,9 +19,11 @@ use log::{info, warn};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Mutex};
 
-pub use auto_tuning::{AutoTuningRecommendationSnapshot, AutoTuningRuntimeSnapshot};
+pub use auto_tuning::{
+    AutoTuningControllerState, AutoTuningRecommendationSnapshot, AutoTuningRuntimeSnapshot,
+};
 pub use engine::WafEngine;
 pub use packet::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
@@ -62,6 +64,7 @@ pub struct WafContext {
     upstream_health: RwLock<UpstreamHealthSnapshot>,
     http3_runtime: RwLock<Http3RuntimeSnapshot>,
     auto_tuning_runtime: RwLock<AutoTuningRuntimeSnapshot>,
+    auto_tuning_controller: Mutex<AutoTuningControllerState>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -132,6 +135,7 @@ impl WafContext {
                 last_error: None,
             }),
             auto_tuning_runtime: RwLock::new(auto_tuning_runtime),
+            auto_tuning_controller: Mutex::new(AutoTuningControllerState::default()),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -169,7 +173,8 @@ impl WafContext {
                 .auto_tuning_runtime
                 .write()
                 .expect("auto_tuning_runtime lock poisoned");
-            *guard = auto_tuning::build_runtime_snapshot(
+            auto_tuning::refresh_runtime_snapshot(
+                &mut guard,
                 &self
                     .runtime_config
                     .read()
@@ -251,6 +256,32 @@ impl WafContext {
             .read()
             .expect("auto_tuning_runtime lock poisoned")
             .clone()
+    }
+
+    pub async fn run_auto_tuning_tick(&self) -> Result<()> {
+        let Some(metrics) = self.metrics_snapshot() else {
+            return Ok(());
+        };
+        let config = self.config_snapshot();
+        let now = unix_timestamp();
+
+        let decision = {
+            let mut controller = self.auto_tuning_controller.lock().await;
+            let mut runtime = self
+                .auto_tuning_runtime
+                .write()
+                .expect("auto_tuning_runtime lock poisoned");
+            auto_tuning::run_control_step(&config, &mut runtime, &mut controller, &metrics, now)
+        };
+
+        if let Some(decision) = decision {
+            self.apply_runtime_config(decision.next_config);
+            if decision.requires_l4_refresh {
+                self.refresh_l4_runtime_from_config().await?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn set_http3_runtime(

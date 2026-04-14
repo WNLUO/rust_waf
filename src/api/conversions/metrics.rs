@@ -108,6 +108,10 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.proxy_fail_close_rejections)
                 .unwrap_or(0),
+            l4_bucket_budget_rejections: metrics
+                .as_ref()
+                .map(|value| value.l4_bucket_budget_rejections)
+                .unwrap_or(0),
             tls_pre_handshake_rejections: metrics
                 .as_ref()
                 .map(|value| value.tls_pre_handshake_rejections)
@@ -148,6 +152,14 @@ impl L7StatsResponse {
                 detected_memory_limit_mb: auto.detected_memory_limit_mb,
                 last_adjust_at: auto.last_adjust_at,
                 last_adjust_reason: auto.last_adjust_reason,
+                last_adjust_diff: auto.last_adjust_diff,
+                rollback_count_24h: auto.rollback_count_24h,
+                cooldown_until: auto.cooldown_until,
+                last_observed_tls_handshake_timeout_rate_percent: auto
+                    .last_observed_tls_handshake_timeout_rate_percent,
+                last_observed_bucket_reject_rate_percent: auto
+                    .last_observed_bucket_reject_rate_percent,
+                last_observed_avg_proxy_latency_ms: auto.last_observed_avg_proxy_latency_ms,
                 recommendation: AutoTuningRecommendationResponse {
                     l4_normal_connection_budget_per_minute: auto
                         .recommendation

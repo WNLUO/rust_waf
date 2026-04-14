@@ -15,6 +15,7 @@ pub struct MetricsCollector {
     proxy_successes: AtomicU64,
     proxy_failures: AtomicU64,
     proxy_fail_close_rejections: AtomicU64,
+    l4_bucket_budget_rejections: AtomicU64,
     tls_pre_handshake_rejections: AtomicU64,
     tls_handshake_timeouts: AtomicU64,
     upstream_healthcheck_successes: AtomicU64,
@@ -38,6 +39,7 @@ impl MetricsCollector {
             proxy_successes: AtomicU64::new(0),
             proxy_failures: AtomicU64::new(0),
             proxy_fail_close_rejections: AtomicU64::new(0),
+            l4_bucket_budget_rejections: AtomicU64::new(0),
             tls_pre_handshake_rejections: AtomicU64::new(0),
             tls_handshake_timeouts: AtomicU64::new(0),
             upstream_healthcheck_successes: AtomicU64::new(0),
@@ -79,6 +81,11 @@ impl MetricsCollector {
 
     pub fn record_fail_close_rejection(&self) {
         self.proxy_fail_close_rejections
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l4_bucket_budget_rejection(&self) {
+        self.l4_bucket_budget_rejections
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -134,6 +141,9 @@ impl MetricsCollector {
             proxy_successes,
             proxy_failures: self.proxy_failures.load(Ordering::Relaxed),
             proxy_fail_close_rejections: self.proxy_fail_close_rejections.load(Ordering::Relaxed),
+            l4_bucket_budget_rejections: self
+                .l4_bucket_budget_rejections
+                .load(Ordering::Relaxed),
             tls_pre_handshake_rejections: self.tls_pre_handshake_rejections.load(Ordering::Relaxed),
             tls_handshake_timeouts: self.tls_handshake_timeouts.load(Ordering::Relaxed),
             upstream_healthcheck_successes: self
@@ -168,6 +178,7 @@ pub struct MetricsSnapshot {
     pub proxy_successes: u64,
     pub proxy_failures: u64,
     pub proxy_fail_close_rejections: u64,
+    pub l4_bucket_budget_rejections: u64,
     pub tls_pre_handshake_rejections: u64,
     pub tls_handshake_timeouts: u64,
     pub upstream_healthcheck_successes: u64,
@@ -213,6 +224,7 @@ mod tests {
         assert_eq!(snapshot.proxy_successes, 1);
         assert_eq!(snapshot.proxy_failures, 1);
         assert_eq!(snapshot.proxy_fail_close_rejections, 1);
+        assert_eq!(snapshot.l4_bucket_budget_rejections, 0);
         assert_eq!(snapshot.tls_pre_handshake_rejections, 1);
         assert_eq!(snapshot.tls_handshake_timeouts, 1);
         assert_eq!(snapshot.upstream_healthcheck_successes, 1);

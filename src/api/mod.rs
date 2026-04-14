@@ -49,7 +49,9 @@ impl ApiServer {
     }
 
     pub async fn start(self) -> anyhow::Result<()> {
-        let realtime_tx = broadcast::channel(64).0;
+        // Shared across high-frequency traffic deltas and dashboard snapshots.
+        // Keep capacity higher to reduce lag/drop under burst traffic.
+        let realtime_tx = broadcast::channel(1024).0;
         realtime::spawn_sampler(Arc::clone(&self.context), realtime_tx.clone());
         realtime::spawn_storage_bridge(Arc::clone(&self.context), realtime_tx.clone());
         realtime::spawn_traffic_bridge(Arc::clone(&self.context), realtime_tx.clone());

@@ -2,12 +2,17 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { fetchTrafficMap } from '@/shared/api/dashboard'
 import { fetchBlockedIps, fetchSecurityEvents } from '@/shared/api/events'
+import { fetchL4Stats } from '@/shared/api/l4'
+import { fetchL7Config, fetchL7Stats } from '@/shared/api/l7'
 import { fetchRulesList } from '@/shared/api/rules'
 import { fetchHealth, fetchMetrics } from '@/shared/api/system'
 import type {
   BlockedIpsResponse,
   BlockedIpItem,
   DashboardPayload,
+  L4StatsPayload,
+  L7ConfigPayload,
+  L7StatsPayload,
   MetricsResponse,
   SecurityEventItem,
   TrafficEventDelta,
@@ -38,6 +43,9 @@ import {
 const dashboard = ref<DashboardPayload | null>(null)
 const trafficMap = ref<TrafficMapResponse | null>(null)
 const trafficEvents = ref<TrafficEventDelta[]>([])
+const l4Stats = ref<L4StatsPayload | null>(null)
+const l7Stats = ref<L7StatsPayload | null>(null)
+const l7Config = ref<L7ConfigPayload | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
@@ -108,6 +116,48 @@ const requestStatus = computed(() => {
   return '等待首次同步，当前为手动刷新'
 })
 
+const autoSlo = computed(() => l7Config.value?.auto_tuning.slo ?? {
+  tls_handshake_timeout_rate_percent: 0.3,
+  bucket_reject_rate_percent: 0.5,
+  p95_proxy_latency_ms: 800,
+})
+
+const calcAutoState = (observed: number, target: number) => {
+  if (!Number.isFinite(observed) || !Number.isFinite(target) || target <= 0) {
+    return 'muted' as const
+  }
+  const ratio = observed / target
+  if (ratio <= 1) return 'success' as const
+  if (ratio <= 1.5) return 'warning' as const
+  return 'error' as const
+}
+
+const autoStateStyles: Record<'success' | 'warning' | 'error' | 'muted', string> = {
+  success: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  warning: 'text-amber-700 bg-amber-50 border-amber-200',
+  error: 'text-red-700 bg-red-50 border-red-200',
+  muted: 'text-slate-600 bg-slate-50 border-slate-200',
+}
+
+const tlsTimeoutState = computed(() =>
+  calcAutoState(
+    l7Stats.value?.auto_tuning.last_observed_tls_handshake_timeout_rate_percent ?? 0,
+    autoSlo.value.tls_handshake_timeout_rate_percent,
+  ),
+)
+const bucketRejectState = computed(() =>
+  calcAutoState(
+    l7Stats.value?.auto_tuning.last_observed_bucket_reject_rate_percent ?? 0,
+    autoSlo.value.bucket_reject_rate_percent,
+  ),
+)
+const latencyState = computed(() =>
+  calcAutoState(
+    l7Stats.value?.auto_tuning.last_observed_avg_proxy_latency_ms ?? 0,
+    autoSlo.value.p95_proxy_latency_ms,
+  ),
+)
+
 const applyMetrics = (metrics: MetricsResponse) => {
   if (!dashboard.value) return
   dashboard.value.metrics = metrics
@@ -124,6 +174,16 @@ const applyMetrics = (metrics: MetricsResponse) => {
 
 useAdminRealtimeTopic<MetricsResponse>('metrics', (payload) => {
   applyMetrics(payload)
+})
+
+useAdminRealtimeTopic<L4StatsPayload>('l4_stats', (payload) => {
+  l4Stats.value = payload
+  lastUpdated.value = Date.now()
+})
+
+useAdminRealtimeTopic<L7StatsPayload>('l7_stats', (payload) => {
+  l7Stats.value = payload
+  lastUpdated.value = Date.now()
 })
 
 useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
@@ -187,7 +247,7 @@ const fetchData = async (showLoader = false) => {
   if (showLoader) loading.value = true
   refreshing.value = true
   try {
-    const [health, metrics, rules, events, blockedIps] = await Promise.all([
+    const [health, metrics, rules, events, blockedIps, l4StatsPayload, l7StatsPayload, l7ConfigPayload] = await Promise.all([
       fetchHealth(),
       fetchMetrics(),
       fetchRulesList(),
@@ -202,6 +262,9 @@ const fetchData = async (showLoader = false) => {
         sort_direction: 'desc',
         sort_by: 'blocked_at',
       }),
+      fetchL4Stats(),
+      fetchL7Stats(),
+      fetchL7Config(),
     ])
 
     dashboard.value = {
@@ -213,6 +276,9 @@ const fetchData = async (showLoader = false) => {
     }
 
     applyMetrics(metrics)
+    l4Stats.value = l4StatsPayload
+    l7Stats.value = l7StatsPayload
+    l7Config.value = l7ConfigPayload
     error.value = ''
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取控制台数据失败'
@@ -369,6 +435,123 @@ onMounted(() => {
           hint="已完成验证并继续放行"
           :icon="ArrowUpRight"
         />
+      </section>
+
+      <section class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-sm tracking-wider text-blue-700">L7 AUTO</p>
+            <StatusBadge
+              :text="l7Stats?.auto_tuning.mode || 'off'"
+              :type="
+                l7Stats?.auto_tuning.mode === 'active'
+                  ? 'success'
+                  : l7Stats?.auto_tuning.mode === 'observe'
+                    ? 'warning'
+                    : 'muted'
+              "
+            />
+          </div>
+          <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">控制器状态</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ l7Stats?.auto_tuning.controller_state || 'unknown' }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">最近动作</p>
+              <p class="mt-1 font-semibold text-slate-900 truncate" :title="l7Stats?.auto_tuning.last_adjust_reason || ''">
+                {{ l7Stats?.auto_tuning.last_adjust_reason || 'none' }}
+              </p>
+            </div>
+            <div :class="`rounded-lg border p-3 ${autoStateStyles[tlsTimeoutState]}`">
+              <p class="text-xs text-slate-500">握手超时率</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ (l7Stats?.auto_tuning.last_observed_tls_handshake_timeout_rate_percent || 0).toFixed(2) }}%
+              </p>
+              <p class="mt-1 text-[11px]">目标 ≤ {{ autoSlo.tls_handshake_timeout_rate_percent.toFixed(2) }}%</p>
+            </div>
+            <div :class="`rounded-lg border p-3 ${autoStateStyles[bucketRejectState]}`">
+              <p class="text-xs text-slate-500">预算拒绝率</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ (l7Stats?.auto_tuning.last_observed_bucket_reject_rate_percent || 0).toFixed(2) }}%
+              </p>
+              <p class="mt-1 text-[11px]">目标 ≤ {{ autoSlo.bucket_reject_rate_percent.toFixed(2) }}%</p>
+            </div>
+            <div :class="`rounded-lg border p-3 ${autoStateStyles[latencyState]}`">
+              <p class="text-xs text-slate-500">平均代理延迟</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l7Stats?.auto_tuning.last_observed_avg_proxy_latency_ms || 0) }} ms
+              </p>
+              <p class="mt-1 text-[11px]">目标 ≤ {{ formatNumber(autoSlo.p95_proxy_latency_ms) }} ms</p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">24h 回滚次数</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l7Stats?.auto_tuning.rollback_count_24h || 0) }}
+              </p>
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-slate-500">
+            资源探测: CPU {{ l7Stats?.auto_tuning.detected_cpu_cores || 0 }} cores /
+            内存上限 {{ l7Stats?.auto_tuning.detected_memory_limit_mb ?? 'unknown' }} MB
+          </p>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-sm tracking-wider text-blue-700">L4 AUTO</p>
+            <StatusBadge
+              :text="l4Stats?.behavior.overview.overload_level || 'normal'"
+              :type="
+                l4Stats?.behavior.overview.overload_level === 'critical'
+                  ? 'error'
+                  : l4Stats?.behavior.overview.overload_level === 'high'
+                    ? 'warning'
+                    : 'success'
+              "
+            />
+          </div>
+          <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">Bucket 总数</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l4Stats?.behavior.overview.bucket_count || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">高风险 Bucket</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l4Stats?.behavior.overview.high_risk_buckets || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">事件丢弃</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l4Stats?.behavior.overview.dropped_events || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">预算拒绝累计</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(dashboard?.metrics.l4_bucket_budget_rejections || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">推荐 normal budget</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l7Stats?.auto_tuning.recommendation.l4_normal_connection_budget_per_minute || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">推荐 TLS 握手超时</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(l7Stats?.auto_tuning.recommendation.tls_handshake_timeout_ms || 0) }} ms
+              </p>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">

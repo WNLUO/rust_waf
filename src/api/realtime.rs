@@ -9,6 +9,7 @@ use crate::core::WafContext;
 use crate::storage::StorageRealtimeEvent;
 use crate::storage::{
     BlockedIpQuery, BlockedIpSortField, EventSortField, SecurityEventQuery, SortDirection,
+    StorageMetricsSummary,
 };
 use axum::{
     extract::{
@@ -76,12 +77,32 @@ pub(super) fn spawn_sampler(context: Arc<WafContext>, realtime_tx: broadcast::Se
     tokio::spawn(async move {
         let mut interval = time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        let mut tick: u64 = 0;
+        let mut cached_storage_summary = collect_storage_summary(context.as_ref()).await;
 
         loop {
             interval.tick().await;
-            if let Ok(messages) = collect_messages(context.as_ref()).await {
+            tick = tick.wrapping_add(1);
+
+            // Refresh SQLite summary less frequently to avoid per-second DB pressure.
+            if tick % 5 == 1 {
+                cached_storage_summary = collect_storage_summary(context.as_ref()).await;
+            }
+
+            if let Ok(messages) =
+                collect_fast_messages(context.as_ref(), cached_storage_summary.clone()).await
+            {
                 for message in messages {
                     let _ = realtime_tx.send(message);
+                }
+            }
+
+            // Periodic full-list refresh heals missed deltas without hammering SQLite every second.
+            if tick % 5 == 0 {
+                if let Ok(messages) = collect_periodic_messages(context.as_ref()).await {
+                    for message in messages {
+                        let _ = realtime_tx.send(message);
+                    }
                 }
             }
         }
@@ -216,7 +237,8 @@ async fn handle_socket(socket: WebSocket, state: ApiState) {
 }
 
 async fn collect_messages(context: &WafContext) -> anyhow::Result<Vec<String>> {
-    let metrics = collect_metrics(context).await;
+    let storage_summary = collect_storage_summary(context).await;
+    let metrics = collect_metrics(context, storage_summary);
     let l4_stats = collect_l4_stats(context);
     let l7_stats = collect_l7_stats(context);
     let recent_events = collect_recent_events(context).await?;
@@ -233,22 +255,37 @@ async fn collect_messages(context: &WafContext) -> anyhow::Result<Vec<String>> {
     ])
 }
 
-async fn collect_metrics(context: &WafContext) -> MetricsResponse {
-    let storage_summary = if let Some(store) = context.sqlite_store.as_ref() {
-        match store.metrics_summary().await {
-            Ok(summary) => Some(summary),
-            Err(err) => {
-                log::warn!(
-                    "Failed to query SQLite metrics summary for realtime feed: {}",
-                    err
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
+async fn collect_fast_messages(
+    context: &WafContext,
+    storage_summary: Option<StorageMetricsSummary>,
+) -> anyhow::Result<Vec<String>> {
+    let metrics = collect_metrics(context, storage_summary);
+    let l4_stats = collect_l4_stats(context);
+    let l7_stats = collect_l7_stats(context);
+    let traffic_map = collect_traffic_map(context).await;
 
+    Ok(vec![
+        serialize_message("metrics", &metrics)?,
+        serialize_message("l4_stats", &l4_stats)?,
+        serialize_message("l7_stats", &l7_stats)?,
+        serialize_message("traffic_map", &traffic_map)?,
+    ])
+}
+
+async fn collect_periodic_messages(context: &WafContext) -> anyhow::Result<Vec<String>> {
+    let recent_events = collect_recent_events(context).await?;
+    let recent_blocked_ips = collect_recent_blocked_ips(context).await?;
+
+    Ok(vec![
+        serialize_message("recent_events", &recent_events)?,
+        serialize_message("recent_blocked_ips", &recent_blocked_ips)?,
+    ])
+}
+
+fn collect_metrics(
+    context: &WafContext,
+    storage_summary: Option<StorageMetricsSummary>,
+) -> MetricsResponse {
     build_metrics_response(
         context.metrics_snapshot(),
         context.active_rule_count(),
@@ -257,6 +294,23 @@ async fn collect_metrics(context: &WafContext) -> MetricsResponse {
             .l4_inspector()
             .map(|inspector| inspector.get_statistics().behavior.overview),
     )
+}
+
+async fn collect_storage_summary(context: &WafContext) -> Option<StorageMetricsSummary> {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return None;
+    };
+
+    match store.metrics_summary().await {
+        Ok(summary) => Some(summary),
+        Err(err) => {
+            log::warn!(
+                "Failed to query SQLite metrics summary for realtime feed: {}",
+                err
+            );
+            None
+        }
+    }
 }
 
 fn collect_l4_stats(context: &WafContext) -> L4StatsResponse {

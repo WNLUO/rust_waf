@@ -251,6 +251,45 @@ function segmentStatusLabel(status: string) {
   }
 }
 
+function adjustReasonLabel(reason: string | null) {
+  switch (reason) {
+    case 'phase1_bootstrap_estimate':
+      return '启动估算'
+    case 'bootstrap_recommendation_apply':
+      return '应用启动建议'
+    case 'adjust_for_handshake_global':
+      return '全局握手压力调节'
+    case 'adjust_for_budget_global':
+      return '全局预算压力调节'
+    case 'adjust_for_latency_global':
+      return '全局延迟压力调节'
+    case 'adjust_for_budget_hot_host':
+      return '热点 Host 预算压力调节'
+    case 'adjust_for_budget_hot_route':
+      return '热点 Route 预算压力调节'
+    case 'adjust_for_budget_hot_host_route':
+      return '热点 Host/Route 预算压力调节'
+    case 'adjust_for_latency_hot_host':
+      return '热点 Host 延迟压力调节'
+    case 'adjust_for_latency_hot_route':
+      return '热点 Route 延迟压力调节'
+    case 'adjust_for_latency_hot_host_route':
+      return '热点 Host/Route 延迟压力调节'
+    case 'rollback_due_to_handshake_global_regression':
+      return '全局握手回滚'
+    case 'rollback_due_to_budget_global_regression':
+      return '全局预算回滚'
+    case 'rollback_due_to_hot_host_regression':
+      return '热点 Host 回滚'
+    case 'rollback_due_to_hot_route_regression':
+      return '热点 Route 回滚'
+    case 'rollback_due_to_hot_host_route_regression':
+      return '热点 Host/Route 回滚'
+    default:
+      return reason || 'none'
+  }
+}
+
 function updateCcDefense(patch: Partial<L7ConfigForm['cc_defense']>) {
   updateForm('cc_defense', {
     ...props.form.cc_defense,
@@ -735,8 +774,15 @@ const safelineResponseBodySource = computed({
           / 平均代理延迟 {{ autoTuningRuntime.last_observed_avg_proxy_latency_ms }}ms
         </p>
         <p class="mt-1">
-          最近动作: {{ autoTuningRuntime.last_adjust_reason || 'none' }} |
+          最近动作: {{ adjustReasonLabel(autoTuningRuntime.last_adjust_reason) }} |
           24h 回滚: {{ autoTuningRuntime.rollback_count_24h }}
+        </p>
+        <p
+          v-if="autoTuningRuntime.last_adjust_diff.length"
+          class="mt-1"
+        >
+          动作说明:
+          {{ autoTuningRuntime.last_adjust_diff.join(' | ') }}
         </p>
         <template v-if="autoEffectEvaluation">
           <p class="mt-1">

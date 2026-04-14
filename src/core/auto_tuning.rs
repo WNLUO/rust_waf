@@ -116,6 +116,12 @@ struct TrafficSegmentDelta {
     failure_rate_percent: f64,
 }
 
+#[derive(Debug, Clone)]
+struct ActionTriggerContext {
+    reason_code: String,
+    detail: String,
+}
+
 pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
     let profile = detect_system_profile();
     let recommendation = recommend(config, &profile);
@@ -200,6 +206,11 @@ pub fn run_control_step(
         return None;
     }
 
+    let rollback_context = state
+        .pending_effect_evaluation
+        .as_ref()
+        .and_then(|pending| rollback_trigger_context(config, &pending.baseline, &deltas));
+
     if let Some(cooldown_until) = state.cooldown_until {
         if now < cooldown_until {
             if should_rollback(config, state, &deltas) {
@@ -218,9 +229,19 @@ pub fn run_control_step(
 
                 runtime.controller_state = "rollback".to_string();
                 runtime.last_adjust_at = Some(now);
-                runtime.last_adjust_reason = Some("rollback_due_to_metric_regression".to_string());
-                runtime.last_adjust_diff =
-                    vec!["restored previous stable runtime config".to_string()];
+                runtime.last_adjust_reason = Some(
+                    rollback_context
+                        .as_ref()
+                        .map(|context| context.reason_code.clone())
+                        .unwrap_or_else(|| "rollback_due_to_metric_regression".to_string()),
+                );
+                runtime.last_adjust_diff = vec![
+                    "restored previous stable runtime config".to_string(),
+                    rollback_context
+                        .as_ref()
+                        .map(|context| context.detail.clone())
+                        .unwrap_or_else(|| "rollback triggered by metric regression".to_string()),
+                ];
                 runtime.cooldown_until = rollback_cooldown_until;
                 runtime.last_effect_evaluation =
                     Some(rollback_effect_snapshot(state, &deltas, now));
@@ -260,8 +281,19 @@ pub fn run_control_step(
 
         runtime.controller_state = "rollback".to_string();
         runtime.last_adjust_at = Some(now);
-        runtime.last_adjust_reason = Some("rollback_due_to_metric_regression".to_string());
-        runtime.last_adjust_diff = vec!["restored previous stable runtime config".to_string()];
+        runtime.last_adjust_reason = Some(
+            rollback_context
+                .as_ref()
+                .map(|context| context.reason_code.clone())
+                .unwrap_or_else(|| "rollback_due_to_metric_regression".to_string()),
+        );
+        runtime.last_adjust_diff = vec![
+            "restored previous stable runtime config".to_string(),
+            rollback_context
+                .as_ref()
+                .map(|context| context.detail.clone())
+                .unwrap_or_else(|| "rollback triggered by metric regression".to_string()),
+        ];
         runtime.cooldown_until = cooldown_until;
         runtime.last_effect_evaluation = Some(rollback_effect_snapshot(state, &deltas, now));
 
@@ -298,12 +330,22 @@ pub fn run_control_step(
         runtime.controller_state = "stable".to_string();
         return None;
     };
+    let action_context = action_trigger_context(config, action, &deltas);
 
     if matches!(config.auto_tuning.mode, AutoTuningMode::Observe)
         || !config.auto_tuning.runtime_adjust_enabled
     {
         runtime.controller_state = "observe_pending_adjust".to_string();
-        runtime.last_adjust_reason = Some(format!("would_adjust_{}", action));
+        runtime.last_adjust_reason = Some(
+            action_context
+                .as_ref()
+                .map(|context| format!("would_{}", context.reason_code))
+                .unwrap_or_else(|| format!("would_adjust_for_{}", action)),
+        );
+        runtime.last_adjust_diff = action_context
+            .as_ref()
+            .map(|context| vec![context.detail.clone()])
+            .unwrap_or_default();
         return None;
     }
 
@@ -358,8 +400,16 @@ pub fn run_control_step(
 
     runtime.controller_state = "adjusted".to_string();
     runtime.last_adjust_at = Some(now);
-    runtime.last_adjust_reason = Some(format!("adjust_for_{}", action));
+    runtime.last_adjust_reason = Some(
+        action_context
+            .as_ref()
+            .map(|context| context.reason_code.clone())
+            .unwrap_or_else(|| format!("adjust_for_{}", action)),
+    );
     runtime.last_adjust_diff = diff.clone();
+    if let Some(context) = action_context.as_ref() {
+        runtime.last_adjust_diff.push(context.detail.clone());
+    }
     runtime.cooldown_until = cooldown_until;
     arm_effect_evaluation(
         runtime,
@@ -1081,12 +1131,16 @@ fn arm_effect_evaluation(
 }
 
 fn action_kind_for_adjust_reason(reason: &str) -> AutoTuningActionKind {
-    match reason {
-        "adjust_for_handshake" => AutoTuningActionKind::Handshake,
-        "adjust_for_budget" => AutoTuningActionKind::Budget,
-        "adjust_for_latency" => AutoTuningActionKind::Latency,
-        "bootstrap_recommendation_apply" => AutoTuningActionKind::Bootstrap,
-        _ => AutoTuningActionKind::Bootstrap,
+    if reason.starts_with("adjust_for_handshake") {
+        AutoTuningActionKind::Handshake
+    } else if reason.starts_with("adjust_for_budget") {
+        AutoTuningActionKind::Budget
+    } else if reason.starts_with("adjust_for_latency") {
+        AutoTuningActionKind::Latency
+    } else if reason == "bootstrap_recommendation_apply" {
+        AutoTuningActionKind::Bootstrap
+    } else {
+        AutoTuningActionKind::Bootstrap
     }
 }
 
@@ -1337,6 +1391,188 @@ fn has_critical_layered_regression(
 
 fn is_business_layer_segment(segment: &TrafficSegmentDelta) -> bool {
     matches!(segment.scope_type, "host" | "route" | "host_route")
+}
+
+fn action_trigger_context(
+    config: &Config,
+    action: &str,
+    deltas: &MetricDeltas,
+) -> Option<ActionTriggerContext> {
+    match action {
+        "handshake" => Some(ActionTriggerContext {
+            reason_code: "adjust_for_handshake_global".to_string(),
+            detail: format!(
+                "triggered by global handshake timeout rate {:.2}% above target {:.2}%",
+                deltas.handshake_timeout_rate_percent,
+                config.auto_tuning.slo.tls_handshake_timeout_rate_percent
+            ),
+        }),
+        "budget" => dominant_segment_for_action(action, deltas).map_or_else(
+            || {
+                Some(ActionTriggerContext {
+                    reason_code: "adjust_for_budget_global".to_string(),
+                    detail: format!(
+                        "triggered by global bucket reject rate {:.2}% above target {:.2}%",
+                        deltas.bucket_reject_rate_percent,
+                        config.auto_tuning.slo.bucket_reject_rate_percent
+                    ),
+                })
+            },
+            |segment| {
+                Some(ActionTriggerContext {
+                    reason_code: format!("adjust_for_budget_hot_{}", segment.scope_type),
+                    detail: format!(
+                        "triggered by hot {} {} failure rate {:.2}% with {} samples",
+                        segment.scope_type,
+                        segment_descriptor(segment),
+                        segment.failure_rate_percent,
+                        segment.proxied_requests_delta
+                    ),
+                })
+            },
+        ),
+        "latency" => dominant_segment_for_action(action, deltas).map_or_else(
+            || {
+                Some(ActionTriggerContext {
+                    reason_code: "adjust_for_latency_global".to_string(),
+                    detail: format!(
+                        "triggered by global proxy latency {}ms above target {}ms",
+                        deltas.avg_proxy_latency_ms, config.auto_tuning.slo.p95_proxy_latency_ms
+                    ),
+                })
+            },
+            |segment| {
+                Some(ActionTriggerContext {
+                    reason_code: format!("adjust_for_latency_hot_{}", segment.scope_type),
+                    detail: format!(
+                        "triggered by hot {} {} latency {}ms with {} samples",
+                        segment.scope_type,
+                        segment_descriptor(segment),
+                        segment.avg_proxy_latency_ms,
+                        segment.proxied_requests_delta
+                    ),
+                })
+            },
+        ),
+        _ => None,
+    }
+}
+
+fn rollback_trigger_context(
+    config: &Config,
+    baseline: &MetricDeltas,
+    current: &MetricDeltas,
+) -> Option<ActionTriggerContext> {
+    if let Some(segment) = evaluate_segments_against_baseline(current, baseline)
+        .into_iter()
+        .find(|segment| {
+            matches!(segment.scope_type.as_str(), "host" | "route" | "host_route")
+                && segment.sample_requests >= 8
+                && (segment.status == "regressed"
+                    || segment.failure_rate_delta_percent
+                        >= (config.auto_tuning.slo.bucket_reject_rate_percent * 1.5).max(3.0)
+                    || segment.avg_proxy_latency_delta_ms >= 150)
+        })
+    {
+        return Some(ActionTriggerContext {
+            reason_code: format!("rollback_due_to_hot_{}_regression", segment.scope_type),
+            detail: format!(
+                "rollback because hot {} {} regressed ({:+}ms, {:+.2}pp, {} samples)",
+                segment.scope_type,
+                segment.scope_key,
+                segment.avg_proxy_latency_delta_ms,
+                segment.failure_rate_delta_percent,
+                segment.sample_requests
+            ),
+        });
+    }
+
+    if current.handshake_timeout_rate_percent
+        > config.auto_tuning.slo.tls_handshake_timeout_rate_percent * 1.8
+    {
+        return Some(ActionTriggerContext {
+            reason_code: "rollback_due_to_handshake_global_regression".to_string(),
+            detail: format!(
+                "rollback because global handshake timeout rate {:.2}% exceeded {:.2}%",
+                current.handshake_timeout_rate_percent,
+                config.auto_tuning.slo.tls_handshake_timeout_rate_percent * 1.8
+            ),
+        });
+    }
+
+    if current.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent * 1.8
+    {
+        return Some(ActionTriggerContext {
+            reason_code: "rollback_due_to_budget_global_regression".to_string(),
+            detail: format!(
+                "rollback because global bucket reject rate {:.2}% exceeded {:.2}%",
+                current.bucket_reject_rate_percent,
+                config.auto_tuning.slo.bucket_reject_rate_percent * 1.8
+            ),
+        });
+    }
+
+    None
+}
+
+fn dominant_segment_for_action<'a>(
+    action: &str,
+    deltas: &'a MetricDeltas,
+) -> Option<&'a TrafficSegmentDelta> {
+    let mut candidates = deltas
+        .segments
+        .iter()
+        .filter(|segment| is_business_layer_segment(segment) && segment.proxied_requests_delta >= 8)
+        .collect::<Vec<_>>();
+    match action {
+        "budget" => candidates.sort_by(|left, right| {
+            right
+                .failure_rate_percent
+                .total_cmp(&left.failure_rate_percent)
+                .then(
+                    right
+                        .proxied_requests_delta
+                        .cmp(&left.proxied_requests_delta),
+                )
+        }),
+        "latency" => candidates.sort_by(|left, right| {
+            right
+                .avg_proxy_latency_ms
+                .cmp(&left.avg_proxy_latency_ms)
+                .then(
+                    right
+                        .proxied_requests_delta
+                        .cmp(&left.proxied_requests_delta),
+                )
+        }),
+        _ => return None,
+    }
+    candidates.into_iter().next()
+}
+
+fn segment_descriptor(segment: &TrafficSegmentDelta) -> String {
+    match segment.scope_type {
+        "host" => segment
+            .host
+            .clone()
+            .unwrap_or_else(|| segment.scope_key.clone()),
+        "route" => segment
+            .route
+            .clone()
+            .unwrap_or_else(|| segment.scope_key.clone()),
+        "host_route" => format!(
+            "{} {}",
+            segment
+                .host
+                .clone()
+                .unwrap_or_else(|| "unknown-host".to_string()),
+            segment
+                .route
+                .clone()
+                .unwrap_or_else(|| "unknown-route".to_string())
+        ),
+        _ => segment.scope_key.clone(),
+    }
 }
 
 fn adjust_u64(value: u64, percent: u8, increase: bool, min: u64, max: u64) -> u64 {

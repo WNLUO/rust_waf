@@ -1,5 +1,6 @@
 use super::super::types::{
-    AutoTuningRecommendationResponse, AutoTuningRuntimeResponse, L4StatsResponse, L7StatsResponse,
+    AutoTuningEffectEvaluationResponse, AutoTuningRecommendationResponse,
+    AutoTuningRuntimeResponse, L4StatsResponse, L7StatsResponse,
 };
 use crate::core::WafContext;
 
@@ -171,6 +172,19 @@ impl L7StatsResponse {
                 last_adjust_diff: auto.last_adjust_diff,
                 rollback_count_24h: auto.rollback_count_24h,
                 cooldown_until: auto.cooldown_until,
+                last_effect_evaluation: auto.last_effect_evaluation.map(|value| {
+                    AutoTuningEffectEvaluationResponse {
+                        status: value.status,
+                        observed_at: value.observed_at,
+                        sample_requests: value.sample_requests,
+                        handshake_timeout_rate_delta_percent: value
+                            .handshake_timeout_rate_delta_percent,
+                        bucket_reject_rate_delta_percent: value
+                            .bucket_reject_rate_delta_percent,
+                        avg_proxy_latency_delta_ms: value.avg_proxy_latency_delta_ms,
+                        summary: value.summary,
+                    }
+                }),
                 last_observed_tls_handshake_timeout_rate_percent: auto
                     .last_observed_tls_handshake_timeout_rate_percent,
                 last_observed_bucket_reject_rate_percent: auto

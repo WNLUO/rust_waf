@@ -25,10 +25,22 @@ pub struct AutoTuningRuntimeSnapshot {
     pub last_adjust_diff: Vec<String>,
     pub rollback_count_24h: u32,
     pub cooldown_until: Option<i64>,
+    pub last_effect_evaluation: Option<AutoTuningEffectEvaluationSnapshot>,
     pub last_observed_tls_handshake_timeout_rate_percent: f64,
     pub last_observed_bucket_reject_rate_percent: f64,
     pub last_observed_avg_proxy_latency_ms: u64,
     pub recommendation: AutoTuningRecommendationSnapshot,
+}
+
+#[derive(Debug, Clone)]
+pub struct AutoTuningEffectEvaluationSnapshot {
+    pub status: String,
+    pub observed_at: Option<i64>,
+    pub sample_requests: u64,
+    pub handshake_timeout_rate_delta_percent: f64,
+    pub bucket_reject_rate_delta_percent: f64,
+    pub avg_proxy_latency_delta_ms: i64,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,6 +54,7 @@ pub struct AutoTuningControllerState {
     pub baseline_before_adjust: Option<Config>,
     pub rollback_timestamps: Vec<i64>,
     pub bootstrap_applied: bool,
+    pending_effect_evaluation: Option<PendingEffectEvaluation>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +70,13 @@ struct MetricDeltas {
     handshake_timeout_rate_percent: f64,
     bucket_reject_rate_percent: f64,
     avg_proxy_latency_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingEffectEvaluation {
+    adjust_at: i64,
+    reason: String,
+    baseline: MetricDeltas,
 }
 
 pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
@@ -76,6 +96,7 @@ pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
         last_adjust_diff: Vec::new(),
         rollback_count_24h: 0,
         cooldown_until: None,
+        last_effect_evaluation: None,
         last_observed_tls_handshake_timeout_rate_percent: 0.0,
         last_observed_bucket_reject_rate_percent: 0.0,
         last_observed_avg_proxy_latency_ms: 0,
@@ -130,6 +151,7 @@ pub fn run_control_step(
         deltas.handshake_timeout_rate_percent;
     runtime.last_observed_bucket_reject_rate_percent = deltas.bucket_reject_rate_percent;
     runtime.last_observed_avg_proxy_latency_ms = deltas.avg_proxy_latency_ms;
+    maybe_finalize_effect_evaluation(config, runtime, state, &deltas, now);
 
     if matches!(config.auto_tuning.mode, AutoTuningMode::Off) {
         runtime.controller_state = "disabled".to_string();
@@ -172,6 +194,7 @@ pub fn run_control_step(
         runtime.last_adjust_reason = Some("rollback_due_to_metric_regression".to_string());
         runtime.last_adjust_diff = vec!["restored previous stable runtime config".to_string()];
         runtime.cooldown_until = cooldown_until;
+        runtime.last_effect_evaluation = Some(rollback_effect_snapshot(state, &deltas, now));
 
         state.consecutive_handshake_high = 0;
         state.consecutive_budget_high = 0;
@@ -269,6 +292,16 @@ pub fn run_control_step(
     runtime.last_adjust_reason = Some(format!("adjust_for_{}", action));
     runtime.last_adjust_diff = diff.clone();
     runtime.cooldown_until = cooldown_until;
+    arm_effect_evaluation(
+        runtime,
+        state,
+        now,
+        runtime
+            .last_adjust_reason
+            .clone()
+            .unwrap_or_else(|| "adjustment".to_string()),
+        deltas,
+    );
 
     Some(AutoTuningDecision {
         next_config: next,
@@ -352,6 +385,13 @@ fn apply_bootstrap_recommendation(
     runtime.last_adjust_reason = Some("bootstrap_recommendation_apply".to_string());
     runtime.last_adjust_diff = diff.clone();
     runtime.cooldown_until = cooldown_until;
+    arm_effect_evaluation(
+        runtime,
+        state,
+        now,
+        "bootstrap_recommendation_apply".to_string(),
+        deltas_from_runtime(runtime),
+    );
 
     Some(AutoTuningDecision {
         next_config: next,
@@ -727,6 +767,182 @@ fn compute_deltas(previous: &MetricsSnapshot, current: &MetricsSnapshot) -> Metr
     }
 }
 
+fn maybe_finalize_effect_evaluation(
+    config: &Config,
+    runtime: &mut AutoTuningRuntimeSnapshot,
+    state: &mut AutoTuningControllerState,
+    deltas: &MetricDeltas,
+    now: i64,
+) {
+    let Some(pending) = state.pending_effect_evaluation.clone() else {
+        return;
+    };
+
+    let min_sample_requests = 20;
+    let deadline_reached = state.cooldown_until.map(|until| now >= until).unwrap_or(false)
+        || now.saturating_sub(pending.adjust_at)
+            >= (config.auto_tuning.control_interval_secs.max(1) as i64).saturating_mul(3);
+
+    if deltas.proxied_requests_delta < min_sample_requests && !deadline_reached {
+        runtime.last_effect_evaluation = Some(AutoTuningEffectEvaluationSnapshot {
+            status: "pending".to_string(),
+            observed_at: None,
+            sample_requests: deltas.proxied_requests_delta,
+            handshake_timeout_rate_delta_percent: 0.0,
+            bucket_reject_rate_delta_percent: 0.0,
+            avg_proxy_latency_delta_ms: 0,
+            summary: format!(
+                "waiting for more post-adjust traffic after {}",
+                pending.reason
+            ),
+        });
+        return;
+    }
+
+    if deltas.proxied_requests_delta < min_sample_requests {
+        runtime.last_effect_evaluation = Some(AutoTuningEffectEvaluationSnapshot {
+            status: "inconclusive".to_string(),
+            observed_at: Some(now),
+            sample_requests: deltas.proxied_requests_delta,
+            handshake_timeout_rate_delta_percent: 0.0,
+            bucket_reject_rate_delta_percent: 0.0,
+            avg_proxy_latency_delta_ms: 0,
+            summary: format!(
+                "insufficient post-adjust traffic to evaluate {}",
+                pending.reason
+            ),
+        });
+        state.pending_effect_evaluation = None;
+        return;
+    }
+
+    let evaluation = evaluate_effect_against_baseline(&pending, deltas, now);
+    runtime.last_effect_evaluation = Some(evaluation);
+    state.pending_effect_evaluation = None;
+}
+
+fn evaluate_effect_against_baseline(
+    pending: &PendingEffectEvaluation,
+    current: &MetricDeltas,
+    now: i64,
+) -> AutoTuningEffectEvaluationSnapshot {
+    let handshake_delta =
+        current.handshake_timeout_rate_percent - pending.baseline.handshake_timeout_rate_percent;
+    let bucket_delta =
+        current.bucket_reject_rate_percent - pending.baseline.bucket_reject_rate_percent;
+    let latency_delta =
+        current.avg_proxy_latency_ms as i64 - pending.baseline.avg_proxy_latency_ms as i64;
+
+    let mut improved = 0u8;
+    let mut regressed = 0u8;
+
+    score_metric_delta(
+        handshake_delta,
+        tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
+        &mut improved,
+        &mut regressed,
+    );
+    score_metric_delta(
+        bucket_delta,
+        tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
+        &mut improved,
+        &mut regressed,
+    );
+    if latency_delta <= -50 {
+        improved = improved.saturating_add(1);
+    } else if latency_delta >= 100 {
+        regressed = regressed.saturating_add(1);
+    }
+
+    let status = if regressed > improved {
+        "regressed"
+    } else if improved > regressed {
+        "improved"
+    } else {
+        "mixed"
+    };
+
+    AutoTuningEffectEvaluationSnapshot {
+        status: status.to_string(),
+        observed_at: Some(now),
+        sample_requests: current.proxied_requests_delta,
+        handshake_timeout_rate_delta_percent: handshake_delta,
+        bucket_reject_rate_delta_percent: bucket_delta,
+        avg_proxy_latency_delta_ms: latency_delta,
+        summary: format!(
+            "{} after {} (handshake {:+.2}pp, bucket {:+.2}pp, latency {:+}ms)",
+            status, pending.reason, handshake_delta, bucket_delta, latency_delta
+        ),
+    }
+}
+
+fn score_metric_delta(delta: f64, tolerance: f64, improved: &mut u8, regressed: &mut u8) {
+    if delta <= -tolerance {
+        *improved = improved.saturating_add(1);
+    } else if delta >= tolerance {
+        *regressed = regressed.saturating_add(1);
+    }
+}
+
+fn tolerance_percent(baseline: f64, minimum: f64) -> f64 {
+    (baseline.abs() * 0.1).max(minimum)
+}
+
+fn arm_effect_evaluation(
+    runtime: &mut AutoTuningRuntimeSnapshot,
+    state: &mut AutoTuningControllerState,
+    now: i64,
+    reason: String,
+    baseline: MetricDeltas,
+) {
+    state.pending_effect_evaluation = Some(PendingEffectEvaluation {
+        adjust_at: now,
+        reason: reason.clone(),
+        baseline,
+    });
+    runtime.last_effect_evaluation = Some(AutoTuningEffectEvaluationSnapshot {
+        status: "pending".to_string(),
+        observed_at: None,
+        sample_requests: 0,
+        handshake_timeout_rate_delta_percent: 0.0,
+        bucket_reject_rate_delta_percent: 0.0,
+        avg_proxy_latency_delta_ms: 0,
+        summary: format!("waiting to evaluate {}", reason),
+    });
+}
+
+fn deltas_from_runtime(runtime: &AutoTuningRuntimeSnapshot) -> MetricDeltas {
+    MetricDeltas {
+        proxied_requests_delta: 0,
+        proxy_successes_delta: 0,
+        handshake_timeout_rate_percent: runtime.last_observed_tls_handshake_timeout_rate_percent,
+        bucket_reject_rate_percent: runtime.last_observed_bucket_reject_rate_percent,
+        avg_proxy_latency_ms: runtime.last_observed_avg_proxy_latency_ms,
+    }
+}
+
+fn rollback_effect_snapshot(
+    state: &mut AutoTuningControllerState,
+    deltas: &MetricDeltas,
+    now: i64,
+) -> AutoTuningEffectEvaluationSnapshot {
+    let summary = state
+        .pending_effect_evaluation
+        .as_ref()
+        .map(|pending| format!("rollback triggered after {}", pending.reason))
+        .unwrap_or_else(|| "rollback triggered after prior adjustment".to_string());
+    state.pending_effect_evaluation = None;
+    AutoTuningEffectEvaluationSnapshot {
+        status: "regressed".to_string(),
+        observed_at: Some(now),
+        sample_requests: deltas.proxied_requests_delta,
+        handshake_timeout_rate_delta_percent: 0.0,
+        bucket_reject_rate_delta_percent: 0.0,
+        avg_proxy_latency_delta_ms: 0,
+        summary,
+    }
+}
+
 fn adjust_u64(value: u64, percent: u8, increase: bool, min: u64, max: u64) -> u64 {
     let step = ((value.saturating_mul(percent as u64)) / 100).max(1);
     let next = if increase {
@@ -880,5 +1096,77 @@ mod tests {
         assert!(warmup.is_none());
         let decision = run_control_step(&config, &mut runtime, &mut state, &current, 140);
         assert!(decision.is_none());
+    }
+
+    #[test]
+    fn active_mode_records_effect_evaluation_after_adjustment() {
+        let mut config = Config::default();
+        config.auto_tuning.mode = AutoTuningMode::Active;
+        config.auto_tuning.runtime_adjust_enabled = true;
+        config.auto_tuning.control_interval_secs = 10;
+        config.auto_tuning.cooldown_secs = 30;
+
+        let mut runtime = super::build_runtime_snapshot(&config);
+        let mut state = AutoTuningControllerState::default();
+
+        let warmup = MetricsSnapshot {
+            proxied_requests: 100,
+            proxy_successes: 100,
+            proxy_latency_micros_total: 100_000_000,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &warmup, 100).is_none());
+        state.bootstrap_applied = true;
+
+        let baseline = MetricsSnapshot {
+            proxied_requests: 140,
+            proxy_successes: 140,
+            proxy_latency_micros_total: 140_000_000,
+            tls_handshake_timeouts: 10,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &baseline, 110).is_none());
+
+        let trigger = MetricsSnapshot {
+            proxied_requests: 180,
+            proxy_successes: 180,
+            proxy_latency_micros_total: 180_000_000,
+            tls_handshake_timeouts: 20,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &trigger, 120).is_none());
+
+        let decision_window = MetricsSnapshot {
+            proxied_requests: 220,
+            proxy_successes: 220,
+            proxy_latency_micros_total: 220_000_000,
+            tls_handshake_timeouts: 30,
+            ..MetricsSnapshot::default()
+        };
+        let decision = run_control_step(&config, &mut runtime, &mut state, &decision_window, 130);
+        assert!(decision.is_some(), "third consecutive high handshake window should adjust");
+        assert_eq!(
+            runtime
+                .last_effect_evaluation
+                .as_ref()
+                .map(|value| value.status.as_str()),
+            Some("pending")
+        );
+
+        let improved = MetricsSnapshot {
+            proxied_requests: 260,
+            proxy_successes: 260,
+            proxy_latency_micros_total: 260_000_000,
+            tls_handshake_timeouts: 32,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &improved, 140).is_none());
+        assert_eq!(
+            runtime
+                .last_effect_evaluation
+                .as_ref()
+                .map(|value| value.status.as_str()),
+            Some("improved")
+        );
     }
 }

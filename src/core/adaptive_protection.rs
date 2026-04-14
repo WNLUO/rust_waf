@@ -377,6 +377,7 @@ mod tests {
             last_adjust_diff: Vec::new(),
             rollback_count_24h: 0,
             cooldown_until: None,
+            last_effect_evaluation: None,
             last_observed_tls_handshake_timeout_rate_percent: 0.0,
             last_observed_bucket_reject_rate_percent: 0.0,
             last_observed_avg_proxy_latency_ms: 0,

@@ -107,10 +107,22 @@ pub struct AutoTuningRuntimeResponse {
     pub(crate) last_adjust_diff: Vec<String>,
     pub(crate) rollback_count_24h: u32,
     pub(crate) cooldown_until: Option<i64>,
+    pub(crate) last_effect_evaluation: Option<AutoTuningEffectEvaluationResponse>,
     pub(crate) last_observed_tls_handshake_timeout_rate_percent: f64,
     pub(crate) last_observed_bucket_reject_rate_percent: f64,
     pub(crate) last_observed_avg_proxy_latency_ms: u64,
     pub(crate) recommendation: AutoTuningRecommendationResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AutoTuningEffectEvaluationResponse {
+    pub(crate) status: String,
+    pub(crate) observed_at: Option<i64>,
+    pub(crate) sample_requests: u64,
+    pub(crate) handshake_timeout_rate_delta_percent: f64,
+    pub(crate) bucket_reject_rate_delta_percent: f64,
+    pub(crate) avg_proxy_latency_delta_ms: i64,
+    pub(crate) summary: String,
 }
 
 #[derive(Debug, Serialize)]

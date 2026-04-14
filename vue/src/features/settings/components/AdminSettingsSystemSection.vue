@@ -219,38 +219,45 @@ function truncateCertificateName(name: string, maxLength = 18) {
           <div class="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <p class="text-sm font-semibold text-stone-900">雷池接入参数</p>
             <div class="flex flex-wrap items-center gap-4">
-              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+              >
+                <span>校验证书</span>
                 <input
                   v-model="safeLineVerifyTls"
                   type="checkbox"
                   class="ui-switch"
                 />
-                <span>校验证书</span>
               </label>
-              <div class="h-3 w-px bg-slate-200"></div>
-              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+              >
+                <span>同步事件</span>
                 <input
                   v-model="safeLineAutoSyncEvents"
                   type="checkbox"
                   class="ui-switch"
                 />
-                <span>同步事件</span>
               </label>
-              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+              >
+                <span>推送封禁</span>
                 <input
                   v-model="safeLineAutoSyncPush"
                   type="checkbox"
                   class="ui-switch"
                 />
-                <span>推送封禁</span>
               </label>
-              <label class="inline-flex items-center gap-2 text-xs text-stone-700">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+              >
+                <span>回流封禁</span>
                 <input
                   v-model="safeLineAutoSyncPull"
                   type="checkbox"
                   class="ui-switch"
                 />
-                <span>回流封禁</span>
               </label>
               <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
                 <span>自动</span>
@@ -362,6 +369,7 @@ function truncateCertificateName(name: string, maxLength = 18) {
 
 .ui-switch {
   appearance: none;
+  -webkit-appearance: none;
   width: 2.25rem;
   height: 1.25rem;
   border-radius: 9999px;

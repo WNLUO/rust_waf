@@ -28,6 +28,12 @@ function patchForm(patch: Partial<L4ConfigForm>) {
     >
       当前处于 L4 兼容模式。这里编辑的是历史细粒度参数，仅用于旧策略回滚或特殊排障，不是自动控制器的主入口。
     </div>
+    <div
+      v-else-if="hideAdaptiveManagedSections"
+      class="rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm leading-6 text-blue-900"
+    >
+      当前展示的是 L4 独立运行项。行为引擎预算、过载延迟和拒绝阈值已交由自动化接管，并收纳到兼容层入口。
+    </div>
     <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
       <label :class="numberFieldClass">
         <span :class="numberLabelClass">每秒连接速率阈值</span>
@@ -140,7 +146,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
       v-if="!hideAdaptiveManagedSections"
       class="space-y-2 border-t border-slate-200 pt-3"
     >
-      <p class="text-sm font-medium text-stone-900">行为引擎预算</p>
+      <p class="text-sm font-medium text-stone-900">行为引擎预算（自动化接管项）</p>
 
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label :class="numberFieldClass">
@@ -290,7 +296,7 @@ function patchForm(patch: Partial<L4ConfigForm>) {
       </div>
 
       <p class="border-t border-slate-200 pt-3 text-sm font-medium text-stone-900">
-        过载缩放与延迟
+        过载缩放与延迟（自动化接管项）
       </p>
 
       <div class="flex flex-wrap items-center gap-x-6 gap-y-3">

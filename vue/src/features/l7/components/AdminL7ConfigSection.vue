@@ -703,10 +703,16 @@ const safelineResponseBodySource = computed({
       当前处于 L7 兼容模式。这里编辑的是历史 CC / 自动调优细粒度参数，仅用于旧策略回滚或专项排障，不作为自动控制器的常规入口。
     </div>
     <div
+      v-else-if="hideAdaptiveManagedSections"
+      class="mb-4 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm leading-6 text-blue-900"
+    >
+      当前展示的是 L7 独立运行项。CC 防护阈值与自动调优细项已交由自动化接管，并收纳到兼容层入口。
+    </div>
+    <div
       class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
     >
       <div>
-        <p class="text-sm tracking-wider text-blue-700">HTTP 配置</p>
+        <p class="text-sm tracking-wider text-blue-700">HTTP 配置（独立运行项）</p>
       </div>
     </div>
 
@@ -824,7 +830,7 @@ const safelineResponseBodySource = computed({
         class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
       >
         <div>
-          <p class="text-sm tracking-wider text-blue-700">自动调优 (Phase 1)</p>
+          <p class="text-sm tracking-wider text-blue-700">自动调优（自动化接管项）</p>
         </div>
         <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
           <span>运行时微调</span>
@@ -1185,7 +1191,7 @@ const safelineResponseBodySource = computed({
         class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
       >
         <div>
-          <p class="text-sm tracking-wider text-blue-700">L7 CC 防护</p>
+          <p class="text-sm tracking-wider text-blue-700">L7 CC 防护（自动化接管项）</p>
         </div>
         <div class="flex flex-wrap gap-3">
           <label
@@ -1335,7 +1341,7 @@ const safelineResponseBodySource = computed({
       >
         <div>
           <p class="text-sm tracking-wider text-blue-700">
-            SafeLine 响应接管
+            SafeLine 响应接管（独立运行项）
           </p>
         </div>
         <div class="flex flex-wrap gap-3">
@@ -1489,7 +1495,7 @@ const safelineResponseBodySource = computed({
         class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
       >
         <div>
-          <p class="text-sm tracking-wider text-blue-700">HTTP/3 配置</p>
+          <p class="text-sm tracking-wider text-blue-700">HTTP/3 配置（独立运行项）</p>
         </div>
         <div class="flex flex-wrap gap-3">
           <label

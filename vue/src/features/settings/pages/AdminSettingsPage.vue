@@ -224,7 +224,7 @@ useFlashMessages({
                 </span>
               </div>
               <p class="text-sm text-stone-700">
-                当前按 {{ adaptiveRuntime.mode }} 模式、{{ adaptiveRuntime.goal }} 目标自动调节 L4 / L7。系统设置页会优先展示自动策略，高级阈值保留在兼容入口中。
+                当前按 {{ adaptiveRuntime.mode }} 模式、{{ adaptiveRuntime.goal }} 目标自动调节 L4 / L7。页面里会把“自动化接管项”和“独立运行项”分开展示，避免把仍需人工维护的配置一起收起。
               </p>
             </div>
             <div class="grid gap-2 text-xs text-stone-700 md:grid-cols-2">
@@ -264,6 +264,9 @@ useFlashMessages({
           >
             <div>
               <p class="text-sm tracking-wider text-blue-700">L4 管理</p>
+              <p class="mt-1 text-xs text-slate-500">
+                主页面保留独立运行项；自动化接管的预算、延迟和拒绝阈值收纳到兼容层入口。
+              </p>
             </div>
             <div class="flex items-center gap-2">
               <button
@@ -306,7 +309,7 @@ useFlashMessages({
             class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
           >
             <p>
-              自适应防护已接管 L4 连接预算、延迟和拒绝阈值。这里的细粒度参数已从常规入口收起，避免线上继续依赖手工阈值。
+              自适应防护已接管 L4 行为引擎预算、过载延迟和拒绝阈值，这一组参数已从主区域收起，避免线上继续依赖手工阈值。
             </p>
             <p>
               与自动化无关的连接速率、SYN 阈值、跟踪容量、封禁表容量、状态保留和 Bloom 缩放仍然保留在下方主表单中。
@@ -337,8 +340,11 @@ useFlashMessages({
             <div
               class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
             >
-              <div>
+            <div>
                 <p class="text-sm tracking-wider text-blue-700">L7 管理</p>
+                <p class="mt-1 text-xs text-slate-500">
+                  主页面保留协议、超时、健康检查和联动运行项；自动化接管的 CC 与自动调优细项收纳到兼容层入口。
+                </p>
               </div>
               <div class="flex items-center gap-2">
               </div>
@@ -355,7 +361,7 @@ useFlashMessages({
             class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
           >
             <p>
-              自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，常规场景不再建议手动维护这一组数值。
+              自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，这一组参数不再建议在主页面人工维护。
             </p>
             <p>
               与自动化无关的 HTTP 协议、上游健康检查、超时、Bloom、SafeLine 接管和 HTTP/3 参数仍然保留在下方主表单中，避免这些运行项被一起隐藏。

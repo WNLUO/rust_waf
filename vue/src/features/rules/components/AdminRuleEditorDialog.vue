@@ -345,7 +345,7 @@ function handleActionChange(event: Event) {
                 :disabled="!!ruleForm.plugin_template_id"
                 @click="$emit('addHeader')"
               >
-                添加 Header
+                添加响应头
               </button>
             </div>
 
@@ -359,7 +359,7 @@ function handleActionChange(event: Event) {
                 :value="header.key"
                 type="text"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-                placeholder="Header 名称"
+                placeholder="响应头名称"
                 :disabled="!!ruleForm.plugin_template_id"
                 @input="
                   $emit(
@@ -386,7 +386,7 @@ function handleActionChange(event: Event) {
                 :value="header.value"
                 type="text"
                 class="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500"
-                placeholder="Header 值"
+                placeholder="响应头值"
                 :disabled="!!ruleForm.plugin_template_id"
                 @input="
                   $emit(

@@ -414,7 +414,10 @@ mod tests {
         assert!(runtime.l4.normal_connection_budget_per_minute < 960);
         assert!(runtime.l4.soft_delay_ms >= 45);
         assert!(runtime.l7.delay_ms >= 350);
-        assert!(runtime.reasons.iter().any(|reason| reason == "request_permit_pressure"));
+        assert!(runtime
+            .reasons
+            .iter()
+            .any(|reason| reason == "request_permit_pressure"));
     }
 
     #[test]
@@ -441,7 +444,10 @@ mod tests {
         let strict = build_runtime_snapshot(&strict_config, &auto, None);
 
         assert!(relaxed.l7.ip_challenge_threshold > strict.l7.ip_challenge_threshold);
-        assert!(relaxed.l4.normal_connection_budget_per_minute > strict.l4.normal_connection_budget_per_minute);
+        assert!(
+            relaxed.l4.normal_connection_budget_per_minute
+                > strict.l4.normal_connection_budget_per_minute
+        );
     }
 
     #[test]

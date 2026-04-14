@@ -146,6 +146,27 @@ pub(crate) async fn handle_http1_connection(
             }
         }
 
+        if let Some(result) = inspect_blocked_client_ip(context.as_ref(), &request).await {
+            persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            http1_handler
+                .write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes())
+                .await?;
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+
         if request.uri.is_empty() {
             debug!("Empty request from {}, ignoring", peer_addr);
             return Ok(());

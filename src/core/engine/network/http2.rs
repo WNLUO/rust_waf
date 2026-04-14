@@ -154,6 +154,31 @@ pub(crate) async fn handle_http2_connection(
                         }
                     }
 
+                    if let Some(result) = inspect_blocked_client_ip(context.as_ref(), &request).await
+                    {
+                        persist_http_inspection_event(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &result,
+                        );
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(result.layer.clone());
+                        }
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
+                        return Ok(Http2Response {
+                            status_code: 403,
+                            headers: vec![],
+                            body: body_for_request(&request, result.reason.as_bytes()),
+                        });
+                    }
+
                     if let Some(response) = try_handle_browser_fingerprint_report(
                         context.as_ref(),
                         &packet,

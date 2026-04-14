@@ -268,7 +268,7 @@ impl L7ConfigUpdateRequest {
                     "Ignoring manual L7 CC threshold update because adaptive protection is enabled"
                 );
             } else {
-            current.l7_config.cc_defense = cc_defense.into_config();
+                current.l7_config.cc_defense = cc_defense.into_config();
             }
         }
         if let Some(safeline_intercept) = self.safeline_intercept {

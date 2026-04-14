@@ -251,7 +251,7 @@ onMounted(loadPage)
             </label>
           </div>
           <label class="mt-4 block space-y-1.5">
-            <span class="text-xs text-slate-500">SSL Ciphers</span>
+            <span class="text-xs text-slate-500">SSL 加密套件</span>
             <input
               v-model="settings.ssl_ciphers"
               class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"

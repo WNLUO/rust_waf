@@ -384,7 +384,7 @@ const clearToken = () => {
               v-if="authPanelOpen"
               class="absolute right-0 top-11 z-40 w-72 rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
             >
-              <p class="text-sm font-medium text-slate-900">管理 API Bearer Token</p>
+              <p class="text-sm font-medium text-slate-900">管理 API 访问令牌</p>
               <p class="mt-2 text-xs leading-6 text-slate-500">
                 令牌仅保存在当前浏览器本地存储中，用于访问受保护的管理接口。
               </p>
@@ -392,7 +392,7 @@ const clearToken = () => {
                 v-model="adminTokenDraft"
                 type="password"
                 class="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-                placeholder="输入 Bearer Token"
+                placeholder="输入访问令牌"
               />
               <div class="mt-3 flex items-center justify-end gap-2">
                 <button

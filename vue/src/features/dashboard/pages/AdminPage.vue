@@ -37,8 +37,6 @@ import {
   Gauge,
   RefreshCw,
   Shield,
-  ArrowUpRight,
-  TimerReset,
 } from 'lucide-vue-next'
 
 const dashboard = ref<DashboardPayload | null>(null)
@@ -379,84 +377,166 @@ onMounted(() => {
           trend="down"
           :series="metricsHistory.latency"
         />
-        <div
-          class="relative overflow-hidden rounded-xl border border-amber-200/80 bg-gradient-to-br from-amber-50 via-white to-stone-50 p-3 shadow-sm"
-        >
-          <div
-            class="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-400 via-amber-300 to-transparent"
-          ></div>
-          <div class="absolute right-0 top-0 p-3 opacity-20">
-            <Database :size="20" class="text-amber-700" />
-          </div>
+        <MetricWidget
+          label="代理成功率"
+          :value="successRate"
+          :hint="`成功 ${formatNumber(dashboard?.metrics.proxy_successes || 0)} / 失败 ${formatNumber(dashboard?.metrics.proxy_failures || 0)}`"
+          :icon="Database"
+        />
+      </section>
 
-          <div class="space-y-3">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p class="text-xs font-medium text-amber-700/80">启用规则</p>
-                <h3 class="mt-1 text-xl font-semibold text-slate-900">
-                  {{ dashboard?.metrics.active_rules || 0 }}
-                </h3>
-              </div>
-              <StatusBadge
-                :text="
-                  (dashboard?.metrics.active_rules || 0) > 0 ? '配置生效中' : '待启用'
-                "
-                :type="
-                  (dashboard?.metrics.active_rules || 0) > 0 ? 'warning' : 'muted'
-                "
-              />
-            </div>
+      <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+        <AdminEventMapSection :traffic-map="trafficMap" :traffic-events="trafficEvents" />
 
-            <div class="grid grid-cols-2 gap-3 rounded-lg border border-amber-100 bg-white/80 p-3">
-              <div>
-                <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                  规则总数
-                </p>
-                <p class="mt-1 text-lg font-semibold text-slate-900">
-                  {{ formatNumber(dashboard?.rules.rules.length || 0) }}
-                </p>
-              </div>
-              <div>
-                <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                  代理成功率
-                </p>
-                <p class="mt-1 text-lg font-semibold text-slate-900">
-                  {{ successRate }}
-                </p>
+        <CyberCard title="运行摘要">
+          <div class="grid gap-4">
+            <div class="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+              <div class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p class="text-xs text-amber-700/80">挑战 / 429 拦截</p>
+                  <p class="mt-1 text-2xl font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.l7_cc_challenges || 0) }}
+                    /
+                    {{ formatNumber(dashboard?.metrics.l7_cc_blocks || 0) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-amber-700/80">延迟处置 / 放行</p>
+                  <p class="mt-1 text-2xl font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.l7_cc_delays || 0) }}
+                    /
+                    {{
+                      formatNumber(
+                        dashboard?.metrics.l7_cc_verified_passes || 0,
+                      )
+                    }}
+                  </p>
+                </div>
               </div>
             </div>
 
+            <div class="rounded-xl bg-slate-50 px-4 py-3">
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <p class="text-xs text-slate-500">成功</p>
+                  <p class="mt-0.5 text-2xl font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.proxy_successes || 0) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500">上游代理失败</p>
+                  <p class="mt-0.5 text-2xl font-semibold text-red-600">
+                    {{ formatNumber(dashboard?.metrics.proxy_failures || 0) }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-xs text-slate-500">上游状态</p>
+                  <StatusBadge
+                    :text="dashboard?.health.upstream_healthy ? '可用' : '异常'"
+                    :type="dashboard?.health.upstream_healthy ? 'success' : 'error'"
+                  />
+                </div>
+                <p class="mt-2 text-2xl font-semibold text-slate-900">
+                  {{ dashboard?.health.upstream_healthy ? '健康' : '异常降级' }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-slate-200 p-4">
+                <p class="text-xs text-slate-500">最近检查</p>
+                <p class="mt-2 text-lg font-semibold text-slate-900">
+                  {{
+                    dashboard?.health.upstream_last_check_at
+                      ? new Intl.DateTimeFormat('zh-CN', {
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                        }).format(new Date(dashboard.health.upstream_last_check_at * 1000))
+                      : '暂无记录'
+                  }}
+                </p>
+                <p
+                  v-if="dashboard?.health.upstream_last_error"
+                  class="mt-2 truncate text-xs text-red-600"
+                  :title="dashboard.health.upstream_last_error"
+                >
+                  {{ dashboard.health.upstream_last_error }}
+                </p>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 p-4">
+              <p class="text-xs text-slate-500">本地数据库状态</p>
+              <div class="mt-3 flex items-center justify-between">
+                <p class="text-lg font-semibold text-stone-900">
+                  {{ dashboard?.metrics.sqlite_enabled ? '已启用' : '未启用' }}
+                </p>
+                <StatusBadge
+                  :text="
+                    dashboard?.metrics.sqlite_enabled ? '持久化可用' : '未连接'
+                  "
+                  :type="
+                    dashboard?.metrics.sqlite_enabled ? 'success' : 'muted'
+                  "
+                />
+              </div>
+            </div>
           </div>
+        </CyberCard>
+      </section>
+
+      <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm tracking-wider text-blue-700">CC 防护摘要</p>
+            <p class="mt-1 text-xs text-slate-500">
+              展示挑战、硬拦截、延迟处置与验证放行的整体情况
+            </p>
+          </div>
+          <StatusBadge
+            :text="(dashboard?.metrics.l7_cc_challenges || 0) + (dashboard?.metrics.l7_cc_blocks || 0) > 0 ? '防护活跃' : '暂无命中'"
+            :type="(dashboard?.metrics.l7_cc_challenges || 0) + (dashboard?.metrics.l7_cc_blocks || 0) > 0 ? 'warning' : 'muted'"
+          />
         </div>
-      </section>
 
-      <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricWidget
-          label="CC Challenge 次数"
-          :value="formatNumber(dashboard?.metrics.l7_cc_challenges || 0)"
-          hint="已返回挑战页或挑战响应"
-          :icon="Shield"
-        />
-        <MetricWidget
-          label="CC 429 次数"
-          :value="formatNumber(dashboard?.metrics.l7_cc_blocks || 0)"
-          :hint="`HTTP 拦截 ${formatNumber(dashboard?.metrics.blocked_l7 || 0)} 中的硬阻断部分`"
-          :icon="Activity"
-          trend="up"
-        />
-        <MetricWidget
-          label="CC 延迟处置"
-          :value="formatNumber(dashboard?.metrics.l7_cc_delays || 0)"
-          hint="命中软阈值后执行延迟"
-          :icon="TimerReset"
-        />
-        <MetricWidget
-          label="Challenge 放行"
-          :value="formatNumber(dashboard?.metrics.l7_cc_verified_passes || 0)"
-          hint="已完成验证并继续放行"
-          :icon="ArrowUpRight"
-        />
-      </section>
+        <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs text-slate-500">挑战次数</p>
+              <p class="mt-2 text-2xl font-semibold text-slate-900">
+                {{ formatNumber(dashboard?.metrics.l7_cc_challenges || 0) }}
+              </p>
+            <p class="mt-2 text-xs text-slate-500">已返回验证页或验证响应</p>
+            </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs text-slate-500">硬拦截次数</p>
+            <p class="mt-2 text-2xl font-semibold text-slate-900">
+              {{ formatNumber(dashboard?.metrics.l7_cc_blocks || 0) }}
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+              HTTP 拦截中的直接拒绝部分
+            </p>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p class="text-xs text-slate-500">延迟处置次数</p>
+            <p class="mt-2 text-2xl font-semibold text-slate-900">
+              {{ formatNumber(dashboard?.metrics.l7_cc_delays || 0) }}
+            </p>
+            <p class="mt-2 text-xs text-slate-500">命中软阈值后执行延迟</p>
+          </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p class="text-xs text-slate-500">验证后放行次数</p>
+              <p class="mt-2 text-2xl font-semibold text-slate-900">
+                {{ formatNumber(dashboard?.metrics.l7_cc_verified_passes || 0) }}
+              </p>
+            <p class="mt-2 text-xs text-slate-500">已完成挑战验证并继续放行</p>
+            </div>
+          </div>
+        </section>
 
       <section
         v-if="adaptiveManaged && adaptiveRuntime"
@@ -465,7 +545,7 @@ onMounted(() => {
         <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div class="space-y-2">
             <div class="flex flex-wrap items-center gap-2">
-              <p class="text-sm tracking-wider text-emerald-700">Adaptive Protection</p>
+              <p class="text-sm tracking-wider text-emerald-700">自适应防护</p>
               <StatusBadge
                 :text="adaptiveRuntime.system_pressure"
                 :type="adaptivePressureType"
@@ -483,7 +563,7 @@ onMounted(() => {
               </p>
             </div>
             <div class="rounded-lg border border-white/80 bg-white/70 p-3">
-              <p class="text-xs text-slate-500">L7 Challenge / Block</p>
+              <p class="text-xs text-slate-500">L7 挑战 / 封禁阈值</p>
               <p class="mt-1 font-semibold text-stone-900">
                 {{ adaptiveRuntime.l7.ip_challenge_threshold }} / {{ adaptiveRuntime.l7.ip_block_threshold }}
               </p>
@@ -507,7 +587,7 @@ onMounted(() => {
       <section class="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div class="flex items-center justify-between gap-3">
-            <p class="text-sm tracking-wider text-blue-700">L7 AUTO</p>
+            <p class="text-sm tracking-wider text-blue-700">L7 自动调优</p>
             <StatusBadge
               :text="l7Stats?.auto_tuning.mode || 'off'"
               :type="
@@ -586,7 +666,7 @@ onMounted(() => {
 
         <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div class="flex items-center justify-between gap-3">
-            <p class="text-sm tracking-wider text-blue-700">L4 AUTO</p>
+            <p class="text-sm tracking-wider text-blue-700">L4 自动防护</p>
             <StatusBadge
               :text="l4Stats?.behavior.overview.overload_level || 'normal'"
               :type="
@@ -637,111 +717,6 @@ onMounted(() => {
             </div>
           </div>
         </div>
-      </section>
-
-      <section class="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <AdminEventMapSection :traffic-map="trafficMap" :traffic-events="trafficEvents" />
-
-        <CyberCard title="运行摘要">
-          <div class="grid gap-4">
-            <div class="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
-              <div class="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p class="text-xs text-amber-700/80">Challenge / 429</p>
-                  <p class="mt-1 text-2xl font-semibold text-stone-900">
-                    {{ formatNumber(dashboard?.metrics.l7_cc_challenges || 0) }}
-                    /
-                    {{ formatNumber(dashboard?.metrics.l7_cc_blocks || 0) }}
-                  </p>
-                </div>
-                <div>
-                  <p class="text-xs text-amber-700/80">Delay / 放行</p>
-                  <p class="mt-1 text-2xl font-semibold text-stone-900">
-                    {{ formatNumber(dashboard?.metrics.l7_cc_delays || 0) }}
-                    /
-                    {{
-                      formatNumber(
-                        dashboard?.metrics.l7_cc_verified_passes || 0,
-                      )
-                    }}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div class="rounded-xl bg-slate-50 px-4 py-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <p class="text-xs text-slate-500">成功</p>
-                  <p class="mt-0.5 text-2xl font-semibold text-stone-900">
-                    {{ formatNumber(dashboard?.metrics.proxy_successes || 0) }}
-                  </p>
-                </div>
-                <div>
-                  <p class="text-xs text-slate-500">上游代理失败</p>
-                  <p class="mt-0.5 text-2xl font-semibold text-red-600">
-                    {{ formatNumber(dashboard?.metrics.proxy_failures || 0) }}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid gap-4 md:grid-cols-2">
-              <div class="rounded-xl border border-slate-200 p-4">
-                <div class="flex items-center justify-between gap-3">
-                  <p class="text-xs text-slate-500">上游状态</p>
-                  <StatusBadge
-                    :text="dashboard?.health.upstream_healthy ? '可用' : '异常'"
-                    :type="dashboard?.health.upstream_healthy ? 'success' : 'error'"
-                  />
-                </div>
-                <p class="mt-2 text-2xl font-semibold text-slate-900">
-                  {{ dashboard?.health.upstream_healthy ? 'Healthy' : 'Degraded' }}
-                </p>
-              </div>
-              <div class="rounded-xl border border-slate-200 p-4">
-                <p class="text-xs text-slate-500">最近检查</p>
-                <p class="mt-2 text-lg font-semibold text-slate-900">
-                  {{
-                    dashboard?.health.upstream_last_check_at
-                      ? new Intl.DateTimeFormat('zh-CN', {
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        }).format(new Date(dashboard.health.upstream_last_check_at * 1000))
-                      : '暂无记录'
-                  }}
-                </p>
-                <p
-                  v-if="dashboard?.health.upstream_last_error"
-                  class="mt-2 truncate text-xs text-red-600"
-                  :title="dashboard.health.upstream_last_error"
-                >
-                  {{ dashboard.health.upstream_last_error }}
-                </p>
-              </div>
-            </div>
-
-            <div class="rounded-xl border border-slate-200 p-4">
-              <p class="text-xs text-slate-500">本地数据库状态</p>
-              <div class="mt-3 flex items-center justify-between">
-                <p class="text-lg font-semibold text-stone-900">
-                  {{ dashboard?.metrics.sqlite_enabled ? '已启用' : '未启用' }}
-                </p>
-                <StatusBadge
-                  :text="
-                    dashboard?.metrics.sqlite_enabled ? '持久化可用' : '未连接'
-                  "
-                  :type="
-                    dashboard?.metrics.sqlite_enabled ? 'success' : 'muted'
-                  "
-                />
-              </div>
-            </div>
-          </div>
-        </CyberCard>
       </section>
     </div>
   </AppLayout>

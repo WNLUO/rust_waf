@@ -178,6 +178,29 @@ async fn handle_http3_request(
         maybe_delay_request(&unified).await;
     }
 
+    if let Some(result) = inspect_blocked_client_ip(context.as_ref(), &unified).await {
+        persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(result.layer.clone());
+        }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.record_l7_feedback(
+                &packet,
+                &unified,
+                crate::l4::behavior::FeedbackSource::L7Block,
+            );
+        }
+        send_http3_response(
+            &mut stream,
+            403,
+            &[],
+            body_for_request(&unified, result.reason.as_bytes()),
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
+
     if let Some(response) = try_handle_browser_fingerprint_report(
         context.as_ref(),
         &packet,

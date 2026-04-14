@@ -787,7 +787,7 @@ const safelineResponseBodySource = computed({
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700"
-          >IP Challenge 阈值<input
+          >IP 挑战阈值<input
             v-model.number="ccIpChallengeThreshold"
             type="number"
             min="10"
@@ -801,7 +801,7 @@ const safelineResponseBodySource = computed({
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700"
-          >Host Challenge 阈值<input
+          >主机挑战阈值<input
             v-model.number="ccHostChallengeThreshold"
             type="number"
             min="5"
@@ -815,7 +815,7 @@ const safelineResponseBodySource = computed({
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700"
-          >路由 Challenge 阈值<input
+          >路由挑战阈值<input
             v-model.number="ccRouteChallengeThreshold"
             type="number"
             min="3"
@@ -829,7 +829,7 @@ const safelineResponseBodySource = computed({
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700"
-          >热点路径 Challenge 阈值<input
+          >热点路径挑战阈值<input
             v-model.number="ccHotPathChallengeThreshold"
             type="number"
             min="32"
@@ -843,14 +843,14 @@ const safelineResponseBodySource = computed({
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700"
-          >Challenge TTL(s)<input
+          >挑战有效期(秒)<input
             v-model.number="ccChallengeTtl"
             type="number"
             min="30"
             :class="numberInputClass"
         /></label>
         <label class="l7-inline-field text-sm text-stone-700"
-          >Challenge Cookie 名称<input
+          >挑战 Cookie 名称<input
             v-model="ccChallengeCookieName"
             type="text"
             placeholder="例如 rwaf_cc"

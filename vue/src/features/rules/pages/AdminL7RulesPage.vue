@@ -155,7 +155,7 @@ const loadRules = async () => {
     rules.value = payload.rules
     error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '读取 HTTP 规则失败'
+    error.value = e instanceof Error ? e.message : '读取网页请求规则失败'
   } finally {
     loading.value = false
   }
@@ -192,16 +192,16 @@ const saveRule = async () => {
 
     if (editingId.value) {
       await updateRule(payload)
-      successMessage.value = `HTTP 规则 ${payload.id} 已更新。`
+      successMessage.value = `网页请求规则 ${payload.id} 已更新。`
     } else {
       await createRule(payload)
-      successMessage.value = `HTTP 规则 ${payload.id} 已创建。`
+      successMessage.value = `网页请求规则 ${payload.id} 已创建。`
     }
 
     isRuleModalOpen.value = false
     await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '保存 HTTP 规则失败'
+    error.value = e instanceof Error ? e.message : '保存网页请求规则失败'
   } finally {
     saving.value = false
   }
@@ -212,23 +212,23 @@ const toggleRuleStatus = async (rule: RuleItem) => {
   successMessage.value = ''
   try {
     await updateRule({ ...rule, enabled: !rule.enabled, layer: 'l7' })
-    successMessage.value = `HTTP 规则 ${rule.id} 已${rule.enabled ? '停用' : '启用'}。`
+    successMessage.value = `网页请求规则 ${rule.id} 已${rule.enabled ? '停用' : '启用'}。`
     await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '更新 HTTP 规则状态失败'
+    error.value = e instanceof Error ? e.message : '更新网页请求规则状态失败'
   }
 }
 
 const removeRule = async (id: string) => {
-  if (!window.confirm(`确认删除 HTTP 规则 ${id} 吗？`)) return
+  if (!window.confirm(`确认删除网页请求规则 ${id} 吗？`)) return
   error.value = ''
   successMessage.value = ''
   try {
     await deleteRule(id)
-    successMessage.value = `HTTP 规则 ${id} 已删除。`
+    successMessage.value = `网页请求规则 ${id} 已删除。`
     await loadRules()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '删除 HTTP 规则失败'
+    error.value = e instanceof Error ? e.message : '删除网页请求规则失败'
   }
 }
 
@@ -258,13 +258,13 @@ onMounted(loadRules)
           class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
         >
           <div>
-            <p class="text-sm tracking-wider text-blue-700">HTTP 规则</p>
+            <p class="text-sm tracking-wider text-blue-700">网页请求规则</p>
             <h2 class="mt-3 font-sans text-4xl font-semibold text-stone-900">
               HTTP 请求规则编排与启停控制
             </h2>
             <p class="mt-4 max-w-2xl text-sm leading-7 text-stone-700">
-              HTTP 规则匹配的是统一请求字符串，包含方法、URI、Header、元数据和
-              Body。适合做路径访问控制、请求特征拦截和应用侧告警。
+              网页请求规则匹配的是统一请求字符串，包含方法、URI、请求头、元数据和
+              请求体。适合做路径访问控制、请求特征拦截和应用侧告警。
             </p>
           </div>
           <button
@@ -272,14 +272,14 @@ onMounted(loadRules)
             @click="openCreateRule"
           >
             <Plus :size="16" />
-            新建 HTTP 规则
+            新建网页请求规则
           </button>
         </div>
       </section>
 
       <section class="grid gap-4 md:grid-cols-3">
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p class="text-xs tracking-wider text-slate-500">HTTP 规则总数</p>
+          <p class="text-xs tracking-wider text-slate-500">网页请求规则总数</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">
             {{ l7Rules.length }}
           </p>
@@ -412,7 +412,7 @@ onMounted(loadRules)
                   colspan="7"
                   class="px-4 py-6 text-center text-sm text-slate-500"
                 >
-                  当前还没有可显示的 HTTP 规则。
+                  当前还没有可显示的网页请求规则。
                 </td>
               </tr>
             </tbody>
@@ -435,7 +435,7 @@ onMounted(loadRules)
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm tracking-wide text-blue-700">
-              {{ editingId ? '编辑 HTTP 规则' : '新建 HTTP 规则' }}
+              {{ editingId ? '编辑网页请求规则' : '新建网页请求规则' }}
             </p>
             <h3 class="mt-2 text-3xl font-semibold text-stone-900">
               {{ editingId ? '调整 HTTP 请求策略' : '创建新的 HTTP 请求策略' }}
@@ -456,7 +456,7 @@ onMounted(loadRules)
             <div>
               <p class="text-sm font-medium text-stone-900">快速模板</p>
               <p class="mt-1 text-xs leading-5 text-slate-500">
-                HTTP 规则匹配的是统一请求字符串，常见内容包括 `GET
+                网页请求规则匹配的是统一请求字符串，常见内容包括 `GET
                 /path`、`header: value`、`@network.client_ip: 1.2.3.4`
                 和请求体。
               </p>
@@ -549,7 +549,7 @@ onMounted(loadRules)
             <div
               class="rounded-lg bg-slate-50 px-4 py-3 text-xs leading-6 text-slate-500"
             >
-              可匹配内容通常包括：请求行 `METHOD /uri`、Header 行、`@metadata`
+              可匹配内容通常包括：请求行 `METHOD /uri`、请求头行、`@metadata`
               元数据和请求体。保存时后端会校验正则是否合法。
             </div>
           </div>
@@ -563,7 +563,7 @@ onMounted(loadRules)
               class="h-4 w-4 accent-blue-600"
             />
             <span class="text-sm text-stone-800"
-              >保存后立即启用这条 HTTP 规则</span
+              >保存后立即启用这条网页请求规则</span
             >
           </label>
 

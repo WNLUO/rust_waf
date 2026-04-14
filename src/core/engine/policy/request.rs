@@ -44,6 +44,36 @@ pub(crate) fn apply_client_identity(
     );
 }
 
+pub(crate) async fn inspect_blocked_client_ip(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+) -> Option<InspectionResult> {
+    let client_ip = request.client_ip.as_deref()?.trim();
+    if client_ip.is_empty() {
+        return None;
+    }
+
+    let store = context.sqlite_store.as_ref()?;
+    let entry = match store.load_active_local_blocked_ip_by_ip(client_ip).await {
+        Ok(entry) => entry,
+        Err(err) => {
+            warn!(
+                "Failed to load active local blocked IP for L7 request client_ip={}: {}",
+                client_ip, err
+            );
+            return None;
+        }
+    }?;
+
+    Some(InspectionResult::block(
+        InspectionLayer::L7,
+        format!(
+            "Request blocked by local blocked IP list: {} ({})",
+            entry.ip, entry.reason
+        ),
+    ))
+}
+
 pub(crate) fn prepare_request_for_routing(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
     if context.config_snapshot().gateway_config.enable_ntlm && request_looks_like_ntlm(request) {

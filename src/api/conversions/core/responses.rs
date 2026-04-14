@@ -433,9 +433,7 @@ impl AutoTuningConfigResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AdaptiveProtectionGoal, AdaptiveProtectionMode, Config, RuntimeProfile,
-    };
+    use crate::config::{AdaptiveProtectionGoal, AdaptiveProtectionMode, Config, RuntimeProfile};
     use crate::core::AdaptiveProtectionRuntimeSnapshot;
 
     #[test]
@@ -478,7 +476,9 @@ mod tests {
             response
                 .advanced_compatibility
                 .persisted_behavior_normal_connection_budget_per_minute,
-            config.l4_config.behavior_normal_connection_budget_per_minute
+            config
+                .l4_config
+                .behavior_normal_connection_budget_per_minute
         );
     }
 

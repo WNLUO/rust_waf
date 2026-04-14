@@ -16,7 +16,7 @@ defineProps<{
 
 <template>
   <section class="grid gap-4 xl:grid-cols-[1fr_1fr]">
-    <CyberCard title="最近 HTTP 事件" sub-title="只展示请求侧策略事件">
+    <CyberCard title="最近网页请求事件" sub-title="只展示请求侧策略事件">
       <div class="space-y-4">
         <div
           v-for="event in events"
@@ -50,7 +50,7 @@ defineProps<{
           </div>
         </div>
         <p v-if="!events.length" class="text-sm text-slate-500">
-          暂无 HTTP 事件。
+          暂无网页请求事件。
         </p>
       </div>
       <template #header-action>
@@ -63,10 +63,10 @@ defineProps<{
       </template>
     </CyberCard>
 
-    <CyberCard title="HTTP 规则摘要" sub-title="规则中心中的请求侧策略概览">
+    <CyberCard title="网页请求规则摘要" sub-title="规则中心中的请求侧策略概览">
       <div class="grid gap-4 md:grid-cols-3">
         <div class="rounded-xl bg-slate-50 p-4">
-          <p class="text-xs tracking-wide text-slate-500">HTTP 规则总数</p>
+          <p class="text-xs tracking-wide text-slate-500">网页请求规则总数</p>
           <p class="mt-3 text-3xl font-semibold text-stone-900">
             {{ formatNumber(l7Rules.length) }}
           </p>
@@ -115,7 +115,7 @@ defineProps<{
           </div>
         </div>
         <p v-if="!l7Rules.length" class="text-sm text-slate-500">
-          当前还没有 HTTP 规则。
+          当前还没有网页请求规则。
         </p>
       </div>
     </CyberCard>

@@ -84,9 +84,8 @@ pub(super) async fn update_l4_compatibility_config_handler(
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message:
-            "L4 兼容层配置已写入数据库，并已按显式兼容模式刷新旧版细粒度行为参数。"
-                .to_string(),
+        message: "L4 兼容层配置已写入数据库，并已按显式兼容模式刷新旧版细粒度行为参数。"
+            .to_string(),
     }))
 }
 
@@ -162,9 +161,8 @@ pub(super) async fn update_l7_compatibility_config_handler(
 
     Ok(Json(WriteStatusResponse {
         success: true,
-        message:
-            "L7 兼容层配置已写入数据库，并已按显式兼容模式刷新旧版 CC / 自动调优细粒度参数。"
-                .to_string(),
+        message: "L7 兼容层配置已写入数据库，并已按显式兼容模式刷新旧版 CC / 自动调优细粒度参数。"
+            .to_string(),
     }))
 }
 

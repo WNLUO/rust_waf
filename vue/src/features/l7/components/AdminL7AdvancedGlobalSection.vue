@@ -274,7 +274,7 @@ onMounted(loadSettings)
             </div>
           </div>
           <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2 lg:col-span-1">
-            <span class="font-medium whitespace-nowrap">SSL Ciphers</span>
+            <span class="font-medium whitespace-nowrap">SSL 加密套件</span>
             <input
               v-model="form.ssl_ciphers"
               class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
@@ -343,13 +343,13 @@ onMounted(loadSettings)
 
       <div class="mt-4 border-t border-slate-200 pt-4">
         <div class="flex items-center justify-between gap-3">
-          <p class="text-sm font-semibold text-stone-900">HTTP Header 操作</p>
+          <p class="text-sm font-semibold text-stone-900">HTTP 请求头操作</p>
           <button
             class="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
             @click="addHeaderOperation"
           >
             <Plus :size="12" />
-            添加一项 Header 操作
+            添加一项请求头操作
           </button>
         </div>
 
@@ -378,14 +378,14 @@ onMounted(loadSettings)
               v-model="item.header"
               class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
               type="text"
-              placeholder="Header 名称"
+              placeholder="请求头名称"
             />
             <input
               v-model="item.value"
               :disabled="item.action === 'remove'"
               class="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-100"
               type="text"
-              placeholder="Header 值"
+              placeholder="请求头值"
             />
             <button
               class="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:text-rose-600"
@@ -396,7 +396,7 @@ onMounted(loadSettings)
           </div>
         </div>
         <p v-else class="mt-4 text-sm text-slate-500">
-          还没有添加 Header 操作。
+          还没有添加请求头操作。
         </p>
       </div>
 

@@ -59,7 +59,7 @@ defineProps<{
 
   <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
     <MetricWidget
-      label="CC Challenge 次数"
+      label="CC 挑战次数"
       :value="formatNumber(stats?.cc_challenge_requests || 0)"
       hint="返回挑战页或挑战响应的累计次数"
       :icon="Shield"
@@ -78,15 +78,15 @@ defineProps<{
       :icon="TimerReset"
     />
     <MetricWidget
-      label="Challenge 放行"
+      label="挑战后放行"
       :value="formatNumber(stats?.cc_verified_pass_requests || 0)"
-      :hint="`Cookie ${configForm.cc_defense.challenge_cookie_name} 验证通过后继续放行`"
+      :hint="`Cookie 标记 ${configForm.cc_defense.challenge_cookie_name} 验证通过后继续放行`"
       :icon="ArrowUpRight"
     />
   </section>
 
   <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-    <CyberCard title="协议支持" sub-title="HTTP 协议与监听入口摘要">
+    <CyberCard title="协议支持" sub-title="网页协议与监听入口摘要">
       <template #header-action>
         <div class="self-end flex flex-wrap justify-end gap-2">
           <StatusBadge
@@ -111,7 +111,7 @@ defineProps<{
             </div>
           </div>
           <div class="rounded-xl bg-slate-50 p-4">
-            <p class="text-xs tracking-wide text-slate-500">HTTP/3 监听</p>
+              <p class="text-xs tracking-wide text-slate-500">HTTP/3 监听入口</p>
             <p class="mt-3 text-sm text-stone-800">
               {{
                 configForm.http3_enabled
@@ -124,7 +124,7 @@ defineProps<{
         <div class="grid gap-3 md:grid-cols-3">
           <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
             <p class="text-xs tracking-wide text-slate-500">
-              HTTP/2 最大并发流
+              HTTP/2 最大并发请求流
             </p>
             <p class="mt-3 text-2xl font-semibold text-stone-900">
               {{ formatNumber(configForm.http2_max_concurrent_streams) }}
@@ -277,7 +277,7 @@ defineProps<{
     </CyberCard>
 
     <CyberCard
-      title="HTTP/3 当前配置摘要"
+      title="HTTP/3 配置摘要"
       sub-title="便于值班时快速对照配置与运行结果"
     >
       <div class="grid gap-3 md:grid-cols-2">

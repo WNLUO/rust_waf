@@ -139,6 +139,9 @@ export interface L7StatsPayload {
   proxy_failures: number
   proxy_fail_close_rejections: number
   l4_bucket_budget_rejections: number
+  tls_pre_handshake_rejections: number
+  tls_handshake_timeouts: number
+  tls_handshake_failures: number
   average_proxy_latency_micros: number
   upstream_healthy: boolean
   upstream_last_check_at: number | null

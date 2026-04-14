@@ -492,6 +492,24 @@ onMounted(() => {
                 {{ formatNumber(l7Stats?.auto_tuning.rollback_count_24h || 0) }}
               </p>
             </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">TLS 预握手拒绝累计</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(dashboard?.metrics.tls_pre_handshake_rejections || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">TLS 握手超时累计</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(dashboard?.metrics.tls_handshake_timeouts || 0) }}
+              </p>
+            </div>
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p class="text-xs text-slate-500">TLS 握手失败累计</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ formatNumber(dashboard?.metrics.tls_handshake_failures || 0) }}
+              </p>
+            </div>
           </div>
           <p class="mt-3 text-xs text-slate-500">
             资源探测: CPU {{ l7Stats?.auto_tuning.detected_cpu_cores || 0 }} cores /

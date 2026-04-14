@@ -49,54 +49,50 @@ impl L4ConfigResponse {
         runtime_enabled: bool,
         adaptive_runtime: &crate::core::AdaptiveProtectionRuntimeSnapshot,
     ) -> Self {
+        let mut effective_l4_config = config.l4_config.clone();
+        crate::core::adaptive_protection::apply_l4_runtime_policy(
+            &mut effective_l4_config,
+            adaptive_runtime,
+        );
+
         Self {
-            ddos_protection_enabled: config.l4_config.ddos_protection_enabled,
-            advanced_ddos_enabled: config.l4_config.advanced_ddos_enabled,
-            connection_rate_limit: config.l4_config.connection_rate_limit,
-            syn_flood_threshold: config.l4_config.syn_flood_threshold,
-            max_tracked_ips: config.l4_config.max_tracked_ips,
-            max_blocked_ips: config.l4_config.max_blocked_ips,
-            state_ttl_secs: config.l4_config.state_ttl_secs,
-            bloom_filter_scale: config.l4_config.bloom_filter_scale,
-            behavior_event_channel_capacity: config.l4_config.behavior_event_channel_capacity,
-            behavior_drop_critical_threshold: config.l4_config.behavior_drop_critical_threshold,
-            behavior_fallback_ratio_percent: config.l4_config.behavior_fallback_ratio_percent,
-            behavior_overload_blocked_connections_threshold: config
-                .l4_config
+            ddos_protection_enabled: effective_l4_config.ddos_protection_enabled,
+            advanced_ddos_enabled: effective_l4_config.advanced_ddos_enabled,
+            connection_rate_limit: effective_l4_config.connection_rate_limit,
+            syn_flood_threshold: effective_l4_config.syn_flood_threshold,
+            max_tracked_ips: effective_l4_config.max_tracked_ips,
+            max_blocked_ips: effective_l4_config.max_blocked_ips,
+            state_ttl_secs: effective_l4_config.state_ttl_secs,
+            bloom_filter_scale: effective_l4_config.bloom_filter_scale,
+            behavior_event_channel_capacity: effective_l4_config.behavior_event_channel_capacity,
+            behavior_drop_critical_threshold: effective_l4_config.behavior_drop_critical_threshold,
+            behavior_fallback_ratio_percent: effective_l4_config.behavior_fallback_ratio_percent,
+            behavior_overload_blocked_connections_threshold: effective_l4_config
                 .behavior_overload_blocked_connections_threshold,
-            behavior_overload_active_connections_threshold: config
-                .l4_config
+            behavior_overload_active_connections_threshold: effective_l4_config
                 .behavior_overload_active_connections_threshold,
-            behavior_normal_connection_budget_per_minute: config
-                .l4_config
+            behavior_normal_connection_budget_per_minute: effective_l4_config
                 .behavior_normal_connection_budget_per_minute,
-            behavior_suspicious_connection_budget_per_minute: config
-                .l4_config
+            behavior_suspicious_connection_budget_per_minute: effective_l4_config
                 .behavior_suspicious_connection_budget_per_minute,
-            behavior_high_risk_connection_budget_per_minute: config
-                .l4_config
+            behavior_high_risk_connection_budget_per_minute: effective_l4_config
                 .behavior_high_risk_connection_budget_per_minute,
-            behavior_high_overload_budget_scale_percent: config
-                .l4_config
+            behavior_high_overload_budget_scale_percent: effective_l4_config
                 .behavior_high_overload_budget_scale_percent,
-            behavior_critical_overload_budget_scale_percent: config
-                .l4_config
+            behavior_critical_overload_budget_scale_percent: effective_l4_config
                 .behavior_critical_overload_budget_scale_percent,
-            behavior_high_overload_delay_ms: config.l4_config.behavior_high_overload_delay_ms,
-            behavior_critical_overload_delay_ms: config
-                .l4_config
+            behavior_high_overload_delay_ms: effective_l4_config.behavior_high_overload_delay_ms,
+            behavior_critical_overload_delay_ms: effective_l4_config
                 .behavior_critical_overload_delay_ms,
-            behavior_soft_delay_threshold_percent: config
-                .l4_config
+            behavior_soft_delay_threshold_percent: effective_l4_config
                 .behavior_soft_delay_threshold_percent,
-            behavior_hard_delay_threshold_percent: config
-                .l4_config
+            behavior_hard_delay_threshold_percent: effective_l4_config
                 .behavior_hard_delay_threshold_percent,
-            behavior_soft_delay_ms: config.l4_config.behavior_soft_delay_ms,
-            behavior_hard_delay_ms: config.l4_config.behavior_hard_delay_ms,
-            behavior_reject_threshold_percent: config.l4_config.behavior_reject_threshold_percent,
-            behavior_critical_reject_threshold_percent: config
-                .l4_config
+            behavior_soft_delay_ms: effective_l4_config.behavior_soft_delay_ms,
+            behavior_hard_delay_ms: effective_l4_config.behavior_hard_delay_ms,
+            behavior_reject_threshold_percent: effective_l4_config
+                .behavior_reject_threshold_percent,
+            behavior_critical_reject_threshold_percent: effective_l4_config
                 .behavior_critical_reject_threshold_percent,
             runtime_enabled,
             bloom_enabled: config.bloom_enabled,
@@ -175,6 +171,9 @@ impl L7ConfigResponse {
         runtime_enabled: bool,
         adaptive_runtime: &crate::core::AdaptiveProtectionRuntimeSnapshot,
     ) -> Self {
+        let effective_cc_defense =
+            crate::core::adaptive_protection::derive_effective_cc_config(config, adaptive_runtime);
+
         Self {
             max_request_size: config.l7_config.max_request_size,
             trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
@@ -223,7 +222,7 @@ impl L7ConfigResponse {
                 .clone()
                 .unwrap_or_default(),
             http3_enable_tls13: config.http3_config.enable_tls13,
-            cc_defense: CcDefenseConfigResponse::from_config(&config.l7_config.cc_defense),
+            cc_defense: CcDefenseConfigResponse::from_config(&effective_cc_defense),
             safeline_intercept: SafeLineInterceptConfigResponse::from_config(
                 &config.l7_config.safeline_intercept,
             ),
@@ -368,6 +367,92 @@ impl AutoTuningConfigResponse {
                 p95_proxy_latency_ms: config.slo.p95_proxy_latency_ms,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        AdaptiveProtectionGoal, AdaptiveProtectionMode, Config, RuntimeProfile,
+    };
+    use crate::core::AdaptiveProtectionRuntimeSnapshot;
+
+    #[test]
+    fn l4_config_response_reports_effective_adaptive_values() {
+        let config = Config {
+            runtime_profile: RuntimeProfile::Standard,
+            adaptive_protection: crate::config::AdaptiveProtectionConfig {
+                enabled: true,
+                mode: AdaptiveProtectionMode::Strict,
+                goal: AdaptiveProtectionGoal::SecurityFirst,
+                cdn_fronted: true,
+                allow_emergency_reject: false,
+            },
+            ..Config::default()
+        };
+
+        let runtime = AdaptiveProtectionRuntimeSnapshot {
+            l4: crate::core::adaptive_protection::AdaptiveL4RuntimePolicy {
+                normal_connection_budget_per_minute: 321,
+                suspicious_connection_budget_per_minute: 210,
+                high_risk_connection_budget_per_minute: 99,
+                soft_delay_ms: 44,
+                hard_delay_ms: 88,
+                high_overload_delay_ms: 33,
+                critical_overload_delay_ms: 77,
+                reject_threshold_percent: 333,
+                critical_reject_threshold_percent: 222,
+                emergency_reject_enabled: false,
+            },
+            ..AdaptiveProtectionRuntimeSnapshot::default()
+        };
+
+        let response = L4ConfigResponse::from_config(&config, true, &runtime);
+
+        assert_eq!(response.behavior_normal_connection_budget_per_minute, 321);
+        assert_eq!(response.behavior_soft_delay_ms, 44);
+        assert_eq!(response.behavior_reject_threshold_percent, 333);
+        assert_eq!(response.adaptive_runtime.l4.hard_delay_ms, 88);
+    }
+
+    #[test]
+    fn l7_config_response_reports_effective_adaptive_cc_values() {
+        let config = Config {
+            l7_config: crate::config::L7Config {
+                cc_defense: crate::config::l7::CcDefenseConfig {
+                    request_window_secs: 10,
+                    ip_challenge_threshold: 60,
+                    ip_block_threshold: 120,
+                    route_challenge_threshold: 24,
+                    route_block_threshold: 48,
+                    delay_ms: 150,
+                    ..crate::config::l7::CcDefenseConfig::default()
+                },
+                ..crate::config::L7Config::default()
+            },
+            ..Config::default()
+        };
+
+        let runtime = AdaptiveProtectionRuntimeSnapshot {
+            l7: crate::core::adaptive_protection::AdaptiveL7RuntimePolicy {
+                request_window_secs: 15,
+                delay_ms: 280,
+                route_challenge_threshold: 12,
+                route_block_threshold: 24,
+                ip_challenge_threshold: 30,
+                ip_block_threshold: 60,
+                challenge_enabled: true,
+            },
+            ..AdaptiveProtectionRuntimeSnapshot::default()
+        };
+
+        let response = L7ConfigResponse::from_config(&config, true, &runtime);
+
+        assert_eq!(response.cc_defense.request_window_secs, 15);
+        assert_eq!(response.cc_defense.delay_ms, 280);
+        assert_eq!(response.cc_defense.ip_challenge_threshold, 30);
+        assert_eq!(response.cc_defense.route_block_threshold, 24);
     }
 }
 

@@ -343,3 +343,136 @@ fn goal_label(goal: AdaptiveProtectionGoal) -> &'static str {
         AdaptiveProtectionGoal::SecurityFirst => "security_first",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        AdaptiveProtectionGoal, AdaptiveProtectionMode, AutoTuningIntent, AutoTuningMode, Config,
+    };
+    use crate::core::AutoTuningRecommendationSnapshot;
+
+    fn base_config() -> Config {
+        Config {
+            adaptive_protection: AdaptiveProtectionConfig {
+                enabled: true,
+                mode: AdaptiveProtectionMode::Balanced,
+                goal: AdaptiveProtectionGoal::Balanced,
+                cdn_fronted: true,
+                allow_emergency_reject: false,
+            },
+            ..Config::default()
+        }
+    }
+
+    fn base_auto_snapshot() -> AutoTuningRuntimeSnapshot {
+        AutoTuningRuntimeSnapshot {
+            mode: AutoTuningMode::Off,
+            intent: AutoTuningIntent::Balanced,
+            controller_state: "idle".to_string(),
+            detected_cpu_cores: 4,
+            detected_memory_limit_mb: Some(4096),
+            last_adjust_at: None,
+            last_adjust_reason: None,
+            last_adjust_diff: Vec::new(),
+            rollback_count_24h: 0,
+            cooldown_until: None,
+            last_observed_tls_handshake_timeout_rate_percent: 0.0,
+            last_observed_bucket_reject_rate_percent: 0.0,
+            last_observed_avg_proxy_latency_ms: 0,
+            recommendation: AutoTuningRecommendationSnapshot {
+                l4_normal_connection_budget_per_minute: 960,
+                l4_suspicious_connection_budget_per_minute: 480,
+                l4_high_risk_connection_budget_per_minute: 168,
+                l4_reject_threshold_percent: 300,
+                l4_critical_reject_threshold_percent: 200,
+                tls_handshake_timeout_ms: 3000,
+            },
+        }
+    }
+
+    #[test]
+    fn adaptive_runtime_tightens_under_attack_pressure() {
+        let config = base_config();
+        let auto = AutoTuningRuntimeSnapshot {
+            last_observed_avg_proxy_latency_ms: 1200,
+            last_observed_tls_handshake_timeout_rate_percent: 0.2,
+            last_observed_bucket_reject_rate_percent: 0.2,
+            ..base_auto_snapshot()
+        };
+        let metrics = MetricsSnapshot {
+            trusted_proxy_permit_drops: 4,
+            tls_handshake_failures: 2,
+            l7_cc_challenges: 12,
+            l7_cc_blocks: 15,
+            ..MetricsSnapshot::default()
+        };
+
+        let runtime = build_runtime_snapshot(&config, &auto, Some(&metrics));
+
+        assert_eq!(runtime.system_pressure, "attack");
+        assert!(runtime.l4.normal_connection_budget_per_minute < 960);
+        assert!(runtime.l4.soft_delay_ms >= 45);
+        assert!(runtime.l7.delay_ms >= 350);
+        assert!(runtime.reasons.iter().any(|reason| reason == "request_permit_pressure"));
+    }
+
+    #[test]
+    fn availability_first_mode_keeps_l7_thresholds_looser_than_strict_security() {
+        let relaxed_config = Config {
+            adaptive_protection: AdaptiveProtectionConfig {
+                mode: AdaptiveProtectionMode::Relaxed,
+                goal: AdaptiveProtectionGoal::AvailabilityFirst,
+                ..base_config().adaptive_protection
+            },
+            ..base_config()
+        };
+        let strict_config = Config {
+            adaptive_protection: AdaptiveProtectionConfig {
+                mode: AdaptiveProtectionMode::Strict,
+                goal: AdaptiveProtectionGoal::SecurityFirst,
+                ..base_config().adaptive_protection
+            },
+            ..base_config()
+        };
+        let auto = base_auto_snapshot();
+
+        let relaxed = build_runtime_snapshot(&relaxed_config, &auto, None);
+        let strict = build_runtime_snapshot(&strict_config, &auto, None);
+
+        assert!(relaxed.l7.ip_challenge_threshold > strict.l7.ip_challenge_threshold);
+        assert!(relaxed.l4.normal_connection_budget_per_minute > strict.l4.normal_connection_budget_per_minute);
+    }
+
+    #[test]
+    fn disabling_adaptive_protection_preserves_static_cc_config() {
+        let config = Config {
+            adaptive_protection: AdaptiveProtectionConfig {
+                enabled: false,
+                ..base_config().adaptive_protection
+            },
+            ..base_config()
+        };
+        let runtime = AdaptiveProtectionRuntimeSnapshot {
+            l7: AdaptiveL7RuntimePolicy {
+                request_window_secs: 99,
+                delay_ms: 999,
+                route_challenge_threshold: 9,
+                route_block_threshold: 10,
+                ip_challenge_threshold: 11,
+                ip_block_threshold: 12,
+                challenge_enabled: false,
+            },
+            ..AdaptiveProtectionRuntimeSnapshot::default()
+        };
+
+        let effective = derive_effective_cc_config(&config, &runtime);
+
+        assert_eq!(
+            effective.ip_challenge_threshold,
+            config.l7_config.cc_defense.ip_challenge_threshold
+        );
+        assert_eq!(effective.delay_ms, config.l7_config.cc_defense.delay_ms);
+        assert_eq!(effective.enabled, config.l7_config.cc_defense.enabled);
+    }
+}

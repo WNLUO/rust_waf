@@ -202,6 +202,38 @@ pub fn run_control_step(
 
     if let Some(cooldown_until) = state.cooldown_until {
         if now < cooldown_until {
+            if should_rollback(config, state, &deltas) {
+                let mut rollback_config = state
+                    .baseline_before_adjust
+                    .take()
+                    .unwrap_or_else(|| config.clone());
+                rollback_config.auto_tuning = config.auto_tuning.clone();
+                rollback_config = rollback_config.normalized();
+
+                let rollback_cooldown_until =
+                    Some(now + (config.auto_tuning.cooldown_secs as i64).saturating_mul(2));
+                state.cooldown_until = rollback_cooldown_until;
+                state.rollback_timestamps.push(now);
+                runtime.rollback_count_24h = state.rollback_timestamps.len() as u32;
+
+                runtime.controller_state = "rollback".to_string();
+                runtime.last_adjust_at = Some(now);
+                runtime.last_adjust_reason = Some("rollback_due_to_metric_regression".to_string());
+                runtime.last_adjust_diff =
+                    vec!["restored previous stable runtime config".to_string()];
+                runtime.cooldown_until = rollback_cooldown_until;
+                runtime.last_effect_evaluation =
+                    Some(rollback_effect_snapshot(state, &deltas, now));
+
+                state.consecutive_handshake_high = 0;
+                state.consecutive_budget_high = 0;
+                state.consecutive_latency_high = 0;
+
+                return Some(AutoTuningDecision {
+                    next_config: rollback_config,
+                    requires_l4_refresh: true,
+                });
+            }
             runtime.cooldown_until = Some(cooldown_until);
             runtime.controller_state = "cooldown".to_string();
             return None;
@@ -472,10 +504,17 @@ fn should_rollback(
         return false;
     }
 
-    deltas.handshake_timeout_rate_percent
+    let global_regression = deltas.handshake_timeout_rate_percent
         > config.auto_tuning.slo.tls_handshake_timeout_rate_percent * 1.8
         || deltas.bucket_reject_rate_percent
-            > config.auto_tuning.slo.bucket_reject_rate_percent * 1.8
+            > config.auto_tuning.slo.bucket_reject_rate_percent * 1.8;
+    let hotspot_regression = state
+        .pending_effect_evaluation
+        .as_ref()
+        .map(|pending| has_critical_layered_regression(config, &pending.baseline, deltas))
+        .unwrap_or(false);
+
+    global_regression || hotspot_regression
 }
 
 fn update_consecutive_counters(
@@ -484,6 +523,8 @@ fn update_consecutive_counters(
     deltas: &MetricDeltas,
 ) {
     let has_volume = deltas.proxied_requests_delta >= 10;
+    let hotspot_budget_pressure = has_hotspot_budget_pressure(config, deltas);
+    let hotspot_latency_pressure = has_hotspot_latency_pressure(config, deltas);
 
     if has_volume
         && deltas.handshake_timeout_rate_percent
@@ -495,7 +536,8 @@ fn update_consecutive_counters(
     }
 
     if has_volume
-        && deltas.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent
+        && (deltas.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent
+            || hotspot_budget_pressure)
     {
         state.consecutive_budget_high = state.consecutive_budget_high.saturating_add(1);
     } else {
@@ -503,7 +545,8 @@ fn update_consecutive_counters(
     }
 
     if deltas.proxy_successes_delta >= 10
-        && deltas.avg_proxy_latency_ms > config.auto_tuning.slo.p95_proxy_latency_ms
+        && (deltas.avg_proxy_latency_ms > config.auto_tuning.slo.p95_proxy_latency_ms
+            || hotspot_latency_pressure)
     {
         state.consecutive_latency_high = state.consecutive_latency_high.saturating_add(1);
     } else {
@@ -1255,6 +1298,47 @@ fn segment_key(segment: &TrafficSegmentDelta) -> String {
     format!("{}::{}", segment.scope_type, segment.scope_key)
 }
 
+fn has_hotspot_budget_pressure(config: &Config, deltas: &MetricDeltas) -> bool {
+    let threshold = (config.auto_tuning.slo.bucket_reject_rate_percent * 2.0).max(5.0);
+    deltas.segments.iter().any(|segment| {
+        is_business_layer_segment(segment)
+            && segment.proxied_requests_delta >= 8
+            && segment.failure_rate_percent >= threshold
+    })
+}
+
+fn has_hotspot_latency_pressure(config: &Config, deltas: &MetricDeltas) -> bool {
+    let threshold = ((config.auto_tuning.slo.p95_proxy_latency_ms as f64) * 1.25)
+        .round()
+        .max((config.auto_tuning.slo.p95_proxy_latency_ms + 50) as f64) as u64;
+    deltas.segments.iter().any(|segment| {
+        is_business_layer_segment(segment)
+            && segment.proxied_requests_delta >= 8
+            && segment.avg_proxy_latency_ms >= threshold
+    })
+}
+
+fn has_critical_layered_regression(
+    config: &Config,
+    baseline: &MetricDeltas,
+    current: &MetricDeltas,
+) -> bool {
+    evaluate_segments_against_baseline(current, baseline)
+        .into_iter()
+        .any(|segment| {
+            matches!(segment.scope_type.as_str(), "host" | "route" | "host_route")
+                && segment.sample_requests >= 8
+                && (segment.status == "regressed"
+                    || segment.failure_rate_delta_percent
+                        >= (config.auto_tuning.slo.bucket_reject_rate_percent * 1.5).max(3.0)
+                    || segment.avg_proxy_latency_delta_ms >= 150)
+        })
+}
+
+fn is_business_layer_segment(segment: &TrafficSegmentDelta) -> bool {
+    matches!(segment.scope_type, "host" | "route" | "host_route")
+}
+
 fn adjust_u64(value: u64, percent: u8, increase: bool, min: u64, max: u64) -> u64 {
     let step = ((value.saturating_mul(percent as u64)) / 100).max(1);
     let next = if increase {
@@ -1469,10 +1553,10 @@ mod tests {
         );
 
         let improved = MetricsSnapshot {
-            proxied_requests: 260,
-            proxy_successes: 260,
-            proxy_latency_micros_total: 260_000_000,
-            tls_handshake_timeouts: 32,
+            proxied_requests: 1_020,
+            proxy_successes: 1_020,
+            proxy_latency_micros_total: 1_020_000_000,
+            tls_handshake_timeouts: 31,
             ..MetricsSnapshot::default()
         };
         assert!(run_control_step(&config, &mut runtime, &mut state, &improved, 140).is_none());
@@ -1483,5 +1567,113 @@ mod tests {
                 .map(|value| value.status.as_str()),
             Some("improved")
         );
+    }
+
+    #[test]
+    fn active_mode_rolls_back_on_hot_route_regression() {
+        let mut config = Config::default();
+        config.auto_tuning.mode = AutoTuningMode::Active;
+        config.auto_tuning.runtime_adjust_enabled = true;
+        config.auto_tuning.control_interval_secs = 10;
+        config.auto_tuning.cooldown_secs = 30;
+
+        let mut runtime = super::build_runtime_snapshot(&config);
+        let mut state = AutoTuningControllerState::default();
+
+        let warmup = MetricsSnapshot {
+            proxied_requests: 100,
+            proxy_successes: 100,
+            proxy_latency_micros_total: 100_000_000,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &warmup, 100).is_none());
+        state.bootstrap_applied = true;
+
+        let baseline = MetricsSnapshot {
+            proxied_requests: 140,
+            proxy_successes: 140,
+            proxy_latency_micros_total: 140_000_000,
+            tls_handshake_timeouts: 10,
+            top_route_segments: vec![crate::metrics::ProxyTrafficSegmentSnapshot {
+                scope_type: "route".to_string(),
+                scope_key: "/checkout|api".to_string(),
+                host: None,
+                route: Some("/checkout".to_string()),
+                request_kind: "api".to_string(),
+                proxied_requests: 20,
+                proxy_successes: 20,
+                proxy_failures: 0,
+                average_proxy_latency_micros: 80_000,
+            }],
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &baseline, 110).is_none());
+
+        let trigger = MetricsSnapshot {
+            proxied_requests: 180,
+            proxy_successes: 180,
+            proxy_latency_micros_total: 180_000_000,
+            tls_handshake_timeouts: 20,
+            top_route_segments: vec![crate::metrics::ProxyTrafficSegmentSnapshot {
+                scope_type: "route".to_string(),
+                scope_key: "/checkout|api".to_string(),
+                host: None,
+                route: Some("/checkout".to_string()),
+                request_kind: "api".to_string(),
+                proxied_requests: 24,
+                proxy_successes: 24,
+                proxy_failures: 0,
+                average_proxy_latency_micros: 90_000,
+            }],
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &trigger, 120).is_none());
+
+        let decision_window = MetricsSnapshot {
+            proxied_requests: 220,
+            proxy_successes: 220,
+            proxy_latency_micros_total: 220_000_000,
+            tls_handshake_timeouts: 30,
+            top_route_segments: vec![crate::metrics::ProxyTrafficSegmentSnapshot {
+                scope_type: "route".to_string(),
+                scope_key: "/checkout|api".to_string(),
+                host: None,
+                route: Some("/checkout".to_string()),
+                request_kind: "api".to_string(),
+                proxied_requests: 28,
+                proxy_successes: 28,
+                proxy_failures: 0,
+                average_proxy_latency_micros: 95_000,
+            }],
+            ..MetricsSnapshot::default()
+        };
+        assert!(
+            run_control_step(&config, &mut runtime, &mut state, &decision_window, 130).is_some()
+        );
+
+        let hotspot_regressed = MetricsSnapshot {
+            proxied_requests: 260,
+            proxy_successes: 260,
+            proxy_latency_micros_total: 260_000_000,
+            tls_handshake_timeouts: 31,
+            top_route_segments: vec![crate::metrics::ProxyTrafficSegmentSnapshot {
+                scope_type: "route".to_string(),
+                scope_key: "/checkout|api".to_string(),
+                host: None,
+                route: Some("/checkout".to_string()),
+                request_kind: "api".to_string(),
+                proxied_requests: 40,
+                proxy_successes: 36,
+                proxy_failures: 4,
+                average_proxy_latency_micros: 320_000,
+            }],
+            ..MetricsSnapshot::default()
+        };
+        let rollback = run_control_step(&config, &mut runtime, &mut state, &hotspot_regressed, 140);
+        assert!(
+            rollback.is_some(),
+            "hot route regression should trigger rollback"
+        );
+        assert_eq!(runtime.controller_state, "rollback");
     }
 }

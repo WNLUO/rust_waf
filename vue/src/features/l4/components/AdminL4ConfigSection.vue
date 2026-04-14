@@ -27,6 +27,8 @@ defineProps<{
     bloom_enabled: boolean
     bloom_false_positive_verification: boolean
     runtime_profile: string
+    adaptive_managed_fields: boolean
+    adaptive_runtime: import('@/shared/types').AdaptiveProtectionRuntimePayload | null
   }
   stats: L4StatsPayload | null
   topPorts: L4StatsPayload['per_port_stats']

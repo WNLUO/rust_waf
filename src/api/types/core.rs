@@ -55,6 +55,7 @@ pub struct L4ConfigResponse {
     pub(crate) bloom_enabled: bool,
     pub(crate) bloom_false_positive_verification: bool,
     pub(crate) runtime_profile: String,
+    pub(crate) adaptive_managed_fields: bool,
     pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
     pub(crate) trusted_cdn: TrustedCdnConfigResponse,
 }
@@ -115,6 +116,7 @@ pub struct L7ConfigResponse {
     pub(crate) bloom_enabled: bool,
     pub(crate) bloom_false_positive_verification: bool,
     pub(crate) runtime_profile: String,
+    pub(crate) adaptive_managed_fields: bool,
     pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
     pub(crate) listen_addrs: Vec<String>,
     pub(crate) upstream_endpoint: String,

@@ -56,6 +56,7 @@ export function useAdminL7() {
   const lastUpdated = ref<number | null>(null)
   const meta = ref({
     runtime_enabled: false,
+    adaptive_managed_fields: false,
     adaptive_runtime: null as AdaptiveProtectionRuntimePayload | null,
   })
 
@@ -87,6 +88,7 @@ export function useAdminL7() {
 
     meta.value = {
       runtime_enabled: payload.runtime_enabled,
+      adaptive_managed_fields: payload.adaptive_managed_fields,
       adaptive_runtime: payload.adaptive_runtime,
     }
   }

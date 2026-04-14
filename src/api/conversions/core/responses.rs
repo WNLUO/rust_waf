@@ -98,6 +98,7 @@ impl L4ConfigResponse {
             bloom_enabled: config.bloom_enabled,
             bloom_false_positive_verification: config.l4_bloom_false_positive_verification,
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+            adaptive_managed_fields: config.adaptive_protection.enabled,
             adaptive_runtime: AdaptiveProtectionRuntimeResponse::from_snapshot(adaptive_runtime),
             trusted_cdn: TrustedCdnConfigResponse {
                 manual_cidrs: config.l4_config.trusted_cdn.manual_cidrs.clone(),
@@ -200,6 +201,7 @@ impl L7ConfigResponse {
             bloom_enabled: config.bloom_enabled,
             bloom_false_positive_verification: config.l7_bloom_false_positive_verification,
             runtime_profile: runtime_profile_label(config.runtime_profile).to_string(),
+            adaptive_managed_fields: config.adaptive_protection.enabled,
             adaptive_runtime: AdaptiveProtectionRuntimeResponse::from_snapshot(adaptive_runtime),
             listen_addrs: config.listen_addrs.clone(),
             upstream_endpoint: config.tcp_upstream_addr.clone().unwrap_or_default(),

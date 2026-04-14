@@ -55,6 +55,7 @@ export interface L4ConfigPayload {
   bloom_enabled: boolean
   bloom_false_positive_verification: boolean
   runtime_profile: 'minimal' | 'standard' | string
+  adaptive_managed_fields: boolean
   adaptive_runtime: AdaptiveProtectionRuntimePayload
   trusted_cdn: TrustedCdnConfigPayload
 }

@@ -1,6 +1,9 @@
 import type { L7ConfigPayload } from '@/features/l7/types/l7'
 
-export type L7ConfigForm = Omit<L7ConfigPayload, 'runtime_enabled' | 'adaptive_runtime'>
+export type L7ConfigForm = Omit<
+  L7ConfigPayload,
+  'runtime_enabled' | 'adaptive_managed_fields' | 'adaptive_runtime'
+>
 
 export const numberInputClass =
   'mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm text-stone-800 outline-none transition focus:border-blue-500/40'

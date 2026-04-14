@@ -27,6 +27,8 @@ defineProps<{
     bloom_enabled: boolean
     bloom_false_positive_verification: boolean
     runtime_profile: string
+    adaptive_managed_fields: boolean
+    adaptive_runtime: import('@/shared/types').AdaptiveProtectionRuntimePayload | null
   }
   configForm: L4ConfigForm
   stats: L4StatsPayload | null
@@ -48,6 +50,20 @@ const hasMeasuredPortBytes = (items: L4StatsPayload['per_port_stats']) =>
       sub-title="帮助你快速确认当前实例到底在按什么模式跑。"
     >
       <div class="space-y-4 text-sm text-stone-700">
+        <div
+          v-if="meta.adaptive_managed_fields && meta.adaptive_runtime"
+          class="rounded-xl border border-emerald-200 bg-emerald-50/80 p-4"
+        >
+          <p class="text-xs tracking-wide text-emerald-700">自适应接管中</p>
+          <p class="mt-2 text-sm leading-6 text-stone-700">
+            当前运行态会自动调整连接预算和延迟策略。下面展示的数字是运行时实际生效值，不建议再把它们当作手工阈值维护。
+          </p>
+          <div class="mt-3 grid gap-3 sm:grid-cols-3 text-xs text-stone-700">
+            <p>Normal: {{ formatNumber(meta.adaptive_runtime.l4.normal_connection_budget_per_minute) }}</p>
+            <p>Delay: {{ formatNumber(meta.adaptive_runtime.l4.soft_delay_ms) }}ms</p>
+            <p>Pressure: {{ meta.adaptive_runtime.system_pressure }}</p>
+          </div>
+        </div>
         <div class="rounded-xl border border-slate-200 p-4">
           <div class="flex items-center justify-between gap-4">
             <div>
@@ -175,7 +191,14 @@ const hasMeasuredPortBytes = (items: L4StatsPayload['per_port_stats']) =>
     </section>
 
     <section class="grid grid-cols-1 gap-4 xl:grid-cols-3">
-      <CyberCard title="限流阈值" sub-title="用于快速复核当前保存的关键阈值。">
+      <CyberCard
+        :title="meta.adaptive_managed_fields ? '当前生效阈值' : '限流阈值'"
+        :sub-title="
+          meta.adaptive_managed_fields
+            ? '这些数值由自适应控制器产出，并反映当前运行态。'
+            : '用于快速复核当前保存的关键阈值。'
+        "
+      >
         <div class="space-y-3 text-sm text-stone-700">
           <div
             class="flex items-center justify-between rounded-[18px] bg-slate-50 px-4 py-3"

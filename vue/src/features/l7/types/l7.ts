@@ -111,6 +111,7 @@ export interface L7ConfigPayload {
   bloom_enabled: boolean
   bloom_false_positive_verification: boolean
   runtime_profile: 'minimal' | 'standard' | string
+  adaptive_managed_fields: boolean
   adaptive_runtime: AdaptiveProtectionRuntimePayload
   listen_addrs: string[]
   upstream_endpoint: string

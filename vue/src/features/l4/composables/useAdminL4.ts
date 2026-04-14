@@ -42,6 +42,7 @@ export function useAdminL4() {
     bloom_enabled: true,
     bloom_false_positive_verification: true,
     runtime_profile: 'standard',
+    adaptive_managed_fields: false,
     adaptive_runtime: null as AdaptiveProtectionRuntimePayload | null,
   })
 
@@ -109,6 +110,7 @@ export function useAdminL4() {
       bloom_false_positive_verification:
         payload.bloom_false_positive_verification,
       runtime_profile: payload.runtime_profile,
+      adaptive_managed_fields: payload.adaptive_managed_fields,
       adaptive_runtime: payload.adaptive_runtime,
     }
   }

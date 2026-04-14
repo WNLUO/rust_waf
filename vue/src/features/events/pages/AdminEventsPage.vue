@@ -360,6 +360,27 @@ const eventPathPreview = (event: SecurityEventItem) =>
 const isPathTruncated = (event: SecurityEventItem) =>
   eventPathText(event).length > PATH_PREVIEW_LIMIT
 
+const parseEventDetails = (event: SecurityEventItem) => {
+  if (!event.details_json) return null
+  try {
+    return JSON.parse(event.details_json) as {
+      client_identity?: Record<string, unknown>
+    }
+  } catch {
+    return null
+  }
+}
+
+const hasClientIdentityDebug = (event: SecurityEventItem) =>
+  Boolean(parseEventDetails(event)?.client_identity)
+
+const openClientIdentityDebug = (event: SecurityEventItem) => {
+  const details = parseEventDetails(event)
+  const payload = details?.client_identity ?? details
+  if (!payload) return
+  openPreview('客户端身份调试', JSON.stringify(payload, null, 2))
+}
+
 const siteOptions = computed(() => {
   const seen = new Map<string, string>()
   for (const event of eventsPayload.value.events) {
@@ -644,6 +665,14 @@ watch(currentPage, () => {
                       @click="openPreview('事件详情', event.details_json)"
                     >
                       <Eye :size="14" />
+                    </button>
+                    <button
+                      v-if="hasClientIdentityDebug(event)"
+                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100"
+                      title="查看客户端身份调试"
+                      @click="openClientIdentityDebug(event)"
+                    >
+                      身份调试
                     </button>
                   </div>
                 </td>

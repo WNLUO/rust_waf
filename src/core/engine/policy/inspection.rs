@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 pub(crate) fn inspect_application_layers(
     context: &WafContext,
@@ -164,6 +165,7 @@ pub(crate) fn persist_http_inspection_event(
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
+    event.details_json = build_request_identity_details(context, request, packet);
 
     store.enqueue_security_event(event);
 }
@@ -207,6 +209,7 @@ pub(crate) fn persist_safeline_intercept_event(
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
+    event.details_json = build_request_identity_details(context, request, packet);
 
     store.enqueue_security_event(event);
 }
@@ -237,4 +240,40 @@ pub(crate) fn persist_safeline_intercept_blocked_ip(
         blocked_at,
         blocked_at + block_duration_secs as i64,
     ));
+}
+
+fn build_request_identity_details(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    packet: &PacketInfo,
+) -> Option<String> {
+    let configured_header = context
+        .config_snapshot()
+        .gateway_config
+        .custom_source_ip_header;
+    let client_ip = request
+        .client_ip
+        .clone()
+        .unwrap_or_else(|| packet.source_ip.to_string());
+    let source_header_value = if configured_header.trim().is_empty() {
+        None
+    } else {
+        request.get_header(&configured_header).cloned()
+    };
+    let payload = json!({
+        "client_identity": {
+            "resolved_client_ip": client_ip,
+            "source_ip": packet.source_ip.to_string(),
+            "peer_ip": request.get_metadata("network.peer_ip").cloned().unwrap_or_else(|| packet.source_ip.to_string()),
+            "client_ip_source": request.get_metadata("network.client_ip_source").cloned().unwrap_or_else(|| "unknown".to_string()),
+            "client_ip_unresolved": request.get_metadata("network.client_ip_unresolved").cloned().unwrap_or_else(|| "false".to_string()),
+            "trusted_proxy_peer": request.get_metadata("network.trusted_proxy_peer").cloned().unwrap_or_else(|| "false".to_string()),
+            "configured_real_ip_header": configured_header,
+            "configured_real_ip_header_value": source_header_value,
+            "x_real_ip": request.get_header("x-real-ip").cloned(),
+            "x_forwarded_for": request.get_header("x-forwarded-for").cloned(),
+        }
+    });
+
+    serde_json::to_string_pretty(&payload).ok()
 }

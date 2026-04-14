@@ -88,6 +88,10 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.l7_cc_delays)
                 .unwrap_or(0),
+            cc_unresolved_identity_delayed_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_unresolved_identity_delays)
+                .unwrap_or(0),
             cc_verified_pass_requests: metrics
                 .as_ref()
                 .map(|value| value.l7_cc_verified_passes)
@@ -115,6 +119,14 @@ impl L7StatsResponse {
             tls_pre_handshake_rejections: metrics
                 .as_ref()
                 .map(|value| value.tls_pre_handshake_rejections)
+                .unwrap_or(0),
+            trusted_proxy_permit_drops: metrics
+                .as_ref()
+                .map(|value| value.trusted_proxy_permit_drops)
+                .unwrap_or(0),
+            trusted_proxy_l4_degrade_actions: metrics
+                .as_ref()
+                .map(|value| value.trusted_proxy_l4_degrade_actions)
                 .unwrap_or(0),
             tls_handshake_timeouts: metrics
                 .as_ref()

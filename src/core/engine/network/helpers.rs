@@ -45,6 +45,10 @@ pub(crate) fn record_l7_cc_metrics(
     metrics: &crate::metrics::MetricsCollector,
     request: &crate::protocol::UnifiedHttpRequest,
 ) {
+    let unresolved_identity = request
+        .get_metadata("l7.cc.client_identity_unresolved")
+        .map(|value| value == "true")
+        .unwrap_or(false);
     if request
         .get_metadata("l7.cc.challenge_verified")
         .map(|value| value == "true")
@@ -56,7 +60,12 @@ pub(crate) fn record_l7_cc_metrics(
     match request.get_metadata("l7.cc.action").map(String::as_str) {
         Some("challenge") => metrics.record_l7_cc_challenge(),
         Some("block") => metrics.record_l7_cc_block(),
-        Some(action) if action.starts_with("delay:") => metrics.record_l7_cc_delay(),
+        Some(action) if action.starts_with("delay:") => {
+            metrics.record_l7_cc_delay();
+            if unresolved_identity {
+                metrics.record_l7_cc_unresolved_identity_delay();
+            }
+        }
         _ => {}
     }
 }

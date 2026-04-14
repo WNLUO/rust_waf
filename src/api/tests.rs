@@ -47,6 +47,7 @@ fn test_build_metrics_response_with_sources() {
             l7_cc_challenges: 5,
             l7_cc_blocks: 2,
             l7_cc_delays: 7,
+            l7_cc_unresolved_identity_delays: 3,
             l7_cc_verified_passes: 4,
             total_bytes: 1024,
             proxied_requests: 10,
@@ -55,6 +56,8 @@ fn test_build_metrics_response_with_sources() {
             proxy_fail_close_rejections: 1,
             l4_bucket_budget_rejections: 4,
             tls_pre_handshake_rejections: 2,
+            trusted_proxy_permit_drops: 2,
+            trusted_proxy_l4_degrade_actions: 9,
             tls_handshake_timeouts: 3,
             tls_handshake_failures: 1,
             upstream_healthcheck_successes: 5,
@@ -97,6 +100,7 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.l7_cc_challenges, 5);
     assert_eq!(response.l7_cc_blocks, 2);
     assert_eq!(response.l7_cc_delays, 7);
+    assert_eq!(response.l7_cc_unresolved_identity_delays, 3);
     assert_eq!(response.l7_cc_verified_passes, 4);
     assert_eq!(response.total_bytes, 1024);
     assert_eq!(response.proxied_requests, 10);
@@ -105,6 +109,8 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.proxy_fail_close_rejections, 1);
     assert_eq!(response.l4_bucket_budget_rejections, 4);
     assert_eq!(response.tls_pre_handshake_rejections, 2);
+    assert_eq!(response.trusted_proxy_permit_drops, 2);
+    assert_eq!(response.trusted_proxy_l4_degrade_actions, 9);
     assert_eq!(response.tls_handshake_timeouts, 3);
     assert_eq!(response.tls_handshake_failures, 1);
     assert_eq!(response.upstream_healthcheck_successes, 5);

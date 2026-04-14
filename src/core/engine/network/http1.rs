@@ -83,6 +83,24 @@ pub(crate) async fn handle_http1_connection(
         }
         if let Some(inspector) = context.l4_inspector() {
             let policy = inspector.apply_request_policy(packet, &mut request);
+            if skip_l4_connection_budget
+                && (policy.suggested_delay_ms > 0 || policy.disable_keepalive)
+            {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_trusted_proxy_l4_degrade_action();
+                }
+                debug!(
+                    "Trusted proxy request downgraded by L4 policy on HTTP/1.1: peer_ip={} client_ip={} unresolved_client_ip={} delay_ms={} force_close={}",
+                    peer_addr.ip(),
+                    request.client_ip.as_deref().unwrap_or("unknown"),
+                    request
+                        .get_metadata("network.client_ip_unresolved")
+                        .map(String::as_str)
+                        .unwrap_or("false"),
+                    policy.suggested_delay_ms,
+                    policy.disable_keepalive
+                );
+            }
             maybe_delay_request(&request).await;
             if policy.reject_new_connections {
                 if let Some(metrics) = context.metrics.as_ref() {

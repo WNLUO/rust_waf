@@ -103,6 +103,9 @@ async fn handle_http3_request(
     resolver: h3::server::RequestResolver<H3QuinnConnection, Bytes>,
 ) -> Result<()> {
     let config = context.config_snapshot();
+    let peer_addr = std::net::SocketAddr::new(packet.source_ip, packet.source_port);
+    let skip_l4_connection_budget =
+        should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let (request, mut stream) = resolver.resolve_request().await?;
     let body = read_http3_request_body(
         &mut stream,
@@ -119,18 +122,32 @@ async fn handle_http3_request(
     );
     unified.add_metadata("udp.peer".to_string(), packet.source_ip.to_string());
     unified.add_metadata("udp.local".to_string(), packet.dest_ip.to_string());
-    apply_client_identity(
-        context.as_ref(),
-        std::net::SocketAddr::new(packet.source_ip, packet.source_port),
-        &mut unified,
-    );
+    apply_client_identity(context.as_ref(), peer_addr, &mut unified);
     prepare_request_for_routing(context.as_ref(), &mut unified);
     let matched_site = resolve_gateway_site(context.as_ref(), &unified);
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);
     }
     if let Some(inspector) = context.l4_inspector() {
-        inspector.apply_request_policy(&packet, &mut unified);
+        let policy = inspector.apply_request_policy(&packet, &mut unified);
+        if skip_l4_connection_budget && (policy.suggested_delay_ms > 0 || policy.disable_keepalive)
+        {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_trusted_proxy_l4_degrade_action();
+            }
+            debug!(
+                "Trusted proxy request downgraded by L4 policy on HTTP/3: peer_ip={} client_ip={} unresolved_client_ip={} delay_ms={} force_close={}",
+                peer_addr.ip(),
+                unified.client_ip.as_deref().unwrap_or("unknown"),
+                unified
+                    .get_metadata("network.client_ip_unresolved")
+                    .map(String::as_str)
+                    .unwrap_or("false"),
+                policy.suggested_delay_ms,
+                policy.disable_keepalive
+            );
+        }
+        maybe_delay_request(&unified).await;
     }
 
     if let Some(response) = try_handle_browser_fingerprint_report(

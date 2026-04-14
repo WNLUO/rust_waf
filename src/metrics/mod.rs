@@ -9,6 +9,7 @@ pub struct MetricsCollector {
     l7_cc_challenges: AtomicU64,
     l7_cc_blocks: AtomicU64,
     l7_cc_delays: AtomicU64,
+    l7_cc_unresolved_identity_delays: AtomicU64,
     l7_cc_verified_passes: AtomicU64,
     total_bytes: AtomicU64,
     proxied_requests: AtomicU64,
@@ -17,6 +18,8 @@ pub struct MetricsCollector {
     proxy_fail_close_rejections: AtomicU64,
     l4_bucket_budget_rejections: AtomicU64,
     tls_pre_handshake_rejections: AtomicU64,
+    trusted_proxy_permit_drops: AtomicU64,
+    trusted_proxy_l4_degrade_actions: AtomicU64,
     tls_handshake_timeouts: AtomicU64,
     tls_handshake_failures: AtomicU64,
     upstream_healthcheck_successes: AtomicU64,
@@ -34,6 +37,7 @@ impl MetricsCollector {
             l7_cc_challenges: AtomicU64::new(0),
             l7_cc_blocks: AtomicU64::new(0),
             l7_cc_delays: AtomicU64::new(0),
+            l7_cc_unresolved_identity_delays: AtomicU64::new(0),
             l7_cc_verified_passes: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             proxied_requests: AtomicU64::new(0),
@@ -42,6 +46,8 @@ impl MetricsCollector {
             proxy_fail_close_rejections: AtomicU64::new(0),
             l4_bucket_budget_rejections: AtomicU64::new(0),
             tls_pre_handshake_rejections: AtomicU64::new(0),
+            trusted_proxy_permit_drops: AtomicU64::new(0),
+            trusted_proxy_l4_degrade_actions: AtomicU64::new(0),
             tls_handshake_timeouts: AtomicU64::new(0),
             tls_handshake_failures: AtomicU64::new(0),
             upstream_healthcheck_successes: AtomicU64::new(0),
@@ -96,6 +102,16 @@ impl MetricsCollector {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_trusted_proxy_permit_drop(&self) {
+        self.trusted_proxy_permit_drops
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_trusted_proxy_l4_degrade_action(&self) {
+        self.trusted_proxy_l4_degrade_actions
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_tls_handshake_timeout(&self) {
         self.tls_handshake_timeouts.fetch_add(1, Ordering::Relaxed);
     }
@@ -114,6 +130,11 @@ impl MetricsCollector {
 
     pub fn record_l7_cc_delay(&self) {
         self.l7_cc_delays.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_unresolved_identity_delay(&self) {
+        self.l7_cc_unresolved_identity_delays
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_l7_cc_verified_pass(&self) {
@@ -141,6 +162,9 @@ impl MetricsCollector {
             l7_cc_challenges: self.l7_cc_challenges.load(Ordering::Relaxed),
             l7_cc_blocks: self.l7_cc_blocks.load(Ordering::Relaxed),
             l7_cc_delays: self.l7_cc_delays.load(Ordering::Relaxed),
+            l7_cc_unresolved_identity_delays: self
+                .l7_cc_unresolved_identity_delays
+                .load(Ordering::Relaxed),
             l7_cc_verified_passes: self.l7_cc_verified_passes.load(Ordering::Relaxed),
             total_bytes: self.total_bytes.load(Ordering::Relaxed),
             proxied_requests: self.proxied_requests.load(Ordering::Relaxed),
@@ -149,6 +173,10 @@ impl MetricsCollector {
             proxy_fail_close_rejections: self.proxy_fail_close_rejections.load(Ordering::Relaxed),
             l4_bucket_budget_rejections: self.l4_bucket_budget_rejections.load(Ordering::Relaxed),
             tls_pre_handshake_rejections: self.tls_pre_handshake_rejections.load(Ordering::Relaxed),
+            trusted_proxy_permit_drops: self.trusted_proxy_permit_drops.load(Ordering::Relaxed),
+            trusted_proxy_l4_degrade_actions: self
+                .trusted_proxy_l4_degrade_actions
+                .load(Ordering::Relaxed),
             tls_handshake_timeouts: self.tls_handshake_timeouts.load(Ordering::Relaxed),
             tls_handshake_failures: self.tls_handshake_failures.load(Ordering::Relaxed),
             upstream_healthcheck_successes: self
@@ -177,6 +205,7 @@ pub struct MetricsSnapshot {
     pub l7_cc_challenges: u64,
     pub l7_cc_blocks: u64,
     pub l7_cc_delays: u64,
+    pub l7_cc_unresolved_identity_delays: u64,
     pub l7_cc_verified_passes: u64,
     pub total_bytes: u64,
     pub proxied_requests: u64,
@@ -185,6 +214,8 @@ pub struct MetricsSnapshot {
     pub proxy_fail_close_rejections: u64,
     pub l4_bucket_budget_rejections: u64,
     pub tls_pre_handshake_rejections: u64,
+    pub trusted_proxy_permit_drops: u64,
+    pub trusted_proxy_l4_degrade_actions: u64,
     pub tls_handshake_timeouts: u64,
     pub tls_handshake_failures: u64,
     pub upstream_healthcheck_successes: u64,
@@ -217,15 +248,19 @@ mod tests {
         metrics.record_l7_cc_challenge();
         metrics.record_l7_cc_block();
         metrics.record_l7_cc_delay();
+        metrics.record_l7_cc_unresolved_identity_delay();
         metrics.record_l7_cc_verified_pass();
         metrics.record_upstream_healthcheck(true);
         metrics.record_upstream_healthcheck(false);
+        metrics.record_trusted_proxy_permit_drop();
+        metrics.record_trusted_proxy_l4_degrade_action();
 
         let snapshot = metrics.get_stats();
         assert_eq!(snapshot.total_packets, 1);
         assert_eq!(snapshot.l7_cc_challenges, 1);
         assert_eq!(snapshot.l7_cc_blocks, 1);
         assert_eq!(snapshot.l7_cc_delays, 1);
+        assert_eq!(snapshot.l7_cc_unresolved_identity_delays, 1);
         assert_eq!(snapshot.l7_cc_verified_passes, 1);
         assert_eq!(snapshot.proxied_requests, 1);
         assert_eq!(snapshot.proxy_successes, 1);
@@ -233,6 +268,8 @@ mod tests {
         assert_eq!(snapshot.proxy_fail_close_rejections, 1);
         assert_eq!(snapshot.l4_bucket_budget_rejections, 0);
         assert_eq!(snapshot.tls_pre_handshake_rejections, 1);
+        assert_eq!(snapshot.trusted_proxy_permit_drops, 1);
+        assert_eq!(snapshot.trusted_proxy_l4_degrade_actions, 1);
         assert_eq!(snapshot.tls_handshake_timeouts, 1);
         assert_eq!(snapshot.tls_handshake_failures, 1);
         assert_eq!(snapshot.upstream_healthcheck_successes, 1);

@@ -108,6 +108,8 @@ async fn acquire_permit_auto(
     peer_addr: std::net::SocketAddr,
     channel: &str,
 ) -> Option<OwnedSemaphorePermit> {
+    let trusted_proxy_peer =
+        crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
     if let Ok(permit) = semaphore.clone().try_acquire_owned() {
         return Some(permit);
     }
@@ -119,10 +121,20 @@ async fn acquire_permit_auto(
         Ok(Err(_)) => None,
         Err(_) => {
             let (available, total, usage_percent) = semaphore_pressure(context, semaphore.as_ref());
-            warn!(
+            if trusted_proxy_peer {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_trusted_proxy_permit_drop();
+                }
+                warn!(
+                    "Dropping {} trusted-proxy connection from {} after adaptive wait {}ms (permits {}/{}, usage {}%)",
+                    channel, peer_addr, wait_ms, available, total, usage_percent
+                );
+            } else {
+                warn!(
                 "Dropping {} connection from {} after adaptive wait {}ms (permits {}/{}, usage {}%)",
                 channel, peer_addr, wait_ms, available, total, usage_percent
             );
+            }
             None
         }
     }

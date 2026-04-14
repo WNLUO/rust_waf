@@ -2,6 +2,7 @@ use crate::config::l7::CcDefenseConfig;
 use crate::core::{CustomHttpResponse, InspectionLayer, InspectionResult};
 use crate::protocol::UnifiedHttpRequest;
 use dashmap::DashMap;
+use log::debug;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
@@ -371,6 +372,18 @@ impl L7CcGuard {
                         .saturating_mul(self.config.ip_challenge_threshold.max(1))
                         / 100)
         {
+            if client_identity_unresolved {
+                debug!(
+                    "L7 CC downgraded unresolved trusted-proxy request to delay-only: client_ip={} host={} route={} delay_ms={} route_effective={} host_effective={} ip_effective={}",
+                    client_ip,
+                    host,
+                    route_path,
+                    self.config.delay_ms,
+                    route_effective,
+                    host_effective,
+                    ip_effective
+                );
+            }
             request.add_metadata(
                 "l7.cc.action".to_string(),
                 format!("delay:{}ms", self.config.delay_ms),

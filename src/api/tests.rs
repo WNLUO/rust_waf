@@ -56,6 +56,7 @@ fn test_build_metrics_response_with_sources() {
             l4_bucket_budget_rejections: 4,
             tls_pre_handshake_rejections: 2,
             tls_handshake_timeouts: 3,
+            tls_handshake_failures: 1,
             upstream_healthcheck_successes: 5,
             upstream_healthcheck_failures: 1,
             proxy_latency_micros_total: 40_000,
@@ -105,6 +106,7 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.l4_bucket_budget_rejections, 4);
     assert_eq!(response.tls_pre_handshake_rejections, 2);
     assert_eq!(response.tls_handshake_timeouts, 3);
+    assert_eq!(response.tls_handshake_failures, 1);
     assert_eq!(response.upstream_healthcheck_successes, 5);
     assert_eq!(response.upstream_healthcheck_failures, 1);
     assert_eq!(response.proxy_latency_micros_total, 40_000);

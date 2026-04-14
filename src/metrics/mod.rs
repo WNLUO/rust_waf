@@ -18,6 +18,7 @@ pub struct MetricsCollector {
     l4_bucket_budget_rejections: AtomicU64,
     tls_pre_handshake_rejections: AtomicU64,
     tls_handshake_timeouts: AtomicU64,
+    tls_handshake_failures: AtomicU64,
     upstream_healthcheck_successes: AtomicU64,
     upstream_healthcheck_failures: AtomicU64,
     proxy_latency_micros_total: AtomicU64,
@@ -42,6 +43,7 @@ impl MetricsCollector {
             l4_bucket_budget_rejections: AtomicU64::new(0),
             tls_pre_handshake_rejections: AtomicU64::new(0),
             tls_handshake_timeouts: AtomicU64::new(0),
+            tls_handshake_failures: AtomicU64::new(0),
             upstream_healthcheck_successes: AtomicU64::new(0),
             upstream_healthcheck_failures: AtomicU64::new(0),
             proxy_latency_micros_total: AtomicU64::new(0),
@@ -98,6 +100,10 @@ impl MetricsCollector {
         self.tls_handshake_timeouts.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_tls_handshake_failure(&self) {
+        self.tls_handshake_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_l7_cc_challenge(&self) {
         self.l7_cc_challenges.fetch_add(1, Ordering::Relaxed);
     }
@@ -144,6 +150,7 @@ impl MetricsCollector {
             l4_bucket_budget_rejections: self.l4_bucket_budget_rejections.load(Ordering::Relaxed),
             tls_pre_handshake_rejections: self.tls_pre_handshake_rejections.load(Ordering::Relaxed),
             tls_handshake_timeouts: self.tls_handshake_timeouts.load(Ordering::Relaxed),
+            tls_handshake_failures: self.tls_handshake_failures.load(Ordering::Relaxed),
             upstream_healthcheck_successes: self
                 .upstream_healthcheck_successes
                 .load(Ordering::Relaxed),
@@ -179,6 +186,7 @@ pub struct MetricsSnapshot {
     pub l4_bucket_budget_rejections: u64,
     pub tls_pre_handshake_rejections: u64,
     pub tls_handshake_timeouts: u64,
+    pub tls_handshake_failures: u64,
     pub upstream_healthcheck_successes: u64,
     pub upstream_healthcheck_failures: u64,
     pub proxy_latency_micros_total: u64,
@@ -205,6 +213,7 @@ mod tests {
         metrics.record_fail_close_rejection();
         metrics.record_tls_pre_handshake_rejection();
         metrics.record_tls_handshake_timeout();
+        metrics.record_tls_handshake_failure();
         metrics.record_l7_cc_challenge();
         metrics.record_l7_cc_block();
         metrics.record_l7_cc_delay();
@@ -225,6 +234,7 @@ mod tests {
         assert_eq!(snapshot.l4_bucket_budget_rejections, 0);
         assert_eq!(snapshot.tls_pre_handshake_rejections, 1);
         assert_eq!(snapshot.tls_handshake_timeouts, 1);
+        assert_eq!(snapshot.tls_handshake_failures, 1);
         assert_eq!(snapshot.upstream_healthcheck_successes, 1);
         assert_eq!(snapshot.upstream_healthcheck_failures, 1);
         assert_eq!(snapshot.proxy_latency_micros_total, 4_000);

@@ -120,6 +120,10 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.tls_handshake_timeouts)
                 .unwrap_or(0),
+            tls_handshake_failures: metrics
+                .as_ref()
+                .map(|value| value.tls_handshake_failures)
+                .unwrap_or(0),
             average_proxy_latency_micros: metrics
                 .as_ref()
                 .map(|value| value.average_proxy_latency_micros)

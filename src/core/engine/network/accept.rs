@@ -90,10 +90,10 @@ pub(crate) async fn handle_tls_connection(
             let policy = inspector.coarse_connection_admission_policy(packet.source_ip, "tls");
             maybe_delay_policy(&policy).await;
             if policy.reject_new_connections {
-                debug!(
-                "Rejecting TLS connection from {} before handshake due to coarse admission pressure",
-                peer_addr
-            );
+                warn!(
+                    "Rejecting TLS connection from {} before handshake due to coarse admission pressure",
+                    peer_addr
+                );
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_tls_pre_handshake_rejection();
                     metrics.record_l4_bucket_budget_rejection();
@@ -102,7 +102,12 @@ pub(crate) async fn handle_tls_connection(
                     context.as_ref(),
                     &packet,
                     "block",
-                    "tls pre-handshake admission rejected: coarse admission pressure".to_string(),
+                    format!(
+                        "tls pre-handshake admission rejected: coarse admission pressure peer_ip={} listener={} source_ip_strategy={:?}",
+                        peer_addr.ip(),
+                        local_addr,
+                        config.gateway_config.source_ip_strategy
+                    ),
                 );
                 return Ok(());
             }
@@ -122,11 +127,23 @@ pub(crate) async fn handle_tls_connection(
     {
         Ok(Ok(stream)) => stream,
         Ok(Err(err)) => {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_tls_handshake_failure();
+            }
+            warn!(
+                "TLS handshake failed for peer {} on {}: {}",
+                peer_addr, local_addr, err
+            );
             persist_tls_transport_event(
                 context.as_ref(),
                 &packet,
                 "alert",
-                format!("tls handshake failed: {}", err),
+                format!(
+                    "tls handshake failed peer_ip={} listener={} reason={}",
+                    peer_addr.ip(),
+                    local_addr,
+                    err
+                ),
             );
             return Err(err.into());
         }
@@ -134,12 +151,18 @@ pub(crate) async fn handle_tls_connection(
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_tls_handshake_timeout();
             }
+            warn!(
+                "TLS handshake timed out for peer {} on {} after {}ms",
+                peer_addr, local_addr, config.l7_config.tls_handshake_timeout_ms
+            );
             persist_tls_transport_event(
                 context.as_ref(),
                 &packet,
                 "alert",
                 format!(
-                    "tls handshake timed out after {}ms",
+                    "tls handshake timed out peer_ip={} listener={} timeout_ms={}",
+                    peer_addr.ip(),
+                    local_addr,
                     config.l7_config.tls_handshake_timeout_ms
                 ),
             );
@@ -179,7 +202,7 @@ pub(crate) async fn handle_tls_connection(
             let policy = inspector.connection_admission_policy(bucket_key);
             maybe_delay_policy(&policy).await;
             if policy.reject_new_connections {
-                debug!(
+                warn!(
                     "Rejecting TLS connection from {} due to bucket admission pressure",
                     peer_addr
                 );
@@ -190,7 +213,13 @@ pub(crate) async fn handle_tls_connection(
                     context.as_ref(),
                     &packet,
                     "block",
-                    "tls post-handshake admission rejected: bucket admission pressure".to_string(),
+                    format!(
+                        "tls post-handshake admission rejected: bucket admission pressure peer_ip={} listener={} sni={} alpn={}",
+                        peer_addr.ip(),
+                        local_addr,
+                        server_name.as_deref().unwrap_or("-"),
+                        alpn.as_deref().unwrap_or("-"),
+                    ),
                 );
                 inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
                 return Ok(());

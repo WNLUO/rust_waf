@@ -13,6 +13,8 @@ const CHALLENGE_SCORE: u32 = 60;
 const BLOCK_SCORE: u32 = 90;
 const DELAY_SCORE: u32 = 35;
 const DELAY_MS: u64 = 250;
+pub const AUTO_BLOCK_DURATION_SECS: u64 = 15 * 60;
+const CHALLENGES_BEFORE_AUTO_BLOCK: usize = 2;
 
 #[derive(Debug)]
 pub struct L7BehaviorGuard {
@@ -23,6 +25,7 @@ pub struct L7BehaviorGuard {
 #[derive(Debug)]
 struct BehaviorWindow {
     samples: Mutex<VecDeque<RequestSample>>,
+    challenge_hits: Mutex<VecDeque<Instant>>,
     last_seen_unix: AtomicI64,
 }
 
@@ -51,6 +54,7 @@ struct BehaviorAssessment {
     jitter_ms: Option<u64>,
     document_requests: usize,
     non_document_requests: usize,
+    recent_challenges: usize,
 }
 
 impl L7BehaviorGuard {
@@ -102,6 +106,10 @@ impl L7BehaviorGuard {
             "l7.behavior.non_document_requests".to_string(),
             assessment.non_document_requests.to_string(),
         );
+        request.add_metadata(
+            "l7.behavior.challenge_count_window".to_string(),
+            assessment.recent_challenges.to_string(),
+        );
         if let Some(route) = assessment.dominant_route.as_ref() {
             request.add_metadata("l7.behavior.dominant_route".to_string(), route.clone());
         }
@@ -114,16 +122,22 @@ impl L7BehaviorGuard {
 
         self.maybe_cleanup(unix_now);
 
-        if assessment.score >= BLOCK_SCORE {
+        let should_auto_block = assessment.score >= BLOCK_SCORE
+            || (assessment.score >= CHALLENGE_SCORE
+                && assessment.recent_challenges >= CHALLENGES_BEFORE_AUTO_BLOCK);
+
+        if should_auto_block {
+            self.record_block(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "block".to_string());
             let reason = format!(
-                "l7 behavior guard blocked suspicious session: score={} repeated_ratio={} distinct_routes={} dominant_route={}",
+                "l7 behavior guard blocked suspicious session: score={} repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={}",
                 assessment.score,
                 assessment.repeated_ratio_percent,
                 assessment.distinct_routes,
-                assessment.dominant_route.as_deref().unwrap_or("*")
+                assessment.dominant_route.as_deref().unwrap_or("*"),
+                assessment.recent_challenges,
             );
-            return Some(InspectionResult::respond(
+            return Some(InspectionResult::respond_and_persist_ip(
                 InspectionLayer::L7,
                 reason.clone(),
                 build_behavior_response(request, 429, "行为异常，请稍后重试", &reason),
@@ -131,13 +145,15 @@ impl L7BehaviorGuard {
         }
 
         if assessment.score >= CHALLENGE_SCORE {
+            self.record_challenge(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "challenge".to_string());
             let reason = format!(
-                "l7 behavior guard challenged suspicious session: score={} repeated_ratio={} distinct_routes={} dominant_route={}",
+                "l7 behavior guard challenged suspicious session: score={} repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={}",
                 assessment.score,
                 assessment.repeated_ratio_percent,
                 assessment.distinct_routes,
-                assessment.dominant_route.as_deref().unwrap_or("*")
+                assessment.dominant_route.as_deref().unwrap_or("*"),
+                assessment.recent_challenges,
             );
             return Some(InspectionResult::respond(
                 InspectionLayer::L7,
@@ -191,12 +207,25 @@ impl L7BehaviorGuard {
             self.buckets.remove(&key);
         }
     }
+
+    fn record_challenge(&self, identity: &str, now: Instant, window: Duration) {
+        if let Some(mut entry) = self.buckets.get_mut(identity) {
+            entry.record_challenge(now, window);
+        }
+    }
+
+    fn record_block(&self, identity: &str, now: Instant, window: Duration) {
+        if let Some(mut entry) = self.buckets.get_mut(identity) {
+            entry.record_block(now, window);
+        }
+    }
 }
 
 impl BehaviorWindow {
     fn new() -> Self {
         Self {
             samples: Mutex::new(VecDeque::new()),
+            challenge_hits: Mutex::new(VecDeque::new()),
             last_seen_unix: AtomicI64::new(unix_timestamp()),
         }
     }
@@ -227,6 +256,7 @@ impl BehaviorWindow {
             samples.pop_front();
         }
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        let recent_challenges = self.recent_challenges(now, window);
 
         let mut route_counts: HashMap<&str, usize> = HashMap::new();
         let mut document_requests = 0usize;
@@ -283,7 +313,53 @@ impl BehaviorWindow {
             jitter_ms,
             document_requests,
             non_document_requests,
+            recent_challenges,
         }
+    }
+
+    fn recent_challenges(&self, now: Instant, window: Duration) -> usize {
+        let mut challenge_hits = self
+            .challenge_hits
+            .lock()
+            .expect("behavior challenge lock poisoned");
+        while let Some(front) = challenge_hits.front() {
+            if now.duration_since(*front) > window {
+                challenge_hits.pop_front();
+            } else {
+                break;
+            }
+        }
+        challenge_hits.len()
+    }
+
+    fn record_challenge(&mut self, now: Instant, window: Duration) {
+        let mut challenge_hits = self
+            .challenge_hits
+            .lock()
+            .expect("behavior challenge lock poisoned");
+        while let Some(front) = challenge_hits.front() {
+            if now.duration_since(*front) > window {
+                challenge_hits.pop_front();
+            } else {
+                break;
+            }
+        }
+        challenge_hits.push_back(now);
+    }
+
+    fn record_block(&mut self, now: Instant, window: Duration) {
+        let mut challenge_hits = self
+            .challenge_hits
+            .lock()
+            .expect("behavior challenge lock poisoned");
+        while let Some(front) = challenge_hits.front() {
+            if now.duration_since(*front) > window {
+                challenge_hits.pop_front();
+            } else {
+                break;
+            }
+        }
+        challenge_hits.clear();
     }
 }
 
@@ -485,5 +561,30 @@ mod tests {
                 .unwrap_or_default()
                 < CHALLENGE_SCORE
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_challenges_escalate_to_block_and_persist() {
+        let guard = L7BehaviorGuard::new();
+        let mut actions = Vec::new();
+        let mut persisted = Vec::new();
+
+        for _ in 0..8 {
+            let mut request = request("GET", "/", "text/html");
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            let result = guard.inspect_request(&mut request).await;
+            actions.push(
+                request
+                    .get_metadata("l7.behavior.action")
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+            persisted.push(result.map(|item| item.persist_blocked_ip).unwrap_or(false));
+        }
+
+        assert!(actions.iter().any(|action| action == "challenge"));
+        assert!(actions.iter().any(|action| action == "block"));
+        assert!(persisted.iter().any(|flag| *flag));
     }
 }

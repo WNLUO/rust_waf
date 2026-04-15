@@ -243,6 +243,12 @@ async fn handle_http3_request(
         if result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
         }
+        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+            context.as_ref(),
+            &packet,
+            &unified,
+            &result,
+        );
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(result.layer.clone());
         }

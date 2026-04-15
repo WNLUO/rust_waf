@@ -15,6 +15,9 @@ export interface MetricsResponse {
   l7_cc_blocks: number
   l7_cc_delays: number
   l7_cc_verified_passes: number
+  l7_behavior_challenges: number
+  l7_behavior_blocks: number
+  l7_behavior_delays: number
   total_bytes: number
   proxied_requests: number
   proxy_successes: number

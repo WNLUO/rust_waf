@@ -217,6 +217,12 @@ pub(crate) async fn handle_http2_connection(
                                 &result,
                             );
                         }
+                        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &result,
+                        );
                         if let Some(metrics) = context.metrics.as_ref() {
                             metrics.record_block(result.layer.clone());
                         }

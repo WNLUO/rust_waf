@@ -7,6 +7,7 @@ import {
   ListFilter,
   Ban,
   Activity,
+  Fingerprint,
   Cpu,
   Settings,
   ServerCog,
@@ -57,6 +58,7 @@ const navItems: NavItem[] = [
   { name: 'L4管理', path: '/admin/l4', icon: ServerCog },
   { name: 'L7管理', path: '/admin/l7', icon: Globe },
   { name: '事件记录', path: '/admin/events', icon: Activity },
+  { name: '行为观测', path: '/admin/behavior', icon: Fingerprint },
   { name: '封禁名单', path: '/admin/blocked', icon: Ban },
   { name: '系统设置', path: '/admin/settings', icon: Settings },
 ]

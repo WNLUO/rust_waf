@@ -143,6 +143,17 @@ impl InspectionResult {
         }
     }
 
+    pub fn respond_and_persist_ip(
+        layer: InspectionLayer,
+        reason: impl Into<String>,
+        custom_response: CustomHttpResponse,
+    ) -> Self {
+        Self {
+            persist_blocked_ip: true,
+            ..Self::respond(layer, reason, custom_response)
+        }
+    }
+
     pub fn block_and_persist_ip(layer: InspectionLayer, reason: impl Into<String>) -> Self {
         Self {
             persist_blocked_ip: true,

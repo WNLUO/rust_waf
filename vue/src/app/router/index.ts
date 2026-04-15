@@ -18,6 +18,8 @@ const AdminL4RulesPage = () =>
   import('@/features/rules/pages/AdminL4RulesPage.vue')
 const AdminEventsPage = () =>
   import('@/features/events/pages/AdminEventsPage.vue')
+const AdminBehaviorPage = () =>
+  import('@/features/behavior/pages/AdminBehaviorPage.vue')
 const AdminBlockedPage = () =>
   import('@/features/blocked/pages/AdminBlockedPage.vue')
 const AdminSettingsPage = () =>
@@ -90,6 +92,11 @@ const router = createRouter({
       path: '/admin/events',
       name: 'admin-events',
       component: AdminEventsPage,
+    },
+    {
+      path: '/admin/behavior',
+      name: 'admin-behavior',
+      component: AdminBehaviorPage,
     },
     {
       path: '/admin/blocked',

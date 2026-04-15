@@ -168,6 +168,20 @@ pub(crate) fn persist_http_inspection_event(
     event.details_json = build_request_identity_details(context, request, packet);
 
     store.enqueue_security_event(event);
+
+    if result.persist_blocked_ip {
+        let blocked_at = unix_timestamp();
+        let ip = request
+            .client_ip
+            .clone()
+            .unwrap_or_else(|| packet.source_ip.to_string());
+        store.enqueue_blocked_ip(BlockedIpRecord::new(
+            ip,
+            result.reason.clone(),
+            blocked_at,
+            blocked_at + crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS as i64,
+        ));
+    }
 }
 
 pub(crate) fn persist_http_identity_debug_event(
@@ -324,6 +338,33 @@ pub(crate) fn persist_safeline_intercept_blocked_ip(
     ));
 }
 
+pub(crate) fn enforce_runtime_http_block_if_needed(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    result: &InspectionResult,
+) {
+    if !result.persist_blocked_ip {
+        return;
+    }
+
+    let Some(inspector) = context.l4_inspector() else {
+        return;
+    };
+
+    let ip = request
+        .client_ip
+        .as_deref()
+        .and_then(|value| value.parse::<std::net::IpAddr>().ok())
+        .unwrap_or(packet.source_ip);
+
+    inspector.block_ip(
+        &ip,
+        &result.reason,
+        std::time::Duration::from_secs(crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS),
+    );
+}
+
 fn build_request_identity_details(
     context: &WafContext,
     request: &UnifiedHttpRequest,
@@ -391,6 +432,7 @@ fn build_request_identity_details_with_header(
             "interval_jitter_ms": request.get_metadata("l7.behavior.interval_jitter_ms").cloned(),
             "document_requests": request.get_metadata("l7.behavior.document_requests").cloned(),
             "non_document_requests": request.get_metadata("l7.behavior.non_document_requests").cloned(),
+            "challenge_count_window": request.get_metadata("l7.behavior.challenge_count_window").cloned(),
         }
     });
 

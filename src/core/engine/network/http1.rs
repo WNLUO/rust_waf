@@ -278,6 +278,12 @@ pub(crate) async fn handle_http1_connection(
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);
             }
+            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                context.as_ref(),
+                packet,
+                &request,
+                &result,
+            );
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_block(result.layer.clone());
             }

@@ -516,6 +516,14 @@ impl AiAuditSettingsRequest {
             allow_auto_temp_block: self.allow_auto_temp_block,
             allow_auto_extend_effective_policies: self.allow_auto_extend_effective_policies,
             auto_revoke_warmup_secs: self.auto_revoke_warmup_secs,
+            auto_audit_enabled: self.auto_audit_enabled,
+            auto_audit_interval_secs: self.auto_audit_interval_secs,
+            auto_audit_cooldown_secs: self.auto_audit_cooldown_secs,
+            auto_audit_on_pressure_high: self.auto_audit_on_pressure_high,
+            auto_audit_on_attack_mode: self.auto_audit_on_attack_mode,
+            auto_audit_on_hotspot_shift: self.auto_audit_on_hotspot_shift,
+            auto_audit_force_local_rules_under_attack: self
+                .auto_audit_force_local_rules_under_attack,
         })
     }
 }

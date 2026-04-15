@@ -73,6 +73,7 @@ pub struct WafContext {
     auto_tuning_controller: Mutex<AutoTuningControllerState>,
     adaptive_protection_runtime: RwLock<AdaptiveProtectionRuntimeSnapshot>,
     ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
+    ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -83,6 +84,26 @@ pub struct RuntimePressureSnapshot {
     pub storage_queue_usage_percent: u64,
     pub drop_delay: bool,
     pub trim_event_persistence: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AiAutoAuditRuntimeSnapshot {
+    pub last_run_at: Option<i64>,
+    pub last_completed_at: Option<i64>,
+    pub last_trigger_signature: Option<String>,
+    pub last_observed_signature: Option<String>,
+    pub last_trigger_reason: Option<String>,
+    pub last_report_id: Option<i64>,
+}
+
+#[derive(Debug, Default)]
+struct AiAutoAuditRuntimeState {
+    last_run_at: Option<i64>,
+    last_completed_at: Option<i64>,
+    last_trigger_signature: Option<String>,
+    last_observed_signature: Option<String>,
+    last_trigger_reason: Option<String>,
+    last_report_id: Option<i64>,
 }
 
 impl WafContext {
@@ -167,6 +188,7 @@ impl WafContext {
             auto_tuning_controller: Mutex::new(AutoTuningControllerState::default()),
             adaptive_protection_runtime: RwLock::new(adaptive_protection_runtime),
             ai_temp_policies: RwLock::new(Vec::new()),
+            ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -578,6 +600,41 @@ impl WafContext {
             .read()
             .expect("adaptive_protection_runtime lock poisoned")
             .clone()
+    }
+
+    pub async fn ai_auto_audit_runtime_snapshot(&self) -> AiAutoAuditRuntimeSnapshot {
+        let guard = self.ai_auto_audit_runtime.lock().await;
+        AiAutoAuditRuntimeSnapshot {
+            last_run_at: guard.last_run_at,
+            last_completed_at: guard.last_completed_at,
+            last_trigger_signature: guard.last_trigger_signature.clone(),
+            last_observed_signature: guard.last_observed_signature.clone(),
+            last_trigger_reason: guard.last_trigger_reason.clone(),
+            last_report_id: guard.last_report_id,
+        }
+    }
+
+    pub async fn note_ai_auto_audit_run_started(
+        &self,
+        signature: String,
+        reason: String,
+        now: i64,
+    ) {
+        let mut guard = self.ai_auto_audit_runtime.lock().await;
+        guard.last_run_at = Some(now);
+        guard.last_trigger_signature = Some(signature);
+        guard.last_trigger_reason = Some(reason);
+    }
+
+    pub async fn note_ai_auto_audit_run_completed(&self, report_id: Option<i64>, now: i64) {
+        let mut guard = self.ai_auto_audit_runtime.lock().await;
+        guard.last_completed_at = Some(now);
+        guard.last_report_id = report_id;
+    }
+
+    pub async fn note_ai_auto_audit_observed_signature(&self, signature: Option<String>) {
+        let mut guard = self.ai_auto_audit_runtime.lock().await;
+        guard.last_observed_signature = signature;
     }
 
     pub async fn run_auto_tuning_tick(&self) -> Result<()> {

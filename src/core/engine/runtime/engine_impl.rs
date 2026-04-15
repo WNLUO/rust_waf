@@ -224,16 +224,16 @@ impl WafEngine {
     }
 
     async fn run_maintenance(&self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
         if let Err(err) = self.context.refresh_rules_from_storage().await {
             warn!("Failed to refresh rules from SQLite: {}", err);
         }
 
         if let Some(store) = self.context.sqlite_store.as_ref() {
             let storage_policy = self.context.config_snapshot().storage_policy;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
             let thresholds = [
                 (
                     "security events",
@@ -301,6 +301,11 @@ impl WafEngine {
 
         if let Err(err) = self.context.refresh_ai_temp_policies().await {
             warn!("Failed to refresh AI temp policies: {}", err);
+        }
+
+        #[cfg(feature = "api")]
+        if let Err(err) = self.run_ai_auto_audit(now).await {
+            warn!("Failed to run AI auto audit: {}", err);
         }
 
         if let Some(l4_inspector) = self.context.l4_inspector() {
@@ -430,6 +435,85 @@ impl WafEngine {
 
         Ok(())
     }
+
+    #[cfg(feature = "api")]
+    async fn run_ai_auto_audit(&self, now: i64) -> Result<()> {
+        let config = self.context.config_snapshot();
+        let ai_config = config.integrations.ai_audit.clone();
+        if !ai_config.auto_audit_enabled {
+            return Ok(());
+        }
+        if self.context.sqlite_store.is_none() {
+            return Ok(());
+        }
+
+        let runtime = self.context.ai_auto_audit_runtime_snapshot().await;
+        if runtime
+            .last_run_at
+            .is_some_and(|last| now.saturating_sub(last) < ai_config.auto_audit_interval_secs as i64)
+        {
+            return Ok(());
+        }
+
+        let summary = crate::api::build_ai_audit_summary_for_context(
+            self.context.as_ref(),
+            Some(15 * 60),
+            Some(ai_config.event_sample_limit.min(120)),
+            Some(ai_config.recent_event_limit.min(8)),
+        )
+        .await?;
+
+        let signature = ai_auto_audit_signature(&summary);
+        self.context
+            .note_ai_auto_audit_observed_signature(Some(signature.clone()))
+            .await;
+
+        let trigger_reasons =
+            ai_auto_audit_trigger_reasons(&ai_config, &summary, runtime.last_observed_signature.as_deref(), &signature);
+        if trigger_reasons.is_empty() {
+            return Ok(());
+        }
+        if runtime.last_run_at.is_some_and(|last| {
+            now.saturating_sub(last) < ai_config.auto_audit_cooldown_secs as i64
+        }) {
+            return Ok(());
+        }
+        if runtime
+            .last_trigger_signature
+            .as_deref()
+            .is_some_and(|previous| previous == signature)
+        {
+            return Ok(());
+        }
+
+        let reason = trigger_reasons.join("+");
+        self.context
+            .note_ai_auto_audit_run_started(signature, reason.clone(), now)
+            .await;
+
+        let report = crate::api::run_ai_audit_report_for_context(
+            Arc::clone(&self.context),
+            crate::api::AiAuditReportQueryParams {
+                window_seconds: Some(15 * 60),
+                sample_limit: Some(ai_config.event_sample_limit.min(120)),
+                recent_limit: Some(ai_config.recent_event_limit.min(8)),
+                provider: None,
+                fallback_to_rules: Some(ai_config.fallback_to_rules),
+            },
+            ai_config.auto_audit_force_local_rules_under_attack
+                && summary.runtime_pressure_level == "attack",
+            Some(reason.clone()),
+        )
+        .await?;
+        self.context
+            .note_ai_auto_audit_run_completed(report.report_id, now)
+            .await;
+        info!(
+            "AI auto audit completed: reason={} risk_level={} provider={}",
+            reason, report.risk_level, report.provider_used
+        );
+        Ok(())
+    }
 }
 
 fn ai_temp_policy_governance_mode(
@@ -482,5 +566,112 @@ fn ai_temp_policy_governance_mode(
                 "watch"
             }
         }
+    }
+}
+
+#[cfg(feature = "api")]
+fn ai_auto_audit_signature(summary: &crate::api::AiAuditSummaryResponse) -> String {
+    let top_route = summary
+        .top_routes
+        .first()
+        .map(|item| item.key.as_str())
+        .unwrap_or("-");
+    let top_source = summary
+        .top_source_ips
+        .first()
+        .map(|item| item.key.as_str())
+        .unwrap_or("-");
+    let top_signal = summary
+        .primary_signals
+        .first()
+        .map(|item| item.key.as_str())
+        .unwrap_or("-");
+    format!(
+        "{}|{}|{}|{}|{}",
+        summary.runtime_pressure_level, top_route, top_source, top_signal, summary.total_events
+    )
+}
+
+#[cfg(feature = "api")]
+fn ai_auto_audit_trigger_reasons(
+    config: &crate::config::AiAuditConfig,
+    summary: &crate::api::AiAuditSummaryResponse,
+    previous_signature: Option<&str>,
+    current_signature: &str,
+) -> Vec<String> {
+    let mut trigger_reasons = Vec::new();
+    if config.auto_audit_on_attack_mode && summary.runtime_pressure_level == "attack" {
+        trigger_reasons.push("attack_mode".to_string());
+    } else if config.auto_audit_on_pressure_high
+        && matches!(summary.runtime_pressure_level.as_str(), "high" | "attack")
+    {
+        trigger_reasons.push("pressure_high".to_string());
+    }
+    if config.auto_audit_on_hotspot_shift
+        && previous_signature.is_some_and(|previous| previous != current_signature)
+        && summary.sampled_events > 0
+    {
+        trigger_reasons.push("hotspot_shift".to_string());
+    }
+    trigger_reasons
+}
+
+#[cfg(all(test, feature = "api"))]
+mod tests {
+    use super::*;
+
+    fn sample_summary() -> crate::api::AiAuditSummaryResponse {
+        crate::api::AiAuditSummaryResponse {
+            generated_at: 1,
+            window_seconds: 900,
+            sampled_events: 10,
+            total_events: 12,
+            active_rules: 3,
+            runtime_pressure_level: "high".to_string(),
+            degraded_reasons: Vec::new(),
+            data_quality: crate::api::AiAuditDataQualityResponse::default(),
+            current: crate::api::AiAuditCurrentStateResponse::default(),
+            counters: crate::api::AiAuditCountersResponse::default(),
+            action_breakdown: Vec::new(),
+            provider_breakdown: Vec::new(),
+            identity_states: Vec::new(),
+            primary_signals: vec![crate::api::AiAuditCountItem {
+                key: "l7_cc:block".to_string(),
+                count: 4,
+            }],
+            labels: Vec::new(),
+            top_source_ips: vec![crate::api::AiAuditCountItem {
+                key: "203.0.113.10".to_string(),
+                count: 5,
+            }],
+            top_routes: vec![crate::api::AiAuditCountItem {
+                key: "/login".to_string(),
+                count: 6,
+            }],
+            top_hosts: Vec::new(),
+            safeline_correlation: crate::api::AiAuditSafeLineCorrelationResponse::default(),
+            trend_windows: Vec::new(),
+            recent_policy_feedback: Vec::new(),
+            recent_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ai_auto_audit_trigger_reasons_cover_pressure_and_hotspot_shift() {
+        let config = crate::config::AiAuditConfig {
+            auto_audit_enabled: true,
+            auto_audit_on_pressure_high: true,
+            auto_audit_on_attack_mode: true,
+            auto_audit_on_hotspot_shift: true,
+            ..crate::config::AiAuditConfig::default()
+        };
+        let summary = sample_summary();
+        let signature = ai_auto_audit_signature(&summary);
+
+        let reasons =
+            ai_auto_audit_trigger_reasons(&config, &summary, Some("old|signature"), &signature);
+
+        assert!(reasons.iter().any(|item| item == "pressure_high"));
+        assert!(reasons.iter().any(|item| item == "hotspot_shift"));
     }
 }

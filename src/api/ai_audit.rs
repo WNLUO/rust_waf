@@ -1031,6 +1031,7 @@ mod tests {
             allow_auto_temp_block: true,
             allow_auto_extend_effective_policies: true,
             auto_revoke_warmup_secs: 300,
+            ..AiAuditConfig::default()
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());
@@ -1067,6 +1068,7 @@ mod tests {
             allow_auto_temp_block: true,
             allow_auto_extend_effective_policies: true,
             auto_revoke_warmup_secs: 300,
+            ..AiAuditConfig::default()
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());

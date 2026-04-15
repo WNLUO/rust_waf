@@ -657,6 +657,14 @@ impl AiAuditSettingsResponse {
             allow_auto_temp_block: config.allow_auto_temp_block,
             allow_auto_extend_effective_policies: config.allow_auto_extend_effective_policies,
             auto_revoke_warmup_secs: config.auto_revoke_warmup_secs,
+            auto_audit_enabled: config.auto_audit_enabled,
+            auto_audit_interval_secs: config.auto_audit_interval_secs,
+            auto_audit_cooldown_secs: config.auto_audit_cooldown_secs,
+            auto_audit_on_pressure_high: config.auto_audit_on_pressure_high,
+            auto_audit_on_attack_mode: config.auto_audit_on_attack_mode,
+            auto_audit_on_hotspot_shift: config.auto_audit_on_hotspot_shift,
+            auto_audit_force_local_rules_under_attack: config
+                .auto_audit_force_local_rules_under_attack,
         }
     }
 }

@@ -39,6 +39,15 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
+pub(crate) use self::system_handlers::{
+    build_ai_audit_summary_for_context, run_ai_audit_report_for_context,
+};
+pub(crate) use self::types::{
+    AiAuditCountItem, AiAuditCountersResponse, AiAuditCurrentStateResponse,
+    AiAuditDataQualityResponse, AiAuditReportQueryParams, AiAuditSafeLineCorrelationResponse,
+    AiAuditSummaryResponse,
+};
+
 pub struct ApiServer {
     addr: SocketAddr,
     context: Arc<WafContext>,

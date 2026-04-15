@@ -129,6 +129,13 @@ impl Default for AiAuditConfig {
             allow_auto_temp_block: true,
             allow_auto_extend_effective_policies: true,
             auto_revoke_warmup_secs: 5 * 60,
+            auto_audit_enabled: false,
+            auto_audit_interval_secs: 5 * 60,
+            auto_audit_cooldown_secs: 10 * 60,
+            auto_audit_on_pressure_high: true,
+            auto_audit_on_attack_mode: true,
+            auto_audit_on_hotspot_shift: true,
+            auto_audit_force_local_rules_under_attack: true,
         }
     }
 }

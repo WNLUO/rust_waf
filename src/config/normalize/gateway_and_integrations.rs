@@ -440,6 +440,18 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
         24 * 3600,
         5 * 60,
     );
+    config.integrations.ai_audit.auto_audit_interval_secs = clamp_u64(
+        config.integrations.ai_audit.auto_audit_interval_secs,
+        60,
+        24 * 3600,
+        5 * 60,
+    );
+    config.integrations.ai_audit.auto_audit_cooldown_secs = clamp_u64(
+        config.integrations.ai_audit.auto_audit_cooldown_secs,
+        60,
+        24 * 3600,
+        10 * 60,
+    );
     config.storage_policy.security_event_retention_days = clamp_u64(
         config.storage_policy.security_event_retention_days,
         1,

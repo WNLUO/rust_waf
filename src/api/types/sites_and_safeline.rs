@@ -169,6 +169,13 @@ pub struct AiAuditSettingsResponse {
     pub(crate) allow_auto_temp_block: bool,
     pub(crate) allow_auto_extend_effective_policies: bool,
     pub(crate) auto_revoke_warmup_secs: u64,
+    pub(crate) auto_audit_enabled: bool,
+    pub(crate) auto_audit_interval_secs: u64,
+    pub(crate) auto_audit_cooldown_secs: u64,
+    pub(crate) auto_audit_on_pressure_high: bool,
+    pub(crate) auto_audit_on_attack_mode: bool,
+    pub(crate) auto_audit_on_hotspot_shift: bool,
+    pub(crate) auto_audit_force_local_rules_under_attack: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -202,6 +209,20 @@ pub struct AiAuditSettingsRequest {
     pub(crate) allow_auto_extend_effective_policies: bool,
     #[serde(default)]
     pub(crate) auto_revoke_warmup_secs: u64,
+    #[serde(default)]
+    pub(crate) auto_audit_enabled: bool,
+    #[serde(default)]
+    pub(crate) auto_audit_interval_secs: u64,
+    #[serde(default)]
+    pub(crate) auto_audit_cooldown_secs: u64,
+    #[serde(default)]
+    pub(crate) auto_audit_on_pressure_high: bool,
+    #[serde(default)]
+    pub(crate) auto_audit_on_attack_mode: bool,
+    #[serde(default)]
+    pub(crate) auto_audit_on_hotspot_shift: bool,
+    #[serde(default)]
+    pub(crate) auto_audit_force_local_rules_under_attack: bool,
 }
 
 #[derive(Debug, Serialize)]

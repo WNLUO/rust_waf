@@ -158,6 +158,20 @@ pub struct AiAuditConfig {
     pub allow_auto_extend_effective_policies: bool,
     #[serde(default = "default_ai_audit_auto_revoke_warmup_secs")]
     pub auto_revoke_warmup_secs: u64,
+    #[serde(default = "default_ai_audit_auto_audit_enabled")]
+    pub auto_audit_enabled: bool,
+    #[serde(default = "default_ai_audit_auto_audit_interval_secs")]
+    pub auto_audit_interval_secs: u64,
+    #[serde(default = "default_ai_audit_auto_audit_cooldown_secs")]
+    pub auto_audit_cooldown_secs: u64,
+    #[serde(default = "default_ai_audit_auto_audit_on_pressure_high")]
+    pub auto_audit_on_pressure_high: bool,
+    #[serde(default = "default_ai_audit_auto_audit_on_attack_mode")]
+    pub auto_audit_on_attack_mode: bool,
+    #[serde(default = "default_ai_audit_auto_audit_on_hotspot_shift")]
+    pub auto_audit_on_hotspot_shift: bool,
+    #[serde(default = "default_ai_audit_auto_audit_force_local_rules_under_attack")]
+    pub auto_audit_force_local_rules_under_attack: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -296,6 +310,34 @@ const fn default_ai_audit_allow_auto_extend_effective_policies() -> bool {
 
 const fn default_ai_audit_auto_revoke_warmup_secs() -> u64 {
     5 * 60
+}
+
+const fn default_ai_audit_auto_audit_enabled() -> bool {
+    false
+}
+
+const fn default_ai_audit_auto_audit_interval_secs() -> u64 {
+    5 * 60
+}
+
+const fn default_ai_audit_auto_audit_cooldown_secs() -> u64 {
+    10 * 60
+}
+
+const fn default_ai_audit_auto_audit_on_pressure_high() -> bool {
+    true
+}
+
+const fn default_ai_audit_auto_audit_on_attack_mode() -> bool {
+    true
+}
+
+const fn default_ai_audit_auto_audit_on_hotspot_shift() -> bool {
+    true
+}
+
+const fn default_ai_audit_auto_audit_force_local_rules_under_attack() -> bool {
+    true
 }
 
 const fn default_security_event_retention_days() -> u64 {

@@ -167,7 +167,7 @@ pub(super) async fn ai_audit_summary_handler(
 ) -> ApiResult<Json<AiAuditSummaryResponse>> {
     Ok(Json(
         build_ai_audit_summary(
-            &state,
+            state.context.as_ref(),
             params.window_seconds,
             params.sample_limit,
             params.recent_limit,
@@ -211,9 +211,27 @@ pub(super) async fn run_ai_audit_report_handler(
         provider: payload.provider,
         fallback_to_rules: payload.fallback_to_rules,
     };
-    let config = state.context.config_snapshot();
+    Ok(Json(
+        run_ai_audit_report_for_context(
+            Arc::clone(&state.context),
+            params,
+            runtime_policy.force_local_rules,
+            None,
+        )
+        .await
+        .map_err(ApiError::internal)?,
+    ))
+}
+
+pub(crate) async fn run_ai_audit_report_for_context(
+    context: Arc<WafContext>,
+    params: AiAuditReportQueryParams,
+    force_local_rules: bool,
+    trigger_reason: Option<String>,
+) -> anyhow::Result<AiAuditReportResponse> {
+    let config = context.config_snapshot();
     let mut execution = crate::api::ai_audit::resolve_report_execution(&config, &params);
-    if runtime_policy.force_local_rules
+    if force_local_rules
         && execution.provider != crate::api::ai_audit::AiAuditProvider::LocalRules
     {
         execution.provider = crate::api::ai_audit::AiAuditProvider::LocalRules;
@@ -221,22 +239,29 @@ pub(super) async fn run_ai_audit_report_handler(
             .execution_notes
             .push("runtime pressure forced ai audit into local_rules mode".to_string());
     }
+    if let Some(reason) = trigger_reason {
+        execution
+            .execution_notes
+            .push(format!("auto audit trigger reason: {}", reason));
+    }
     let summary_query = crate::api::ai_audit::summary_query_from_report(&params);
     let summary = build_ai_audit_summary(
-        &state,
+        context.as_ref(),
         summary_query.window_seconds,
         summary_query.sample_limit,
         summary_query.recent_limit,
     )
-    .await?;
-    let mut report =
-        crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report).await?;
-    if runtime_policy.force_local_rules {
+    .await
+    .map_err(|err| anyhow::anyhow!("build ai audit summary failed: {:?}", err))?;
+    let mut report = crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report)
+        .await
+        .map_err(|err| anyhow::anyhow!("execute ai audit report failed: {:?}", err))?;
+    if force_local_rules {
         report
             .degraded_reasons
             .push("management_ai_audit_forced_local_rules_under_runtime_pressure".to_string());
     }
-    if let Some(store) = state.context.sqlite_store.as_ref() {
+    if let Some(store) = context.sqlite_store.as_ref() {
         let persist_result = match serde_json::to_string(&report) {
             Ok(report_json) => store
                 .create_ai_audit_report(
@@ -248,8 +273,8 @@ pub(super) async fn run_ai_audit_report_handler(
                     &report_json,
                 )
                 .await
-                .map_err(ApiError::internal),
-            Err(err) => Err(ApiError::internal(err)),
+                .map_err(anyhow::Error::from),
+            Err(err) => Err(anyhow::Error::from(err)),
         };
         match persist_result {
             Ok(id) => report.report_id = Some(id),
@@ -284,10 +309,10 @@ pub(super) async fn run_ai_audit_report_handler(
                         .push("failed to auto apply ai temporary policies".to_string());
                 }
             }
-            let _ = state.context.refresh_ai_temp_policies().await;
+            let _ = context.refresh_ai_temp_policies().await;
         }
     }
-    Ok(Json(report))
+    Ok(report)
 }
 
 pub(super) async fn list_ai_audit_reports_handler(
@@ -323,7 +348,8 @@ pub(super) async fn list_ai_temp_policies_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<AiTempPoliciesResponse>> {
     let items = state.context.active_ai_temp_policies();
-    let summary = build_ai_audit_summary(&state, Some(900), Some(120), Some(0)).await?;
+    let summary = build_ai_audit_summary(state.context.as_ref(), Some(900), Some(120), Some(0))
+        .await?;
     Ok(Json(AiTempPoliciesResponse {
         total: items.len() as u32,
         policies: items
@@ -401,14 +427,17 @@ pub(super) async fn update_ai_audit_report_feedback_handler(
 }
 
 async fn build_ai_audit_summary(
-    state: &ApiState,
+    context: &WafContext,
     window_seconds: Option<u32>,
     sample_limit: Option<u32>,
     recent_limit: Option<u32>,
 ) -> ApiResult<AiAuditSummaryResponse> {
-    let store = sqlite_store(&state)?;
-    let config = state.context.config_snapshot();
-    let runtime_policy = management_runtime_policy(state.context.as_ref());
+    let store = context
+        .sqlite_store
+        .as_deref()
+        .ok_or_else(|| ApiError::conflict("SQLite store is unavailable".to_string()))?;
+    let config = context.config_snapshot();
+    let runtime_policy = management_runtime_policy(context);
     let now = unix_timestamp();
     let requested_window_seconds = window_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
     let requested_sample_limit = sample_limit
@@ -448,11 +477,10 @@ async fn build_ai_audit_summary(
         .map_err(ApiError::internal)?;
     let storage_summary = store.metrics_summary().await.map_err(ApiError::internal)?;
 
-    let metrics = state.context.metrics_snapshot().unwrap_or_default();
-    let auto = state.context.auto_tuning_snapshot();
-    let adaptive = state.context.adaptive_protection_snapshot();
-    let recent_policy_feedback = state
-        .context
+    let metrics = context.metrics_snapshot().unwrap_or_default();
+    let auto = context.auto_tuning_snapshot();
+    let adaptive = context.adaptive_protection_snapshot();
+    let recent_policy_feedback = context
         .active_ai_temp_policies()
         .into_iter()
         .take(6)
@@ -469,7 +497,7 @@ async fn build_ai_audit_summary(
         &storage_summary,
         &aggregate,
         result.total,
-        state.context.runtime_pressure_snapshot(),
+        context.runtime_pressure_snapshot(),
         config.integrations.ai_audit.include_raw_event_samples,
     );
     if data_quality.analysis_confidence == "low" {
@@ -483,7 +511,7 @@ async fn build_ai_audit_summary(
         window_seconds,
         sampled_events: aggregate.sampled_events,
         total_events: result.total,
-        active_rules: state.context.active_rule_count(),
+        active_rules: context.active_rule_count(),
         runtime_pressure_level: runtime_policy.pressure_level,
         degraded_reasons,
         data_quality,
@@ -568,6 +596,17 @@ async fn build_ai_audit_summary(
         recent_policy_feedback,
         recent_events: aggregate.recent_events,
     })
+}
+
+pub(crate) async fn build_ai_audit_summary_for_context(
+    context: &WafContext,
+    window_seconds: Option<u32>,
+    sample_limit: Option<u32>,
+    recent_limit: Option<u32>,
+) -> anyhow::Result<AiAuditSummaryResponse> {
+    build_ai_audit_summary(context, window_seconds, sample_limit, recent_limit)
+        .await
+        .map_err(|err| anyhow::anyhow!("build ai audit summary failed: {:?}", err))
 }
 
 #[derive(Debug, Default)]

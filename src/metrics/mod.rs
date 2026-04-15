@@ -1,7 +1,12 @@
 use crate::core::InspectionLayer;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+
+const MAX_PROXY_SEGMENT_ENTRIES: usize = 512;
+const MAX_SEGMENT_COMPONENT_LEN: usize = 96;
 
 pub struct MetricsCollector {
     total_packets: AtomicU64,
@@ -598,6 +603,7 @@ fn update_segment_map(
     update: ProxySegmentUpdate,
 ) {
     let mut guard = segments.lock().expect("segment metrics lock poisoned");
+    let key = bounded_segment_key(&key, guard.len());
     let entry = guard
         .entry(key)
         .or_insert_with(ProxyTrafficSegmentAccumulator::default);
@@ -621,6 +627,51 @@ fn update_segment_map(
             }
         }
     }
+}
+
+fn bounded_segment_key(key: &str, current_len: usize) -> String {
+    let normalized = normalize_segment_key(key);
+    if current_len < MAX_PROXY_SEGMENT_ENTRIES {
+        return normalized;
+    }
+
+    let mut parts = normalized.split('|').collect::<Vec<_>>();
+    if parts.is_empty() {
+        return overflow_segment_key("", "", "other");
+    }
+    let request_kind = parts.pop().unwrap_or("other");
+    let host = parts.first().copied().unwrap_or_default();
+    let route = parts.get(1).copied().unwrap_or_default();
+    overflow_segment_key(host, route, request_kind)
+}
+
+fn normalize_segment_key(key: &str) -> String {
+    key.split('|')
+        .map(compact_segment_component)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn compact_segment_component(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= MAX_SEGMENT_COMPONENT_LEN {
+        return trimmed.to_string();
+    }
+
+    let mut hasher = DefaultHasher::new();
+    trimmed.hash(&mut hasher);
+    let hash = hasher.finish();
+    let prefix_len = MAX_SEGMENT_COMPONENT_LEN.saturating_sub(18);
+    let prefix = trimmed.chars().take(prefix_len).collect::<String>();
+    format!("{prefix}:seg-{hash:016x}")
+}
+
+fn overflow_segment_key(host: &str, route: &str, request_kind: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    host.hash(&mut hasher);
+    route.hash(&mut hasher);
+    request_kind.hash(&mut hasher);
+    format!("__overflow__|{:03}|{}", hasher.finish() % 128, request_kind)
 }
 
 fn build_segment_snapshot(
@@ -741,5 +792,23 @@ mod tests {
         assert_eq!(snapshot.other_proxy.proxy_successes, 1);
         assert_eq!(snapshot.other_proxy.proxy_failures, 1);
         assert_eq!(snapshot.other_proxy.average_proxy_latency_micros, 4_000);
+    }
+
+    #[test]
+    fn segment_keys_are_folded_when_cardinality_grows_too_high() {
+        let key = bounded_segment_key(
+            "very-long-host.example.com|/hot/route|api",
+            MAX_PROXY_SEGMENT_ENTRIES,
+        );
+        assert!(key.starts_with("__overflow__|"));
+        assert!(key.ends_with("|api"));
+    }
+
+    #[test]
+    fn long_segment_components_are_compacted() {
+        let compacted =
+            normalize_segment_key(&format!("{}|{}|api", "h".repeat(256), "r".repeat(256)));
+        assert!(compacted.len() < 256);
+        assert!(compacted.contains(":seg-"));
     }
 }

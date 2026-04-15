@@ -1,6 +1,22 @@
 use super::*;
+use dashmap::DashMap;
+use std::sync::OnceLock;
+
 const FINGERPRINT_COOKIE_NAME: &str = "rwaf_fp";
 const FINGERPRINT_COOKIE_MAX_AGE_SECS: u64 = 30 * 24 * 3600;
+const FINGERPRINT_REPORT_CACHE_MAX_ENTRIES: usize = 4_096;
+const FINGERPRINT_REPORT_CACHE_TTL_NORMAL_SECS: i64 = 10 * 60;
+const FINGERPRINT_REPORT_CACHE_TTL_ATTACK_SECS: i64 = 30 * 60;
+const FINGERPRINT_REPORT_CACHE_KEY_COMPONENT_LIMIT: usize = 96;
+
+static BROWSER_FINGERPRINT_REPORT_CACHE: OnceLock<DashMap<String, FingerprintReportCacheEntry>> =
+    OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct FingerprintReportCacheEntry {
+    provider_event_id: String,
+    stored_at: i64,
+}
 
 pub(crate) fn try_handle_browser_fingerprint_report(
     context: &WafContext,
@@ -97,6 +113,7 @@ fn handle_browser_fingerprint_report(
         .clone()
         .unwrap_or_else(|| packet.source_ip.to_string());
     let provider_event_id = provided_provider_event_id.unwrap_or(derived_provider_event_id);
+    let pressure = context.runtime_pressure_snapshot();
 
     payload_object.insert(
         "fingerprintId".to_string(),
@@ -148,33 +165,41 @@ fn handle_browser_fingerprint_report(
         );
     }
 
-    let mut event = SecurityEventRecord::now(
-        "L7",
-        "respond",
-        build_browser_fingerprint_reason(&provider_event_id, &payload),
-        source_ip,
-        packet.dest_ip.to_string(),
-        packet.source_port,
-        packet.dest_port,
-        format!("{:?}", packet.protocol),
-    );
-    event.provider = Some("browser_fingerprint".to_string());
-    event.provider_event_id = Some(provider_event_id.clone());
-    event.provider_site_id = matched_site.map(|site| site.id.to_string());
-    event.provider_site_name = matched_site.map(|site| site.name.clone());
-    event.provider_site_domain = request_hostname(request)
-        .or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
-    event.http_method = Some(request.method.clone());
-    event.uri = Some(request.uri.clone());
-    event.http_version = Some(request.version.to_string());
-    event.details_json = Some(details_json);
-    store.enqueue_security_event(event);
+    let should_persist =
+        claim_browser_fingerprint_report_slot(&source_ip, &provider_event_id, pressure.level);
+    if should_persist {
+        let mut event = SecurityEventRecord::now(
+            "L7",
+            "respond",
+            build_browser_fingerprint_reason(&provider_event_id, &payload),
+            source_ip.clone(),
+            packet.dest_ip.to_string(),
+            packet.source_port,
+            packet.dest_port,
+            format!("{:?}", packet.protocol),
+        );
+        event.provider = Some("browser_fingerprint".to_string());
+        event.provider_event_id = Some(provider_event_id.clone());
+        event.provider_site_id = matched_site.map(|site| site.id.to_string());
+        event.provider_site_name = matched_site.map(|site| site.name.clone());
+        event.provider_site_domain = request_hostname(request)
+            .or_else(|| matched_site.map(|site| site.primary_hostname.clone()));
+        event.http_method = Some(request.method.clone());
+        event.uri = Some(request.uri.clone());
+        event.http_version = Some(request.version.to_string());
+        event.details_json = Some(details_json);
+        store.enqueue_security_event(event);
+    }
 
     let mut response = json_http_response(
         202,
         serde_json::json!({
             "success": true,
-            "message": "浏览器指纹已接收并写入事件库",
+            "message": if should_persist {
+                "浏览器指纹已接收并写入事件库"
+            } else {
+                "浏览器指纹已接收，重复上报已折叠"
+            },
             "fingerprint_id": provider_event_id,
         }),
         &[],
@@ -189,7 +214,115 @@ fn handle_browser_fingerprint_report(
     response
         .headers
         .push(("x-browser-fingerprint-id".to_string(), provider_event_id));
+    if !should_persist {
+        response.headers.push((
+            "x-browser-fingerprint-deduped".to_string(),
+            "true".to_string(),
+        ));
+    }
     response
+}
+
+fn claim_browser_fingerprint_report_slot(
+    source_ip: &str,
+    provider_event_id: &str,
+    pressure_level: &str,
+) -> bool {
+    let cache = BROWSER_FINGERPRINT_REPORT_CACHE.get_or_init(DashMap::new);
+    let now = unix_timestamp();
+    let ttl_secs = if matches!(pressure_level, "high" | "attack") {
+        FINGERPRINT_REPORT_CACHE_TTL_ATTACK_SECS
+    } else {
+        FINGERPRINT_REPORT_CACHE_TTL_NORMAL_SECS
+    };
+    let key = fingerprint_report_cache_key(source_ip, provider_event_id);
+
+    if let Some(entry) = cache.get(&key) {
+        if now.saturating_sub(entry.stored_at) < ttl_secs {
+            return false;
+        }
+    }
+
+    cleanup_fingerprint_report_cache(cache, now, ttl_secs);
+    if cache.len() >= FINGERPRINT_REPORT_CACHE_MAX_ENTRIES && !cache.contains_key(&key) {
+        return false;
+    }
+
+    cache.insert(
+        key,
+        FingerprintReportCacheEntry {
+            provider_event_id: provider_event_id.to_string(),
+            stored_at: now,
+        },
+    );
+    true
+}
+
+fn cleanup_fingerprint_report_cache(
+    cache: &DashMap<String, FingerprintReportCacheEntry>,
+    now: i64,
+    ttl_secs: i64,
+) {
+    let stale_before = now.saturating_sub(ttl_secs);
+    let stale_keys = cache
+        .iter()
+        .filter(|entry| entry.stored_at < stale_before)
+        .map(|entry| entry.key().clone())
+        .collect::<Vec<_>>();
+    for key in stale_keys {
+        cache.remove(&key);
+    }
+
+    if cache.len() <= FINGERPRINT_REPORT_CACHE_MAX_ENTRIES {
+        return;
+    }
+
+    let mut oldest_entries = cache
+        .iter()
+        .map(|entry| {
+            (
+                entry.key().clone(),
+                entry.stored_at,
+                entry.provider_event_id.len(),
+            )
+        })
+        .collect::<Vec<_>>();
+    oldest_entries.sort_by(|left, right| {
+        left.1
+            .cmp(&right.1)
+            .then(left.2.cmp(&right.2))
+            .then(left.0.cmp(&right.0))
+    });
+
+    for (key, _, _) in oldest_entries.into_iter().take(
+        cache
+            .len()
+            .saturating_sub(FINGERPRINT_REPORT_CACHE_MAX_ENTRIES),
+    ) {
+        cache.remove(&key);
+    }
+}
+
+fn fingerprint_report_cache_key(source_ip: &str, provider_event_id: &str) -> String {
+    format!(
+        "{}|{}",
+        compact_component(source_ip),
+        compact_component(provider_event_id)
+    )
+}
+
+fn compact_component(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= FINGERPRINT_REPORT_CACHE_KEY_COMPONENT_LIMIT {
+        return trimmed.to_string();
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(trimmed.as_bytes());
+    let digest = format!("{:x}", hasher.finalize());
+    let prefix_len = FINGERPRINT_REPORT_CACHE_KEY_COMPONENT_LIMIT.saturating_sub(17);
+    let prefix = trimmed.chars().take(prefix_len).collect::<String>();
+    format!("{prefix}:{}", &digest[..16])
 }
 
 fn build_browser_fingerprint_reason(
@@ -287,4 +420,33 @@ fn json_http_response(
 
 fn request_path(uri: &str) -> &str {
     uri.split('?').next().unwrap_or(uri)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_fingerprint_reports_are_folded_within_ttl() {
+        let cache = BROWSER_FINGERPRINT_REPORT_CACHE.get_or_init(DashMap::new);
+        cache.clear();
+
+        assert!(claim_browser_fingerprint_report_slot(
+            "203.0.113.10",
+            "fp-123",
+            "normal"
+        ));
+        assert!(!claim_browser_fingerprint_report_slot(
+            "203.0.113.10",
+            "fp-123",
+            "normal"
+        ));
+    }
+
+    #[test]
+    fn fingerprint_report_cache_key_compacts_long_components() {
+        let key = fingerprint_report_cache_key(&"1".repeat(256), &"a".repeat(256));
+        assert!(key.len() < 240);
+        assert!(key.contains(':'));
+    }
 }

@@ -326,6 +326,7 @@ fn collect_metrics(
         context
             .l4_inspector()
             .map(|inspector| inspector.get_statistics().behavior.overview),
+        context.runtime_pressure_snapshot(),
     )
 }
 

@@ -138,6 +138,13 @@ const adaptivePressureType = computed(() => {
   if (pressure === 'elevated') return 'info' as const
   return 'success' as const
 })
+const runtimePressureType = computed(() => {
+  const pressure = dashboard.value?.metrics.runtime_pressure_level ?? 'normal'
+  if (pressure === 'attack') return 'error' as const
+  if (pressure === 'high') return 'warning' as const
+  if (pressure === 'elevated') return 'info' as const
+  return 'success' as const
+})
 
 const calcAutoState = (observed: number, target: number) => {
   if (!Number.isFinite(observed) || !Number.isFinite(target) || target <= 0) {
@@ -468,6 +475,44 @@ onMounted(() => {
                   {{ dashboard.health.upstream_last_error }}
                 </p>
               </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs text-slate-500">运行时压力</p>
+                <StatusBadge
+                  :text="dashboard?.metrics.runtime_pressure_level || 'normal'"
+                  :type="runtimePressureType"
+                />
+              </div>
+              <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p class="text-xs text-slate-500">SQLite 队列占用</p>
+                  <p class="mt-1 text-lg font-semibold text-stone-900">
+                    {{ formatNumber(dashboard?.metrics.runtime_pressure_storage_queue_percent || 0) }}%
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500">攻击态降级</p>
+                  <p class="mt-1 text-lg font-semibold text-stone-900">
+                    {{
+                      dashboard?.metrics.runtime_pressure_drop_delay ||
+                      dashboard?.metrics.runtime_pressure_trim_event_persistence
+                        ? '已启用'
+                        : '未启用'
+                    }}
+                  </p>
+                </div>
+              </div>
+              <p class="mt-3 text-xs leading-5 text-slate-500">
+                {{
+                  dashboard?.metrics.runtime_pressure_drop_delay
+                    ? '当前会优先收紧 delay 处置，避免 worker 被 sleep 型流量拖住。'
+                    : dashboard?.metrics.runtime_pressure_trim_event_persistence
+                      ? '当前会裁剪低价值事件持久化，优先保证主链吞吐。'
+                      : '当前处于常态观测模式，未触发运行时降级。'
+                }}
+              </p>
             </div>
 
             <div class="rounded-xl border border-slate-200 p-4">

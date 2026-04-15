@@ -11,6 +11,9 @@ use tokio::sync::broadcast;
 const ORIGIN_CACHE_TTL_SUCCESS_MS: i64 = 10 * 60 * 1_000;
 const ORIGIN_CACHE_TTL_PENDING_MS: i64 = 15 * 1_000;
 const EXTERNAL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
+const TRAFFIC_MAP_MAX_OBSERVATIONS: usize = 8_192;
+const TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES: usize = 2_048;
+const TRAFFIC_MAP_MAX_ACTIVE_IPS_PER_SNAPSHOT: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficDirection {
@@ -234,7 +237,7 @@ impl TrafficMapCollector {
     ) -> TrafficRealtimeEvent {
         if !self.geo_cache.contains_key(&event.source_ip) {
             let resolved = self.resolve_geo_node(&event.source_ip).await;
-            self.geo_cache.insert(event.source_ip.clone(), resolved);
+            self.cache_geo_node(event.source_ip.clone(), resolved);
         }
 
         let node = self
@@ -286,6 +289,9 @@ impl TrafficMapCollector {
         {
             guard.pop_front();
         }
+        while guard.len() > TRAFFIC_MAP_MAX_OBSERVATIONS {
+            guard.pop_front();
+        }
     }
 
     pub async fn snapshot(&self, window_seconds: u32) -> TrafficMapSnapshot {
@@ -316,12 +322,17 @@ impl TrafficMapCollector {
         for observation in &observations {
             unique_ips.insert(observation.source_ip.clone());
         }
+        let mut unique_ips = unique_ips.into_iter().collect::<Vec<_>>();
+        unique_ips.sort();
+        if unique_ips.len() > TRAFFIC_MAP_MAX_ACTIVE_IPS_PER_SNAPSHOT {
+            unique_ips.truncate(TRAFFIC_MAP_MAX_ACTIVE_IPS_PER_SNAPSHOT);
+        }
         for ip in unique_ips {
             if self.geo_cache.contains_key(&ip) {
                 continue;
             }
             let resolved = self.resolve_geo_node(&ip).await;
-            self.geo_cache.insert(ip, resolved);
+            self.cache_geo_node(ip, resolved);
         }
 
         #[derive(Default)]
@@ -637,6 +648,35 @@ impl TrafficMapCollector {
         }
         let payload = response.json::<IpWhoisResponse>().await.ok()?;
         payload.success.then_some(payload)
+    }
+
+    fn cache_geo_node(&self, source_ip: String, node: GeoNode) {
+        if self.geo_cache.len() >= TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES
+            && !self.geo_cache.contains_key(&source_ip)
+        {
+            self.evict_geo_cache_entries(TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES / 8);
+        }
+        if self.geo_cache.len() >= TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES
+            && !self.geo_cache.contains_key(&source_ip)
+        {
+            return;
+        }
+        self.geo_cache.insert(source_ip, node);
+    }
+
+    fn evict_geo_cache_entries(&self, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let mut keys = self
+            .geo_cache
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        keys.sort();
+        for key in keys.into_iter().take(count) {
+            self.geo_cache.remove(&key);
+        }
     }
 }
 
@@ -1244,4 +1284,33 @@ fn unix_timestamp_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn traffic_map_keeps_observation_count_bounded() {
+        let collector = TrafficMapCollector::new();
+        for index in 0..(TRAFFIC_MAP_MAX_OBSERVATIONS + 128) {
+            collector.record_ingress(format!("203.0.113.{}", index % 200), 128, false);
+        }
+
+        let guard = collector
+            .observations
+            .lock()
+            .expect("traffic map observation lock poisoned");
+        assert!(guard.len() <= TRAFFIC_MAP_MAX_OBSERVATIONS);
+    }
+
+    #[test]
+    fn traffic_map_geo_cache_is_capped() {
+        let collector = TrafficMapCollector::new();
+        for index in 0..(TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES + 128) {
+            collector.cache_geo_node(format!("198.51.100.{index}"), fallback_node("198.51.100.1"));
+        }
+
+        assert!(collector.geo_cache.len() <= TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES);
+    }
 }

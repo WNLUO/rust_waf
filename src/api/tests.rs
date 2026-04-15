@@ -21,7 +21,18 @@ fn unique_test_db_path(name: &str) -> String {
 
 #[test]
 fn test_build_metrics_response_without_sources() {
-    let response = build_metrics_response(None, 0, None, None);
+    let response = build_metrics_response(
+        None,
+        0,
+        None,
+        None,
+        crate::core::RuntimePressureSnapshot {
+            level: "normal",
+            storage_queue_usage_percent: 0,
+            drop_delay: false,
+            trim_event_persistence: false,
+        },
+    );
 
     assert_eq!(response.total_packets, 0);
     assert_eq!(response.blocked_packets, 0);
@@ -34,6 +45,10 @@ fn test_build_metrics_response_without_sources() {
     assert!(response.last_rule_update_at.is_none());
     assert_eq!(response.l4_bucket_count, 0);
     assert_eq!(response.l4_overload_level, "normal");
+    assert_eq!(response.runtime_pressure_level, "normal");
+    assert!(!response.runtime_pressure_drop_delay);
+    assert!(!response.runtime_pressure_trim_event_persistence);
+    assert_eq!(response.runtime_pressure_storage_queue_percent, 0);
 }
 
 #[test]
@@ -101,6 +116,12 @@ fn test_build_metrics_response_with_sources() {
             overload_level: crate::l4::behavior::L4OverloadLevel::High,
             overload_reason: Some("bucket_pressure".to_string()),
         }),
+        crate::core::RuntimePressureSnapshot {
+            level: "high",
+            storage_queue_usage_percent: 81,
+            drop_delay: true,
+            trim_event_persistence: true,
+        },
     );
 
     assert_eq!(response.total_packets, 12);
@@ -145,6 +166,10 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.l4_high_risk_buckets, 2);
     assert_eq!(response.l4_behavior_dropped_events, 11);
     assert_eq!(response.l4_overload_level, "high");
+    assert_eq!(response.runtime_pressure_level, "high");
+    assert!(response.runtime_pressure_drop_delay);
+    assert!(response.runtime_pressure_trim_event_persistence);
+    assert_eq!(response.runtime_pressure_storage_queue_percent, 81);
 }
 
 #[test]

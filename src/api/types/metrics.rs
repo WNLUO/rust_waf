@@ -52,6 +52,10 @@ pub struct MetricsResponse {
     pub(crate) l4_high_risk_buckets: u64,
     pub(crate) l4_behavior_dropped_events: u64,
     pub(crate) l4_overload_level: String,
+    pub(crate) runtime_pressure_level: String,
+    pub(crate) runtime_pressure_drop_delay: bool,
+    pub(crate) runtime_pressure_trim_event_persistence: bool,
+    pub(crate) runtime_pressure_storage_queue_percent: u64,
 }
 
 #[derive(Debug, Serialize)]

@@ -1,10 +1,12 @@
 use super::types::MetricsResponse;
+use crate::core::RuntimePressureSnapshot;
 
 pub(super) fn build_metrics_response(
     metrics: Option<crate::metrics::MetricsSnapshot>,
     active_rules: u64,
     storage_summary: Option<crate::storage::StorageMetricsSummary>,
     l4_behavior: Option<crate::l4::behavior::L4BehaviorOverview>,
+    runtime_pressure: RuntimePressureSnapshot,
 ) -> MetricsResponse {
     let snapshot = metrics.unwrap_or_default();
     let sqlite_enabled = storage_summary.is_some();
@@ -81,5 +83,9 @@ pub(super) fn build_metrics_response(
             crate::l4::behavior::L4OverloadLevel::High => "high".to_string(),
             crate::l4::behavior::L4OverloadLevel::Critical => "critical".to_string(),
         },
+        runtime_pressure_level: runtime_pressure.level.to_string(),
+        runtime_pressure_drop_delay: runtime_pressure.drop_delay,
+        runtime_pressure_trim_event_persistence: runtime_pressure.trim_event_persistence,
+        runtime_pressure_storage_queue_percent: runtime_pressure.storage_queue_usage_percent,
     }
 }

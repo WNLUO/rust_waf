@@ -56,6 +56,10 @@ export interface MetricsResponse {
   l4_high_risk_buckets: number
   l4_behavior_dropped_events: number
   l4_overload_level: string
+  runtime_pressure_level: string
+  runtime_pressure_drop_delay: boolean
+  runtime_pressure_trim_event_persistence: boolean
+  runtime_pressure_storage_queue_percent: number
 }
 
 export interface AdaptiveProtectionL4RuntimePayload {

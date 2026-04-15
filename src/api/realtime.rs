@@ -37,6 +37,15 @@ struct RealtimeEnvelope {
     payload: Value,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct RealtimePressurePolicy {
+    fast_message_every_ticks: u64,
+    periodic_message_every_ticks: u64,
+    include_traffic_map_in_fast_path: bool,
+    security_event_sample_rate: u64,
+    traffic_event_sample_rate: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub(super) struct AdminWsTicketResponse {
     ticket: String,
@@ -83,22 +92,26 @@ pub(super) fn spawn_sampler(context: Arc<WafContext>, realtime_tx: broadcast::Se
         loop {
             interval.tick().await;
             tick = tick.wrapping_add(1);
+            let policy = realtime_policy(context.as_ref());
 
             // Refresh SQLite summary less frequently to avoid per-second DB pressure.
-            if tick % 5 == 1 {
+            if tick % policy.periodic_message_every_ticks == 1 {
                 cached_storage_summary = collect_storage_summary(context.as_ref()).await;
             }
 
-            if let Ok(messages) =
-                collect_fast_messages(context.as_ref(), cached_storage_summary.clone()).await
-            {
-                for message in messages {
-                    let _ = realtime_tx.send(message);
+            if tick % policy.fast_message_every_ticks == 0 {
+                if let Ok(messages) =
+                    collect_fast_messages(context.as_ref(), cached_storage_summary.clone(), policy)
+                        .await
+                {
+                    for message in messages {
+                        let _ = realtime_tx.send(message);
+                    }
                 }
             }
 
             // Periodic full-list refresh heals missed deltas without hammering SQLite every second.
-            if tick % 5 == 0 {
+            if tick % policy.periodic_message_every_ticks == 0 {
                 if let Ok(messages) = collect_periodic_messages(context.as_ref()).await {
                     for message in messages {
                         let _ = realtime_tx.send(message);
@@ -119,9 +132,17 @@ pub(super) fn spawn_storage_bridge(
     let mut storage_rx = store.subscribe_realtime();
 
     tokio::spawn(async move {
+        let mut security_event_seq: u64 = 0;
         loop {
+            let policy = realtime_policy(context.as_ref());
             let message = match storage_rx.recv().await {
                 Ok(StorageRealtimeEvent::SecurityEvent(event)) => {
+                    security_event_seq = security_event_seq.wrapping_add(1);
+                    if should_sample_out(security_event_seq, policy.security_event_sample_rate)
+                        && !is_high_value_security_event(&event)
+                    {
+                        continue;
+                    }
                     serialize_message("security_event_delta", &SecurityEventResponse::from(event))
                 }
                 Ok(StorageRealtimeEvent::BlockedIpUpsert(entry)) => {
@@ -148,12 +169,20 @@ pub(super) fn spawn_traffic_bridge(
     let mut traffic_rx = context.subscribe_traffic_realtime();
 
     tokio::spawn(async move {
+        let mut traffic_seq: u64 = 0;
         loop {
+            let policy = realtime_policy(context.as_ref());
             let event = match traffic_rx.recv().await {
                 Ok(event) => event,
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(broadcast::error::RecvError::Closed) => break,
             };
+            traffic_seq = traffic_seq.wrapping_add(1);
+            if should_sample_out(traffic_seq, policy.traffic_event_sample_rate)
+                && !is_high_value_traffic_event(&event)
+            {
+                continue;
+            }
 
             let enriched = context.enrich_traffic_realtime_event(event).await;
             if let Ok(payload) = serialize_message("traffic_event_delta", &enriched) {
@@ -258,18 +287,22 @@ async fn collect_messages(context: &WafContext) -> anyhow::Result<Vec<String>> {
 async fn collect_fast_messages(
     context: &WafContext,
     storage_summary: Option<StorageMetricsSummary>,
+    policy: RealtimePressurePolicy,
 ) -> anyhow::Result<Vec<String>> {
     let metrics = collect_metrics(context, storage_summary);
     let l4_stats = collect_l4_stats(context);
     let l7_stats = collect_l7_stats(context);
-    let traffic_map = collect_traffic_map(context).await;
-
-    Ok(vec![
+    let mut messages = vec![
         serialize_message("metrics", &metrics)?,
         serialize_message("l4_stats", &l4_stats)?,
         serialize_message("l7_stats", &l7_stats)?,
-        serialize_message("traffic_map", &traffic_map)?,
-    ])
+    ];
+    if policy.include_traffic_map_in_fast_path {
+        let traffic_map = collect_traffic_map(context).await;
+        messages.push(serialize_message("traffic_map", &traffic_map)?);
+    }
+
+    Ok(messages)
 }
 
 async fn collect_periodic_messages(context: &WafContext) -> anyhow::Result<Vec<String>> {
@@ -294,6 +327,54 @@ fn collect_metrics(
             .l4_inspector()
             .map(|inspector| inspector.get_statistics().behavior.overview),
     )
+}
+
+fn realtime_policy(context: &WafContext) -> RealtimePressurePolicy {
+    let pressure = context.runtime_pressure_snapshot();
+    match pressure.level {
+        "attack" => RealtimePressurePolicy {
+            fast_message_every_ticks: 5,
+            periodic_message_every_ticks: 15,
+            include_traffic_map_in_fast_path: false,
+            security_event_sample_rate: 8,
+            traffic_event_sample_rate: 12,
+        },
+        "high" => RealtimePressurePolicy {
+            fast_message_every_ticks: 3,
+            periodic_message_every_ticks: 10,
+            include_traffic_map_in_fast_path: false,
+            security_event_sample_rate: 4,
+            traffic_event_sample_rate: 6,
+        },
+        "elevated" => RealtimePressurePolicy {
+            fast_message_every_ticks: 2,
+            periodic_message_every_ticks: 6,
+            include_traffic_map_in_fast_path: true,
+            security_event_sample_rate: 2,
+            traffic_event_sample_rate: 3,
+        },
+        _ => RealtimePressurePolicy {
+            fast_message_every_ticks: 1,
+            periodic_message_every_ticks: 5,
+            include_traffic_map_in_fast_path: true,
+            security_event_sample_rate: 1,
+            traffic_event_sample_rate: 1,
+        },
+    }
+}
+
+fn should_sample_out(sequence: u64, sample_rate: u64) -> bool {
+    sample_rate > 1 && !sequence.is_multiple_of(sample_rate)
+}
+
+fn is_high_value_security_event(event: &crate::storage::SecurityEventEntry) -> bool {
+    matches!(event.action.as_str(), "block" | "alert")
+}
+
+fn is_high_value_traffic_event(event: &crate::core::traffic_map::TrafficRealtimeEventRaw) -> bool {
+    event.decision == "block"
+        || (event.direction == "ingress" && event.bytes >= 64 * 1024)
+        || event.latency_ms.unwrap_or(0) >= 1_000
 }
 
 async fn collect_storage_summary(context: &WafContext) -> Option<StorageMetricsSummary> {
@@ -481,6 +562,38 @@ fn random_ticket() -> String {
         .take(48)
         .map(char::from)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_rate_one_keeps_everything() {
+        assert!(!should_sample_out(1, 1));
+        assert!(!should_sample_out(2, 1));
+    }
+
+    #[test]
+    fn sample_rate_n_keeps_only_stride() {
+        assert!(should_sample_out(1, 4));
+        assert!(should_sample_out(2, 4));
+        assert!(should_sample_out(3, 4));
+        assert!(!should_sample_out(4, 4));
+    }
+
+    #[test]
+    fn high_value_traffic_event_bypasses_sampling() {
+        let blocked = crate::core::traffic_map::TrafficRealtimeEventRaw {
+            timestamp_ms: 1,
+            source_ip: "203.0.113.10".to_string(),
+            direction: "ingress".to_string(),
+            decision: "block".to_string(),
+            bytes: 128,
+            latency_ms: None,
+        };
+        assert!(is_high_value_traffic_event(&blocked));
+    }
 }
 
 fn unix_timestamp() -> i64 {

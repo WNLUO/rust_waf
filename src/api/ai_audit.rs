@@ -534,18 +534,22 @@ async fn send_chat_request(
     request: &OpenAiCompatibleChatRequest,
 ) -> anyhow::Result<String> {
     let response = match auth {
-        ProviderAuth::Bearer(token) => client
-            .post(endpoint)
-            .bearer_auth(token)
-            .json(request)
-            .send()
-            .await?,
-        ProviderAuth::Header(name, value) => client
-            .post(endpoint)
-            .header(name, value)
-            .json(request)
-            .send()
-            .await?,
+        ProviderAuth::Bearer(token) => {
+            client
+                .post(endpoint)
+                .bearer_auth(token)
+                .json(request)
+                .send()
+                .await?
+        }
+        ProviderAuth::Header(name, value) => {
+            client
+                .post(endpoint)
+                .header(name, value)
+                .json(request)
+                .send()
+                .await?
+        }
     };
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
@@ -1082,8 +1086,8 @@ mod tests {
     use super::*;
     use crate::api::{
         AiAuditCountItem, AiAuditCountersResponse, AiAuditCurrentStateResponse,
-        AiAuditDataQualityResponse, AiAuditEventSampleResponse,
-        AiAuditSafeLineCorrelationResponse, AiAuditTrendWindowResponse,
+        AiAuditDataQualityResponse, AiAuditEventSampleResponse, AiAuditSafeLineCorrelationResponse,
+        AiAuditTrendWindowResponse,
     };
 
     fn sample_summary() -> AiAuditSummaryResponse {
@@ -1382,7 +1386,9 @@ mod tests {
 
     #[test]
     fn text_needs_chinese_localization_detects_english_and_ignores_chinese() {
-        assert!(text_needs_chinese_localization("Need review for suspicious login burst"));
+        assert!(text_needs_chinese_localization(
+            "Need review for suspicious login burst"
+        ));
         assert!(!text_needs_chinese_localization("需要复核可疑登录突增"));
         assert!(!text_needs_chinese_localization(""));
     }

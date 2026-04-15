@@ -1,6 +1,6 @@
 use super::policy::{
     apply_identity_state_policy, canonicalize_transport, default_policy, derive_overload_level,
-    max_risk_level, overload_reason, policy_from_runtime, policy_snapshot,
+    max_risk_level, merge_policies, overload_reason, policy_from_runtime, policy_snapshot,
     resolve_request_bucket_ip, risk_label, transport_label,
 };
 use super::runtime::{extend_queue, unix_timestamp, worker_loop};
@@ -145,25 +145,50 @@ impl L4BehaviorEngine {
         packet: &PacketInfo,
         request: &mut UnifiedHttpRequest,
     ) -> L4AdaptivePolicy {
-        let key = BucketKey::from_request(resolve_request_bucket_ip(packet, request), request);
+        let client_bucket_ip = resolve_request_bucket_ip(packet, request);
+        let key = BucketKey::from_request(client_bucket_ip, request);
+        let peer_key = trusted_forwarded_peer_bucket_key(packet, request, &key);
         let overload_level = self.current_overload_level();
         let tuning = self
             .tuning
             .read()
             .expect("behavior tuning lock poisoned")
             .clone();
-        let policy = self
+        let mut policy = self
             .policy_for_key(&key, overload_level.clone())
             .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
+        if let Some(peer_key) = peer_key.as_ref() {
+            let peer_policy = self
+                .policy_for_key(peer_key, overload_level.clone())
+                .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
+            policy = merge_policies(policy, peer_policy);
+            request.add_metadata("l4.dual_identity_budget".to_string(), "true".to_string());
+            request.add_metadata(
+                "l4.peer_bucket_ip".to_string(),
+                peer_key.peer_ip.to_string(),
+            );
+            request.add_metadata(
+                "l4.client_bucket_ip".to_string(),
+                client_bucket_ip.to_string(),
+            );
+        }
         let policy = apply_identity_state_policy(policy, request, &overload_level, &tuning);
 
         let bytes = request.to_inspection_string().len() as u64;
         self.try_send(BehaviorEvent::RequestObserved {
-            key,
+            key: key.clone(),
             bytes,
             now: Instant::now(),
             unix_now: unix_timestamp(),
         });
+        if let Some(peer_key) = peer_key {
+            self.try_send(BehaviorEvent::RequestObserved {
+                key: peer_key,
+                bytes,
+                now: Instant::now(),
+                unix_now: unix_timestamp(),
+            });
+        }
 
         request.add_metadata(
             "l4.bucket_risk".to_string(),
@@ -202,12 +227,21 @@ impl L4BehaviorEngine {
         request: &UnifiedHttpRequest,
         source: FeedbackSource,
     ) {
+        let key = BucketKey::from_request(resolve_request_bucket_ip(packet, request), request);
         self.try_send(BehaviorEvent::Feedback {
-            key: BucketKey::from_request(resolve_request_bucket_ip(packet, request), request),
+            key: key.clone(),
             source,
             now: Instant::now(),
             unix_now: unix_timestamp(),
         });
+        if let Some(peer_key) = trusted_forwarded_peer_bucket_key(packet, request, &key) {
+            self.try_send(BehaviorEvent::Feedback {
+                key: peer_key,
+                source,
+                now: Instant::now(),
+                unix_now: unix_timestamp(),
+            });
+        }
     }
 
     pub fn snapshot(
@@ -450,4 +484,26 @@ impl L4BehaviorEngine {
         }
         aggregate
     }
+}
+
+fn trusted_forwarded_peer_bucket_key(
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+    client_key: &BucketKey,
+) -> Option<BucketKey> {
+    if !matches!(
+        request
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
+        Some("trusted_cdn_forwarded")
+    ) {
+        return None;
+    }
+
+    if client_key.peer_ip == packet.source_ip {
+        return None;
+    }
+
+    let peer_key = BucketKey::from_request(packet.source_ip, request);
+    (peer_key != *client_key).then_some(peer_key)
 }

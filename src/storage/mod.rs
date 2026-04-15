@@ -21,9 +21,9 @@ use sqlx::SqlitePool;
 use sqlx::{QueryBuilder, Sqlite};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
 

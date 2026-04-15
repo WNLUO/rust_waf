@@ -285,6 +285,23 @@ pub(super) fn apply_identity_state_policy(
     policy
 }
 
+pub(super) fn merge_policies(
+    primary: L4AdaptivePolicy,
+    secondary: L4AdaptivePolicy,
+) -> L4AdaptivePolicy {
+    L4AdaptivePolicy {
+        risk_level: max_risk_level(&primary.risk_level, &secondary.risk_level),
+        risk_score: primary.risk_score.max(secondary.risk_score),
+        disable_keepalive: primary.disable_keepalive || secondary.disable_keepalive,
+        prefer_early_close: primary.prefer_early_close || secondary.prefer_early_close,
+        reject_new_connections: primary.reject_new_connections || secondary.reject_new_connections,
+        connection_budget_per_minute: primary
+            .connection_budget_per_minute
+            .min(secondary.connection_budget_per_minute),
+        suggested_delay_ms: primary.suggested_delay_ms.max(secondary.suggested_delay_ms),
+    }
+}
+
 pub(super) fn policy_snapshot(policy: &L4AdaptivePolicy) -> L4BucketPolicySnapshot {
     L4BucketPolicySnapshot {
         connection_budget_per_minute: policy.connection_budget_per_minute,

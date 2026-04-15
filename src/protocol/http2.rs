@@ -110,14 +110,12 @@ impl Http2Handler {
             let client_ip = client_ip.clone();
             async move {
                 let is_head_request = request.method() == http::Method::HEAD;
-                let response = match Http2Handler::request_head_to_unified(
-                    request,
-                    &client_ip,
-                    listener_port,
-                ) {
-                    Ok((unified, body)) => handler(unified, body).await?,
-                    Err(err) => error_handler(err).await?,
-                };
+                let response =
+                    match Http2Handler::request_head_to_unified(request, &client_ip, listener_port)
+                    {
+                        Ok((unified, body)) => handler(unified, body).await?,
+                        Err(err) => error_handler(err).await?,
+                    };
                 Ok::<_, ProtocolError>(Http2Handler::build_response(response, is_head_request))
             }
         });
@@ -168,13 +166,9 @@ impl Http2Handler {
     {
         let (parts, body) = request.into_parts();
         let mut unified = Self::request_parts_to_unified(parts, client_ip, listener_port)?;
-        let body = Self::read_request_body(
-            body,
-            max_size,
-            read_idle_timeout_ms,
-            body_min_bytes_per_sec,
-        )
-        .await?;
+        let body =
+            Self::read_request_body(body, max_size, read_idle_timeout_ms, body_min_bytes_per_sec)
+                .await?;
         unified.body = body.to_vec();
 
         Ok(unified)

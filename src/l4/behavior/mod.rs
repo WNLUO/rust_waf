@@ -484,6 +484,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trusted_forwarded_requests_merge_peer_budget_pressure() {
+        let engine = L4BehaviorEngine::new(&L4Config::default());
+        engine.start();
+
+        let peer_packet = packet(55);
+        for idx in 0..220 {
+            let _ = engine.observe_connection_open(
+                format!("proxy-{idx}"),
+                &peer_packet,
+                Some("example.com"),
+                Some("h2"),
+                "tls",
+                "h2",
+                BucketPeerKind::TrustedProxy,
+            );
+        }
+
+        sleep(Duration::from_millis(50)).await;
+
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/hot".to_string());
+        request.add_header("host".to_string(), "example.com".to_string());
+        request.set_client_ip(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 77)).to_string());
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_forwarded".to_string(),
+        );
+        request.add_metadata(
+            "network.client_ip_source".to_string(),
+            "forwarded_header".to_string(),
+        );
+        request.add_metadata(
+            "network.peer_ip".to_string(),
+            peer_packet.source_ip.to_string(),
+        );
+        request.add_metadata("transport".to_string(), "tls".to_string());
+        request.add_metadata("tls.alpn".to_string(), "h2".to_string());
+
+        let policy = engine.apply_request_policy(&peer_packet, &mut request);
+
+        assert_eq!(
+            request
+                .get_metadata("l4.dual_identity_budget")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            request
+                .get_metadata("l4.peer_bucket_ip")
+                .map(String::as_str),
+            Some("203.0.113.55")
+        );
+        assert!(policy.disable_keepalive || policy.suggested_delay_ms > 0);
+    }
+
+    #[tokio::test]
     async fn direct_client_idle_connections_without_requests_escalate_risk() {
         let engine = L4BehaviorEngine::new(&L4Config::default());
         engine.start();

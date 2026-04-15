@@ -676,13 +676,18 @@ async fn test_sqlite_store_aggregates_low_priority_events_by_route_and_time_wind
     let details = aggregated
         .items
         .iter()
-        .map(|item| serde_json::from_str::<serde_json::Value>(item.details_json.as_deref().unwrap()).unwrap())
+        .map(|item| {
+            serde_json::from_str::<serde_json::Value>(item.details_json.as_deref().unwrap())
+                .unwrap()
+        })
         .collect::<Vec<_>>();
     assert!(details.iter().any(|value| {
         value["storage_pressure"]["count"].as_u64() == Some(3)
             && value["storage_pressure"]["route"].as_str() == Some("/login?from=bot")
     }));
-    assert!(details.iter().any(|value| value["storage_pressure"]["count"].as_u64() == Some(2)));
+    assert!(details
+        .iter()
+        .any(|value| value["storage_pressure"]["count"].as_u64() == Some(2)));
 }
 
 #[tokio::test]
@@ -782,13 +787,15 @@ async fn test_sqlite_store_preserves_hotspots_and_merges_long_tail_sources() {
         .collect::<Vec<_>>();
 
     assert!(details.iter().any(|(source_ip, value)| {
-        source_ip == "*"
-            && value["storage_pressure"]["source_scope"].as_str() == Some("long_tail")
+        source_ip == "*" && value["storage_pressure"]["source_scope"].as_str() == Some("long_tail")
     }));
     assert!(details.iter().any(|(source_ip, value)| {
         source_ip == "203.0.113.99"
             && value["storage_pressure"]["source_scope"].as_str() == Some("hotspot")
-            && value["storage_pressure"]["count"].as_u64().unwrap_or_default() >= 1
+            && value["storage_pressure"]["count"]
+                .as_u64()
+                .unwrap_or_default()
+                >= 1
     }));
 }
 

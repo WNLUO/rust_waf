@@ -269,10 +269,11 @@ pub(crate) async fn handle_http1_connection(
                 );
             }
             if let Some(response) = early_inspection_result.custom_response.as_ref() {
-                let response = crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                    context.as_ref(),
-                    &resolve_runtime_custom_response(response),
-                );
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
                 let body = body_for_request(&request, &response.body);
                 if let Some(tarpit) = response.tarpit.as_ref() {
                     http1_handler
@@ -303,6 +304,150 @@ pub(crate) async fn handle_http1_connection(
                         403,
                         "Forbidden",
                         early_inspection_result.reason.as_bytes(),
+                    )
+                    .await?;
+            }
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+
+        if let Some(result) = context
+            .l7_behavior_guard()
+            .inspect_request(&mut request)
+            .await
+        {
+            request.add_metadata("l7.behavior.prechecked".to_string(), "true".to_string());
+            if let Some(metrics) = context.metrics.as_ref() {
+                crate::core::engine::network::record_l7_behavior_metrics(metrics, &request);
+            }
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+            }
+            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                context.as_ref(),
+                packet,
+                &request,
+                &result,
+            );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
+                let body = body_for_request(&request, &response.body);
+                if let Some(tarpit) = response.tarpit.as_ref() {
+                    http1_handler
+                        .write_response_with_headers_tarpit(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                            tarpit,
+                        )
+                        .await?;
+                } else {
+                    http1_handler
+                        .write_response_with_headers(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                        )
+                        .await?;
+                }
+            } else {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        429,
+                        "Too Many Requests",
+                        result.reason.as_bytes(),
+                    )
+                    .await?;
+            }
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+        request.add_metadata("l7.behavior.prechecked".to_string(), "true".to_string());
+
+        let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
+        request.add_metadata("l7.cc.prechecked".to_string(), "true".to_string());
+        if let Some(metrics) = context.metrics.as_ref() {
+            record_l7_cc_metrics(metrics, &request);
+        }
+        if let Some(result) = cc_result {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+            }
+            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                context.as_ref(),
+                packet,
+                &request,
+                &result,
+            );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
+                let body = body_for_request(&request, &response.body);
+                if let Some(tarpit) = response.tarpit.as_ref() {
+                    http1_handler
+                        .write_response_with_headers_tarpit(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                            tarpit,
+                        )
+                        .await?;
+                } else {
+                    http1_handler
+                        .write_response_with_headers(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                        )
+                        .await?;
+                }
+            } else {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        429,
+                        "Too Many Requests",
+                        result.reason.as_bytes(),
                     )
                     .await?;
             }
@@ -405,104 +550,41 @@ pub(crate) async fn handle_http1_connection(
             continue;
         }
 
-        if let Some(result) = context
-            .l7_behavior_guard()
-            .inspect_request(&mut request)
-            .await
+        if request
+            .get_metadata("l7.behavior.prechecked")
+            .map(String::as_str)
+            != Some("true")
         {
-            if let Some(metrics) = context.metrics.as_ref() {
-                crate::core::engine::network::record_l7_behavior_metrics(metrics, &request);
-            }
-            if result.should_persist_event() {
-                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
-            }
-            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                context.as_ref(),
-                packet,
-                &request,
-                &result,
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
+            if let Some(result) = context
+                .l7_behavior_guard()
+                .inspect_request(&mut request)
+                .await
+            {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    crate::core::engine::network::record_l7_behavior_metrics(metrics, &request);
+                }
+                if result.should_persist_event() {
+                    persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+                }
+                crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                    context.as_ref(),
                     packet,
                     &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
+                    &result,
                 );
-            }
-            if let Some(response) = result.custom_response.as_ref() {
-                let response = resolve_runtime_custom_response(response);
-                let body = body_for_request(&request, &response.body);
-                http1_handler
-                    .write_response_with_headers(
-                        &mut stream,
-                        response.status_code,
-                        http_status_text(response.status_code),
-                        &response.headers,
-                        &body,
-                    )
-                    .await?;
-            } else {
-                http1_handler
-                    .write_response(
-                        &mut stream,
-                        429,
-                        "Too Many Requests",
-                        result.reason.as_bytes(),
-                    )
-                    .await?;
-            }
-            if !should_keep_client_connection_open(&request) {
-                return Ok(());
-            }
-            continue;
-        }
-
-        let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
-        if let Some(metrics) = context.metrics.as_ref() {
-            record_l7_cc_metrics(metrics, &request);
-        }
-        if let Some(result) = cc_result {
-            if result.should_persist_event() {
-                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
-            }
-            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                context.as_ref(),
-                packet,
-                &request,
-                &result,
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
-            if let Some(response) = result.custom_response.as_ref() {
-                let response =
-                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                        context.as_ref(),
-                        &resolve_runtime_custom_response(response),
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_block(result.layer.clone());
+                }
+                if let Some(inspector) = context.l4_inspector() {
+                    inspector.record_l7_feedback(
+                        packet,
+                        &request,
+                        crate::l4::behavior::FeedbackSource::L7Block,
                     );
-                let body = body_for_request(&request, &response.body);
-                if let Some(tarpit) = response.tarpit.as_ref() {
-                    http1_handler
-                        .write_response_with_headers_tarpit(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                            tarpit,
-                        )
-                        .await?;
-                } else {
+                }
+                if let Some(response) = result.custom_response.as_ref() {
+                    let response = resolve_runtime_custom_response(response);
+                    let body = body_for_request(&request, &response.body);
                     http1_handler
                         .write_response_with_headers(
                             &mut stream,
@@ -512,21 +594,95 @@ pub(crate) async fn handle_http1_connection(
                             &body,
                         )
                         .await?;
+                } else {
+                    http1_handler
+                        .write_response(
+                            &mut stream,
+                            429,
+                            "Too Many Requests",
+                            result.reason.as_bytes(),
+                        )
+                        .await?;
                 }
-            } else {
-                http1_handler
-                    .write_response(
-                        &mut stream,
-                        429,
-                        "Too Many Requests",
-                        result.reason.as_bytes(),
-                    )
-                    .await?;
+                if !should_keep_client_connection_open(&request) {
+                    return Ok(());
+                }
+                continue;
             }
-            if !should_keep_client_connection_open(&request) {
-                return Ok(());
+            if let Some(metrics) = context.metrics.as_ref() {
+                crate::core::engine::network::record_l7_behavior_metrics(metrics, &request);
             }
-            continue;
+        }
+
+        if request.get_metadata("l7.cc.prechecked").map(String::as_str) != Some("true") {
+            let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
+            if let Some(metrics) = context.metrics.as_ref() {
+                record_l7_cc_metrics(metrics, &request);
+            }
+            if let Some(result) = cc_result {
+                if result.should_persist_event() {
+                    persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+                }
+                crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                    context.as_ref(),
+                    packet,
+                    &request,
+                    &result,
+                );
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_block(result.layer.clone());
+                }
+                if let Some(inspector) = context.l4_inspector() {
+                    inspector.record_l7_feedback(
+                        packet,
+                        &request,
+                        crate::l4::behavior::FeedbackSource::L7Block,
+                    );
+                }
+                if let Some(response) = result.custom_response.as_ref() {
+                    let response =
+                        crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                            context.as_ref(),
+                            &resolve_runtime_custom_response(response),
+                        );
+                    let body = body_for_request(&request, &response.body);
+                    if let Some(tarpit) = response.tarpit.as_ref() {
+                        http1_handler
+                            .write_response_with_headers_tarpit(
+                                &mut stream,
+                                response.status_code,
+                                http_status_text(response.status_code),
+                                &response.headers,
+                                &body,
+                                tarpit,
+                            )
+                            .await?;
+                    } else {
+                        http1_handler
+                            .write_response_with_headers(
+                                &mut stream,
+                                response.status_code,
+                                http_status_text(response.status_code),
+                                &response.headers,
+                                &body,
+                            )
+                            .await?;
+                    }
+                } else {
+                    http1_handler
+                        .write_response(
+                            &mut stream,
+                            429,
+                            "Too Many Requests",
+                            result.reason.as_bytes(),
+                        )
+                        .await?;
+                }
+                if !should_keep_client_connection_open(&request) {
+                    return Ok(());
+                }
+                continue;
+            }
         }
 
         prepare_request_for_proxy(context.as_ref(), &mut request);
@@ -1036,10 +1192,7 @@ mod tests {
         let peer_addr: std::net::SocketAddr = "127.0.0.1:54321".parse().unwrap();
         let local_addr: std::net::SocketAddr = "127.0.0.1:660".parse().unwrap();
         let request_semaphore = Arc::new(Semaphore::new(0));
-        let connection_permit = Arc::new(Semaphore::new(1))
-            .acquire_owned()
-            .await
-            .unwrap();
+        let connection_permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
         let (mut client, server) = duplex(4096);
 
         let task = tokio::spawn({

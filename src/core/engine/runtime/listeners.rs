@@ -361,9 +361,13 @@ impl Http3ListenerRuntime {
             shutdown_http3_listener(existing).await;
         }
 
-        let listener =
-            spawn_http3_listener(http3, context.clone(), connection_semaphore, request_semaphore)
-                .await?;
+        let listener = spawn_http3_listener(
+            http3,
+            context.clone(),
+            connection_semaphore,
+            request_semaphore,
+        )
+        .await?;
         let listener_addr = listener.addr.clone();
         let mut guard = self.state.lock().await;
         guard.listener = Some(listener);

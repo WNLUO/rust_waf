@@ -218,10 +218,11 @@ async fn handle_http3_request(
             );
         }
         if let Some(response) = early_inspection_result.custom_response.as_ref() {
-            let response = crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                context.as_ref(),
-                &resolve_runtime_custom_response(response),
-            );
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
             send_http3_response(
                 &mut stream,
                 response.status_code,
@@ -240,6 +241,100 @@ async fn handle_http3_request(
             )
             .await?;
         }
+        return Ok(());
+    }
+
+    if let Some(result) = context
+        .l7_behavior_guard()
+        .inspect_request(&mut unified)
+        .await
+    {
+        unified.add_metadata("l7.behavior.prechecked".to_string(), "true".to_string());
+        if let Some(metrics) = context.metrics.as_ref() {
+            crate::core::engine::network::record_l7_behavior_metrics(metrics, &unified);
+        }
+        if result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+        }
+        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+            context.as_ref(),
+            &packet,
+            &unified,
+            &result,
+        );
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(result.layer.clone());
+        }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.record_l7_feedback(
+                &packet,
+                &unified,
+                crate::l4::behavior::FeedbackSource::L7Block,
+            );
+        }
+        if let Some(response) = result.custom_response.as_ref() {
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
+            send_http3_response(
+                &mut stream,
+                response.status_code,
+                &response.headers,
+                response.body,
+                response.tarpit.as_ref(),
+            )
+            .await?;
+            return Ok(());
+        }
+        send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
+        return Ok(());
+    }
+    unified.add_metadata("l7.behavior.prechecked".to_string(), "true".to_string());
+
+    let cc_result = context.l7_cc_guard().inspect_request(&mut unified).await;
+    unified.add_metadata("l7.cc.prechecked".to_string(), "true".to_string());
+    if let Some(metrics) = context.metrics.as_ref() {
+        record_l7_cc_metrics(metrics, &unified);
+    }
+    if let Some(result) = cc_result {
+        if result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+        }
+        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+            context.as_ref(),
+            &packet,
+            &unified,
+            &result,
+        );
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(result.layer.clone());
+        }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.record_l7_feedback(
+                &packet,
+                &unified,
+                crate::l4::behavior::FeedbackSource::L7Block,
+            );
+        }
+        if let Some(response) = result.custom_response.as_ref() {
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
+            send_http3_response(
+                &mut stream,
+                response.status_code,
+                &response.headers,
+                response.body,
+                response.tarpit.as_ref(),
+            )
+            .await?;
+            return Ok(());
+        }
+        send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
         return Ok(());
     }
 
@@ -321,95 +416,106 @@ async fn handle_http3_request(
         return Ok(());
     }
 
-    if let Some(result) = context
-        .l7_behavior_guard()
-        .inspect_request(&mut unified)
-        .await
+    if unified
+        .get_metadata("l7.behavior.prechecked")
+        .map(String::as_str)
+        != Some("true")
     {
+        if let Some(result) = context
+            .l7_behavior_guard()
+            .inspect_request(&mut unified)
+            .await
+        {
+            if let Some(metrics) = context.metrics.as_ref() {
+                crate::core::engine::network::record_l7_behavior_metrics(metrics, &unified);
+            }
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+            }
+            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                context.as_ref(),
+                &packet,
+                &unified,
+                &result,
+            );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    &packet,
+                    &unified,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
+                send_http3_response(
+                    &mut stream,
+                    response.status_code,
+                    &response.headers,
+                    response.body,
+                    response.tarpit.as_ref(),
+                )
+                .await?;
+                return Ok(());
+            }
+            send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
+            return Ok(());
+        }
         if let Some(metrics) = context.metrics.as_ref() {
             crate::core::engine::network::record_l7_behavior_metrics(metrics, &unified);
         }
-        if result.should_persist_event() {
-            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
-        }
-        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-            context.as_ref(),
-            &packet,
-            &unified,
-            &result,
-        );
-        if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_block(result.layer.clone());
-        }
-        if let Some(inspector) = context.l4_inspector() {
-            inspector.record_l7_feedback(
-                &packet,
-                &unified,
-                crate::l4::behavior::FeedbackSource::L7Block,
-            );
-        }
-        if let Some(response) = result.custom_response.as_ref() {
-            let response =
-                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                    context.as_ref(),
-                    &resolve_runtime_custom_response(response),
-                );
-            send_http3_response(
-                &mut stream,
-                response.status_code,
-                &response.headers,
-                response.body,
-                response.tarpit.as_ref(),
-            )
-            .await?;
-            return Ok(());
-        }
-        send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
-        return Ok(());
     }
 
-    let cc_result = context.l7_cc_guard().inspect_request(&mut unified).await;
-    if let Some(metrics) = context.metrics.as_ref() {
-        record_l7_cc_metrics(metrics, &unified);
-    }
-    if let Some(result) = cc_result {
-        if result.should_persist_event() {
-            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
-        }
-        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-            context.as_ref(),
-            &packet,
-            &unified,
-            &result,
-        );
+    if unified.get_metadata("l7.cc.prechecked").map(String::as_str) != Some("true") {
+        let cc_result = context.l7_cc_guard().inspect_request(&mut unified).await;
         if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_block(result.layer.clone());
+            record_l7_cc_metrics(metrics, &unified);
         }
-        if let Some(inspector) = context.l4_inspector() {
-            inspector.record_l7_feedback(
+        if let Some(result) = cc_result {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+            }
+            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                context.as_ref(),
                 &packet,
                 &unified,
-                crate::l4::behavior::FeedbackSource::L7Block,
+                &result,
             );
-        }
-        if let Some(response) = result.custom_response.as_ref() {
-            let response =
-                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                    context.as_ref(),
-                    &resolve_runtime_custom_response(response),
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    &packet,
+                    &unified,
+                    crate::l4::behavior::FeedbackSource::L7Block,
                 );
-            send_http3_response(
-                &mut stream,
-                response.status_code,
-                &response.headers,
-                response.body,
-                response.tarpit.as_ref(),
-            )
-            .await?;
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
+                send_http3_response(
+                    &mut stream,
+                    response.status_code,
+                    &response.headers,
+                    response.body,
+                    response.tarpit.as_ref(),
+                )
+                .await?;
+                return Ok(());
+            }
+            send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
             return Ok(());
         }
-        send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
-        return Ok(());
     }
 
     prepare_request_for_proxy(context.as_ref(), &mut unified);

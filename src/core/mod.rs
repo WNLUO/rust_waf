@@ -859,13 +859,20 @@ async fn restore_runtime_blocked_ips(store: &SqliteStore, inspector: &L4Inspecto
         if remaining_secs == 0 {
             continue;
         }
-        if inspector.block_ip(&ip, &entry.reason, Duration::from_secs(remaining_secs as u64)) {
+        if inspector.block_ip(
+            &ip,
+            &entry.reason,
+            Duration::from_secs(remaining_secs as u64),
+        ) {
             restored = restored.saturating_add(1);
         }
     }
 
     if restored > 0 {
-        info!("Restored {} active local blocked IP(s) into runtime memory", restored);
+        info!(
+            "Restored {} active local blocked IP(s) into runtime memory",
+            restored
+        );
     }
 
     Ok(())

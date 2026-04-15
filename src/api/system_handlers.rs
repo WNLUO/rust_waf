@@ -262,8 +262,7 @@ pub(crate) async fn run_ai_audit_report_for_context(
 ) -> anyhow::Result<AiAuditReportResponse> {
     let config = context.config_snapshot();
     let mut execution = crate::api::ai_audit::resolve_report_execution(&config, &params);
-    if force_local_rules
-        && execution.provider != crate::api::ai_audit::AiAuditProvider::LocalRules
+    if force_local_rules && execution.provider != crate::api::ai_audit::AiAuditProvider::LocalRules
     {
         execution.provider = crate::api::ai_audit::AiAuditProvider::LocalRules;
         execution
@@ -284,9 +283,10 @@ pub(crate) async fn run_ai_audit_report_for_context(
     )
     .await
     .map_err(|err| anyhow::anyhow!("build ai audit summary failed: {:?}", err))?;
-    let mut report = crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report)
-        .await
-        .map_err(|err| anyhow::anyhow!("execute ai audit report failed: {:?}", err))?;
+    let mut report =
+        crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report)
+            .await
+            .map_err(|err| anyhow::anyhow!("execute ai audit report failed: {:?}", err))?;
     if force_local_rules {
         report
             .degraded_reasons
@@ -379,8 +379,8 @@ pub(super) async fn list_ai_temp_policies_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<AiTempPoliciesResponse>> {
     let items = state.context.active_ai_temp_policies();
-    let summary = build_ai_audit_summary(state.context.as_ref(), Some(900), Some(120), Some(0))
-        .await?;
+    let summary =
+        build_ai_audit_summary(state.context.as_ref(), Some(900), Some(120), Some(0)).await?;
     Ok(Json(AiTempPoliciesResponse {
         total: items.len() as u32,
         policies: items
@@ -1949,7 +1949,10 @@ mod tests {
             .recommendations
             .iter()
             .any(|item| item.key == "manual_review_due_to_degraded_input"));
-        assert!(report.suggested_local_rules.iter().all(|item| !item.auto_apply));
+        assert!(report
+            .suggested_local_rules
+            .iter()
+            .all(|item| !item.auto_apply));
     }
 
     #[test]

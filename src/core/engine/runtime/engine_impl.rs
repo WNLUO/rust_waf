@@ -467,10 +467,9 @@ impl WafEngine {
         }
 
         let runtime = self.context.ai_auto_audit_runtime_snapshot().await;
-        if runtime
-            .last_run_at
-            .is_some_and(|last| now.saturating_sub(last) < ai_config.auto_audit_interval_secs as i64)
-        {
+        if runtime.last_run_at.is_some_and(|last| {
+            now.saturating_sub(last) < ai_config.auto_audit_interval_secs as i64
+        }) {
             return Ok(());
         }
 

@@ -1,6 +1,4 @@
-use super::types::{
-    MetricsResponse, StorageAttackHotspotResponse, StorageAttackInsightsResponse,
-};
+use super::types::{MetricsResponse, StorageAttackHotspotResponse, StorageAttackInsightsResponse};
 use crate::core::RuntimePressureSnapshot;
 
 pub(super) fn build_metrics_response(
@@ -31,11 +29,8 @@ pub(super) fn build_metrics_response(
         overload_level: crate::l4::behavior::L4OverloadLevel::Normal,
         overload_reason: None,
     });
-    let storage_degraded_reasons = build_storage_degraded_reasons(
-        &storage_summary,
-        &aggregation_insights,
-        &runtime_pressure,
-    );
+    let storage_degraded_reasons =
+        build_storage_degraded_reasons(&storage_summary, &aggregation_insights, &runtime_pressure);
 
     MetricsResponse {
         total_packets: snapshot.total_packets,

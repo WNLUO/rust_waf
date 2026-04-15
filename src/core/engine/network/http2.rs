@@ -239,6 +239,114 @@ pub(crate) async fn handle_http2_connection(
                         });
                     }
 
+                    if let Some(result) =
+                        context.l7_behavior_guard().inspect_request(&mut request).await
+                    {
+                        request.add_metadata("l7.behavior.prechecked".to_string(), "true".to_string());
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            crate::core::engine::network::record_l7_behavior_metrics(
+                                metrics, &request,
+                            );
+                        }
+                        if result.should_persist_event() {
+                            persist_http_inspection_event(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                        }
+                        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &result,
+                        );
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(result.layer.clone());
+                        }
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
+                        if let Some(response) = result.custom_response.as_ref() {
+                            let response = resolve_runtime_custom_response(response);
+                            let body = body_for_request(&request, &response.body);
+                            let mut headers = response.headers.clone();
+                            apply_response_policies(
+                                context.as_ref(),
+                                &mut headers,
+                                response.status_code,
+                            );
+                            return Ok(Http2Response {
+                                status_code: response.status_code,
+                                headers,
+                                body,
+                            });
+                        }
+                        return Ok(Http2Response {
+                            status_code: 429,
+                            headers: vec![],
+                            body: body_for_request(&request, result.reason.as_bytes()),
+                        });
+                    }
+                    request.add_metadata("l7.behavior.prechecked".to_string(), "true".to_string());
+
+                    let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
+                    request.add_metadata("l7.cc.prechecked".to_string(), "true".to_string());
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        record_l7_cc_metrics(metrics, &request);
+                    }
+                    if let Some(result) = cc_result {
+                        if result.should_persist_event() {
+                            persist_http_inspection_event(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                        }
+                        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &result,
+                        );
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(result.layer.clone());
+                        }
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
+                        if let Some(response) = result.custom_response.as_ref() {
+                            let response = resolve_runtime_custom_response(response);
+                            let body = body_for_request(&request, &response.body);
+                            let mut headers = response.headers.clone();
+                            apply_response_policies(
+                                context.as_ref(),
+                                &mut headers,
+                                response.status_code,
+                            );
+                            return Ok(Http2Response {
+                                status_code: response.status_code,
+                                headers,
+                                body,
+                            });
+                        }
+                        return Ok(Http2Response {
+                            status_code: 429,
+                            headers: vec![],
+                            body: body_for_request(&request, result.reason.as_bytes()),
+                        });
+                    }
+
                     let request_body = match Http2Handler::read_request_body(
                         body.take().expect("http2 request body missing"),
                         max_request_size,
@@ -328,109 +436,126 @@ pub(crate) async fn handle_http2_connection(
                         }
                     }
 
-                    if let Some(result) =
-                        context.l7_behavior_guard().inspect_request(&mut request).await
+                    if request
+                        .get_metadata("l7.behavior.prechecked")
+                        .map(String::as_str)
+                        != Some("true")
                     {
+                        if let Some(result) =
+                            context.l7_behavior_guard().inspect_request(&mut request).await
+                        {
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                crate::core::engine::network::record_l7_behavior_metrics(
+                                    metrics, &request,
+                                );
+                            }
+                            if result.should_persist_event() {
+                                persist_http_inspection_event(
+                                    context.as_ref(),
+                                    &packet,
+                                    &request,
+                                    &result,
+                                );
+                            }
+                            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                metrics.record_block(result.layer.clone());
+                            }
+                            if let Some(inspector) = context.l4_inspector() {
+                                inspector.record_l7_feedback(
+                                    &packet,
+                                    &request,
+                                    crate::l4::behavior::FeedbackSource::L7Block,
+                                );
+                            }
+                            if let Some(response) = result.custom_response.as_ref() {
+                                let response = resolve_runtime_custom_response(response);
+                                let body = body_for_request(&request, &response.body);
+                                let mut headers = response.headers.clone();
+                                apply_response_policies(
+                                    context.as_ref(),
+                                    &mut headers,
+                                    response.status_code,
+                                );
+                                return Ok(Http2Response {
+                                    status_code: response.status_code,
+                                    headers,
+                                    body,
+                                });
+                            }
+                            return Ok(Http2Response {
+                                status_code: 429,
+                                headers: vec![],
+                                body: body_for_request(&request, result.reason.as_bytes()),
+                            });
+                        }
                         if let Some(metrics) = context.metrics.as_ref() {
                             crate::core::engine::network::record_l7_behavior_metrics(
                                 metrics, &request,
                             );
                         }
-                        if result.should_persist_event() {
-                            persist_http_inspection_event(
-                                context.as_ref(),
-                                &packet,
-                                &request,
-                                &result,
-                            );
-                        }
-                        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                            context.as_ref(),
-                            &packet,
-                            &request,
-                            &result,
-                        );
-                        if let Some(metrics) = context.metrics.as_ref() {
-                            metrics.record_block(result.layer.clone());
-                        }
-                        if let Some(inspector) = context.l4_inspector() {
-                            inspector.record_l7_feedback(
-                                &packet,
-                                &request,
-                                crate::l4::behavior::FeedbackSource::L7Block,
-                            );
-                        }
-                        if let Some(response) = result.custom_response.as_ref() {
-                            let response = resolve_runtime_custom_response(response);
-                            let body = body_for_request(&request, &response.body);
-                            let mut headers = response.headers.clone();
-                            apply_response_policies(
-                                context.as_ref(),
-                                &mut headers,
-                                response.status_code,
-                            );
-                            return Ok(Http2Response {
-                                status_code: response.status_code,
-                                headers,
-                                body,
-                            });
-                        }
-                        return Ok(Http2Response {
-                            status_code: 429,
-                            headers: vec![],
-                            body: body_for_request(&request, result.reason.as_bytes()),
-                        });
                     }
 
-                    let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
-                    if let Some(metrics) = context.metrics.as_ref() {
-                        record_l7_cc_metrics(metrics, &request);
-                    }
-                    if let Some(result) = cc_result {
-                        if result.should_persist_event() {
-                            persist_http_inspection_event(
+                    if request
+                        .get_metadata("l7.cc.prechecked")
+                        .map(String::as_str)
+                        != Some("true")
+                    {
+                        let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            record_l7_cc_metrics(metrics, &request);
+                        }
+                        if let Some(result) = cc_result {
+                            if result.should_persist_event() {
+                                persist_http_inspection_event(
+                                    context.as_ref(),
+                                    &packet,
+                                    &request,
+                                    &result,
+                                );
+                            }
+                            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
                                 context.as_ref(),
                                 &packet,
                                 &request,
                                 &result,
                             );
-                        }
-                        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                            context.as_ref(),
-                            &packet,
-                            &request,
-                            &result,
-                        );
-                        if let Some(metrics) = context.metrics.as_ref() {
-                            metrics.record_block(result.layer.clone());
-                        }
-                        if let Some(inspector) = context.l4_inspector() {
-                            inspector.record_l7_feedback(
-                                &packet,
-                                &request,
-                                crate::l4::behavior::FeedbackSource::L7Block,
-                            );
-                        }
-                        if let Some(response) = result.custom_response.as_ref() {
-                            let response = resolve_runtime_custom_response(response);
-                            let body = body_for_request(&request, &response.body);
-                            let mut headers = response.headers.clone();
-                            apply_response_policies(
-                                context.as_ref(),
-                                &mut headers,
-                                response.status_code,
-                            );
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                metrics.record_block(result.layer.clone());
+                            }
+                            if let Some(inspector) = context.l4_inspector() {
+                                inspector.record_l7_feedback(
+                                    &packet,
+                                    &request,
+                                    crate::l4::behavior::FeedbackSource::L7Block,
+                                );
+                            }
+                            if let Some(response) = result.custom_response.as_ref() {
+                                let response = resolve_runtime_custom_response(response);
+                                let body = body_for_request(&request, &response.body);
+                                let mut headers = response.headers.clone();
+                                apply_response_policies(
+                                    context.as_ref(),
+                                    &mut headers,
+                                    response.status_code,
+                                );
+                                return Ok(Http2Response {
+                                    status_code: response.status_code,
+                                    headers,
+                                    body,
+                                });
+                            }
                             return Ok(Http2Response {
-                                status_code: response.status_code,
-                                headers,
-                                body,
+                                status_code: 429,
+                                headers: vec![],
+                                body: body_for_request(&request, result.reason.as_bytes()),
                             });
                         }
-                        return Ok(Http2Response {
-                            status_code: 429,
-                            headers: vec![],
-                            body: body_for_request(&request, result.reason.as_bytes()),
-                        });
                     }
 
                     prepare_request_for_proxy(context.as_ref(), &mut request);
@@ -913,10 +1038,7 @@ mod tests {
         let peer_addr: std::net::SocketAddr = "127.0.0.1:54322".parse().unwrap();
         let local_addr: std::net::SocketAddr = "127.0.0.1:660".parse().unwrap();
         let request_semaphore = Arc::new(Semaphore::new(0));
-        let connection_permit = Arc::new(Semaphore::new(1))
-            .acquire_owned()
-            .await
-            .unwrap();
+        let connection_permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
         let (client, server) = duplex(16 * 1024);
 
         let server_task = tokio::spawn({

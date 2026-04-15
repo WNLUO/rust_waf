@@ -814,6 +814,18 @@ onMounted(() => {
                   }}
                 </p>
               </div>
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <p class="text-xs text-slate-400">近期策略反馈</p>
+                <p class="mt-1 text-sm font-semibold text-slate-900">
+                  {{
+                    formatNumber(
+                      report.input_profile.recent_policy_feedback_count,
+                    )
+                  }}
+                </p>
+              </div>
             </div>
 
             <div
@@ -1213,6 +1225,47 @@ onMounted(() => {
         </div>
 
         <div class="space-y-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4">
+            <p class="text-sm font-semibold text-slate-900">最近策略反馈</p>
+            <div
+              v-if="!report.summary.recent_policy_feedback.length"
+              class="mt-3 text-sm text-slate-500"
+            >
+              当前没有可供回灌的策略反馈。
+            </div>
+            <div v-else class="mt-3 space-y-3">
+              <article
+                v-for="item in report.summary.recent_policy_feedback"
+                :key="item.policy_key"
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <StatusBadge type="muted" :text="item.action" />
+                  <StatusBadge type="info" :text="item.action_status" />
+                  <StatusBadge
+                    type="muted"
+                    :text="`${item.scope_type}:${item.scope_value}`"
+                  />
+                </div>
+                <p class="mt-2 text-sm font-semibold text-slate-900">
+                  {{ item.title }}
+                </p>
+                <p class="mt-1 text-sm text-slate-700">
+                  {{ item.action_reason }}
+                </p>
+                <p class="mt-1 text-[11px] text-slate-500">
+                  {{
+                    item.primary_object
+                      ? `主要对象 ${item.primary_object} · ${formatNumber(item.primary_object_hits)} 次`
+                      : '暂无主要对象'
+                  }}
+                  · 命中 {{ formatNumber(item.hit_count) }} ·
+                  {{ formatTimestamp(item.updated_at) }}
+                </p>
+              </article>
+            </div>
+          </div>
+
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
             <p class="text-sm font-semibold text-slate-900">执行说明</p>
             <div

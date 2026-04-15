@@ -112,7 +112,22 @@ export interface AiAuditSummaryResponse {
   top_routes: AiAuditCountItem[]
   top_hosts: AiAuditCountItem[]
   safeline_correlation: AiAuditSafeLineCorrelation
+  recent_policy_feedback: AiAuditPolicyFeedback[]
   recent_events: AiAuditEventSample[]
+}
+
+export interface AiAuditPolicyFeedback {
+  policy_key: string
+  title: string
+  action: string
+  scope_type: string
+  scope_value: string
+  action_status: string
+  action_reason: string
+  primary_object: string | null
+  primary_object_hits: number
+  hit_count: number
+  updated_at: number
 }
 
 export interface AiAuditSafeLineCorrelation {
@@ -152,6 +167,7 @@ export interface AiAuditInputProfile {
   sampled_events: number
   included_recent_events: number
   raw_samples_included: boolean
+  recent_policy_feedback_count: number
 }
 
 export interface AiAuditSuggestedRule {

@@ -99,7 +99,24 @@ pub struct AiAuditSummaryResponse {
     pub(crate) top_hosts: Vec<AiAuditCountItem>,
     #[serde(default)]
     pub(crate) safeline_correlation: AiAuditSafeLineCorrelationResponse,
+    #[serde(default)]
+    pub(crate) recent_policy_feedback: Vec<AiAuditPolicyFeedbackResponse>,
     pub(crate) recent_events: Vec<AiAuditEventSampleResponse>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiAuditPolicyFeedbackResponse {
+    pub(crate) policy_key: String,
+    pub(crate) title: String,
+    pub(crate) action: String,
+    pub(crate) scope_type: String,
+    pub(crate) scope_value: String,
+    pub(crate) action_status: String,
+    pub(crate) action_reason: String,
+    pub(crate) primary_object: Option<String>,
+    pub(crate) primary_object_hits: i64,
+    pub(crate) hit_count: i64,
+    pub(crate) updated_at: i64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -278,6 +295,8 @@ pub struct AiAuditInputProfileResponse {
     pub(crate) included_recent_events: u32,
     #[serde(default)]
     pub(crate) raw_samples_included: bool,
+    #[serde(default)]
+    pub(crate) recent_policy_feedback_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

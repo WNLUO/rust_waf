@@ -381,6 +381,13 @@ async fn build_ai_audit_summary(
     let mut rust_source_ips = BTreeMap::new();
     let mut safeline_events = 0u64;
     let mut rust_events = 0u64;
+    let recent_policy_feedback = state
+        .context
+        .active_ai_temp_policies()
+        .into_iter()
+        .take(6)
+        .map(ai_audit_policy_feedback_from_entry)
+        .collect::<Vec<_>>();
 
     let sampled_events = result.items.len() as u32;
     let mut recent_events = Vec::new();
@@ -487,6 +494,7 @@ async fn build_ai_audit_summary(
                 6,
             ),
         },
+        recent_policy_feedback,
         recent_events,
     })
 }
@@ -1050,6 +1058,7 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             sampled_events: summary.sampled_events,
             included_recent_events: summary.recent_events.len() as u32,
             raw_samples_included: true,
+            recent_policy_feedback_count: summary.recent_policy_feedback.len() as u32,
         },
         findings,
         recommendations,
@@ -1203,6 +1212,30 @@ fn top_effect_object(effect: &crate::storage::AiTempPolicyEffectStats) -> (Optio
         .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
         .map(|(key, value)| (Some(key.clone()), *value))
         .unwrap_or((effect.last_matched_value.clone(), 0))
+}
+
+fn ai_audit_policy_feedback_from_entry(
+    value: crate::storage::AiTempPolicyEntry,
+) -> AiAuditPolicyFeedbackResponse {
+    let effect =
+        serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&value.effect_json)
+            .unwrap_or_default();
+    let (action_status, action_reason, _) =
+        classify_ai_temp_policy_action(value.action.as_str(), value.hit_count, None, None, None);
+    let (primary_object, primary_object_hits) = top_effect_object(&effect);
+    AiAuditPolicyFeedbackResponse {
+        policy_key: value.policy_key,
+        title: value.title,
+        action: value.action,
+        scope_type: value.scope_type,
+        scope_value: value.scope_value,
+        action_status,
+        action_reason,
+        primary_object,
+        primary_object_hits,
+        hit_count: value.hit_count,
+        updated_at: value.updated_at,
+    }
 }
 
 fn classify_ai_temp_policy_action(
@@ -1373,6 +1406,7 @@ mod tests {
             top_routes: Vec::new(),
             top_hosts: Vec::new(),
             safeline_correlation: AiAuditSafeLineCorrelationResponse::default(),
+            recent_policy_feedback: Vec::new(),
             recent_events: Vec::new(),
         }
     }

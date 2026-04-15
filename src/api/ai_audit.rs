@@ -435,6 +435,7 @@ fn build_provider_input(
         "top_routes": summary.top_routes,
         "top_hosts": summary.top_hosts,
         "safeline_correlation": summary.safeline_correlation,
+        "recent_policy_feedback": summary.recent_policy_feedback,
         "recent_events": if include_raw_event_samples {
             serde_json::to_value(&summary.recent_events).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
         } else {
@@ -456,6 +457,7 @@ fn build_input_profile(
             0
         },
         raw_samples_included,
+        recent_policy_feedback_count: summary.recent_policy_feedback.len() as u32,
     }
 }
 
@@ -825,6 +827,7 @@ mod tests {
             top_routes: Vec::new(),
             top_hosts: Vec::new(),
             safeline_correlation: AiAuditSafeLineCorrelationResponse::default(),
+            recent_policy_feedback: Vec::new(),
             recent_events: Vec::<AiAuditEventSampleResponse>::new(),
         }
     }
@@ -971,6 +974,7 @@ mod tests {
                     sampled_events: summary.sampled_events,
                     included_recent_events: 0,
                     raw_samples_included: false,
+                    recent_policy_feedback_count: summary.recent_policy_feedback.len() as u32,
                 },
                 findings: vec![],
                 recommendations: vec![],

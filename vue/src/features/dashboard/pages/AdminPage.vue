@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { fetchTrafficMap } from '@/shared/api/dashboard'
 import { fetchBlockedIps, fetchSecurityEvents } from '@/shared/api/events'
 import { fetchL4Config, fetchL4Stats } from '@/shared/api/l4'
@@ -169,6 +170,26 @@ const formatShortTime = (unix: number) =>
     minute: '2-digit',
     second: '2-digit',
   }).format(new Date(unix * 1000))
+const hotspotEventsRoute = (
+  sourceIp: string,
+  _route: string | null,
+  timeWindowStart: number,
+  timeWindowEnd: number,
+) => ({
+  name: 'admin-events',
+  query: {
+    action: 'summary',
+    source_ip: sourceIp,
+    created_from: String(timeWindowStart),
+    created_to: String(timeWindowEnd),
+  },
+})
+const summaryEventsRoute = {
+  name: 'admin-events',
+  query: {
+    action: 'summary',
+  },
+}
 
 const calcAutoState = (observed: number, target: number) => {
   if (!Number.isFinite(observed) || !Number.isFinite(target) || target <= 0) {
@@ -583,10 +604,18 @@ onMounted(() => {
                 v-if="storageInsights.hotspot_sources.length"
                 class="mt-3 space-y-2"
               >
-                <div
+                <RouterLink
                   v-for="hotspot in storageInsights.hotspot_sources"
                   :key="`${hotspot.source_ip}-${hotspot.action}-${hotspot.route}-${hotspot.time_window_start}`"
-                  class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                  :to="
+                    hotspotEventsRoute(
+                      hotspot.source_ip,
+                      hotspot.route,
+                      hotspot.time_window_start,
+                      hotspot.time_window_end,
+                    )
+                  "
+                  class="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-blue-300 hover:bg-blue-50/60"
                 >
                   <div class="flex items-center justify-between gap-3">
                     <p class="font-medium text-stone-900">
@@ -601,14 +630,17 @@ onMounted(() => {
                     {{ formatShortTime(hotspot.time_window_start) }} -
                     {{ formatShortTime(hotspot.time_window_end) }}
                   </p>
-                </div>
+                </RouterLink>
               </div>
-              <p
-                v-else
-                class="mt-3 text-xs leading-5 text-slate-500"
-              >
+              <div v-else class="mt-3 text-xs leading-5 text-slate-500">
                 当前没有活跃的热点聚合，低价值事件仍以常态方式记录。
-              </p>
+              </div>
+              <RouterLink
+                :to="summaryEventsRoute"
+                class="mt-3 inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 transition hover:border-blue-300 hover:text-blue-700"
+              >
+                查看全部摘要事件
+              </RouterLink>
             </div>
 
             <div class="rounded-xl border border-slate-200 p-4">

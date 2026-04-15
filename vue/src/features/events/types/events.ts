@@ -37,6 +37,19 @@ export interface SecurityEventDecisionSummary {
   labels: string[]
 }
 
+export interface StoragePressureSummaryDetails {
+  mode: string
+  action: string | null
+  original_reason: string | null
+  count: number
+  source_scope: string | null
+  route: string | null
+  time_window_start: number | null
+  time_window_end: number | null
+  first_created_at: number | null
+  last_created_at: number | null
+}
+
 export interface SecurityEventsResponse {
   total: number
   limit: number

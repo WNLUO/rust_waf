@@ -3,7 +3,11 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { fetchSecurityEvents } from '@/shared/api/events'
 import { syncSafeLineEvents } from '@/shared/api/safeline'
-import type { SecurityEventItem, SecurityEventsResponse } from '@/shared/types'
+import type {
+  SecurityEventItem,
+  SecurityEventsResponse,
+  StoragePressureSummaryDetails,
+} from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import { useFormatters } from '@/shared/composables/useFormatters'
@@ -28,6 +32,7 @@ const currentPage = ref(1)
 const previewTitle = ref('')
 const previewContent = ref('')
 const pendingRealtimeCount = ref(0)
+const syncingFiltersFromRoute = ref(false)
 const realtimeState = useAdminRealtimeState()
 const eventsPayload = ref<SecurityEventsResponse>({
   total: 0,
@@ -343,6 +348,9 @@ const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
 
 const eventActionLabel = (action: string) => {
   const normalized = action.trim().toLowerCase()
+  if (normalized === 'summary') {
+    return '摘要'
+  }
   if (normalized in safeLineActionMap) {
     return safeLineActionMap[normalized]
   }
@@ -356,6 +364,7 @@ const eventActionBadgeType = (action: string) => {
   const normalized = action.trim().toLowerCase()
   if (normalized === '1' || normalized === 'block') return 'error'
   if (normalized === 'allow') return 'success'
+  if (normalized === 'summary') return 'warning'
   if (normalized === '0' || normalized === 'alert' || normalized === 'log') {
     return 'warning'
   }
@@ -433,6 +442,101 @@ const eventPrimarySignalLabel = (event: SecurityEventItem) => {
 const eventLabelsPreview = (event: SecurityEventItem) =>
   (event.decision_summary?.labels || []).slice(0, 3)
 
+const parseStorageSummaryDetails = (
+  event: SecurityEventItem,
+): StoragePressureSummaryDetails | null => {
+  if (event.action.toLowerCase() !== 'summary' || !event.details_json) return null
+  try {
+    const payload = JSON.parse(event.details_json) as {
+      storage_pressure?: Partial<StoragePressureSummaryDetails>
+    }
+    const summary = payload.storage_pressure
+    if (!summary || summary.mode !== 'aggregated') return null
+    return {
+      mode: String(summary.mode || 'aggregated'),
+      action:
+        typeof summary.action === 'string' && summary.action.trim()
+          ? summary.action.trim()
+          : null,
+      original_reason:
+        typeof summary.original_reason === 'string' && summary.original_reason.trim()
+          ? summary.original_reason.trim()
+          : null,
+      count: Number(summary.count || 0),
+      source_scope:
+        typeof summary.source_scope === 'string' && summary.source_scope.trim()
+          ? summary.source_scope.trim()
+          : null,
+      route:
+        typeof summary.route === 'string' && summary.route.trim()
+          ? summary.route.trim()
+          : null,
+      time_window_start:
+        typeof summary.time_window_start === 'number'
+          ? summary.time_window_start
+          : null,
+      time_window_end:
+        typeof summary.time_window_end === 'number' ? summary.time_window_end : null,
+      first_created_at:
+        typeof summary.first_created_at === 'number'
+          ? summary.first_created_at
+          : null,
+      last_created_at:
+        typeof summary.last_created_at === 'number' ? summary.last_created_at : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+const isStorageSummaryEvent = (event: SecurityEventItem) =>
+  parseStorageSummaryDetails(event) !== null
+
+const storageSummaryScopeLabel = (event: SecurityEventItem) => {
+  const details = parseStorageSummaryDetails(event)
+  if (!details?.source_scope) return ''
+  return details.source_scope === 'long_tail' ? '长尾汇总' : '热点摘要'
+}
+
+const storageSummaryCountLabel = (event: SecurityEventItem) => {
+  const details = parseStorageSummaryDetails(event)
+  if (!details || !details.count) return ''
+  return `${details.count} 次`
+}
+
+const storageSummaryWindowLabel = (event: SecurityEventItem) => {
+  const details = parseStorageSummaryDetails(event)
+  if (!details?.time_window_start || !details?.time_window_end) return ''
+  return `${formatTimestamp(details.time_window_start)} - ${formatTimestamp(details.time_window_end)}`
+}
+
+const storageSummaryRouteLabel = (event: SecurityEventItem) =>
+  parseStorageSummaryDetails(event)?.route || ''
+
+const openStorageSummaryPreview = (event: SecurityEventItem) => {
+  const details = parseStorageSummaryDetails(event)
+  if (!details) return
+  openPreview(
+    '攻击摘要',
+    JSON.stringify(
+      {
+        source_ip: event.source_ip,
+        action: details.action,
+        source_scope: details.source_scope,
+        count: details.count,
+        route: details.route,
+        time_window_start: details.time_window_start,
+        time_window_end: details.time_window_end,
+        original_reason: details.original_reason,
+        first_created_at: details.first_created_at,
+        last_created_at: details.last_created_at,
+      },
+      null,
+      2,
+    ),
+  )
+}
+
 const parseEventDetails = (event: SecurityEventItem) => {
   if (!event.details_json) return null
   try {
@@ -490,7 +594,21 @@ const goToPage = (page: number) => {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
 }
 
+const resetRouteDrivenFilters = () => {
+  eventsFilters.source_ip = ''
+  eventsFilters.action = 'all'
+  eventsFilters.identity_state = 'all'
+  eventsFilters.primary_signal = ''
+  eventsFilters.labels = ''
+  eventsFilters.blocked_only = false
+  eventsFilters.created_from = ''
+  eventsFilters.created_to = ''
+  eventsFilters.sort_by = 'created_at'
+  eventsFilters.sort_direction = 'desc'
+}
+
 const applyFiltersFromRouteQuery = () => {
+  resetRouteDrivenFilters()
   const query = route.query
   const getValue = (key: string) => {
     const value = query[key]
@@ -501,6 +619,17 @@ const applyFiltersFromRouteQuery = () => {
   const sourceIp = getValue('source_ip')
   if (typeof sourceIp === 'string' && sourceIp.trim()) {
     eventsFilters.source_ip = sourceIp.trim()
+  }
+
+  const action = getValue('action')
+  if (
+    action === 'block' ||
+    action === 'allow' ||
+    action === 'alert' ||
+    action === 'log' ||
+    action === 'summary'
+  ) {
+    eventsFilters.action = action
   }
 
   const identityState = getValue('identity_state')
@@ -582,9 +711,23 @@ onMounted(async () => {
 })
 
 watch(
+  () => route.query,
+  () => {
+    syncingFiltersFromRoute.value = true
+    applyFiltersFromRouteQuery()
+    syncingFiltersFromRoute.value = false
+    if (!filtersReady.value) return
+    currentPage.value = 1
+    pendingRealtimeCount.value = 0
+    loadEvents()
+  },
+)
+
+watch(
   () => ({ ...eventsFilters }),
   () => {
     if (!filtersReady.value) return
+    if (syncingFiltersFromRoute.value) return
     currentPage.value = 1
     pendingRealtimeCount.value = 0
     loadEvents()
@@ -720,6 +863,9 @@ watch(currentPage, () => {
                 v-for="event in eventsPayload.events"
                 :key="event.id"
                 class="border-t border-slate-200 align-middle text-slate-800"
+                :class="{
+                  'bg-amber-50/40': isStorageSummaryEvent(event),
+                }"
               >
                 <td class="px-3 py-2">
                   <div class="space-y-1 text-center">
@@ -733,6 +879,12 @@ watch(currentPage, () => {
                     <StatusBadge
                       :text="layerLabel(event.layer)"
                       :type="event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'"
+                      compact
+                    />
+                    <StatusBadge
+                      v-if="isStorageSummaryEvent(event)"
+                      :text="storageSummaryScopeLabel(event)"
+                      type="warning"
                       compact
                     />
                     <StatusBadge
@@ -755,6 +907,12 @@ watch(currentPage, () => {
                       {{ event.source_ip }}
                     </div>
                     <div
+                      v-if="isStorageSummaryEvent(event)"
+                      class="text-[11px] text-amber-700"
+                    >
+                      {{ storageSummaryCountLabel(event) }}
+                    </div>
+                    <div
                       v-if="eventIdentityStateLabel(event)"
                       class="text-[11px] text-slate-500"
                     >
@@ -765,8 +923,13 @@ watch(currentPage, () => {
                 <td class="px-3 py-2">
                   <div class="space-y-1 text-center">
                     <div class="font-mono text-xs text-slate-600">
-                      {{ event.protocol }}
-                      <span v-if="event.http_version"> / {{ event.http_version }}</span>
+                      <template v-if="isStorageSummaryEvent(event)">
+                        {{ storageSummaryWindowLabel(event) || event.protocol }}
+                      </template>
+                      <template v-else>
+                        {{ event.protocol }}
+                        <span v-if="event.http_version"> / {{ event.http_version }}</span>
+                      </template>
                     </div>
                     <div
                       v-if="eventPrimarySignalLabel(event)"
@@ -787,6 +950,14 @@ watch(currentPage, () => {
                           {{ eventReasonPreview(event) }}
                         </div>
                       </div>
+                      <button
+                        v-if="isStorageSummaryEvent(event)"
+                        class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-2 text-xs text-amber-700 hover:bg-amber-100"
+                        title="查看攻击摘要"
+                        @click="openStorageSummaryPreview(event)"
+                      >
+                        摘要
+                      </button>
                       <button
                         v-if="isReasonTruncated(event)"
                         class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
@@ -838,12 +1009,16 @@ watch(currentPage, () => {
                   <div class="flex items-center justify-center gap-2">
                     <div
                       class="event-path-text font-mono text-xs text-slate-700"
-                      :title="eventPathText(event)"
+                      :title="isStorageSummaryEvent(event) ? storageSummaryRouteLabel(event) || eventPathText(event) : eventPathText(event)"
                     >
-                      {{ eventPathPreview(event) }}
+                      {{
+                        isStorageSummaryEvent(event)
+                          ? storageSummaryRouteLabel(event) || eventPathPreview(event)
+                          : eventPathPreview(event)
+                      }}
                     </div>
                     <button
-                      v-if="isPathTruncated(event)"
+                      v-if="!isStorageSummaryEvent(event) && isPathTruncated(event)"
                       class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
                       title="查看完整路径"
                       @click="openPreview('完整路径', eventPathText(event))"

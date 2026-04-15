@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use log::debug;
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -21,6 +21,7 @@ pub struct L7CcGuard {
     host_buckets: DashMap<String, SlidingWindowCounter>,
     route_buckets: DashMap<String, SlidingWindowCounter>,
     hot_path_buckets: DashMap<String, SlidingWindowCounter>,
+    hot_path_client_buckets: DashMap<String, DistinctSlidingWindowCounter>,
     ip_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
     host_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
     route_weighted_buckets: DashMap<String, WeightedSlidingWindowCounter>,
@@ -46,6 +47,13 @@ struct WeightedSlidingWindowCounter {
 #[derive(Debug)]
 struct PageLoadWindowState {
     expires_at_unix: AtomicI64,
+    last_seen_unix: AtomicI64,
+}
+
+#[derive(Debug)]
+struct DistinctSlidingWindowCounter {
+    events: Mutex<VecDeque<(Instant, String)>>,
+    counts: Mutex<HashMap<String, u32>>,
     last_seen_unix: AtomicI64,
 }
 
@@ -84,6 +92,7 @@ impl L7CcGuard {
             host_buckets: DashMap::new(),
             route_buckets: DashMap::new(),
             hot_path_buckets: DashMap::new(),
+            hot_path_client_buckets: DashMap::new(),
             ip_weighted_buckets: DashMap::new(),
             host_weighted_buckets: DashMap::new(),
             route_weighted_buckets: DashMap::new(),
@@ -171,6 +180,14 @@ impl L7CcGuard {
             unix_now,
             window,
         );
+        let hot_path_client_count = self.observe_distinct(
+            &self.hot_path_client_buckets,
+            format!("{host}|{route_path}"),
+            client_ip.to_string(),
+            now,
+            unix_now,
+            window,
+        );
 
         let ip_weighted_points = self.observe_weighted(
             &self.ip_weighted_buckets,
@@ -232,6 +249,10 @@ impl L7CcGuard {
             "l7.cc.hot_path_count".to_string(),
             hot_path_count.to_string(),
         );
+        request.add_metadata(
+            "l7.cc.hot_path_clients".to_string(),
+            hot_path_client_count.to_string(),
+        );
         request.add_metadata("l7.cc.ip_weighted".to_string(), ip_effective.to_string());
         request.add_metadata(
             "l7.cc.host_weighted".to_string(),
@@ -274,13 +295,22 @@ impl L7CcGuard {
             ip_block_threshold.saturating_mul(u32::from(config.hard_ip_block_multiplier));
         let hard_hot_path_block_threshold = hot_path_block_threshold
             .saturating_mul(u32::from(config.hard_hot_path_block_multiplier));
+        let global_hot_path_client_block_threshold =
+            global_hot_path_client_block_threshold(&config);
+        let global_hot_path_effective_block_threshold =
+            global_hot_path_effective_block_threshold(&config);
         let hard_block = route_count >= hard_route_block_threshold
             || host_count >= hard_host_block_threshold
             || ip_count >= hard_ip_block_threshold
             || hot_path_count >= hard_hot_path_block_threshold;
+        let global_hot_path_pressure_block =
+            matches!(request_kind, RequestKind::ApiLike | RequestKind::Other)
+                && hot_path_client_count >= global_hot_path_client_block_threshold
+                && hot_path_effective >= global_hot_path_effective_block_threshold;
 
         if !client_identity_unresolved
             && (hard_block
+                || global_hot_path_pressure_block
                 || (!low_risk_subresource
                     && (route_effective >= route_block_threshold
                         || host_effective >= host_block_threshold
@@ -323,11 +353,20 @@ impl L7CcGuard {
         let hot_path_challenge_threshold = config
             .hot_path_challenge_threshold
             .saturating_mul(challenge_multiplier);
+        let global_hot_path_client_challenge_threshold =
+            global_hot_path_client_challenge_threshold(&config);
+        let global_hot_path_effective_challenge_threshold =
+            global_hot_path_effective_challenge_threshold(&config);
+        let global_hot_path_pressure_challenge =
+            matches!(request_kind, RequestKind::ApiLike | RequestKind::Other)
+                && hot_path_client_count >= global_hot_path_client_challenge_threshold
+                && hot_path_effective >= global_hot_path_effective_challenge_threshold;
 
         if !client_identity_unresolved
             && !verified
             && !low_risk_subresource
-            && (route_effective >= route_challenge_threshold
+            && (global_hot_path_pressure_challenge
+                || route_effective >= route_challenge_threshold
                 || host_effective >= host_challenge_threshold
                 || ip_effective >= ip_challenge_threshold
                 || (hot_path_effective >= hot_path_challenge_threshold
@@ -526,6 +565,21 @@ impl L7CcGuard {
         entry.observe(now, unix_now, window, weight_percent)
     }
 
+    fn observe_distinct(
+        &self,
+        map: &DashMap<String, DistinctSlidingWindowCounter>,
+        key: String,
+        value: String,
+        now: Instant,
+        unix_now: i64,
+        window: Duration,
+    ) -> u32 {
+        let mut entry = map
+            .entry(key)
+            .or_insert_with(DistinctSlidingWindowCounter::new);
+        entry.observe(value, now, unix_now, window)
+    }
+
     fn request_weight_percent(
         &self,
         kind: RequestKind,
@@ -612,6 +666,7 @@ impl L7CcGuard {
             self.host_buckets.len(),
             self.route_buckets.len(),
             self.hot_path_buckets.len(),
+            self.hot_path_client_buckets.len(),
             self.ip_weighted_buckets.len(),
             self.host_weighted_buckets.len(),
             self.route_weighted_buckets.len(),
@@ -633,6 +688,7 @@ impl L7CcGuard {
         cleanup_map(&self.host_buckets, stale_before, cleanup_batch);
         cleanup_map(&self.route_buckets, stale_before, cleanup_batch);
         cleanup_map(&self.hot_path_buckets, stale_before, cleanup_batch);
+        cleanup_distinct_map(&self.hot_path_client_buckets, stale_before, cleanup_batch);
         cleanup_weighted_map(&self.ip_weighted_buckets, stale_before, cleanup_batch);
         cleanup_weighted_map(&self.host_weighted_buckets, stale_before, cleanup_batch);
         cleanup_weighted_map(&self.route_weighted_buckets, stale_before, cleanup_batch);
@@ -734,6 +790,45 @@ impl PageLoadWindowState {
     }
 }
 
+impl DistinctSlidingWindowCounter {
+    fn new() -> Self {
+        Self {
+            events: Mutex::new(VecDeque::new()),
+            counts: Mutex::new(HashMap::new()),
+            last_seen_unix: AtomicI64::new(unix_timestamp()),
+        }
+    }
+
+    fn observe(&mut self, value: String, now: Instant, unix_now: i64, window: Duration) -> u32 {
+        let mut events = self
+            .events
+            .lock()
+            .expect("cc distinct bucket lock poisoned");
+        let mut counts = self
+            .counts
+            .lock()
+            .expect("cc distinct counts lock poisoned");
+        while let Some((front, _)) = events.front() {
+            if now.duration_since(*front) > window {
+                if let Some((_, expired)) = events.pop_front() {
+                    if let Some(count) = counts.get_mut(&expired) {
+                        *count = count.saturating_sub(1);
+                        if *count == 0 {
+                            counts.remove(&expired);
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        events.push_back((now, value.clone()));
+        *counts.entry(value).or_insert(0) += 1;
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        counts.len().min(u32::MAX as usize) as u32
+    }
+}
+
 fn weighted_points_to_requests(points: u32) -> u32 {
     if points == 0 {
         return 0;
@@ -772,6 +867,23 @@ fn cleanup_map(map: &DashMap<String, SlidingWindowCounter>, stale_before: i64, l
 
 fn cleanup_weighted_map(
     map: &DashMap<String, WeightedSlidingWindowCounter>,
+    stale_before: i64,
+    limit: usize,
+) {
+    let keys = map
+        .iter()
+        .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
+        .take(limit)
+        .map(|entry| entry.key().clone())
+        .collect::<Vec<_>>();
+
+    for key in keys {
+        map.remove(&key);
+    }
+}
+
+fn cleanup_distinct_map(
+    map: &DashMap<String, DistinctSlidingWindowCounter>,
     stale_before: i64,
     limit: usize,
 ) {
@@ -972,6 +1084,30 @@ fn challenge_mode(request: &UnifiedHttpRequest, route_path: &str) -> HtmlRespons
     } else {
         HtmlResponseMode::TextOnly
     }
+}
+
+fn global_hot_path_client_challenge_threshold(config: &CcDefenseConfig) -> u32 {
+    config.route_challenge_threshold.saturating_div(2).max(4)
+}
+
+fn global_hot_path_client_block_threshold(config: &CcDefenseConfig) -> u32 {
+    config
+        .route_block_threshold
+        .saturating_div(2)
+        .max(global_hot_path_client_challenge_threshold(config).saturating_mul(2))
+        .max(8)
+}
+
+fn global_hot_path_effective_challenge_threshold(config: &CcDefenseConfig) -> u32 {
+    config.route_challenge_threshold.saturating_div(2).max(4)
+}
+
+fn global_hot_path_effective_block_threshold(config: &CcDefenseConfig) -> u32 {
+    config
+        .route_block_threshold
+        .saturating_div(2)
+        .max(global_hot_path_effective_challenge_threshold(config).saturating_mul(2))
+        .max(8)
 }
 
 fn request_path(uri: &str) -> &str {
@@ -1200,6 +1336,64 @@ mod tests {
                 .get_metadata("l7.cc.request_kind")
                 .map(String::as_str),
             Some("api")
+        );
+    }
+
+    #[tokio::test]
+    async fn distributed_api_requests_trigger_global_hot_path_pressure() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 8,
+            route_block_threshold: 16,
+            host_challenge_threshold: 100,
+            host_block_threshold: 200,
+            ip_challenge_threshold: 100,
+            ip_block_threshold: 200,
+            hot_path_challenge_threshold: 500,
+            hot_path_block_threshold: 1_000,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        for idx in 0..3 {
+            let mut request = UnifiedHttpRequest::new(
+                HttpVersion::Http1_1,
+                "POST".to_string(),
+                "/api/checkout".to_string(),
+            );
+            request.set_client_ip(format!("203.0.113.{}", idx + 10));
+            request.add_header("host".to_string(), "example.com".to_string());
+            request.add_header("accept".to_string(), "application/json".to_string());
+            assert!(guard.inspect_request(&mut request).await.is_none());
+            assert_eq!(
+                request
+                    .get_metadata("l7.cc.hot_path_clients")
+                    .map(String::as_str),
+                Some(match idx {
+                    0 => "1",
+                    1 => "2",
+                    _ => "3",
+                })
+            );
+        }
+
+        let mut fourth = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/checkout".to_string(),
+        );
+        fourth.set_client_ip("203.0.113.20".to_string());
+        fourth.add_header("host".to_string(), "example.com".to_string());
+        fourth.add_header("accept".to_string(), "application/json".to_string());
+        let result = guard.inspect_request(&mut fourth).await;
+        assert!(
+            result.is_some(),
+            "distributed pressure should trigger challenge"
+        );
+        assert_eq!(
+            fourth
+                .get_metadata("l7.cc.hot_path_clients")
+                .map(String::as_str),
+            Some("4")
         );
     }
 

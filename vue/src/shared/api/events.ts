@@ -6,6 +6,7 @@ import type {
   BlockedIpsCleanupExpiredResponse,
   BlockedIpsQuery,
   BlockedIpsResponse,
+  BehaviorProfilesResponse,
   EventsQuery,
   SecurityEventsResponse,
   WriteStatusResponse,
@@ -20,6 +21,10 @@ export function unblockIp(id: number) {
 
 export function fetchSecurityEvents(query?: EventsQuery) {
   return apiRequest<SecurityEventsResponse>(`/events${buildQuery(query)}`)
+}
+
+export function fetchBehaviorProfiles() {
+  return apiRequest<BehaviorProfilesResponse>('/behavior/profiles')
 }
 
 export function fetchBlockedIps(query?: BlockedIpsQuery) {

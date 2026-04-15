@@ -31,6 +31,30 @@ export interface SecurityEventsResponse {
   events: SecurityEventItem[]
 }
 
+export interface BehaviorProfileItem {
+  identity: string
+  latest_seen_at: number
+  score: number
+  dominant_route: string | null
+  focused_document_route: string | null
+  distinct_routes: number
+  repeated_ratio: number
+  document_repeated_ratio: number
+  interval_jitter_ms: number | null
+  document_requests: number
+  non_document_requests: number
+  challenge_count_window: number
+  session_span_secs: number
+  flags: string[]
+  latest_route: string
+  latest_kind: string
+}
+
+export interface BehaviorProfilesResponse {
+  total: number
+  profiles: BehaviorProfileItem[]
+}
+
 export interface EventsQuery extends Record<string, ApiQueryValue> {
   limit?: number
   offset?: number

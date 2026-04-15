@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import { fetchSecurityEvents } from '@/shared/api/events'
+import { fetchBehaviorProfiles, fetchSecurityEvents } from '@/shared/api/events'
 import { fetchMetrics } from '@/shared/api/system'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
@@ -12,7 +12,11 @@ import {
   useAdminRealtimeState,
   useAdminRealtimeTopic,
 } from '@/shared/realtime/adminRealtime'
-import type { MetricsResponse, SecurityEventItem } from '@/shared/types'
+import type {
+  BehaviorProfileItem,
+  MetricsResponse,
+  SecurityEventItem,
+} from '@/shared/types'
 import {
   Activity,
   Ban,
@@ -95,7 +99,9 @@ const error = ref('')
 const lastUpdated = ref<number | null>(null)
 const metrics = ref<MetricsResponse | null>(null)
 const behaviorEvents = ref<BehaviorEventView[]>([])
+const activeProfiles = ref<BehaviorProfileItem[]>([])
 const selectedProfileKey = ref('')
+let refreshTimer: number | null = null
 
 useFlashMessages({
   error,
@@ -209,59 +215,81 @@ function toBehaviorEvent(event: SecurityEventItem): BehaviorEventView | null {
   }
 }
 
-const profiles = computed<BehaviorProfileView[]>(() => {
-  const groups = new Map<string, BehaviorEventView[]>()
+const eventSummaryByIdentity = computed(() => {
+  const summary = new Map<
+    string,
+    {
+      eventCount: number
+      challengeCount: number
+      blockCount: number
+      latestAction: BehaviorEventView['action']
+      latestSeenAt: number
+      latestUri: string
+      sourceIp: string
+    }
+  >()
   for (const event of behaviorEvents.value) {
-    const key = event.identity || `ip:${event.sourceIp}`
-    const bucket = groups.get(key) ?? []
-    bucket.push(event)
-    groups.set(key, bucket)
+    const current = summary.get(event.identity)
+    if (!current) {
+      summary.set(event.identity, {
+        eventCount: 1,
+        challengeCount: event.action === 'challenge' ? 1 : 0,
+        blockCount: event.action === 'block' ? 1 : 0,
+        latestAction: event.action,
+        latestSeenAt: event.createdAt,
+        latestUri: event.uri,
+        sourceIp: event.sourceIp,
+      })
+      continue
+    }
+    current.eventCount += 1
+    if (event.action === 'challenge') current.challengeCount += 1
+    if (event.action === 'block') current.blockCount += 1
+    if (event.createdAt >= current.latestSeenAt) {
+      current.latestSeenAt = event.createdAt
+      current.latestAction = event.action
+      current.latestUri = event.uri
+      current.sourceIp = event.sourceIp
+    }
   }
+  return summary
+})
 
-  return Array.from(groups.entries())
-    .map(([key, events]) => {
-      const sorted = [...events].sort((left, right) => right.createdAt - left.createdAt)
-      const latest = sorted[0]
-      const challengeCount = events.filter((item) => item.action === 'challenge').length
-      const blockCount = events.filter((item) => item.action === 'block').length
-      const scoreTotal = events.reduce((sum, item) => sum + item.score, 0)
-      const maxRepeatedRatio = Math.max(...events.map((item) => item.repeatedRatio))
-      const maxDocumentRepeatedRatio = Math.max(
-        ...events.map((item) => item.documentRepeatedRatio),
-      )
-      const maxScore = Math.max(...events.map((item) => item.score))
-      const flags = Array.from(new Set(events.flatMap((item) => item.flags)))
-
-      return {
-        key,
-        identity: key,
-        sourceIp: latest.sourceIp,
-        latestAction: latest.action,
-        latestSeenAt: latest.createdAt,
-        latestUri: latest.uri,
-        dominantRoute: latest.dominantRoute,
-        eventCount: events.length,
-        challengeCount,
-        blockCount,
-        maxScore,
-        avgScore: Number((scoreTotal / events.length).toFixed(1)),
-        maxRepeatedRatio,
-        maxDocumentRepeatedRatio,
-        distinctRoutes: latest.distinctRoutes,
-        intervalJitterMs: latest.intervalJitterMs,
-        documentRequests: latest.documentRequests,
-        nonDocumentRequests: latest.nonDocumentRequests,
-        challengeCountWindow: latest.challengeCountWindow,
-        focusedDocumentRoute: latest.dominantRoute,
-        sessionSpanSecs: latest.sessionSpanSecs,
-        flags,
-      }
-    })
-    .sort((left, right) => {
-      if (right.maxScore !== left.maxScore) return right.maxScore - left.maxScore
-      if (right.blockCount !== left.blockCount) return right.blockCount - left.blockCount
-      return right.latestSeenAt - left.latestSeenAt
-    })
+const profiles = computed<BehaviorProfileView[]>(() => {
+  return activeProfiles.value.map((profile) => {
+    const eventSummary = eventSummaryByIdentity.value.get(profile.identity)
+    const sourceIpMatch = profile.identity.match(
+      /(?:ipua:|cookie:|fp:)?([0-9a-f.:]+)(?:\||$)/i,
+    )
+    return {
+      key: profile.identity,
+      identity: profile.identity,
+      sourceIp: eventSummary?.sourceIp || sourceIpMatch?.[1] || '-',
+      latestAction: eventSummary?.latestAction || 'other',
+      latestSeenAt: profile.latest_seen_at,
+      latestUri: eventSummary?.latestUri || profile.latest_route,
+      dominantRoute: profile.dominant_route || '-',
+      eventCount: eventSummary?.eventCount || 0,
+      challengeCount: eventSummary?.challengeCount || 0,
+      blockCount: eventSummary?.blockCount || 0,
+      maxScore: profile.score,
+      avgScore: profile.score,
+      maxRepeatedRatio: profile.repeated_ratio,
+      maxDocumentRepeatedRatio: profile.document_repeated_ratio,
+      distinctRoutes: profile.distinct_routes,
+      intervalJitterMs: profile.interval_jitter_ms,
+      documentRequests: profile.document_requests,
+      nonDocumentRequests: profile.non_document_requests,
+      challengeCountWindow: profile.challenge_count_window,
+      focusedDocumentRoute: profile.focused_document_route || profile.dominant_route || '-',
+      sessionSpanSecs: profile.session_span_secs,
+      flags: profile.flags,
+    }
+  })
+  .sort((left, right) => {
+    if (right.maxScore !== left.maxScore) return right.maxScore - left.maxScore
+    return right.latestSeenAt - left.latestSeenAt
+  })
 })
 
 const selectedProfile = computed(
@@ -328,8 +356,9 @@ async function loadPage(showLoader = false) {
   if (showLoader) loading.value = true
   refreshing.value = true
   try {
-    const [metricsPayload, eventsPayload] = await Promise.all([
+    const [metricsPayload, profilesPayload, eventsPayload] = await Promise.all([
       fetchMetrics(),
+      fetchBehaviorProfiles(),
       fetchSecurityEvents({
         limit: MAX_EVENTS,
         offset: 0,
@@ -340,15 +369,16 @@ async function loadPage(showLoader = false) {
       }),
     ])
     metrics.value = metricsPayload
+    activeProfiles.value = profilesPayload.profiles
     behaviorEvents.value = eventsPayload.events
       .map(toBehaviorEvent)
       .filter((item): item is BehaviorEventView => item !== null)
       .sort((left, right) => right.createdAt - left.createdAt)
     if (
       !selectedProfileKey.value ||
-      !behaviorEvents.value.some((item) => item.identity === selectedProfileKey.value)
+      !activeProfiles.value.some((item) => item.identity === selectedProfileKey.value)
     ) {
-      selectedProfileKey.value = behaviorEvents.value[0]?.identity || ''
+      selectedProfileKey.value = activeProfiles.value[0]?.identity || ''
     }
     lastUpdated.value = Date.now()
   } catch (err) {
@@ -384,6 +414,16 @@ useAdminRealtimeTopic<{ events: SecurityEventItem[] }>('recent_events', (payload
 
 onMounted(() => {
   loadPage(true)
+  refreshTimer = window.setInterval(() => {
+    void loadPage()
+  }, 5000)
+})
+
+onBeforeUnmount(() => {
+  if (refreshTimer !== null) {
+    window.clearInterval(refreshTimer)
+    refreshTimer = null
+  }
 })
 </script>
 
@@ -401,10 +441,10 @@ onMounted(() => {
             </div>
             <div class="space-y-2">
               <h1 class="text-2xl font-semibold tracking-tight text-slate-900">
-                看见“像真人但不正常”的会话
+                看见所有正在访问的用户画像
               </h1>
               <p class="max-w-3xl text-sm leading-6 text-slate-600">
-                这里展示的是行为风控层命中的会话画像，不只是 IP 限速。你可以看到重复率、主命中路径、页面联动缺失、机械节奏，以及它最终走到了 challenge 还是 block。
+                这里先展示最近活跃会话的实时画像，再用异常轨迹辅助判断哪些访问不自然。这样即使还没触发 challenge，你也能先看到自己当前访问的路径、节奏和分数。
               </p>
             </div>
           </div>
@@ -431,12 +471,12 @@ onMounted(() => {
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">
             <div>
-              <p class="text-sm text-slate-500">可疑身份</p>
+              <p class="text-sm text-slate-500">活跃身份</p>
               <p class="mt-2 text-3xl font-semibold text-slate-900">
                 {{ formatNumber(profiles.length) }}
               </p>
               <p class="mt-2 text-xs text-slate-500">
-                最近 {{ formatNumber(behaviorEvents.length) }} 条行为事件聚合
+                最近 5 分钟行为快照
               </p>
             </div>
             <div class="rounded-2xl bg-slate-100 p-3 text-slate-600">
@@ -499,8 +539,8 @@ onMounted(() => {
 
       <section class="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <CyberCard
-          title="可疑会话画像"
-          sub-title="按 identity 聚合最近命中的行为风控事件，优先展示风险更高的会话"
+          title="活跃会话画像"
+          sub-title="按 identity 展示最近活跃访问者，分数高的会排在前面，但正常访问也会出现"
         >
           <div v-if="loading" class="py-16 text-center text-sm text-slate-500">
             正在加载行为画像...
@@ -509,7 +549,7 @@ onMounted(() => {
             v-else-if="!profiles.length"
             class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-sm text-slate-500"
           >
-            还没有采集到行为风控事件。等你继续用 `curl` 或真实流量命中后，这里会自动出现画像。
+            还没有采集到活跃会话。等页面有访问进来，这里会自动出现画像。
           </div>
           <div v-else class="space-y-3">
             <button
@@ -586,7 +626,7 @@ onMounted(() => {
 
         <CyberCard
           title="画像详情"
-          sub-title="把行为风控打分拆成你能直接读懂的字段"
+          sub-title="把当前会话的活跃状态和异常线索拆成你能直接读懂的字段"
         >
           <div
             v-if="!selectedProfile"

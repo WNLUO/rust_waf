@@ -9,6 +9,32 @@ pub struct SecurityEventsResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct BehaviorProfilesResponse {
+    pub(crate) total: u64,
+    pub(crate) profiles: Vec<BehaviorProfileResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BehaviorProfileResponse {
+    pub(crate) identity: String,
+    pub(crate) latest_seen_at: i64,
+    pub(crate) score: u32,
+    pub(crate) dominant_route: Option<String>,
+    pub(crate) focused_document_route: Option<String>,
+    pub(crate) distinct_routes: usize,
+    pub(crate) repeated_ratio: u32,
+    pub(crate) document_repeated_ratio: u32,
+    pub(crate) interval_jitter_ms: Option<u64>,
+    pub(crate) document_requests: usize,
+    pub(crate) non_document_requests: usize,
+    pub(crate) challenge_count_window: usize,
+    pub(crate) session_span_secs: u64,
+    pub(crate) flags: Vec<String>,
+    pub(crate) latest_route: String,
+    pub(crate) latest_kind: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SecurityEventResponse {
     pub(crate) id: i64,
     pub(crate) layer: String,

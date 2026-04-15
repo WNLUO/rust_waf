@@ -6,7 +6,7 @@ use crate::config::L7Config;
 use crate::core::WafContext;
 use log::{debug, info};
 
-pub use behavior_guard::L7BehaviorGuard;
+pub use behavior_guard::{BehaviorProfileSnapshot, L7BehaviorGuard};
 pub use cc_guard::L7CcGuard;
 pub use slow_attack_guard::{SlowAttackGuard, SlowAttackKind, SlowAttackObservation};
 

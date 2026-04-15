@@ -24,6 +24,19 @@ pub(super) async fn list_security_events_handler(
     }))
 }
 
+pub(super) async fn list_behavior_profiles_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<BehaviorProfilesResponse>> {
+    let profiles = state.context.l7_behavior_guard().snapshot_profiles(256);
+    Ok(Json(BehaviorProfilesResponse {
+        total: profiles.len() as u64,
+        profiles: profiles
+            .into_iter()
+            .map(BehaviorProfileResponse::from)
+            .collect(),
+    }))
+}
+
 pub(super) async fn update_security_event_handler(
     State(state): State<ApiState>,
     Path(id): Path<i64>,

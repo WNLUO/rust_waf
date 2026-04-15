@@ -58,6 +58,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(events_handlers::list_security_events_handler),
         )
         .route(
+            "/behavior/profiles",
+            get(events_handlers::list_behavior_profiles_handler),
+        )
+        .route(
             "/events/:id",
             patch(events_handlers::update_security_event_handler),
         )

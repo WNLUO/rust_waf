@@ -22,6 +22,26 @@ pub struct L7BehaviorGuard {
     request_sequence: AtomicU64,
 }
 
+#[derive(Debug, Clone)]
+pub struct BehaviorProfileSnapshot {
+    pub identity: String,
+    pub latest_seen_unix: i64,
+    pub score: u32,
+    pub dominant_route: Option<String>,
+    pub focused_document_route: Option<String>,
+    pub distinct_routes: usize,
+    pub repeated_ratio_percent: u32,
+    pub document_repeated_ratio_percent: u32,
+    pub jitter_ms: Option<u64>,
+    pub document_requests: usize,
+    pub non_document_requests: usize,
+    pub recent_challenges: usize,
+    pub session_span_secs: u64,
+    pub flags: Vec<String>,
+    pub latest_route: String,
+    pub latest_kind: &'static str,
+}
+
 #[derive(Debug)]
 struct BehaviorWindow {
     samples: Mutex<VecDeque<RequestSample>>,
@@ -244,6 +264,31 @@ impl L7BehaviorGuard {
             entry.record_block(now, window);
         }
     }
+
+    pub fn snapshot_profiles(&self, limit: usize) -> Vec<BehaviorProfileSnapshot> {
+        let now = Instant::now();
+        let unix_now = unix_timestamp();
+        let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
+        let mut profiles = self
+            .buckets
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .value()
+                    .snapshot(entry.key().clone(), now, unix_now, window)
+            })
+            .collect::<Vec<_>>();
+        profiles.sort_by(|left, right| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| right.latest_seen_unix.cmp(&left.latest_seen_unix))
+        });
+        if limit > 0 && profiles.len() > limit {
+            profiles.truncate(limit);
+        }
+        profiles
+    }
 }
 
 impl BehaviorWindow {
@@ -283,124 +328,7 @@ impl BehaviorWindow {
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
         let recent_challenges = self.recent_challenges(now, window);
 
-        let mut route_counts: HashMap<&str, usize> = HashMap::new();
-        let mut document_route_counts: HashMap<&str, usize> = HashMap::new();
-        let mut api_requests = 0usize;
-        let mut document_requests = 0usize;
-        let mut non_document_requests = 0usize;
-        for sample in samples.iter() {
-            *route_counts.entry(sample.route.as_str()).or_insert(0) += 1;
-            if matches!(sample.kind, RequestKind::Document) {
-                document_requests += 1;
-                *document_route_counts
-                    .entry(sample.route.as_str())
-                    .or_insert(0) += 1;
-            } else if matches!(sample.kind, RequestKind::Api) {
-                api_requests += 1;
-                non_document_requests += 1;
-            } else {
-                non_document_requests += 1;
-            }
-        }
-        let total = samples.len().max(1);
-        let dominant = route_counts
-            .iter()
-            .max_by_key(|(_, count)| **count)
-            .map(|(route, count)| ((*route).to_string(), *count))
-            .unwrap_or_else(|| (route, 1));
-        let repeated_ratio_percent = ((dominant.1 * 100) / total) as u32;
-        let distinct_routes = route_counts.len();
-        let jitter_ms = interval_jitter_ms(&samples);
-        let document_dominant = document_route_counts
-            .iter()
-            .max_by_key(|(_, count)| **count)
-            .map(|(route, count)| ((*route).to_string(), *count));
-        let document_repeated_ratio_percent = if document_requests == 0 {
-            0
-        } else {
-            document_dominant
-                .as_ref()
-                .map(|(_, count)| ((*count * 100) / document_requests) as u32)
-                .unwrap_or(0)
-        };
-        let session_span_secs = samples
-            .front()
-            .map(|first| now.duration_since(first.at).as_secs())
-            .unwrap_or(0);
-
-        let mut score = 0u32;
-        let mut flags = Vec::new();
-        if total >= 8 && repeated_ratio_percent >= 85 {
-            score += 35;
-            flags.push("repeated_route_burst");
-        } else if total >= 6 && repeated_ratio_percent >= 70 {
-            score += 20;
-            flags.push("repeated_route_bias");
-        }
-        if total >= 10 && distinct_routes <= 2 {
-            score += 20;
-            flags.push("low_route_diversity");
-        } else if total >= 8 && distinct_routes <= 3 {
-            score += 10;
-            flags.push("narrow_navigation");
-        }
-        if document_requests >= 4 && non_document_requests == 0 {
-            score += 20;
-            flags.push("document_without_followups");
-        } else if document_requests >= 5
-            && non_document_requests.saturating_mul(2) < document_requests
-        {
-            score += 10;
-            flags.push("document_heavy");
-        }
-        if document_requests >= 5 && document_repeated_ratio_percent >= 80 {
-            score += 30;
-            flags.push("focused_document_reload");
-        } else if document_requests >= 4 && document_repeated_ratio_percent >= 65 {
-            score += 15;
-            flags.push("focused_document_loop");
-        }
-        if api_requests >= 5 && distinct_routes <= 2 {
-            score += 15;
-            flags.push("api_route_bias");
-        }
-        if is_high_value_route(dominant.0.as_str()) && dominant.1 >= 4 {
-            score += 15;
-            flags.push("high_value_route_bias");
-        }
-        if total >= 8
-            && session_span_secs >= 90
-            && repeated_ratio_percent >= 70
-            && distinct_routes <= 2
-        {
-            score += 20;
-            flags.push("low_and_slow");
-        }
-        if let Some(jitter_ms) = jitter_ms {
-            if total >= 6 && jitter_ms <= 250 {
-                score += 20;
-                flags.push("mechanical_intervals");
-            } else if total >= 6 && jitter_ms <= 500 {
-                score += 10;
-                flags.push("low_jitter");
-            }
-        }
-
-        BehaviorAssessment {
-            identity,
-            score: score.min(100),
-            dominant_route: Some(dominant.0),
-            distinct_routes,
-            repeated_ratio_percent,
-            document_repeated_ratio_percent,
-            focused_document_route: document_dominant.map(|(route, _)| route),
-            jitter_ms,
-            document_requests,
-            non_document_requests,
-            recent_challenges,
-            session_span_secs,
-            flags,
-        }
+        assess_samples(identity, &samples, now, recent_challenges)
     }
 
     fn recent_challenges(&self, now: Instant, window: Duration) -> usize {
@@ -446,6 +374,187 @@ impl BehaviorWindow {
             }
         }
         challenge_hits.clear();
+    }
+
+    fn snapshot(
+        &self,
+        identity: String,
+        now: Instant,
+        unix_now: i64,
+        window: Duration,
+    ) -> Option<BehaviorProfileSnapshot> {
+        let mut samples = self.samples.lock().expect("behavior window lock poisoned");
+        while let Some(front) = samples.front() {
+            if now.duration_since(front.at) > window || samples.len() > MAX_SAMPLES_PER_IDENTITY {
+                samples.pop_front();
+            } else {
+                break;
+            }
+        }
+        if samples.is_empty() {
+            return None;
+        }
+        let samples_snapshot = samples.iter().cloned().collect::<VecDeque<_>>();
+        drop(samples);
+
+        let assessment = assess_samples(
+            identity.clone(),
+            &samples_snapshot,
+            now,
+            self.recent_challenges(now, window),
+        );
+        let latest = samples_snapshot.back().cloned()?;
+        Some(BehaviorProfileSnapshot {
+            identity,
+            latest_seen_unix: unix_now,
+            score: assessment.score,
+            dominant_route: assessment.dominant_route,
+            focused_document_route: assessment.focused_document_route,
+            distinct_routes: assessment.distinct_routes,
+            repeated_ratio_percent: assessment.repeated_ratio_percent,
+            document_repeated_ratio_percent: assessment.document_repeated_ratio_percent,
+            jitter_ms: assessment.jitter_ms,
+            document_requests: assessment.document_requests,
+            non_document_requests: assessment.non_document_requests,
+            recent_challenges: assessment.recent_challenges,
+            session_span_secs: assessment.session_span_secs,
+            flags: assessment.flags.into_iter().map(str::to_string).collect(),
+            latest_route: latest.route,
+            latest_kind: latest.kind.as_str(),
+        })
+    }
+}
+
+impl RequestKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            RequestKind::Document => "document",
+            RequestKind::Static => "static",
+            RequestKind::Api => "api",
+            RequestKind::Other => "other",
+        }
+    }
+}
+
+fn assess_samples(
+    identity: String,
+    samples: &VecDeque<RequestSample>,
+    now: Instant,
+    recent_challenges: usize,
+) -> BehaviorAssessment {
+    let mut route_counts: HashMap<&str, usize> = HashMap::new();
+    let mut document_route_counts: HashMap<&str, usize> = HashMap::new();
+    let mut api_requests = 0usize;
+    let mut document_requests = 0usize;
+    let mut non_document_requests = 0usize;
+    for sample in samples.iter() {
+        *route_counts.entry(sample.route.as_str()).or_insert(0) += 1;
+        if matches!(sample.kind, RequestKind::Document) {
+            document_requests += 1;
+            *document_route_counts
+                .entry(sample.route.as_str())
+                .or_insert(0) += 1;
+        } else if matches!(sample.kind, RequestKind::Api) {
+            api_requests += 1;
+            non_document_requests += 1;
+        } else {
+            non_document_requests += 1;
+        }
+    }
+    let total = samples.len().max(1);
+    let dominant = route_counts
+        .iter()
+        .max_by_key(|(_, count)| **count)
+        .map(|(route, count)| ((*route).to_string(), *count))
+        .unwrap_or_else(|| ("-".to_string(), 1));
+    let repeated_ratio_percent = ((dominant.1 * 100) / total) as u32;
+    let distinct_routes = route_counts.len();
+    let jitter_ms = interval_jitter_ms(samples);
+    let document_dominant = document_route_counts
+        .iter()
+        .max_by_key(|(_, count)| **count)
+        .map(|(route, count)| ((*route).to_string(), *count));
+    let document_repeated_ratio_percent = if document_requests == 0 {
+        0
+    } else {
+        document_dominant
+            .as_ref()
+            .map(|(_, count)| ((*count * 100) / document_requests) as u32)
+            .unwrap_or(0)
+    };
+    let session_span_secs = samples
+        .front()
+        .map(|first| now.duration_since(first.at).as_secs())
+        .unwrap_or(0);
+
+    let mut score = 0u32;
+    let mut flags = Vec::new();
+    if total >= 8 && repeated_ratio_percent >= 85 {
+        score += 35;
+        flags.push("repeated_route_burst");
+    } else if total >= 6 && repeated_ratio_percent >= 70 {
+        score += 20;
+        flags.push("repeated_route_bias");
+    }
+    if total >= 10 && distinct_routes <= 2 {
+        score += 20;
+        flags.push("low_route_diversity");
+    } else if total >= 8 && distinct_routes <= 3 {
+        score += 10;
+        flags.push("narrow_navigation");
+    }
+    if document_requests >= 4 && non_document_requests == 0 {
+        score += 20;
+        flags.push("document_without_followups");
+    } else if document_requests >= 5 && non_document_requests.saturating_mul(2) < document_requests
+    {
+        score += 10;
+        flags.push("document_heavy");
+    }
+    if document_requests >= 5 && document_repeated_ratio_percent >= 80 {
+        score += 30;
+        flags.push("focused_document_reload");
+    } else if document_requests >= 4 && document_repeated_ratio_percent >= 65 {
+        score += 15;
+        flags.push("focused_document_loop");
+    }
+    if api_requests >= 5 && distinct_routes <= 2 {
+        score += 15;
+        flags.push("api_route_bias");
+    }
+    if is_high_value_route(dominant.0.as_str()) && dominant.1 >= 4 {
+        score += 15;
+        flags.push("high_value_route_bias");
+    }
+    if total >= 8 && session_span_secs >= 90 && repeated_ratio_percent >= 70 && distinct_routes <= 2
+    {
+        score += 20;
+        flags.push("low_and_slow");
+    }
+    if let Some(jitter_ms) = jitter_ms {
+        if total >= 6 && jitter_ms <= 250 {
+            score += 20;
+            flags.push("mechanical_intervals");
+        } else if total >= 6 && jitter_ms <= 500 {
+            score += 10;
+            flags.push("low_jitter");
+        }
+    }
+
+    BehaviorAssessment {
+        identity,
+        score: score.min(100),
+        dominant_route: Some(dominant.0),
+        distinct_routes,
+        repeated_ratio_percent,
+        document_repeated_ratio_percent,
+        focused_document_route: document_dominant.map(|(route, _)| route),
+        jitter_ms,
+        document_requests,
+        non_document_requests,
+        recent_challenges,
+        session_span_secs,
+        flags,
     }
 }
 

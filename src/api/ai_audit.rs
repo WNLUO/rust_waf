@@ -393,9 +393,61 @@ fn extract_choice_content(payload: &OpenAiCompatibleChatResponse) -> anyhow::Res
 
 fn parse_model_output(content: &str) -> anyhow::Result<AiAuditModelOutput> {
     let normalized = strip_markdown_fences(content);
-    Ok(serde_json::from_str::<AiAuditModelOutput>(
-        normalized.trim(),
-    )?)
+    let mut value = serde_json::from_str::<serde_json::Value>(normalized.trim())?;
+    normalize_model_output_value(&mut value);
+    Ok(serde_json::from_value::<AiAuditModelOutput>(value)?)
+}
+
+fn normalize_model_output_value(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+
+    normalize_string_or_array_field(object, "executive_summary");
+
+    if let Some(findings) = object
+        .get_mut("findings")
+        .and_then(|item| item.as_array_mut())
+    {
+        for finding in findings {
+            if let Some(finding_object) = finding.as_object_mut() {
+                normalize_string_or_array_field(finding_object, "evidence");
+            }
+        }
+    }
+}
+
+fn normalize_string_or_array_field(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) {
+    let Some(value) = object.get_mut(key) else {
+        return;
+    };
+
+    match value {
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                *value = serde_json::Value::Array(Vec::new());
+            } else {
+                *value =
+                    serde_json::Value::Array(vec![serde_json::Value::String(trimmed.to_string())]);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            items.retain(|item| match item {
+                serde_json::Value::String(text) => !text.trim().is_empty(),
+                _ => true,
+            });
+        }
+        serde_json::Value::Null => {
+            *value = serde_json::Value::Array(Vec::new());
+        }
+        other => {
+            *other = serde_json::Value::Array(vec![serde_json::Value::String(other.to_string())]);
+        }
+    }
 }
 
 fn provider_from_config(config: &AiAuditConfig) -> AiAuditProvider {
@@ -669,6 +721,29 @@ mod tests {
         assert_eq!(output.risk_level, "high");
         assert_eq!(output.findings.len(), 1);
         assert_eq!(output.recommendations.len(), 1);
+    }
+
+    #[test]
+    fn parse_model_output_normalizes_string_summary_and_evidence() {
+        let output = parse_model_output(
+            r#"{
+                "risk_level":"medium",
+                "headline":"Need review",
+                "executive_summary":"single summary line",
+                "findings":[{"key":"f1","severity":"medium","title":"A","detail":"B","evidence":"one evidence line"}],
+                "recommendations":[{"key":"r1","priority":"medium","title":"R","action":"Do","rationale":"Why"}]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            output.executive_summary,
+            vec!["single summary line".to_string()]
+        );
+        assert_eq!(
+            output.findings[0].evidence,
+            vec!["one evidence line".to_string()]
+        );
     }
 
     #[tokio::test]

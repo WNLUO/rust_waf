@@ -82,25 +82,39 @@ pub struct AiAuditReportsQueryParams {
     pub(crate) feedback_status: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditSummaryResponse {
+    #[serde(default)]
     pub(crate) generated_at: i64,
+    #[serde(default)]
     pub(crate) window_seconds: u32,
+    #[serde(default)]
     pub(crate) sampled_events: u32,
+    #[serde(default)]
     pub(crate) total_events: u64,
+    #[serde(default)]
     pub(crate) active_rules: u64,
+    #[serde(default)]
     pub(crate) current: AiAuditCurrentStateResponse,
+    #[serde(default)]
     pub(crate) counters: AiAuditCountersResponse,
+    #[serde(default)]
     pub(crate) identity_states: Vec<AiAuditCountItem>,
+    #[serde(default)]
     pub(crate) primary_signals: Vec<AiAuditCountItem>,
+    #[serde(default)]
     pub(crate) labels: Vec<AiAuditCountItem>,
+    #[serde(default)]
     pub(crate) top_source_ips: Vec<AiAuditCountItem>,
+    #[serde(default)]
     pub(crate) top_routes: Vec<AiAuditCountItem>,
+    #[serde(default)]
     pub(crate) top_hosts: Vec<AiAuditCountItem>,
     #[serde(default)]
     pub(crate) safeline_correlation: AiAuditSafeLineCorrelationResponse,
     #[serde(default)]
     pub(crate) recent_policy_feedback: Vec<AiAuditPolicyFeedbackResponse>,
+    #[serde(default)]
     pub(crate) recent_events: Vec<AiAuditEventSampleResponse>,
 }
 
@@ -134,24 +148,35 @@ pub struct AiAuditSafeLineCorrelationResponse {
     pub(crate) persistent_overlap_source_ips: Vec<AiAuditCountItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditReportResponse {
+    #[serde(default)]
     pub(crate) report_id: Option<i64>,
+    #[serde(default)]
     pub(crate) generated_at: i64,
+    #[serde(default)]
     pub(crate) provider_used: String,
+    #[serde(default)]
     pub(crate) fallback_used: bool,
     #[serde(default)]
     pub(crate) analysis_mode: String,
+    #[serde(default)]
     pub(crate) execution_notes: Vec<String>,
+    #[serde(default)]
     pub(crate) risk_level: String,
+    #[serde(default)]
     pub(crate) headline: String,
+    #[serde(default)]
     pub(crate) executive_summary: Vec<String>,
     #[serde(default)]
     pub(crate) input_profile: AiAuditInputProfileResponse,
+    #[serde(default)]
     pub(crate) findings: Vec<AiAuditReportFinding>,
+    #[serde(default)]
     pub(crate) recommendations: Vec<AiAuditReportRecommendation>,
     #[serde(default)]
     pub(crate) suggested_local_rules: Vec<AiAuditSuggestedRuleResponse>,
+    #[serde(default)]
     pub(crate) summary: AiAuditSummaryResponse,
 }
 
@@ -250,34 +275,53 @@ pub struct AiAuditFeedbackUpdateRequest {
     pub(crate) feedback_notes: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditCurrentStateResponse {
+    #[serde(default)]
     pub(crate) adaptive_system_pressure: String,
+    #[serde(default)]
     pub(crate) adaptive_reasons: Vec<String>,
+    #[serde(default)]
     pub(crate) l4_overload_level: String,
+    #[serde(default)]
     pub(crate) auto_tuning_controller_state: String,
+    #[serde(default)]
     pub(crate) auto_tuning_last_adjust_reason: Option<String>,
+    #[serde(default)]
     pub(crate) auto_tuning_last_adjust_diff: Vec<String>,
+    #[serde(default)]
     pub(crate) identity_pressure_percent: f64,
+    #[serde(default)]
     pub(crate) l7_friction_pressure_percent: f64,
+    #[serde(default)]
     pub(crate) slow_attack_pressure_percent: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditReportFinding {
+    #[serde(default)]
     pub(crate) key: String,
+    #[serde(default)]
     pub(crate) severity: String,
+    #[serde(default)]
     pub(crate) title: String,
+    #[serde(default)]
     pub(crate) detail: String,
+    #[serde(default)]
     pub(crate) evidence: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditReportRecommendation {
+    #[serde(default)]
     pub(crate) key: String,
+    #[serde(default)]
     pub(crate) priority: String,
+    #[serde(default)]
     pub(crate) title: String,
+    #[serde(default)]
     pub(crate) action: String,
+    #[serde(default)]
     pub(crate) rationale: String,
     #[serde(default)]
     pub(crate) action_type: String,
@@ -299,21 +343,27 @@ pub struct AiAuditInputProfileResponse {
     pub(crate) recent_policy_feedback_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditSuggestedRuleResponse {
+    #[serde(default)]
     pub(crate) key: String,
+    #[serde(default)]
     pub(crate) title: String,
     #[serde(default)]
     pub(crate) policy_type: String,
+    #[serde(default)]
     pub(crate) layer: String,
     #[serde(default)]
     pub(crate) scope_type: String,
     #[serde(default)]
     pub(crate) scope_value: String,
+    #[serde(default)]
     pub(crate) target: String,
     #[serde(default)]
     pub(crate) action: String,
+    #[serde(default)]
     pub(crate) operator: String,
+    #[serde(default)]
     pub(crate) suggested_value: String,
     #[serde(default)]
     pub(crate) ttl_secs: u64,
@@ -322,42 +372,69 @@ pub struct AiAuditSuggestedRuleResponse {
     pub(crate) rationale: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditCountersResponse {
+    #[serde(default)]
     pub(crate) proxied_requests: u64,
+    #[serde(default)]
     pub(crate) blocked_packets: u64,
+    #[serde(default)]
     pub(crate) blocked_l4: u64,
+    #[serde(default)]
     pub(crate) blocked_l7: u64,
+    #[serde(default)]
     pub(crate) l7_cc_challenges: u64,
+    #[serde(default)]
     pub(crate) l7_cc_blocks: u64,
+    #[serde(default)]
     pub(crate) l7_cc_delays: u64,
+    #[serde(default)]
     pub(crate) l7_behavior_challenges: u64,
+    #[serde(default)]
     pub(crate) l7_behavior_blocks: u64,
+    #[serde(default)]
     pub(crate) l7_behavior_delays: u64,
+    #[serde(default)]
     pub(crate) l4_bucket_budget_rejections: u64,
+    #[serde(default)]
     pub(crate) trusted_proxy_permit_drops: u64,
+    #[serde(default)]
     pub(crate) trusted_proxy_l4_degrade_actions: u64,
+    #[serde(default)]
     pub(crate) l4_request_budget_softened: u64,
+    #[serde(default)]
     pub(crate) slow_attack_hits: u64,
+    #[serde(default)]
     pub(crate) average_proxy_latency_micros: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditCountItem {
+    #[serde(default)]
     pub(crate) key: String,
+    #[serde(default)]
     pub(crate) count: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditEventSampleResponse {
+    #[serde(default)]
     pub(crate) id: i64,
+    #[serde(default)]
     pub(crate) created_at: i64,
+    #[serde(default)]
     pub(crate) layer: String,
+    #[serde(default)]
     pub(crate) action: String,
+    #[serde(default)]
     pub(crate) reason: String,
+    #[serde(default)]
     pub(crate) source_ip: String,
+    #[serde(default)]
     pub(crate) uri: Option<String>,
+    #[serde(default)]
     pub(crate) provider: Option<String>,
+    #[serde(default)]
     pub(crate) decision_summary: Option<SecurityEventDecisionSummary>,
 }
 

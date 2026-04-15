@@ -117,6 +117,90 @@ pub struct BlockedIpEntry {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct FingerprintProfileEntry {
+    pub identity: String,
+    pub identity_kind: String,
+    pub source_ip: Option<String>,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+    pub first_site_domain: Option<String>,
+    pub last_site_domain: Option<String>,
+    pub first_user_agent: Option<String>,
+    pub last_user_agent: Option<String>,
+    pub total_security_events: i64,
+    pub total_behavior_events: i64,
+    pub total_challenges: i64,
+    pub total_blocks: i64,
+    pub latest_score: Option<i64>,
+    pub max_score: i64,
+    pub latest_action: Option<String>,
+    pub reputation_score: i64,
+    pub notes: String,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct BehaviorSessionEntry {
+    pub session_key: String,
+    pub identity: String,
+    pub source_ip: Option<String>,
+    pub site_domain: Option<String>,
+    pub opened_at: i64,
+    pub last_seen_at: i64,
+    pub event_count: i64,
+    pub challenge_count: i64,
+    pub block_count: i64,
+    pub latest_action: Option<String>,
+    pub latest_uri: Option<String>,
+    pub latest_reason: Option<String>,
+    pub dominant_route: Option<String>,
+    pub focused_document_route: Option<String>,
+    pub focused_api_route: Option<String>,
+    pub distinct_routes: i64,
+    pub repeated_ratio: i64,
+    pub document_repeated_ratio: i64,
+    pub api_repeated_ratio: i64,
+    pub document_requests: i64,
+    pub api_requests: i64,
+    pub non_document_requests: i64,
+    pub interval_jitter_ms: Option<i64>,
+    pub session_span_secs: i64,
+    pub flags_json: String,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct BehaviorEventEntry {
+    pub id: i64,
+    pub security_event_id: Option<i64>,
+    pub identity: String,
+    pub session_key: String,
+    pub source_ip: String,
+    pub site_domain: Option<String>,
+    pub http_method: Option<String>,
+    pub uri: Option<String>,
+    pub action: Option<String>,
+    pub reason: String,
+    pub score: i64,
+    pub dominant_route: Option<String>,
+    pub focused_document_route: Option<String>,
+    pub focused_api_route: Option<String>,
+    pub distinct_routes: i64,
+    pub repeated_ratio: i64,
+    pub document_repeated_ratio: i64,
+    pub api_repeated_ratio: i64,
+    pub document_requests: i64,
+    pub api_requests: i64,
+    pub non_document_requests: i64,
+    pub interval_jitter_ms: Option<i64>,
+    pub challenge_count_window: i64,
+    pub session_span_secs: i64,
+    pub flags_json: String,
+    pub created_at: i64,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SafeLineSiteMappingEntry {
     pub id: i64,
     pub safeline_site_id: String,

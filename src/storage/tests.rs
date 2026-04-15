@@ -87,6 +87,24 @@ async fn test_sqlite_store_initializes_schema() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    let fingerprint_profiles_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'fingerprint_profiles'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let behavior_sessions_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'behavior_sessions'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let behavior_events_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'behavior_events'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
 
     assert_eq!(security_events_exists, 1);
     assert_eq!(blocked_ips_exists, 1);
@@ -98,6 +116,9 @@ async fn test_sqlite_store_initializes_schema() {
     assert_eq!(local_sites_exists, 1);
     assert_eq!(site_sync_links_exists, 1);
     assert_eq!(local_certificate_secrets_exists, 1);
+    assert_eq!(fingerprint_profiles_exists, 1);
+    assert_eq!(behavior_sessions_exists, 1);
+    assert_eq!(behavior_events_exists, 1);
 }
 
 #[tokio::test]
@@ -237,6 +258,112 @@ async fn test_sqlite_store_persists_records() {
     assert_eq!(summary.queue_capacity, 1024);
     assert_eq!(summary.dropped_security_events, 0);
     assert_eq!(summary.dropped_blocked_ips, 0);
+}
+
+#[tokio::test]
+async fn test_sqlite_store_persists_fingerprint_profiles_and_behavior_history() {
+    let path = unique_test_db_path("behavior_history");
+    let store = SqliteStore::new(path.clone(), true).await.unwrap();
+
+    store.enqueue_security_event(SecurityEventRecord {
+        layer: "L7".to_string(),
+        provider: None,
+        provider_event_id: None,
+        provider_site_id: None,
+        provider_site_name: None,
+        provider_site_domain: Some("example.com".to_string()),
+        action: "respond".to_string(),
+        reason: "l7 behavior guard challenged suspicious session: score=60".to_string(),
+        details_json: Some(
+            r#"{
+              "client_identity": {
+                "resolved_client_ip": "203.0.113.10",
+                "headers": [
+                  ["host", "example.com"],
+                  ["user-agent", "MobileSafari"]
+                ]
+              },
+              "l7_behavior": {
+                "action": "challenge",
+                "identity": "fp:test-fingerprint",
+                "score": "60",
+                "dominant_route": "/api/search",
+                "focused_document_route": "/",
+                "focused_api_route": "/api/search",
+                "distinct_routes": "3",
+                "repeated_ratio": "80",
+                "document_repeated_ratio": "100",
+                "api_repeated_ratio": "100",
+                "document_requests": "1",
+                "api_requests": "4",
+                "non_document_requests": "8",
+                "challenge_count_window": "1",
+                "session_span_secs": "12",
+                "flags": "focused_api_burst,single_query_endpoint"
+              }
+            }"#
+            .to_string(),
+        ),
+        source_ip: "203.0.113.10".to_string(),
+        dest_ip: "192.0.2.10".to_string(),
+        source_port: 42310,
+        dest_port: 443,
+        protocol: "TCP".to_string(),
+        http_method: Some("GET".to_string()),
+        uri: Some("/api/search?q=test".to_string()),
+        http_version: Some("HTTP/2.0".to_string()),
+        created_at: unix_timestamp(),
+        handled: false,
+        handled_at: None,
+    });
+
+    store.flush().await.unwrap();
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect(&format!("sqlite://{}", path))
+        .await
+        .unwrap();
+
+    let profile_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM fingerprint_profiles")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let behavior_session_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM behavior_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let behavior_event_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM behavior_events")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let latest_profile: (String, String, i64, i64, i64) = sqlx::query_as(
+        "SELECT identity, identity_kind, total_security_events, total_behavior_events, total_challenges FROM fingerprint_profiles LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let latest_session: (String, String, i64, i64, i64) = sqlx::query_as(
+        "SELECT identity, focused_api_route, api_requests, api_repeated_ratio, challenge_count FROM behavior_sessions LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(profile_count, 1);
+    assert_eq!(behavior_session_count, 1);
+    assert_eq!(behavior_event_count, 1);
+    assert_eq!(latest_profile.0, "fp:test-fingerprint");
+    assert_eq!(latest_profile.1, "fingerprint");
+    assert_eq!(latest_profile.2, 1);
+    assert_eq!(latest_profile.3, 1);
+    assert_eq!(latest_profile.4, 1);
+    assert_eq!(latest_session.0, "fp:test-fingerprint");
+    assert_eq!(latest_session.1, "/api/search");
+    assert_eq!(latest_session.2, 4);
+    assert_eq!(latest_session.3, 100);
+    assert_eq!(latest_session.4, 1);
 }
 
 #[tokio::test]

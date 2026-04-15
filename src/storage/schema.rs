@@ -47,6 +47,102 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON blocked_ips(ip);
         CREATE INDEX IF NOT EXISTS idx_blocked_ips_expires_at
             ON blocked_ips(expires_at);
+
+        CREATE TABLE IF NOT EXISTS fingerprint_profiles (
+            identity TEXT PRIMARY KEY,
+            identity_kind TEXT NOT NULL,
+            source_ip TEXT,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at INTEGER NOT NULL,
+            first_site_domain TEXT,
+            last_site_domain TEXT,
+            first_user_agent TEXT,
+            last_user_agent TEXT,
+            total_security_events INTEGER NOT NULL DEFAULT 0,
+            total_behavior_events INTEGER NOT NULL DEFAULT 0,
+            total_challenges INTEGER NOT NULL DEFAULT 0,
+            total_blocks INTEGER NOT NULL DEFAULT 0,
+            latest_score INTEGER,
+            max_score INTEGER NOT NULL DEFAULT 0,
+            latest_action TEXT,
+            reputation_score INTEGER NOT NULL DEFAULT 0,
+            notes TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fingerprint_profiles_last_seen_at
+            ON fingerprint_profiles(last_seen_at);
+        CREATE INDEX IF NOT EXISTS idx_fingerprint_profiles_source_ip
+            ON fingerprint_profiles(source_ip);
+
+        CREATE TABLE IF NOT EXISTS behavior_sessions (
+            session_key TEXT PRIMARY KEY,
+            identity TEXT NOT NULL,
+            source_ip TEXT,
+            site_domain TEXT,
+            opened_at INTEGER NOT NULL,
+            last_seen_at INTEGER NOT NULL,
+            event_count INTEGER NOT NULL DEFAULT 0,
+            challenge_count INTEGER NOT NULL DEFAULT 0,
+            block_count INTEGER NOT NULL DEFAULT 0,
+            latest_action TEXT,
+            latest_uri TEXT,
+            latest_reason TEXT,
+            dominant_route TEXT,
+            focused_document_route TEXT,
+            focused_api_route TEXT,
+            distinct_routes INTEGER NOT NULL DEFAULT 0,
+            repeated_ratio INTEGER NOT NULL DEFAULT 0,
+            document_repeated_ratio INTEGER NOT NULL DEFAULT 0,
+            api_repeated_ratio INTEGER NOT NULL DEFAULT 0,
+            document_requests INTEGER NOT NULL DEFAULT 0,
+            api_requests INTEGER NOT NULL DEFAULT 0,
+            non_document_requests INTEGER NOT NULL DEFAULT 0,
+            interval_jitter_ms INTEGER,
+            session_span_secs INTEGER NOT NULL DEFAULT 0,
+            flags_json TEXT NOT NULL DEFAULT '[]'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_behavior_sessions_identity
+            ON behavior_sessions(identity);
+        CREATE INDEX IF NOT EXISTS idx_behavior_sessions_last_seen_at
+            ON behavior_sessions(last_seen_at);
+
+        CREATE TABLE IF NOT EXISTS behavior_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            security_event_id INTEGER,
+            identity TEXT NOT NULL,
+            session_key TEXT NOT NULL,
+            source_ip TEXT NOT NULL,
+            site_domain TEXT,
+            http_method TEXT,
+            uri TEXT,
+            action TEXT,
+            reason TEXT NOT NULL,
+            score INTEGER NOT NULL DEFAULT 0,
+            dominant_route TEXT,
+            focused_document_route TEXT,
+            focused_api_route TEXT,
+            distinct_routes INTEGER NOT NULL DEFAULT 0,
+            repeated_ratio INTEGER NOT NULL DEFAULT 0,
+            document_repeated_ratio INTEGER NOT NULL DEFAULT 0,
+            api_repeated_ratio INTEGER NOT NULL DEFAULT 0,
+            document_requests INTEGER NOT NULL DEFAULT 0,
+            api_requests INTEGER NOT NULL DEFAULT 0,
+            non_document_requests INTEGER NOT NULL DEFAULT 0,
+            interval_jitter_ms INTEGER,
+            challenge_count_window INTEGER NOT NULL DEFAULT 0,
+            session_span_secs INTEGER NOT NULL DEFAULT 0,
+            flags_json TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY(security_event_id) REFERENCES security_events(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_behavior_events_identity
+            ON behavior_events(identity);
+        CREATE INDEX IF NOT EXISTS idx_behavior_events_session_key
+            ON behavior_events(session_key);
+        CREATE INDEX IF NOT EXISTS idx_behavior_events_created_at
+            ON behavior_events(created_at);
         CREATE TABLE IF NOT EXISTS rules (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

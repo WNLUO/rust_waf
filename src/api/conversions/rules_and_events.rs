@@ -190,21 +190,29 @@ impl From<crate::l7::behavior_guard::BehaviorProfileSnapshot> for BehaviorProfil
     fn from(value: crate::l7::behavior_guard::BehaviorProfileSnapshot) -> Self {
         Self {
             identity: value.identity,
+            source_ip: value.source_ip,
             latest_seen_at: value.latest_seen_unix,
             score: value.score,
             dominant_route: value.dominant_route,
             focused_document_route: value.focused_document_route,
+            focused_api_route: value.focused_api_route,
             distinct_routes: value.distinct_routes,
             repeated_ratio: value.repeated_ratio_percent,
             document_repeated_ratio: value.document_repeated_ratio_percent,
+            api_repeated_ratio: value.api_repeated_ratio_percent,
             interval_jitter_ms: value.jitter_ms,
             document_requests: value.document_requests,
+            api_requests: value.api_requests,
             non_document_requests: value.non_document_requests,
             challenge_count_window: value.recent_challenges,
             session_span_secs: value.session_span_secs,
             flags: value.flags,
             latest_route: value.latest_route,
             latest_kind: value.latest_kind.to_string(),
+            blocked: false,
+            blocked_at: None,
+            blocked_expires_at: None,
+            blocked_reason: None,
         }
     }
 }

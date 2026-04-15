@@ -28,12 +28,27 @@ pub(super) async fn list_behavior_profiles_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<BehaviorProfilesResponse>> {
     let profiles = state.context.l7_behavior_guard().snapshot_profiles(256);
+    let store = state.context.sqlite_store.as_ref().cloned();
+    let mut response_profiles = Vec::with_capacity(profiles.len());
+    for profile in profiles {
+        let mut response = BehaviorProfileResponse::from(profile);
+        if let (Some(store), Some(source_ip)) = (store.as_ref(), response.source_ip.as_deref()) {
+            if let Some(entry) = store
+                .load_active_local_blocked_ip_by_ip(source_ip)
+                .await
+                .map_err(ApiError::internal)?
+            {
+                response.blocked = true;
+                response.blocked_at = Some(entry.blocked_at);
+                response.blocked_expires_at = Some(entry.expires_at);
+                response.blocked_reason = Some(entry.reason);
+            }
+        }
+        response_profiles.push(response);
+    }
     Ok(Json(BehaviorProfilesResponse {
-        total: profiles.len() as u64,
-        profiles: profiles
-            .into_iter()
-            .map(BehaviorProfileResponse::from)
-            .collect(),
+        total: response_profiles.len() as u64,
+        profiles: response_profiles,
     }))
 }
 

@@ -17,21 +17,29 @@ pub struct BehaviorProfilesResponse {
 #[derive(Debug, Serialize)]
 pub struct BehaviorProfileResponse {
     pub(crate) identity: String,
+    pub(crate) source_ip: Option<String>,
     pub(crate) latest_seen_at: i64,
     pub(crate) score: u32,
     pub(crate) dominant_route: Option<String>,
     pub(crate) focused_document_route: Option<String>,
+    pub(crate) focused_api_route: Option<String>,
     pub(crate) distinct_routes: usize,
     pub(crate) repeated_ratio: u32,
     pub(crate) document_repeated_ratio: u32,
+    pub(crate) api_repeated_ratio: u32,
     pub(crate) interval_jitter_ms: Option<u64>,
     pub(crate) document_requests: usize,
+    pub(crate) api_requests: usize,
     pub(crate) non_document_requests: usize,
     pub(crate) challenge_count_window: usize,
     pub(crate) session_span_secs: u64,
     pub(crate) flags: Vec<String>,
     pub(crate) latest_route: String,
     pub(crate) latest_kind: String,
+    pub(crate) blocked: bool,
+    pub(crate) blocked_at: Option<i64>,
+    pub(crate) blocked_expires_at: Option<i64>,
+    pub(crate) blocked_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

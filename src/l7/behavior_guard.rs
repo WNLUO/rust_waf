@@ -27,15 +27,19 @@ pub struct L7BehaviorGuard {
 #[derive(Debug, Clone)]
 pub struct BehaviorProfileSnapshot {
     pub identity: String,
+    pub source_ip: Option<String>,
     pub latest_seen_unix: i64,
     pub score: u32,
     pub dominant_route: Option<String>,
     pub focused_document_route: Option<String>,
+    pub focused_api_route: Option<String>,
     pub distinct_routes: usize,
     pub repeated_ratio_percent: u32,
     pub document_repeated_ratio_percent: u32,
+    pub api_repeated_ratio_percent: u32,
     pub jitter_ms: Option<u64>,
     pub document_requests: usize,
+    pub api_requests: usize,
     pub non_document_requests: usize,
     pub recent_challenges: usize,
     pub session_span_secs: u64,
@@ -55,6 +59,7 @@ struct BehaviorWindow {
 struct RequestSample {
     route: String,
     kind: RequestKind,
+    client_ip: Option<String>,
     at: Instant,
 }
 
@@ -75,8 +80,11 @@ struct BehaviorAssessment {
     repeated_ratio_percent: u32,
     document_repeated_ratio_percent: u32,
     focused_document_route: Option<String>,
+    focused_api_route: Option<String>,
+    api_repeated_ratio_percent: u32,
     jitter_ms: Option<u64>,
     document_requests: usize,
+    api_requests: usize,
     non_document_requests: usize,
     recent_challenges: usize,
     session_span_secs: u64,
@@ -103,10 +111,24 @@ impl L7BehaviorGuard {
             .cloned()
             .unwrap_or_else(|| normalized_route_path(request_path(&request.uri)));
         let kind = request_kind(request);
+        let client_ip = request
+            .client_ip
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
-        let assessment = self.observe_and_assess(&identity, route, kind, now, unix_now, window);
+        let assessment = self.observe_and_assess(
+            &identity,
+            route,
+            kind,
+            client_ip,
+            now,
+            unix_now,
+            window,
+        );
 
         request.add_metadata(
             "l7.behavior.identity".to_string(),
@@ -133,8 +155,16 @@ impl L7BehaviorGuard {
             assessment.document_requests.to_string(),
         );
         request.add_metadata(
+            "l7.behavior.api_requests".to_string(),
+            assessment.api_requests.to_string(),
+        );
+        request.add_metadata(
             "l7.behavior.non_document_requests".to_string(),
             assessment.non_document_requests.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.api_repeated_ratio".to_string(),
+            assessment.api_repeated_ratio_percent.to_string(),
         );
         request.add_metadata(
             "l7.behavior.challenge_count_window".to_string(),
@@ -153,6 +183,12 @@ impl L7BehaviorGuard {
         if let Some(route) = assessment.focused_document_route.as_ref() {
             request.add_metadata(
                 "l7.behavior.focused_document_route".to_string(),
+                route.clone(),
+            );
+        }
+        if let Some(route) = assessment.focused_api_route.as_ref() {
+            request.add_metadata(
+                "l7.behavior.focused_api_route".to_string(),
                 route.clone(),
             );
         }
@@ -225,6 +261,7 @@ impl L7BehaviorGuard {
         identity: &str,
         route: String,
         kind: RequestKind,
+        client_ip: Option<String>,
         now: Instant,
         unix_now: i64,
         window: Duration,
@@ -233,7 +270,15 @@ impl L7BehaviorGuard {
             .buckets
             .entry(identity.to_string())
             .or_insert_with(BehaviorWindow::new);
-        entry.observe_and_assess(identity.to_string(), route, kind, now, unix_now, window)
+        entry.observe_and_assess(
+            identity.to_string(),
+            route,
+            kind,
+            client_ip,
+            now,
+            unix_now,
+            window,
+        )
     }
 
     fn maybe_cleanup(&self, unix_now: i64) {
@@ -311,6 +356,7 @@ impl BehaviorWindow {
         identity: String,
         route: String,
         kind: RequestKind,
+        client_ip: Option<String>,
         now: Instant,
         unix_now: i64,
         window: Duration,
@@ -326,6 +372,7 @@ impl BehaviorWindow {
         samples.push_back(RequestSample {
             route: route.clone(),
             kind,
+            client_ip,
             at: now,
         });
         while samples.len() > MAX_SAMPLES_PER_IDENTITY {
@@ -411,15 +458,19 @@ impl BehaviorWindow {
         let latest = samples_snapshot.back().cloned()?;
         Some(BehaviorProfileSnapshot {
             identity,
+            source_ip: latest.client_ip,
             latest_seen_unix: self.last_seen_unix.load(Ordering::Relaxed),
             score: assessment.score,
             dominant_route: assessment.dominant_route,
             focused_document_route: assessment.focused_document_route,
+            focused_api_route: assessment.focused_api_route,
             distinct_routes: assessment.distinct_routes,
             repeated_ratio_percent: assessment.repeated_ratio_percent,
             document_repeated_ratio_percent: assessment.document_repeated_ratio_percent,
+            api_repeated_ratio_percent: assessment.api_repeated_ratio_percent,
             jitter_ms: assessment.jitter_ms,
             document_requests: assessment.document_requests,
+            api_requests: assessment.api_requests,
             non_document_requests: assessment.non_document_requests,
             recent_challenges: assessment.recent_challenges,
             session_span_secs: assessment.session_span_secs,
@@ -449,6 +500,7 @@ fn assess_samples(
 ) -> BehaviorAssessment {
     let mut route_counts: HashMap<&str, usize> = HashMap::new();
     let mut document_route_counts: HashMap<&str, usize> = HashMap::new();
+    let mut api_route_counts: HashMap<&str, usize> = HashMap::new();
     let mut api_requests = 0usize;
     let mut document_requests = 0usize;
     let mut non_document_requests = 0usize;
@@ -462,6 +514,7 @@ fn assess_samples(
         } else if matches!(sample.kind, RequestKind::Api) {
             api_requests += 1;
             non_document_requests += 1;
+            *api_route_counts.entry(sample.route.as_str()).or_insert(0) += 1;
         } else {
             non_document_requests += 1;
         }
@@ -485,6 +538,18 @@ fn assess_samples(
         document_dominant
             .as_ref()
             .map(|(_, count)| ((*count * 100) / document_requests) as u32)
+            .unwrap_or(0)
+    };
+    let api_dominant = api_route_counts
+        .iter()
+        .max_by_key(|(_, count)| **count)
+        .map(|(route, count)| ((*route).to_string(), *count));
+    let api_repeated_ratio_percent = if api_requests == 0 {
+        0
+    } else {
+        api_dominant
+            .as_ref()
+            .map(|(_, count)| ((*count * 100) / api_requests) as u32)
             .unwrap_or(0)
     };
     let session_span_secs = samples
@@ -542,9 +607,30 @@ fn assess_samples(
         score += 15;
         flags.push("api_route_bias");
     }
+    if api_requests >= 4 && api_repeated_ratio_percent >= 85 {
+        score += 35;
+        flags.push("focused_api_burst");
+    } else if api_requests >= 3 && api_repeated_ratio_percent >= 70 {
+        score += 20;
+        flags.push("focused_api_loop");
+    }
+    if api_requests >= 3
+        && api_repeated_ratio_percent >= 100
+        && session_span_secs <= 30
+        && distinct_routes <= 3
+    {
+        score += 25;
+        flags.push("single_query_endpoint");
+    }
     if is_high_value_route(dominant.0.as_str()) && dominant.1 >= 4 {
         score += 15;
         flags.push("high_value_route_bias");
+    }
+    if let Some((route, count)) = api_dominant.as_ref() {
+        if is_high_value_route(route) && *count >= 3 {
+            score += 20;
+            flags.push("high_value_api_bias");
+        }
     }
     if total >= 8 && session_span_secs >= 90 && repeated_ratio_percent >= 70 && distinct_routes <= 2
     {
@@ -569,8 +655,11 @@ fn assess_samples(
         repeated_ratio_percent,
         document_repeated_ratio_percent,
         focused_document_route: document_dominant.map(|(route, _)| route),
+        focused_api_route: api_dominant.map(|(route, _)| route),
+        api_repeated_ratio_percent,
         jitter_ms,
         document_requests,
+        api_requests,
         non_document_requests,
         recent_challenges,
         session_span_secs,
@@ -1005,6 +1094,7 @@ mod tests {
             samples.push_back(RequestSample {
                 route: "/stale".to_string(),
                 kind: RequestKind::Document,
+                client_ip: Some("203.0.113.10".to_string()),
                 at: Instant::now(),
             });
         }
@@ -1024,6 +1114,7 @@ mod tests {
             samples.push_back(RequestSample {
                 route: "/fresh".to_string(),
                 kind: RequestKind::Document,
+                client_ip: Some("203.0.113.11".to_string()),
                 at: Instant::now(),
             });
         }

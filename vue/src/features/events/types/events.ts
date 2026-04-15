@@ -33,21 +33,29 @@ export interface SecurityEventsResponse {
 
 export interface BehaviorProfileItem {
   identity: string
+  source_ip: string | null
   latest_seen_at: number
   score: number
   dominant_route: string | null
   focused_document_route: string | null
+  focused_api_route: string | null
   distinct_routes: number
   repeated_ratio: number
   document_repeated_ratio: number
+  api_repeated_ratio: number
   interval_jitter_ms: number | null
   document_requests: number
+  api_requests: number
   non_document_requests: number
   challenge_count_window: number
   session_span_secs: number
   flags: string[]
   latest_route: string
   latest_kind: string
+  blocked: boolean
+  blocked_at: number | null
+  blocked_expires_at: number | null
+  blocked_reason: string | null
 }
 
 export interface BehaviorProfilesResponse {

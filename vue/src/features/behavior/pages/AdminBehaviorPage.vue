@@ -85,8 +85,15 @@ interface BehaviorProfileView {
   nonDocumentRequests: number
   challengeCountWindow: number
   focusedDocumentRoute: string
+  focusedApiRoute: string
+  apiRequests: number
+  apiRepeatedRatio: number
   sessionSpanSecs: number
   flags: string[]
+  blocked: boolean
+  blockedAt: number | null
+  blockedExpiresAt: number | null
+  blockedReason: string
 }
 
 const MAX_EVENTS = 120
@@ -258,14 +265,11 @@ const eventSummaryByIdentity = computed(() => {
 const profiles = computed<BehaviorProfileView[]>(() => {
   return activeProfiles.value.map((profile) => {
     const eventSummary = eventSummaryByIdentity.value.get(profile.identity)
-    const sourceIpMatch = profile.identity.match(
-      /(?:ipua:|cookie:|fp:)?([0-9a-f.:]+)(?:\||$)/i,
-    )
     return {
       key: profile.identity,
       identity: profile.identity,
-      sourceIp: eventSummary?.sourceIp || sourceIpMatch?.[1] || '-',
-      latestAction: eventSummary?.latestAction || 'other',
+      sourceIp: profile.source_ip || eventSummary?.sourceIp || '-',
+      latestAction: profile.blocked ? 'block' : eventSummary?.latestAction || 'other',
       latestSeenAt: profile.latest_seen_at,
       latestUri: eventSummary?.latestUri || profile.latest_route,
       dominantRoute: profile.dominant_route || '-',
@@ -279,11 +283,18 @@ const profiles = computed<BehaviorProfileView[]>(() => {
       distinctRoutes: profile.distinct_routes,
       intervalJitterMs: profile.interval_jitter_ms,
       documentRequests: profile.document_requests,
+      apiRequests: profile.api_requests,
       nonDocumentRequests: profile.non_document_requests,
+      apiRepeatedRatio: profile.api_repeated_ratio,
       challengeCountWindow: profile.challenge_count_window,
       focusedDocumentRoute: profile.focused_document_route || profile.dominant_route || '-',
+      focusedApiRoute: profile.focused_api_route || profile.dominant_route || '-',
       sessionSpanSecs: profile.session_span_secs,
       flags: profile.flags,
+      blocked: profile.blocked,
+      blockedAt: profile.blocked_at,
+      blockedExpiresAt: profile.blocked_expires_at,
+      blockedReason: profile.blocked_reason || '-',
     }
   })
   .sort((left, right) => {
@@ -571,6 +582,11 @@ onBeforeUnmount(() => {
                       :type="actionBadgeType(profile.latestAction)"
                       :text="actionLabel(profile.latestAction)"
                     />
+                    <StatusBadge
+                      v-if="profile.blocked"
+                      type="error"
+                      text="封禁名单中"
+                    />
                     <span class="rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-medium text-white">
                       最高分 {{ formatNumber(profile.maxScore) }}
                     </span>
@@ -613,6 +629,12 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
                   <div>
+                    <div class="text-xs text-slate-400">接口重复率</div>
+                    <div class="mt-1 font-semibold text-slate-900">
+                      {{ formatNumber(profile.apiRepeatedRatio) }}%
+                    </div>
+                  </div>
+                  <div>
                     <div class="text-xs text-slate-400">平均分</div>
                     <div class="mt-1 font-semibold text-slate-900">
                       {{ profile.avgScore.toFixed(1) }}
@@ -640,6 +662,11 @@ onBeforeUnmount(() => {
                 <StatusBadge
                   :type="actionBadgeType(selectedProfile.latestAction)"
                   :text="actionLabel(selectedProfile.latestAction)"
+                />
+                <StatusBadge
+                  v-if="selectedProfile.blocked"
+                  type="error"
+                  :text="selectedProfile.blockedExpiresAt ? `已封禁至 ${formatTimestamp(selectedProfile.blockedExpiresAt)}` : '已进入封禁名单'"
                 />
                 <StatusBadge
                   type="info"
@@ -670,6 +697,14 @@ onBeforeUnmount(() => {
                   页面重载率
                   <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.maxDocumentRepeatedRatio) }}%</span>
                 </div>
+                <div class="mt-2 text-sm text-slate-600">
+                  关注页面
+                  <span class="font-semibold text-slate-900">{{ selectedProfile.focusedDocumentRoute }}</span>
+                </div>
+                <div class="mt-2 text-sm text-slate-600">
+                  关注接口
+                  <span class="font-semibold text-slate-900">{{ selectedProfile.focusedApiRoute }}</span>
+                </div>
               </div>
 
               <div class="rounded-2xl bg-slate-50 p-4">
@@ -677,6 +712,14 @@ onBeforeUnmount(() => {
                 <div class="mt-3 text-sm text-slate-600">
                   页面请求
                   <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.documentRequests) }}</span>
+                </div>
+                <div class="mt-2 text-sm text-slate-600">
+                  接口请求
+                  <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.apiRequests) }}</span>
+                </div>
+                <div class="mt-2 text-sm text-slate-600">
+                  接口重复率
+                  <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.apiRepeatedRatio) }}%</span>
                 </div>
                 <div class="mt-2 text-sm text-slate-600">
                   非页面请求
@@ -691,6 +734,31 @@ onBeforeUnmount(() => {
                 <div class="mt-2 text-sm text-slate-600">
                   会话跨度
                   <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.sessionSpanSecs) }} s</span>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="selectedProfile.blocked"
+              class="rounded-2xl border border-red-200 bg-red-50/70 p-4"
+            >
+              <div class="text-xs uppercase tracking-[0.18em] text-red-700">封禁状态</div>
+              <div class="mt-3 grid gap-2 text-sm text-red-900 sm:grid-cols-2">
+                <div>
+                  封禁开始
+                  <span class="font-semibold">
+                    {{ selectedProfile.blockedAt ? formatTimestamp(selectedProfile.blockedAt) : '-' }}
+                  </span>
+                </div>
+                <div>
+                  封禁结束
+                  <span class="font-semibold">
+                    {{ selectedProfile.blockedExpiresAt ? formatTimestamp(selectedProfile.blockedExpiresAt) : '-' }}
+                  </span>
+                </div>
+                <div class="sm:col-span-2">
+                  封禁原因
+                  <span class="font-semibold">{{ selectedProfile.blockedReason }}</span>
                 </div>
               </div>
             </div>

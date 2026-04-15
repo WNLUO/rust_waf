@@ -49,7 +49,9 @@ pub(crate) async fn inspect_blocked_client_ip(
     request: &UnifiedHttpRequest,
 ) -> Option<InspectionResult> {
     let config = context.config_snapshot();
-    let client_ip_source = request.get_metadata("network.client_ip_source").map(String::as_str);
+    let client_ip_source = request
+        .get_metadata("network.client_ip_source")
+        .map(String::as_str);
     if matches!(
         config.gateway_config.source_ip_strategy,
         crate::config::SourceIpStrategy::Header
@@ -91,7 +93,10 @@ pub(crate) fn prepare_request_for_routing(context: &WafContext, request: &mut Un
             .config_snapshot()
             .l7_config
             .upstream_http1_allow_connection_reuse
-        && !context.config_snapshot().l7_config.upstream_http1_strict_mode
+        && !context
+            .config_snapshot()
+            .l7_config
+            .upstream_http1_strict_mode
         && request_looks_like_ntlm(request)
     {
         request.add_metadata(

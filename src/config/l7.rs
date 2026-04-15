@@ -74,6 +74,8 @@ pub struct L7Config {
     #[serde(default)]
     pub cc_defense: CcDefenseConfig,
     #[serde(default)]
+    pub slow_attack_defense: SlowAttackDefenseConfig,
+    #[serde(default)]
     pub safeline_intercept: SafeLineInterceptConfig,
 }
 
@@ -121,6 +123,24 @@ pub struct CcDefenseConfig {
     pub hard_ip_block_multiplier: u8,
     #[serde(default = "default_cc_hard_hot_path_block_multiplier")]
     pub hard_hot_path_block_multiplier: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlowAttackDefenseConfig {
+    #[serde(default = "default_slow_attack_defense_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_slow_attack_header_min_bytes_per_sec")]
+    pub header_min_bytes_per_sec: u32,
+    #[serde(default = "default_slow_attack_body_min_bytes_per_sec")]
+    pub body_min_bytes_per_sec: u32,
+    #[serde(default = "default_slow_attack_idle_keepalive_timeout_ms")]
+    pub idle_keepalive_timeout_ms: u64,
+    #[serde(default = "default_slow_attack_event_window_secs")]
+    pub event_window_secs: u64,
+    #[serde(default = "default_slow_attack_max_events_per_window")]
+    pub max_events_per_window: u32,
+    #[serde(default = "default_slow_attack_block_duration_secs")]
+    pub block_duration_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -335,6 +355,34 @@ const fn default_cc_hard_hot_path_block_multiplier() -> u8 {
     3
 }
 
+const fn default_slow_attack_defense_enabled() -> bool {
+    true
+}
+
+const fn default_slow_attack_header_min_bytes_per_sec() -> u32 {
+    128
+}
+
+const fn default_slow_attack_body_min_bytes_per_sec() -> u32 {
+    256
+}
+
+const fn default_slow_attack_idle_keepalive_timeout_ms() -> u64 {
+    15_000
+}
+
+const fn default_slow_attack_event_window_secs() -> u64 {
+    300
+}
+
+const fn default_slow_attack_max_events_per_window() -> u32 {
+    4
+}
+
+const fn default_slow_attack_block_duration_secs() -> u64 {
+    900
+}
+
 const fn default_safeline_intercept_max_body_bytes() -> usize {
     32 * 1024
 }
@@ -407,6 +455,20 @@ impl Default for CcDefenseConfig {
     }
 }
 
+impl Default for SlowAttackDefenseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_slow_attack_defense_enabled(),
+            header_min_bytes_per_sec: default_slow_attack_header_min_bytes_per_sec(),
+            body_min_bytes_per_sec: default_slow_attack_body_min_bytes_per_sec(),
+            idle_keepalive_timeout_ms: default_slow_attack_idle_keepalive_timeout_ms(),
+            event_window_secs: default_slow_attack_event_window_secs(),
+            max_events_per_window: default_slow_attack_max_events_per_window(),
+            block_duration_secs: default_slow_attack_block_duration_secs(),
+        }
+    }
+}
+
 impl Default for L7Config {
     fn default() -> Self {
         Self {
@@ -427,8 +489,7 @@ impl Default for L7Config {
             upstream_failure_mode: UpstreamFailureMode::default(),
             upstream_protocol_policy: UpstreamProtocolPolicy::default(),
             upstream_http1_strict_mode: default_upstream_http1_strict_mode(),
-            upstream_http1_allow_connection_reuse:
-                default_upstream_http1_allow_connection_reuse(),
+            upstream_http1_allow_connection_reuse: default_upstream_http1_allow_connection_reuse(),
             reject_ambiguous_http1_requests: default_reject_ambiguous_http1_requests(),
             reject_http1_transfer_encoding_requests:
                 default_reject_http1_transfer_encoding_requests(),
@@ -436,6 +497,7 @@ impl Default for L7Config {
             reject_expect_100_continue: default_reject_expect_100_continue(),
             bloom_filter_scale: default_bloom_filter_scale(),
             cc_defense: CcDefenseConfig::default(),
+            slow_attack_defense: SlowAttackDefenseConfig::default(),
             safeline_intercept: SafeLineInterceptConfig::default(),
         }
     }

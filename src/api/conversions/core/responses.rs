@@ -31,9 +31,7 @@ impl SettingsResponse {
             gateway_name: config.console_settings.gateway_name.clone(),
             drop_unmatched_requests: config.console_settings.drop_unmatched_requests,
             cdn_525_diagnostic_mode: config.console_settings.cdn_525_diagnostic_mode,
-            client_identity_debug_enabled: config
-                .console_settings
-                .client_identity_debug_enabled,
+            client_identity_debug_enabled: config.console_settings.client_identity_debug_enabled,
             adaptive_protection: AdaptiveProtectionConfigResponse::from_config(
                 &config.adaptive_protection,
             ),
@@ -258,9 +256,7 @@ impl L7ConfigResponse {
             reject_http1_transfer_encoding_requests: config
                 .l7_config
                 .reject_http1_transfer_encoding_requests,
-            reject_body_on_safe_http_methods: config
-                .l7_config
-                .reject_body_on_safe_http_methods,
+            reject_body_on_safe_http_methods: config.l7_config.reject_body_on_safe_http_methods,
             reject_expect_100_continue: config.l7_config.reject_expect_100_continue,
             bloom_filter_scale: config.l7_config.bloom_filter_scale,
             http2_enabled: config.l7_config.http2_config.enabled,

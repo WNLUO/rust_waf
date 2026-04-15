@@ -87,6 +87,7 @@ impl BucketRuntime {
             total_bytes: 0,
             l7_block_hits: 0,
             safeline_hits: 0,
+            slow_attack_hits: 0,
             avg_connection_lifetime_ms: 0.0,
             score_ewma: 0.0,
             risk_level: L4BucketRiskLevel::Normal,
@@ -179,6 +180,9 @@ pub(super) async fn worker_loop(
                         }
                         FeedbackSource::SafeLine => {
                             bucket.safeline_hits = bucket.safeline_hits.saturating_add(1)
+                        }
+                        FeedbackSource::SlowAttack => {
+                            bucket.slow_attack_hits = bucket.slow_attack_hits.saturating_add(1)
                         }
                     }
                 }

@@ -176,8 +176,49 @@ pub(crate) async fn handle_tls_connection(
             return Err(err.into());
         }
         Err(_) => {
+            let assessment = context
+                .slow_attack_guard()
+                .assess(crate::l7::SlowAttackObservation {
+                    kind: crate::l7::SlowAttackKind::SlowTlsHandshake,
+                    peer_ip: packet.source_ip,
+                    client_ip: None,
+                    trusted_proxy_peer,
+                    client_identity_unresolved: trusted_proxy_peer,
+                    host: None,
+                    detail: format!(
+                        "listener={} timeout_ms={}",
+                        local_addr, handshake_timeout_ms
+                    ),
+                });
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_tls_handshake_timeout();
+                metrics.record_slow_attack_tls_handshake();
+                if assessment.should_block_ip {
+                    metrics.record_slow_attack_block();
+                }
+            }
+            if assessment.should_block_ip {
+                if let Some(ip) = assessment.block_ip {
+                    if let Some(inspector) = context.l4_inspector() {
+                        inspector.block_ip(
+                            &ip,
+                            &assessment.reason,
+                            std::time::Duration::from_secs(assessment.block_duration_secs),
+                        );
+                    }
+                    if let Some(store) = context.sqlite_store.as_ref() {
+                        let blocked_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64;
+                        store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+                            ip.to_string(),
+                            assessment.reason.clone(),
+                            blocked_at,
+                            blocked_at + assessment.block_duration_secs as i64,
+                        ));
+                    }
+                }
             }
             warn!(
                 "TLS handshake timed out for peer {} on {} after {}ms",
@@ -191,7 +232,7 @@ pub(crate) async fn handle_tls_connection(
                     "tls handshake timed out peer_ip={} listener={} timeout_ms={}",
                     peer_addr.ip(),
                     local_addr,
-                    handshake_timeout_ms
+                    handshake_timeout_ms,
                 ),
             );
             return Err(anyhow::anyhow!("TLS handshake timed out"));

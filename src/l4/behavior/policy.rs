@@ -48,18 +48,20 @@ pub(super) fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) 
     } else {
         0.0
     };
-    let enforcement_feedback = if bucket.l7_block_hits + bucket.safeline_hits > 0 {
-        let score = (((bucket.l7_block_hits + bucket.safeline_hits) as f64
-            / bucket.total_requests.max(1) as f64)
-            * 100.0)
-            .min(20.0);
-        match bucket.peer_kind {
-            BucketPeerKind::TrustedProxy => score.min(5.0),
-            BucketPeerKind::DirectClient => score,
-        }
-    } else {
-        0.0
-    };
+    let enforcement_feedback =
+        if bucket.l7_block_hits + bucket.safeline_hits + bucket.slow_attack_hits > 0 {
+            let score = (((bucket.l7_block_hits + bucket.safeline_hits + bucket.slow_attack_hits)
+                as f64
+                / bucket.total_requests.max(1) as f64)
+                * 100.0)
+                .min(20.0);
+            match bucket.peer_kind {
+                BucketPeerKind::TrustedProxy => score.min(5.0),
+                BucketPeerKind::DirectClient => score,
+            }
+        } else {
+            0.0
+        };
 
     let raw_score = (recent_connections * connection_weight)
         + (recent_requests * request_weight)

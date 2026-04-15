@@ -180,6 +180,48 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .cc_defense
         .hard_hot_path_block_multiplier
         .clamp(1, 20);
+    config
+        .l7_config
+        .slow_attack_defense
+        .header_min_bytes_per_sec = config
+        .l7_config
+        .slow_attack_defense
+        .header_min_bytes_per_sec
+        .clamp(16, 64 * 1024);
+    config.l7_config.slow_attack_defense.body_min_bytes_per_sec = config
+        .l7_config
+        .slow_attack_defense
+        .body_min_bytes_per_sec
+        .clamp(16, 256 * 1024);
+    config
+        .l7_config
+        .slow_attack_defense
+        .idle_keepalive_timeout_ms = clamp_u64(
+        config
+            .l7_config
+            .slow_attack_defense
+            .idle_keepalive_timeout_ms,
+        1_000,
+        120_000,
+        15_000,
+    );
+    config.l7_config.slow_attack_defense.event_window_secs = clamp_u64(
+        config.l7_config.slow_attack_defense.event_window_secs,
+        30,
+        86_400,
+        300,
+    );
+    config.l7_config.slow_attack_defense.max_events_per_window = config
+        .l7_config
+        .slow_attack_defense
+        .max_events_per_window
+        .clamp(1, 1_000);
+    config.l7_config.slow_attack_defense.block_duration_secs = clamp_u64(
+        config.l7_config.slow_attack_defense.block_duration_secs,
+        30,
+        86_400,
+        900,
+    );
 
     if config.l7_config.upstream_http1_strict_mode {
         config.l7_config.upstream_http1_allow_connection_reuse = false;

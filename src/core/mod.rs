@@ -11,7 +11,7 @@ pub mod traffic_map;
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
-use crate::l7::{HttpTrafficProcessor, L7CcGuard};
+use crate::l7::{HttpTrafficProcessor, L7CcGuard, SlowAttackGuard};
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::SqliteStore;
@@ -57,6 +57,7 @@ pub struct WafContext {
     runtime_config: Arc<RwLock<Config>>,
     l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
     l7_cc_guard: RwLock<Arc<L7CcGuard>>,
+    slow_attack_guard: RwLock<Arc<SlowAttackGuard>>,
     pub http_processor: HttpTrafficProcessor,
     pub rule_engine: RwLock<Option<RuleEngine>>,
     pub metrics: Option<MetricsCollector>,
@@ -120,6 +121,9 @@ impl WafContext {
                 ))
             })),
             l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&effective_cc_defense))),
+            slow_attack_guard: RwLock::new(Arc::new(SlowAttackGuard::new(
+                &config.l7_config.slow_attack_defense,
+            ))),
             http_processor,
             rule_engine: RwLock::new(rule_engine),
             metrics,
@@ -186,6 +190,8 @@ impl WafContext {
         self.refresh_adaptive_protection_runtime(None);
         let effective_cc_defense = self.effective_l7_cc_defense();
         self.l7_cc_guard().update_config(&effective_cc_defense);
+        self.slow_attack_guard()
+            .update_config(&self.config_snapshot().l7_config.slow_attack_defense);
         self.refresh_l4_behavior_tuning_from_config();
         self.refresh_http3_runtime_metadata();
     }
@@ -206,6 +212,13 @@ impl WafContext {
         self.l7_cc_guard
             .read()
             .expect("l7_cc_guard lock poisoned")
+            .clone()
+    }
+
+    pub fn slow_attack_guard(&self) -> Arc<SlowAttackGuard> {
+        self.slow_attack_guard
+            .read()
+            .expect("slow_attack_guard lock poisoned")
             .clone()
     }
 

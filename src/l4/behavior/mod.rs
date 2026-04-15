@@ -130,6 +130,7 @@ struct BucketRuntime {
     total_bytes: u64,
     l7_block_hits: u64,
     safeline_hits: u64,
+    slow_attack_hits: u64,
     avg_connection_lifetime_ms: f64,
     score_ewma: f64,
     risk_level: L4BucketRiskLevel,
@@ -183,6 +184,7 @@ pub struct L4BucketSnapshot {
     pub avg_connection_lifetime_ms: u64,
     pub l7_block_hits: u64,
     pub safeline_hits: u64,
+    pub slow_attack_hits: u64,
     pub risk_score: u32,
     pub risk_level: L4BucketRiskLevel,
     pub policy: L4BucketPolicySnapshot,
@@ -226,6 +228,7 @@ pub struct L4AdaptivePolicy {
 pub enum FeedbackSource {
     L7Block,
     SafeLine,
+    SlowAttack,
 }
 
 impl L4BehaviorTuning {}

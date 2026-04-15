@@ -39,6 +39,16 @@ pub enum ProtocolError {
     #[error("Protocol detection timeout")]
     #[allow(dead_code)]
     Timeout,
+    #[error("HTTP/1 idle timeout after {elapsed_ms}ms")]
+    IdleTimeout { elapsed_ms: u64 },
+    #[error("HTTP/1 slow header read: {bytes_read} bytes in {elapsed_ms}ms")]
+    SlowHeader { bytes_read: usize, elapsed_ms: u64 },
+    #[error("HTTP/1 slow body read: {bytes_read}/{expected_bytes} bytes in {elapsed_ms}ms")]
+    SlowBody {
+        bytes_read: usize,
+        expected_bytes: usize,
+        elapsed_ms: u64,
+    },
     #[error("Unsupported protocol version")]
     #[allow(dead_code)]
     UnsupportedVersion,

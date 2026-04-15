@@ -15,9 +15,8 @@ mod tests;
 pub(crate) use browser_fingerprint::try_handle_browser_fingerprint_report;
 pub(crate) use inspection::{
     inspect_application_layers, inspect_transport_layers, persist_http_identity_debug_event,
-    persist_http_inspection_event,
-    persist_l4_inspection_event, persist_safeline_intercept_blocked_ip,
-    persist_safeline_intercept_event,
+    persist_http_inspection_event, persist_l4_inspection_event,
+    persist_safeline_intercept_blocked_ip, persist_safeline_intercept_event,
 };
 #[cfg(test)]
 pub(crate) use request::expand_request_template;

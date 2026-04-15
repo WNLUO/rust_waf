@@ -71,6 +71,7 @@ fn test_build_metrics_response_with_sources() {
             top_host_segments: Vec::new(),
             top_route_segments: Vec::new(),
             top_host_route_segments: Vec::new(),
+            ..crate::metrics::MetricsSnapshot::default()
         }),
         4,
         Some(crate::storage::StorageMetricsSummary {

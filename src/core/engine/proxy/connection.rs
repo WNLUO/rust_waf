@@ -1,6 +1,6 @@
 use super::*;
-use dashmap::DashMap;
 use bytes::Bytes;
+use dashmap::DashMap;
 use http::Request;
 use http_body_util::{BodyExt, Full};
 use hyper::client::conn::http2 as hyper_http2;
@@ -212,8 +212,9 @@ async fn proxy_http2_request(
     }
 
     let pool_key = build_http2_pool_key(context, request, upstream)?;
-    let pooled = get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
-        .await?;
+    let pooled =
+        get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
+            .await?;
     let upstream_request = build_http2_upstream_request(request, upstream)?;
     let mut guard = pooled.lock().await;
     let response = tokio::time::timeout(
@@ -319,7 +320,10 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
     reusable_connection: &mut Option<UpstreamClientConnection>,
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
-    if context.config_snapshot().l7_config.upstream_http1_strict_mode
+    if context
+        .config_snapshot()
+        .l7_config
+        .upstream_http1_strict_mode
         || !context
             .config_snapshot()
             .l7_config
@@ -440,7 +444,9 @@ fn enforce_http1_request_safety(context: &WafContext, request: &UnifiedHttpReque
         anyhow::bail!("rejected HTTP/1 request carrying Transfer-Encoding");
     }
     if config.reject_ambiguous_http1_requests && has_transfer_encoding && content_length_count > 0 {
-        anyhow::bail!("rejected ambiguous HTTP/1 request: both Content-Length and Transfer-Encoding present");
+        anyhow::bail!(
+            "rejected ambiguous HTTP/1 request: both Content-Length and Transfer-Encoding present"
+        );
     }
     if config.reject_expect_100_continue && has_expect_100_continue {
         anyhow::bail!("rejected HTTP/1 request carrying Expect: 100-continue");
@@ -488,7 +494,9 @@ fn build_http2_upstream_request(
         }
     }
 
-    builder.body(Full::new(Bytes::from(request.body.clone()))).map_err(Into::into)
+    builder
+        .body(Full::new(Bytes::from(request.body.clone())))
+        .map_err(Into::into)
 }
 
 fn normalize_http2_upstream_path(path: &str) -> String {
@@ -704,8 +712,9 @@ mod tests {
         let request =
             UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
 
-        let selected = select_upstream_transport(&context, &request, &https_upstream("up.example:443"))
-            .expect("selection should succeed");
+        let selected =
+            select_upstream_transport(&context, &request, &https_upstream("up.example:443"))
+                .expect("selection should succeed");
 
         assert_eq!(selected, UpstreamTransport::Http2);
     }
@@ -722,8 +731,8 @@ mod tests {
             authority: "127.0.0.1:8080".to_string(),
         };
 
-        let selected =
-            select_upstream_transport(&context, &request, &upstream).expect("selection should succeed");
+        let selected = select_upstream_transport(&context, &request, &upstream)
+            .expect("selection should succeed");
 
         assert_eq!(selected, UpstreamTransport::Http1);
     }

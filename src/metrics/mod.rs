@@ -24,6 +24,11 @@ pub struct MetricsCollector {
     trusted_proxy_l4_degrade_actions: AtomicU64,
     tls_handshake_timeouts: AtomicU64,
     tls_handshake_failures: AtomicU64,
+    slow_attack_idle_timeouts: AtomicU64,
+    slow_attack_header_timeouts: AtomicU64,
+    slow_attack_body_timeouts: AtomicU64,
+    slow_attack_tls_handshake_hits: AtomicU64,
+    slow_attack_blocks: AtomicU64,
     upstream_healthcheck_successes: AtomicU64,
     upstream_healthcheck_failures: AtomicU64,
     proxy_latency_micros_total: AtomicU64,
@@ -107,6 +112,11 @@ impl MetricsCollector {
             trusted_proxy_l4_degrade_actions: AtomicU64::new(0),
             tls_handshake_timeouts: AtomicU64::new(0),
             tls_handshake_failures: AtomicU64::new(0),
+            slow_attack_idle_timeouts: AtomicU64::new(0),
+            slow_attack_header_timeouts: AtomicU64::new(0),
+            slow_attack_body_timeouts: AtomicU64::new(0),
+            slow_attack_tls_handshake_hits: AtomicU64::new(0),
+            slow_attack_blocks: AtomicU64::new(0),
             upstream_healthcheck_successes: AtomicU64::new(0),
             upstream_healthcheck_failures: AtomicU64::new(0),
             proxy_latency_micros_total: AtomicU64::new(0),
@@ -263,6 +273,30 @@ impl MetricsCollector {
         self.tls_handshake_failures.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_slow_attack_idle_timeout(&self) {
+        self.slow_attack_idle_timeouts
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_slow_attack_header_timeout(&self) {
+        self.slow_attack_header_timeouts
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_slow_attack_body_timeout(&self) {
+        self.slow_attack_body_timeouts
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_slow_attack_tls_handshake(&self) {
+        self.slow_attack_tls_handshake_hits
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_slow_attack_block(&self) {
+        self.slow_attack_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_l7_cc_challenge(&self) {
         self.l7_cc_challenges.fetch_add(1, Ordering::Relaxed);
     }
@@ -358,6 +392,13 @@ impl MetricsCollector {
                 .load(Ordering::Relaxed),
             tls_handshake_timeouts: self.tls_handshake_timeouts.load(Ordering::Relaxed),
             tls_handshake_failures: self.tls_handshake_failures.load(Ordering::Relaxed),
+            slow_attack_idle_timeouts: self.slow_attack_idle_timeouts.load(Ordering::Relaxed),
+            slow_attack_header_timeouts: self.slow_attack_header_timeouts.load(Ordering::Relaxed),
+            slow_attack_body_timeouts: self.slow_attack_body_timeouts.load(Ordering::Relaxed),
+            slow_attack_tls_handshake_hits: self
+                .slow_attack_tls_handshake_hits
+                .load(Ordering::Relaxed),
+            slow_attack_blocks: self.slow_attack_blocks.load(Ordering::Relaxed),
             upstream_healthcheck_successes: self
                 .upstream_healthcheck_successes
                 .load(Ordering::Relaxed),
@@ -474,6 +515,11 @@ pub struct MetricsSnapshot {
     pub trusted_proxy_l4_degrade_actions: u64,
     pub tls_handshake_timeouts: u64,
     pub tls_handshake_failures: u64,
+    pub slow_attack_idle_timeouts: u64,
+    pub slow_attack_header_timeouts: u64,
+    pub slow_attack_body_timeouts: u64,
+    pub slow_attack_tls_handshake_hits: u64,
+    pub slow_attack_blocks: u64,
     pub upstream_healthcheck_successes: u64,
     pub upstream_healthcheck_failures: u64,
     pub proxy_latency_micros_total: u64,

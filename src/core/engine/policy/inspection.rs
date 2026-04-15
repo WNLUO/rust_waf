@@ -207,11 +207,8 @@ pub(crate) fn persist_http_identity_debug_event(
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
-    event.details_json = build_request_identity_details_with_header(
-        &configured_header,
-        request,
-        packet,
-    );
+    event.details_json =
+        build_request_identity_details_with_header(&configured_header, request, packet);
 
     store.enqueue_security_event(event);
 }

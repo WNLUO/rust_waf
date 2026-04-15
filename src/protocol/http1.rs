@@ -24,6 +24,8 @@ impl Http1Handler {
         max_size: usize,
         first_byte_timeout_ms: u64,
         read_idle_timeout_ms: u64,
+        header_min_bytes_per_sec: u32,
+        body_min_bytes_per_sec: u32,
     ) -> Result<UnifiedHttpRequest, ProtocolError>
     where
         R: AsyncReadExt + Unpin,
@@ -33,6 +35,8 @@ impl Http1Handler {
         let mut headers_complete = false;
         let mut content_length: Option<usize> = None;
         let mut body_bytes_read = 0;
+        let request_started_at = std::time::Instant::now();
+        let mut header_progress_started_at: Option<std::time::Instant> = None;
 
         // 读取HTTP头
         while !headers_complete && buffer.len() < max_size {
@@ -46,14 +50,43 @@ impl Http1Handler {
                 reader.read(&mut temp_buffer),
             )
             .await
-            .map_err(|_| ProtocolError::Timeout)??;
+            .map_err(|_| {
+                let elapsed_ms = request_started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64;
+                if buffer.is_empty() {
+                    ProtocolError::IdleTimeout { elapsed_ms }
+                } else {
+                    ProtocolError::SlowHeader {
+                        bytes_read: buffer.len(),
+                        elapsed_ms,
+                    }
+                }
+            })??;
             if bytes_read == 0 {
                 break;
+            }
+            if header_progress_started_at.is_none() {
+                header_progress_started_at = Some(std::time::Instant::now());
             }
 
             let remaining = max_size.saturating_sub(buffer.len());
             let to_copy = remaining.min(bytes_read);
             buffer.extend_from_slice(&temp_buffer[..to_copy]);
+            if below_min_rate(
+                buffer.len(),
+                header_progress_started_at.as_ref(),
+                header_min_bytes_per_sec,
+            ) {
+                let elapsed_ms = header_progress_started_at
+                    .map(|started| started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+                    .unwrap_or_default();
+                return Err(ProtocolError::SlowHeader {
+                    bytes_read: buffer.len(),
+                    elapsed_ms,
+                });
+            }
 
             // 检查是否到达头部结束标记
             if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
@@ -93,6 +126,7 @@ impl Http1Handler {
 
             if let Some(headers_end_pos) = headers_end.checked_add(4) {
                 let current_body_size = buffer.len().saturating_sub(headers_end_pos);
+                let body_started_at = std::time::Instant::now();
 
                 // 继续读取请求体直到达到Content-Length
                 while body_bytes_read + current_body_size < expected_length
@@ -106,7 +140,14 @@ impl Http1Handler {
                         reader.read(&mut temp_buffer[..bytes_to_read]),
                     )
                     .await
-                    .map_err(|_| ProtocolError::Timeout)??;
+                    .map_err(|_| ProtocolError::SlowBody {
+                        bytes_read: body_bytes_read + current_body_size,
+                        expected_bytes: expected_length,
+                        elapsed_ms: body_started_at
+                            .elapsed()
+                            .as_millis()
+                            .min(u128::from(u64::MAX)) as u64,
+                    })??;
                     if bytes_read == 0 {
                         break;
                     }
@@ -115,6 +156,21 @@ impl Http1Handler {
                     let to_copy = remaining.min(bytes_read);
                     buffer.extend_from_slice(&temp_buffer[..to_copy]);
                     body_bytes_read += to_copy;
+                    if below_min_rate(
+                        body_bytes_read + current_body_size,
+                        Some(&body_started_at),
+                        body_min_bytes_per_sec,
+                    ) {
+                        return Err(ProtocolError::SlowBody {
+                            bytes_read: body_bytes_read + current_body_size,
+                            expected_bytes: expected_length,
+                            elapsed_ms: body_started_at
+                                .elapsed()
+                                .as_millis()
+                                .min(u128::from(u64::MAX))
+                                as u64,
+                        });
+                    }
                 }
             }
         }
@@ -163,8 +219,7 @@ impl Http1Handler {
                 if normalized_key == "transfer-encoding" {
                     has_transfer_encoding = true;
                 }
-                if normalized_key == "expect"
-                    && trimmed_value.eq_ignore_ascii_case("100-continue")
+                if normalized_key == "expect" && trimmed_value.eq_ignore_ascii_case("100-continue")
                 {
                     has_expect_100_continue = true;
                 }
@@ -327,6 +382,25 @@ impl Http1Handler {
     }
 }
 
+fn below_min_rate(
+    bytes: usize,
+    started_at: Option<&std::time::Instant>,
+    min_bytes_per_sec: u32,
+) -> bool {
+    if bytes == 0 || min_bytes_per_sec == 0 {
+        return false;
+    }
+    let Some(started_at) = started_at else {
+        return false;
+    };
+    let elapsed = started_at.elapsed();
+    if elapsed < Duration::from_secs(1) {
+        return false;
+    }
+    let elapsed_secs = elapsed.as_secs_f64().max(0.001);
+    (bytes as f64 / elapsed_secs) < min_bytes_per_sec as f64
+}
+
 impl Default for Http1Handler {
     fn default() -> Self {
         Self::new()
@@ -346,7 +420,7 @@ mod tests {
         let mut cursor = Cursor::new(request_data);
 
         let request = handler
-            .read_request(&mut cursor, 1024, 100, 100)
+            .read_request(&mut cursor, 1024, 100, 100, 16, 16)
             .await
             .unwrap();
 
@@ -368,7 +442,7 @@ mod tests {
         let mut cursor = Cursor::new(request_data);
 
         let request = handler
-            .read_request(&mut cursor, 1024, 100, 100)
+            .read_request(&mut cursor, 1024, 100, 100, 16, 16)
             .await
             .unwrap();
 
@@ -399,7 +473,9 @@ mod tests {
         let handler = Http1Handler::new();
         let (_client, mut server) = duplex(64);
 
-        let result = handler.read_request(&mut server, 1024, 10, 10).await;
-        assert!(matches!(result, Err(ProtocolError::Timeout)));
+        let result = handler
+            .read_request(&mut server, 1024, 10, 10, 16, 16)
+            .await;
+        assert!(matches!(result, Err(ProtocolError::IdleTimeout { .. })));
     }
 }

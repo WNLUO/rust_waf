@@ -190,7 +190,10 @@ pub(crate) fn resolve_client_ip(
     let gateway = &config.gateway_config;
     let trusted_proxy_peer = peer_is_trusted_proxy(context, peer_addr.ip());
 
-    if matches!(gateway.source_ip_strategy, crate::config::SourceIpStrategy::Header) {
+    if matches!(
+        gateway.source_ip_strategy,
+        crate::config::SourceIpStrategy::Header
+    ) {
         let resolved = if gateway.custom_source_ip_header.trim().is_empty() {
             None
         } else {

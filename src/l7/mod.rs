@@ -1,10 +1,12 @@
 pub mod cc_guard;
+pub mod slow_attack_guard;
 
 use crate::config::L7Config;
 use crate::core::WafContext;
 use log::{debug, info};
 
 pub use cc_guard::L7CcGuard;
+pub use slow_attack_guard::{SlowAttackGuard, SlowAttackKind, SlowAttackObservation};
 
 #[derive(Debug, Clone)]
 pub struct HttpTrafficProcessor {

@@ -36,6 +36,18 @@ pub(super) fn normalize_profile_settings(config: &mut Config) {
             clamp_u64(config.l7_config.proxy_write_timeout_ms, 500, 15_000, 3_000);
         config.l7_config.proxy_read_timeout_ms =
             clamp_u64(config.l7_config.proxy_read_timeout_ms, 500, 30_000, 10_000);
+        config
+            .l7_config
+            .slow_attack_defense
+            .idle_keepalive_timeout_ms = clamp_u64(
+            config
+                .l7_config
+                .slow_attack_defense
+                .idle_keepalive_timeout_ms,
+            1_000,
+            20_000,
+            10_000,
+        );
         config.l7_config.upstream_healthcheck_interval_secs = clamp_u64(
             config.l7_config.upstream_healthcheck_interval_secs,
             1,
@@ -81,6 +93,18 @@ pub(super) fn normalize_profile_settings(config: &mut Config) {
             clamp_u64(config.l7_config.proxy_write_timeout_ms, 500, 30_000, 3_000);
         config.l7_config.proxy_read_timeout_ms =
             clamp_u64(config.l7_config.proxy_read_timeout_ms, 500, 60_000, 10_000);
+        config
+            .l7_config
+            .slow_attack_defense
+            .idle_keepalive_timeout_ms = clamp_u64(
+            config
+                .l7_config
+                .slow_attack_defense
+                .idle_keepalive_timeout_ms,
+            1_000,
+            60_000,
+            15_000,
+        );
         config.l7_config.upstream_healthcheck_interval_secs = clamp_u64(
             config.l7_config.upstream_healthcheck_interval_secs,
             1,

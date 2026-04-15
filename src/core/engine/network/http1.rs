@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::engine::policy::persist_http_identity_debug_event;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
 pub(crate) async fn handle_http1_connection(
     context: Arc<WafContext>,
@@ -12,6 +13,7 @@ pub(crate) async fn handle_http1_connection(
     let config = context.config_snapshot();
     let http1_handler = Http1Handler::new();
     let mut reusable_upstream_connection = None;
+    let mut requests_seen = 0u64;
     let connection_id = extra_metadata
         .iter()
         .find(|(key, _)| key == "network.connection_id")
@@ -19,18 +21,62 @@ pub(crate) async fn handle_http1_connection(
         .unwrap_or_else(|| "unknown".to_string());
     let opened_at = std::time::Instant::now();
     let mut bucket_key = None;
+    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
 
     loop {
-        let mut request = http1_handler
+        let first_byte_timeout_ms = if requests_seen == 0 {
+            config.l7_config.first_byte_timeout_ms
+        } else {
+            config
+                .l7_config
+                .slow_attack_defense
+                .idle_keepalive_timeout_ms
+        };
+        let mut request = match http1_handler
             .read_request(
                 &mut stream,
                 config.l7_config.max_request_size,
-                config.l7_config.first_byte_timeout_ms,
+                first_byte_timeout_ms,
                 config.l7_config.read_idle_timeout_ms,
+                config
+                    .l7_config
+                    .slow_attack_defense
+                    .header_min_bytes_per_sec,
+                config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
             )
-            .await?;
+            .await
+        {
+            Ok(request) => request,
+            Err(err)
+                if matches!(
+                    err,
+                    crate::protocol::ProtocolError::IdleTimeout { .. }
+                        | crate::protocol::ProtocolError::SlowHeader { .. }
+                        | crate::protocol::ProtocolError::SlowBody { .. }
+                ) =>
+            {
+                handle_slow_attack_error(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    packet,
+                    peer_addr,
+                    &err,
+                    trusted_proxy_peer,
+                )
+                .await?;
+                if let (Some(inspector), Some(bucket_key)) =
+                    (context.l4_inspector(), bucket_key.as_ref())
+                {
+                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                }
+                return Ok(());
+            }
+            Err(err) => return Err(err.into()),
+        };
+        requests_seen = requests_seen.saturating_add(1);
 
         apply_client_identity(context.as_ref(), peer_addr, &mut request);
         request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
@@ -586,6 +632,154 @@ pub(crate) async fn handle_http1_connection(
             return Ok(());
         }
     }
+}
+
+async fn handle_slow_attack_error(
+    context: &WafContext,
+    http1_handler: &Http1Handler,
+    stream: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    packet: &PacketInfo,
+    peer_addr: std::net::SocketAddr,
+    err: &crate::protocol::ProtocolError,
+    trusted_proxy_peer: bool,
+) -> Result<()> {
+    let (kind, detail) = match err {
+        crate::protocol::ProtocolError::IdleTimeout { elapsed_ms } => (
+            crate::l7::SlowAttackKind::IdleConnection,
+            format!("elapsed_ms={elapsed_ms}"),
+        ),
+        crate::protocol::ProtocolError::SlowHeader {
+            bytes_read,
+            elapsed_ms,
+        } => (
+            crate::l7::SlowAttackKind::SlowHeaders,
+            format!("bytes_read={bytes_read} elapsed_ms={elapsed_ms}"),
+        ),
+        crate::protocol::ProtocolError::SlowBody {
+            bytes_read,
+            expected_bytes,
+            elapsed_ms,
+        } => (
+            crate::l7::SlowAttackKind::SlowBody,
+            format!(
+                "bytes_read={bytes_read} expected_bytes={expected_bytes} elapsed_ms={elapsed_ms}"
+            ),
+        ),
+        _ => return Ok(()),
+    };
+
+    let assessment = context
+        .slow_attack_guard()
+        .assess(crate::l7::SlowAttackObservation {
+            kind,
+            peer_ip: packet.source_ip,
+            client_ip: None,
+            trusted_proxy_peer,
+            client_identity_unresolved: trusted_proxy_peer,
+            host: None,
+            detail,
+        });
+    if let Some(metrics) = context.metrics.as_ref() {
+        match kind {
+            crate::l7::SlowAttackKind::IdleConnection => metrics.record_slow_attack_idle_timeout(),
+            crate::l7::SlowAttackKind::SlowHeaders => metrics.record_slow_attack_header_timeout(),
+            crate::l7::SlowAttackKind::SlowBody => metrics.record_slow_attack_body_timeout(),
+            crate::l7::SlowAttackKind::SlowTlsHandshake => {
+                metrics.record_slow_attack_tls_handshake()
+            }
+        }
+        if assessment.should_block_ip {
+            metrics.record_slow_attack_block();
+        }
+        metrics.record_block(crate::core::InspectionLayer::L7);
+    }
+
+    persist_http1_slow_attack_event(context, packet, peer_addr, kind, &assessment);
+
+    if assessment.should_block_ip {
+        if let Some(ip) = assessment.block_ip {
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.block_ip(
+                    &ip,
+                    &assessment.reason,
+                    std::time::Duration::from_secs(assessment.block_duration_secs),
+                );
+            }
+            if let Some(store) = context.sqlite_store.as_ref() {
+                let blocked_at = current_unix_timestamp();
+                store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+                    ip.to_string(),
+                    assessment.reason.clone(),
+                    blocked_at,
+                    blocked_at + assessment.block_duration_secs as i64,
+                ));
+            }
+        }
+    }
+
+    let response = context
+        .slow_attack_guard()
+        .build_response(&assessment, kind);
+    http1_handler
+        .write_response_with_headers(
+            stream,
+            response.status_code,
+            http_status_text(response.status_code),
+            &response.headers,
+            &response.body,
+        )
+        .await?;
+    let _ = stream.shutdown().await;
+    warn!(
+        "Slow attack defense terminated HTTP/1.1 connection from {}: {}",
+        peer_addr, assessment.reason
+    );
+    Ok(())
+}
+
+fn persist_http1_slow_attack_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    peer_addr: std::net::SocketAddr,
+    kind: crate::l7::SlowAttackKind,
+    assessment: &crate::l7::slow_attack_guard::SlowAttackAssessment,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+
+    let mut event = crate::storage::SecurityEventRecord::now(
+        "L7",
+        if assessment.should_block_ip {
+            "block"
+        } else {
+            "respond"
+        },
+        assessment.reason.clone(),
+        assessment.block_ip.unwrap_or(packet.source_ip).to_string(),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    );
+    event.http_version = Some("HTTP/1.1".to_string());
+    event.details_json = serde_json::to_string_pretty(&serde_json::json!({
+        "slow_attack": {
+            "kind": kind.as_str(),
+            "event_count": assessment.event_count,
+            "block_ip": assessment.block_ip.map(|ip| ip.to_string()),
+            "peer_ip": peer_addr.ip().to_string(),
+        }
+    }))
+    .ok();
+    store.enqueue_security_event(event);
+}
+
+fn current_unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]

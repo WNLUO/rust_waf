@@ -1,8 +1,8 @@
 use super::helpers::{
     normalize_https_listen_addr_input, parse_adaptive_protection_goal,
     parse_adaptive_protection_mode, parse_auto_tuning_intent, parse_auto_tuning_mode,
-    parse_safeline_intercept_action, parse_safeline_intercept_match_mode,
-    parse_source_ip_strategy, parse_trusted_cdn_sync_interval_unit, parse_upstream_failure_mode,
+    parse_safeline_intercept_action, parse_safeline_intercept_match_mode, parse_source_ip_strategy,
+    parse_trusted_cdn_sync_interval_unit, parse_upstream_failure_mode,
     parse_upstream_protocol_policy,
 };
 use super::*;
@@ -257,12 +257,10 @@ impl L7ConfigUpdateRequest {
         current.l7_config.upstream_http1_strict_mode = self.upstream_http1_strict_mode;
         current.l7_config.upstream_http1_allow_connection_reuse =
             self.upstream_http1_allow_connection_reuse;
-        current.l7_config.reject_ambiguous_http1_requests =
-            self.reject_ambiguous_http1_requests;
+        current.l7_config.reject_ambiguous_http1_requests = self.reject_ambiguous_http1_requests;
         current.l7_config.reject_http1_transfer_encoding_requests =
             self.reject_http1_transfer_encoding_requests;
-        current.l7_config.reject_body_on_safe_http_methods =
-            self.reject_body_on_safe_http_methods;
+        current.l7_config.reject_body_on_safe_http_methods = self.reject_body_on_safe_http_methods;
         current.l7_config.reject_expect_100_continue = self.reject_expect_100_continue;
         current.l7_config.bloom_filter_scale = self.bloom_filter_scale;
         current.l7_config.http2_config.enabled = self.http2_enabled;
@@ -410,8 +408,7 @@ impl SettingsUpdateRequest {
         current.console_settings.gateway_name = self.gateway_name;
         current.console_settings.drop_unmatched_requests = self.drop_unmatched_requests;
         current.console_settings.cdn_525_diagnostic_mode = self.cdn_525_diagnostic_mode;
-        current.console_settings.client_identity_debug_enabled =
-            self.client_identity_debug_enabled;
+        current.console_settings.client_identity_debug_enabled = self.client_identity_debug_enabled;
         current.adaptive_protection = self.adaptive_protection.into_config()?;
         current.gateway_config = GatewayConfig {
             https_listen_addr,

@@ -281,6 +281,7 @@ impl L4BehaviorEngine {
                     avg_connection_lifetime_ms: bucket.avg_connection_lifetime_ms.max(0.0) as u64,
                     l7_block_hits: bucket.l7_block_hits,
                     safeline_hits: bucket.safeline_hits,
+                    slow_attack_hits: bucket.slow_attack_hits,
                     risk_score: bucket.score_ewma.round().clamp(0.0, 100.0) as u32,
                     risk_level: bucket.risk_level.clone(),
                     policy: policy_snapshot(&policy),

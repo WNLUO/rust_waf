@@ -370,11 +370,19 @@ impl WafEngine {
                 .baseline_identity_pressure_percent
                 .map(|baseline| current_identity <= baseline - 1.5)
                 .unwrap_or(false);
+            let governance_mode = ai_temp_policy_governance_mode(
+                policy.action.as_str(),
+                policy.hit_count,
+                l7_improved,
+                identity_improved,
+            );
 
-            let should_revoke = age_secs >= 300 && policy.hit_count == 0 && !effect.auto_revoked;
+            let should_revoke =
+                age_secs >= 300 && governance_mode == "cold" && !effect.auto_revoked;
             if should_revoke {
                 effect.auto_revoked = true;
-                effect.auto_revoke_reason = Some("no_hits_after_warmup".to_string());
+                effect.auto_revoke_reason =
+                    Some(format!("{}_after_warmup", policy.action.replace(':', "_")));
                 let _ = store
                     .revoke_ai_temp_policy_with_effect(policy.id, &effect, now)
                     .await?;
@@ -382,15 +390,16 @@ impl WafEngine {
             }
 
             let should_extend = ttl_remaining <= 300
-                && policy.hit_count >= 3
-                && (l7_improved || identity_improved)
+                && governance_mode == "effective"
                 && effect.auto_extensions < 2;
             if should_extend {
                 effect.auto_extensions += 1;
-                let extension_secs = if policy.action == "add_temp_block" {
-                    300
-                } else {
-                    600
+                let extension_secs = match policy.action.as_str() {
+                    "add_temp_block" => 300,
+                    "increase_delay" => 600,
+                    "tighten_route_cc" | "tighten_host_cc" | "increase_challenge" => 900,
+                    "raise_identity_risk" | "add_behavior_watch" => 600,
+                    _ => 300,
                 };
                 let _ = store
                     .extend_ai_temp_policy_expiry_with_effect(
@@ -416,5 +425,58 @@ impl WafEngine {
         }
 
         Ok(())
+    }
+}
+
+fn ai_temp_policy_governance_mode(
+    action: &str,
+    hit_count: i64,
+    l7_improved: bool,
+    identity_improved: bool,
+) -> &'static str {
+    match action {
+        "increase_delay" => {
+            if hit_count >= 3 && l7_improved {
+                "effective"
+            } else if hit_count == 0 {
+                "cold"
+            } else {
+                "watch"
+            }
+        }
+        "tighten_route_cc" | "tighten_host_cc" | "increase_challenge" => {
+            if hit_count >= 2 && l7_improved {
+                "effective"
+            } else if hit_count == 0 {
+                "cold"
+            } else {
+                "watch"
+            }
+        }
+        "raise_identity_risk" | "add_behavior_watch" => {
+            if hit_count >= 2 && identity_improved {
+                "effective"
+            } else if hit_count == 0 {
+                "cold"
+            } else {
+                "watch"
+            }
+        }
+        "add_temp_block" => {
+            if hit_count >= 1 && (l7_improved || identity_improved) {
+                "effective"
+            } else if hit_count == 0 {
+                "cold"
+            } else {
+                "watch"
+            }
+        }
+        _ => {
+            if hit_count == 0 {
+                "cold"
+            } else {
+                "watch"
+            }
+        }
     }
 }

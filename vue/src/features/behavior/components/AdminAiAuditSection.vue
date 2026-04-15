@@ -1332,6 +1332,10 @@ onMounted(() => {
                           : '尚未评估'
                       }}
                     </p>
+                    <p class="mt-1 text-[11px] text-slate-500">
+                      动作评估 {{ policy.effectiveness.action_status }} ·
+                      {{ policy.effectiveness.action_reason }}
+                    </p>
                     <div class="mt-3 grid gap-2 md:grid-cols-2">
                       <div
                         class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
@@ -1452,6 +1456,9 @@ onMounted(() => {
                         </p>
                       </div>
                     </div>
+                    <p class="mt-2 text-[11px] text-slate-500">
+                      治理建议 {{ policy.effectiveness.governance_hint }}
+                    </p>
                   </div>
                   <button
                     type="button"

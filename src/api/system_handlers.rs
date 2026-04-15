@@ -1123,6 +1123,23 @@ fn ai_temp_policy_response_from_entry(
     let effect =
         serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&value.effect_json)
             .unwrap_or_default();
+    let l7_friction_delta = effect
+        .baseline_l7_friction_percent
+        .map(|value| summary.current.l7_friction_pressure_percent - value);
+    let identity_pressure_delta = effect
+        .baseline_identity_pressure_percent
+        .map(|value| summary.current.identity_pressure_percent - value);
+    let rust_persistence_delta = effect
+        .baseline_rust_persistence_percent
+        .map(|value| summary.safeline_correlation.rust_persistence_percent - value);
+    let (action_status, action_reason, governance_hint) = classify_ai_temp_policy_action(
+        value.action.as_str(),
+        value.hit_count,
+        l7_friction_delta,
+        identity_pressure_delta,
+        rust_persistence_delta,
+    );
+
     AiTempPolicyResponse {
         id: value.id,
         created_at: value.created_at,
@@ -1165,16 +1182,123 @@ fn ai_temp_policy_response_from_entry(
             current_l7_friction_percent: summary.current.l7_friction_pressure_percent,
             current_identity_pressure_percent: summary.current.identity_pressure_percent,
             current_rust_persistence_percent: summary.safeline_correlation.rust_persistence_percent,
-            l7_friction_delta: effect
-                .baseline_l7_friction_percent
-                .map(|value| summary.current.l7_friction_pressure_percent - value),
-            identity_pressure_delta: effect
-                .baseline_identity_pressure_percent
-                .map(|value| summary.current.identity_pressure_percent - value),
-            rust_persistence_delta: effect
-                .baseline_rust_persistence_percent
-                .map(|value| summary.safeline_correlation.rust_persistence_percent - value),
+            l7_friction_delta,
+            identity_pressure_delta,
+            rust_persistence_delta,
+            action_status,
+            action_reason,
+            governance_hint,
         },
+    }
+}
+
+fn classify_ai_temp_policy_action(
+    action: &str,
+    hit_count: i64,
+    l7_friction_delta: Option<f64>,
+    identity_pressure_delta: Option<f64>,
+    rust_persistence_delta: Option<f64>,
+) -> (String, String, String) {
+    let l7_improved = l7_friction_delta
+        .map(|value| value <= -3.0)
+        .unwrap_or(false);
+    let identity_improved = identity_pressure_delta
+        .map(|value| value <= -1.5)
+        .unwrap_or(false);
+    let persistence_improved = rust_persistence_delta
+        .map(|value| value <= -10.0)
+        .unwrap_or(false);
+
+    match action {
+        "increase_delay" => {
+            if hit_count >= 3 && persistence_improved {
+                (
+                    "effective".to_string(),
+                    "延迟策略已命中且雷池后持续压力明显回落。".to_string(),
+                    "可短期续期，继续观察是否仍需升级为更强动作。".to_string(),
+                )
+            } else if hit_count == 0 {
+                (
+                    "cold".to_string(),
+                    "延迟策略尚未命中，暂时无法说明对热点有真实覆盖。".to_string(),
+                    "热身后若仍无命中，可优先清退。".to_string(),
+                )
+            } else {
+                (
+                    "watch".to_string(),
+                    "延迟策略已有命中，但持续压力回落还不够明显。".to_string(),
+                    "继续观察持续压力与命中数，必要时升级 challenge 或 route 收紧。".to_string(),
+                )
+            }
+        }
+        "tighten_route_cc" | "tighten_host_cc" | "increase_challenge" => {
+            if hit_count >= 2 && l7_improved {
+                (
+                    "effective".to_string(),
+                    "摩擦类策略已命中，并且 L7 摩擦压力相对基线下降。".to_string(),
+                    "可有限续期，优先保持热点对象的短期收紧。".to_string(),
+                )
+            } else if hit_count == 0 {
+                (
+                    "cold".to_string(),
+                    "摩擦类策略尚未命中，说明当前覆盖面可能偏窄。".to_string(),
+                    "热身后若无命中，可考虑撤销或改用更合适的匹配范围。".to_string(),
+                )
+            } else {
+                (
+                    "watch".to_string(),
+                    "摩擦类策略已有命中，但 L7 压力改善仍不充分。".to_string(),
+                    "继续观察，若压力不降可升级为短时 block 或更严阈值。".to_string(),
+                )
+            }
+        }
+        "raise_identity_risk" | "add_behavior_watch" => {
+            if hit_count >= 2 && identity_improved {
+                (
+                    "effective".to_string(),
+                    "行为/身份策略已命中，并且身份压力相对基线回落。".to_string(),
+                    "可短期保留，继续观察是否还有未解析身份回流。".to_string(),
+                )
+            } else if hit_count == 0 {
+                (
+                    "cold".to_string(),
+                    "行为/身份策略尚未命中，当前无法证明其作用范围有效。".to_string(),
+                    "若热身后仍无命中，应优先清退。".to_string(),
+                )
+            } else {
+                (
+                    "watch".to_string(),
+                    "行为/身份策略已有命中，但身份压力改善不明显。".to_string(),
+                    "继续观察，必要时结合真实 IP 链路或热点对象再收紧。".to_string(),
+                )
+            }
+        }
+        "add_temp_block" => {
+            if hit_count >= 1 && persistence_improved {
+                (
+                    "effective".to_string(),
+                    "临时封禁已命中，且雷池后持续压力明显下降。".to_string(),
+                    "仅建议短时续期，避免过度阻断。".to_string(),
+                )
+            } else if hit_count == 0 {
+                (
+                    "cold".to_string(),
+                    "临时封禁尚未命中，当前无法证明封禁对象仍然活跃。".to_string(),
+                    "热身后若仍无命中，可自动退出。".to_string(),
+                )
+            } else {
+                (
+                    "watch".to_string(),
+                    "临时封禁已有命中，但持续压力仍未明显下降。".to_string(),
+                    "继续观察，必要时扩大匹配范围或转为 route 级策略。".to_string(),
+                )
+            }
+        }
+        _ => (
+            "watch".to_string(),
+            "当前策略动作缺少专项评估模型，先按通用观察处理。".to_string(),
+            "建议结合命中和压力变化手动复核。".to_string(),
+        ),
     }
 }
 

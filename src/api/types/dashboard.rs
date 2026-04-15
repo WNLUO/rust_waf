@@ -181,6 +181,9 @@ pub struct AiTempPolicyEffectivenessResponse {
     pub(crate) l7_friction_delta: Option<f64>,
     pub(crate) identity_pressure_delta: Option<f64>,
     pub(crate) rust_persistence_delta: Option<f64>,
+    pub(crate) action_status: String,
+    pub(crate) action_reason: String,
+    pub(crate) governance_hint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

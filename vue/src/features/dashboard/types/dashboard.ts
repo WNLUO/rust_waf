@@ -257,6 +257,9 @@ export interface AiTempPolicyEffectiveness {
   l7_friction_delta: number | null
   identity_pressure_delta: number | null
   rust_persistence_delta: number | null
+  action_status: string
+  action_reason: string
+  governance_hint: string
 }
 
 export interface AiTempPoliciesResponse {

@@ -97,6 +97,18 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.l7_cc_verified_passes)
                 .unwrap_or(0),
+            behavior_challenge_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_behavior_challenges)
+                .unwrap_or(0),
+            behavior_block_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_behavior_blocks)
+                .unwrap_or(0),
+            behavior_delayed_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_behavior_delays)
+                .unwrap_or(0),
             proxied_requests: metrics
                 .as_ref()
                 .map(|value| value.proxied_requests)

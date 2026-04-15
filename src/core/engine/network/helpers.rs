@@ -70,6 +70,21 @@ pub(crate) fn record_l7_cc_metrics(
     }
 }
 
+pub(crate) fn record_l7_behavior_metrics(
+    metrics: &crate::metrics::MetricsCollector,
+    request: &crate::protocol::UnifiedHttpRequest,
+) {
+    match request
+        .get_metadata("l7.behavior.action")
+        .map(String::as_str)
+    {
+        Some("challenge") => metrics.record_l7_behavior_challenge(),
+        Some("block") => metrics.record_l7_behavior_block(),
+        Some(action) if action.starts_with("delay:") => metrics.record_l7_behavior_delay(),
+        _ => {}
+    }
+}
+
 pub(crate) fn proxy_traffic_kind(
     request: &crate::protocol::UnifiedHttpRequest,
 ) -> crate::metrics::ProxyTrafficKind {

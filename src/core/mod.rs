@@ -11,7 +11,7 @@ pub mod traffic_map;
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
-use crate::l7::{HttpTrafficProcessor, L7CcGuard, SlowAttackGuard};
+use crate::l7::{HttpTrafficProcessor, L7BehaviorGuard, L7CcGuard, SlowAttackGuard};
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::SqliteStore;
@@ -57,6 +57,7 @@ pub struct WafContext {
     runtime_config: Arc<RwLock<Config>>,
     l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
     l7_cc_guard: RwLock<Arc<L7CcGuard>>,
+    l7_behavior_guard: RwLock<Arc<L7BehaviorGuard>>,
     slow_attack_guard: RwLock<Arc<SlowAttackGuard>>,
     pub http_processor: HttpTrafficProcessor,
     pub rule_engine: RwLock<Option<RuleEngine>>,
@@ -121,6 +122,7 @@ impl WafContext {
                 ))
             })),
             l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&effective_cc_defense))),
+            l7_behavior_guard: RwLock::new(Arc::new(L7BehaviorGuard::new())),
             slow_attack_guard: RwLock::new(Arc::new(SlowAttackGuard::new(
                 &config.l7_config.slow_attack_defense,
             ))),
@@ -219,6 +221,13 @@ impl WafContext {
         self.slow_attack_guard
             .read()
             .expect("slow_attack_guard lock poisoned")
+            .clone()
+    }
+
+    pub fn l7_behavior_guard(&self) -> Arc<L7BehaviorGuard> {
+        self.l7_behavior_guard
+            .read()
+            .expect("l7_behavior_guard lock poisoned")
             .clone()
     }
 

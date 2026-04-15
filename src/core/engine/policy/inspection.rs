@@ -370,6 +370,27 @@ fn build_request_identity_details_with_header(
             "x_forwarded_for": request.get_header("x-forwarded-for").cloned(),
             "http_version": request.version.to_string(),
             "headers": headers,
+        },
+        "l7_cc": {
+            "action": request.get_metadata("l7.cc.action").cloned(),
+            "request_kind": request.get_metadata("l7.cc.request_kind").cloned(),
+            "route": request.get_metadata("l7.cc.route").cloned(),
+            "host": request.get_metadata("l7.cc.host").cloned(),
+            "route_weighted": request.get_metadata("l7.cc.route_weighted").cloned(),
+            "hot_path_weighted": request.get_metadata("l7.cc.hot_path_weighted").cloned(),
+            "hot_path_clients": request.get_metadata("l7.cc.hot_path_clients").cloned(),
+            "challenge_verified": request.get_metadata("l7.cc.challenge_verified").cloned(),
+        },
+        "l7_behavior": {
+            "action": request.get_metadata("l7.behavior.action").cloned(),
+            "score": request.get_metadata("l7.behavior.score").cloned(),
+            "identity": request.get_metadata("l7.behavior.identity").cloned(),
+            "dominant_route": request.get_metadata("l7.behavior.dominant_route").cloned(),
+            "distinct_routes": request.get_metadata("l7.behavior.distinct_routes").cloned(),
+            "repeated_ratio": request.get_metadata("l7.behavior.repeated_ratio").cloned(),
+            "interval_jitter_ms": request.get_metadata("l7.behavior.interval_jitter_ms").cloned(),
+            "document_requests": request.get_metadata("l7.behavior.document_requests").cloned(),
+            "non_document_requests": request.get_metadata("l7.behavior.non_document_requests").cloned(),
         }
     });
 

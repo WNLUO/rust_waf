@@ -13,6 +13,9 @@ pub struct MetricsCollector {
     l7_cc_delays: AtomicU64,
     l7_cc_unresolved_identity_delays: AtomicU64,
     l7_cc_verified_passes: AtomicU64,
+    l7_behavior_challenges: AtomicU64,
+    l7_behavior_blocks: AtomicU64,
+    l7_behavior_delays: AtomicU64,
     total_bytes: AtomicU64,
     proxied_requests: AtomicU64,
     proxy_successes: AtomicU64,
@@ -101,6 +104,9 @@ impl MetricsCollector {
             l7_cc_delays: AtomicU64::new(0),
             l7_cc_unresolved_identity_delays: AtomicU64::new(0),
             l7_cc_verified_passes: AtomicU64::new(0),
+            l7_behavior_challenges: AtomicU64::new(0),
+            l7_behavior_blocks: AtomicU64::new(0),
+            l7_behavior_delays: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             proxied_requests: AtomicU64::new(0),
             proxy_successes: AtomicU64::new(0),
@@ -318,6 +324,18 @@ impl MetricsCollector {
         self.l7_cc_verified_passes.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_l7_behavior_challenge(&self) {
+        self.l7_behavior_challenges.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_behavior_block(&self) {
+        self.l7_behavior_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_behavior_delay(&self) {
+        self.l7_behavior_delays.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_upstream_healthcheck(&self, healthy: bool) {
         if healthy {
             self.upstream_healthcheck_successes
@@ -379,6 +397,9 @@ impl MetricsCollector {
                 .l7_cc_unresolved_identity_delays
                 .load(Ordering::Relaxed),
             l7_cc_verified_passes: self.l7_cc_verified_passes.load(Ordering::Relaxed),
+            l7_behavior_challenges: self.l7_behavior_challenges.load(Ordering::Relaxed),
+            l7_behavior_blocks: self.l7_behavior_blocks.load(Ordering::Relaxed),
+            l7_behavior_delays: self.l7_behavior_delays.load(Ordering::Relaxed),
             total_bytes: self.total_bytes.load(Ordering::Relaxed),
             proxied_requests: self.proxied_requests.load(Ordering::Relaxed),
             proxy_successes,
@@ -504,6 +525,9 @@ pub struct MetricsSnapshot {
     pub l7_cc_delays: u64,
     pub l7_cc_unresolved_identity_delays: u64,
     pub l7_cc_verified_passes: u64,
+    pub l7_behavior_challenges: u64,
+    pub l7_behavior_blocks: u64,
+    pub l7_behavior_delays: u64,
     pub total_bytes: u64,
     pub proxied_requests: u64,
     pub proxy_successes: u64,

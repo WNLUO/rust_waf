@@ -301,7 +301,7 @@ const fn default_ai_audit_max_active_temp_policies() -> u32 {
 }
 
 const fn default_ai_audit_allow_auto_temp_block() -> bool {
-    true
+    false
 }
 
 const fn default_ai_audit_allow_auto_extend_effective_policies() -> bool {

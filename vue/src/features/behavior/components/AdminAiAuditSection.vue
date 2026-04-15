@@ -45,7 +45,7 @@ function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
     temp_block_ttl_secs: 1800,
     auto_apply_min_confidence: 70,
     max_active_temp_policies: 24,
-    allow_auto_temp_block: true,
+    allow_auto_temp_block: false,
     allow_auto_extend_effective_policies: true,
     auto_revoke_warmup_secs: 300,
     auto_audit_enabled: false,
@@ -80,6 +80,7 @@ const windowSeconds = ref(900)
 const feedbackFilter = ref<
   'all' | 'unreviewed' | 'confirmed' | 'false_positive' | 'follow_up'
 >('all')
+const triggerReasonFilter = ref<'all' | 'auto' | 'manual' | 'pressure' | 'attack' | 'hotspot'>('all')
 const feedbackNotes = reactive<Record<number, string>>({})
 
 const { formatNumber, formatTimestamp } = useFormatters()
@@ -146,16 +147,54 @@ const autoAuditTriggerFlags = computed(() => {
   return flags
 })
 
+const filteredReportHistory = computed(() => {
+  if (triggerReasonFilter.value === 'all') {
+    return reportHistory.value
+  }
+  return reportHistory.value.filter((item) => {
+    const reason = (item.auto_trigger_reason ?? '').toLowerCase()
+    switch (triggerReasonFilter.value) {
+      case 'auto':
+        return item.auto_generated
+      case 'manual':
+        return !item.auto_generated
+      case 'pressure':
+        return reason.includes('pressure')
+      case 'attack':
+        return reason.includes('attack')
+      case 'hotspot':
+        return reason.includes('hotspot')
+      default:
+        return true
+    }
+  })
+})
+
+const autoAuditTimeline = computed(() => {
+  return filteredReportHistory.value
+    .filter((item) => item.auto_generated)
+    .slice(0, 6)
+    .map((item) => ({
+      id: item.id,
+      generated_at: item.generated_at,
+      risk_level: item.risk_level,
+      headline: item.headline,
+      trigger_reason: describeAutoTriggerReason(item.auto_trigger_reason),
+      provider_used: item.provider_used,
+      fallback_used: item.fallback_used,
+    }))
+})
+
 const compareReport = computed(() => {
-  if (!reportHistory.value.length) return null
+  if (!filteredReportHistory.value.length) return null
   if (compareReportId.value != null) {
     return (
-      reportHistory.value.find((item) => item.id === compareReportId.value) ??
+      filteredReportHistory.value.find((item) => item.id === compareReportId.value) ??
       null
     )
   }
   return (
-    reportHistory.value.find((item) => {
+    filteredReportHistory.value.find((item) => {
       if (report.value?.report_id != null) {
         return item.id !== report.value.report_id
       }
@@ -307,6 +346,23 @@ function describeAutoTriggerReason(value: string | null | undefined) {
     .map((item) => item.trim())
     .filter(Boolean)
     .join(' / ')
+}
+
+function triggerReasonFilterLabel(value: typeof triggerReasonFilter.value) {
+  switch (value) {
+    case 'auto':
+      return '自动触发'
+    case 'manual':
+      return '手动执行'
+    case 'pressure':
+      return '高压力'
+    case 'attack':
+      return 'attack 模式'
+    case 'hotspot':
+      return '热点变化'
+    default:
+      return '全部'
+  }
 }
 
 watch(
@@ -804,16 +860,6 @@ onMounted(() => {
               class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
             >
               <input
-                v-model="form.allow_auto_temp_block"
-                type="checkbox"
-                class="h-4 w-4 accent-cyan-600"
-              />
-              允许自动执行 temp block
-            </label>
-            <label
-              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-            >
-              <input
                 v-model="form.allow_auto_extend_effective_policies"
                 type="checkbox"
                 class="h-4 w-4 accent-cyan-600"
@@ -870,6 +916,12 @@ onMounted(() => {
               />
               attack 模式强制回退 local_rules
             </label>
+            <span
+              class="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700"
+            >
+              <code class="rounded bg-white/80 px-1 py-0.5">temp block</code>
+              <span class="ml-2">仍需人工确认，不参与自动执行</span>
+            </span>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500"
                 >观察窗口（秒）</span
@@ -1853,10 +1905,67 @@ onMounted(() => {
               <option value="false_positive">误报</option>
               <option value="follow_up">待跟进</option>
             </select>
+            <select
+              v-model="triggerReasonFilter"
+              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+            >
+              <option value="all">全部触发</option>
+              <option value="auto">自动触发</option>
+              <option value="manual">手动执行</option>
+              <option value="pressure">高压力</option>
+              <option value="attack">attack 模式</option>
+              <option value="hotspot">热点变化</option>
+            </select>
             <StatusBadge
               type="muted"
-              :text="`历史 ${formatNumber(historyTotal)}`"
+              :text="`历史 ${formatNumber(filteredReportHistory.length)} / ${formatNumber(historyTotal)}`"
             />
+          </div>
+        </div>
+
+        <div
+          v-if="autoAuditTimeline.length"
+          class="mt-4 rounded-2xl border border-cyan-200 bg-[linear-gradient(135deg,rgba(248,250,252,0.96),rgba(236,254,255,0.92))] px-4 py-4"
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge type="info" text="自动审计时间线" />
+            <StatusBadge
+              type="muted"
+              :text="`筛选 ${triggerReasonFilterLabel(triggerReasonFilter)}`"
+            />
+          </div>
+          <div class="mt-4 space-y-3">
+            <article
+              v-for="item in autoAuditTimeline"
+              :key="`timeline-${item.id}`"
+              class="rounded-2xl border border-white/80 bg-white/85 px-4 py-3"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  :type="
+                    item.risk_level === 'high' || item.risk_level === 'critical'
+                      ? 'error'
+                      : item.risk_level === 'medium'
+                        ? 'warning'
+                        : 'success'
+                  "
+                  :text="item.risk_level"
+                />
+                <StatusBadge type="info" text="自动触发" />
+                <StatusBadge type="muted" :text="item.provider_used" />
+                <StatusBadge
+                  v-if="item.fallback_used"
+                  type="warning"
+                  text="已走 fallback"
+                />
+              </div>
+              <p class="mt-2 text-sm font-semibold text-slate-900">
+                {{ item.headline }}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                {{ formatTimestamp(item.generated_at) }} · {{ item.trigger_reason }}
+              </p>
+            </article>
           </div>
         </div>
 
@@ -1867,14 +1976,14 @@ onMounted(() => {
           正在加载 AI 审计历史...
         </div>
         <div
-          v-else-if="!reportHistory.length"
+          v-else-if="!filteredReportHistory.length"
           class="py-12 text-center text-sm text-slate-500"
         >
-          还没有历史审计报告
+          当前筛选条件下没有历史审计报告
         </div>
         <div v-else class="mt-4 space-y-4">
           <article
-            v-for="item in reportHistory"
+            v-for="item in filteredReportHistory"
             :key="item.id"
             class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
           >

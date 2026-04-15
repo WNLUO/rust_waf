@@ -440,6 +440,8 @@ impl WafEngine {
     async fn run_ai_auto_audit(&self, now: i64) -> Result<()> {
         let config = self.context.config_snapshot();
         let ai_config = config.integrations.ai_audit.clone();
+        const SHORT_WINDOW_SECS: u32 = 3 * 60;
+        const LONG_WINDOW_SECS: u32 = 15 * 60;
         if !ai_config.auto_audit_enabled {
             return Ok(());
         }
@@ -455,21 +457,29 @@ impl WafEngine {
             return Ok(());
         }
 
-        let summary = crate::api::build_ai_audit_summary_for_context(
+        let trigger_summary = crate::api::build_ai_audit_summary_for_context(
             self.context.as_ref(),
-            Some(15 * 60),
-            Some(ai_config.event_sample_limit.min(120)),
+            Some(SHORT_WINDOW_SECS),
+            Some(ai_config.event_sample_limit.min(80)),
             Some(ai_config.recent_event_limit.min(8)),
         )
         .await?;
+        if let Some(pause_reason) = ai_auto_audit_pause_reason(&trigger_summary) {
+            info!("AI auto audit paused: {}", pause_reason);
+            return Ok(());
+        }
 
-        let signature = ai_auto_audit_signature(&summary);
+        let signature = ai_auto_audit_signature(&trigger_summary);
         self.context
             .note_ai_auto_audit_observed_signature(Some(signature.clone()))
             .await;
 
-        let trigger_reasons =
-            ai_auto_audit_trigger_reasons(&ai_config, &summary, runtime.last_observed_signature.as_deref(), &signature);
+        let trigger_reasons = ai_auto_audit_trigger_reasons(
+            &ai_config,
+            &trigger_summary,
+            runtime.last_observed_signature.as_deref(),
+            &signature,
+        );
         if trigger_reasons.is_empty() {
             return Ok(());
         }
@@ -494,14 +504,14 @@ impl WafEngine {
         let report = crate::api::run_ai_audit_report_for_context(
             Arc::clone(&self.context),
             crate::api::AiAuditReportQueryParams {
-                window_seconds: Some(15 * 60),
+                window_seconds: Some(LONG_WINDOW_SECS),
                 sample_limit: Some(ai_config.event_sample_limit.min(120)),
                 recent_limit: Some(ai_config.recent_event_limit.min(8)),
                 provider: None,
                 fallback_to_rules: Some(ai_config.fallback_to_rules),
             },
             ai_config.auto_audit_force_local_rules_under_attack
-                && summary.runtime_pressure_level == "attack",
+                && trigger_summary.runtime_pressure_level == "attack",
             Some(reason.clone()),
         )
         .await?;
@@ -613,7 +623,36 @@ fn ai_auto_audit_trigger_reasons(
     {
         trigger_reasons.push("hotspot_shift".to_string());
     }
+    if summary.data_quality.analysis_confidence == "medium"
+        && (summary.data_quality.detail_slimming_active
+            || summary.data_quality.sqlite_queue_usage_percent >= 75.0)
+    {
+        trigger_reasons.push("data_quality_degraded".to_string());
+    }
     trigger_reasons
+}
+
+#[cfg(feature = "api")]
+fn ai_auto_audit_pause_reason(summary: &crate::api::AiAuditSummaryResponse) -> Option<String> {
+    if summary.data_quality.analysis_confidence != "low" {
+        return None;
+    }
+    if summary.data_quality.dropped_security_events > 0 {
+        return Some(format!(
+            "data quality degraded: dropped_security_events={}",
+            summary.data_quality.dropped_security_events
+        ));
+    }
+    if summary.data_quality.persistence_coverage_ratio < 0.95 {
+        return Some(format!(
+            "data quality degraded: persistence_coverage_ratio={:.2}",
+            summary.data_quality.persistence_coverage_ratio
+        ));
+    }
+    if summary.data_quality.detail_slimming_active {
+        return Some("data quality degraded: detail slimming active".to_string());
+    }
+    None
 }
 
 #[cfg(all(test, feature = "api"))]
@@ -673,5 +712,38 @@ mod tests {
 
         assert!(reasons.iter().any(|item| item == "pressure_high"));
         assert!(reasons.iter().any(|item| item == "hotspot_shift"));
+    }
+
+    #[test]
+    fn ai_auto_audit_trigger_reasons_include_data_quality_degraded() {
+        let config = crate::config::AiAuditConfig {
+            auto_audit_enabled: true,
+            auto_audit_on_pressure_high: true,
+            auto_audit_on_attack_mode: true,
+            auto_audit_on_hotspot_shift: true,
+            ..crate::config::AiAuditConfig::default()
+        };
+        let mut summary = sample_summary();
+        summary.data_quality.analysis_confidence = "medium".to_string();
+        summary.data_quality.detail_slimming_active = true;
+        summary.data_quality.sqlite_queue_usage_percent = 82.0;
+        let signature = ai_auto_audit_signature(&summary);
+
+        let reasons =
+            ai_auto_audit_trigger_reasons(&config, &summary, Some(&signature), &signature);
+
+        assert!(reasons.iter().any(|item| item == "data_quality_degraded"));
+    }
+
+    #[test]
+    fn ai_auto_audit_pause_reason_blocks_low_confidence_data_quality() {
+        let mut summary = sample_summary();
+        summary.data_quality.analysis_confidence = "low".to_string();
+        summary.data_quality.dropped_security_events = 3;
+
+        let reason = ai_auto_audit_pause_reason(&summary);
+
+        assert!(reason.is_some());
+        assert!(reason.unwrap().contains("dropped_security_events"));
     }
 }

@@ -1458,9 +1458,6 @@ async fn apply_ai_temp_policies_from_report(
         if confidence < ai_config.auto_apply_min_confidence as i64 {
             continue;
         }
-        if item.action == "add_temp_block" && !ai_config.allow_auto_temp_block {
-            continue;
-        }
         if (active_count + applied as u32) >= ai_config.max_active_temp_policies {
             break;
         }

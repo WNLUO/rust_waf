@@ -19,7 +19,9 @@ use serde_json;
 use sqlx::SqlitePool;
 #[cfg(any(feature = "api", test))]
 use sqlx::{QueryBuilder, Sqlite};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify};
@@ -35,6 +37,7 @@ use self::query::{
 const SQLITE_STARTUP_BACKUP_RETENTION: usize = 5;
 const SQLITE_CORRUPT_BACKUP_RETENTION: usize = 5;
 const STORAGE_OPTION_NONE_SENTINEL: i64 = -1;
+const AGGREGATED_SECURITY_EVENT_WINDOW_SECS: i64 = 5;
 
 #[derive(Debug, Default)]
 struct StorageMetricsCache {
@@ -104,6 +107,25 @@ impl StorageMetricsCache {
     }
 }
 
+#[derive(Debug, Clone)]
+struct AggregatedSecurityEventBucket {
+    layer: String,
+    action: String,
+    reason: String,
+    source_ip: String,
+    dest_ip: String,
+    protocol: String,
+    http_method: Option<String>,
+    uri: Option<String>,
+    http_version: Option<String>,
+    count: u64,
+    long_tail: bool,
+    time_window_start: i64,
+    time_window_end: i64,
+    first_created_at: i64,
+    last_created_at: i64,
+}
+
 #[derive(Clone)]
 pub struct SqliteStore {
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
@@ -118,6 +140,8 @@ pub struct SqliteStore {
     dropped_blocked_ips: Arc<AtomicU64>,
     metrics_cache: Arc<StorageMetricsCache>,
     realtime_tx: broadcast::Sender<StorageRealtimeEvent>,
+    aggregated_security_events: Arc<StdMutex<HashMap<String, AggregatedSecurityEventBucket>>>,
+    aggregated_security_event_candidates: Arc<StdMutex<HashMap<String, u64>>>,
 }
 
 #[allow(clippy::large_enum_variant)]

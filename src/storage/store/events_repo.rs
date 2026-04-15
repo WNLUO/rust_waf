@@ -322,6 +322,23 @@ impl SqliteStore {
         Ok(row)
     }
 
+    pub async fn list_active_local_blocked_ips(&self) -> Result<Vec<BlockedIpEntry>> {
+        let items = sqlx::query_as::<_, BlockedIpEntry>(
+            r#"
+            SELECT id, provider, provider_remote_id, ip, reason, blocked_at, expires_at
+            FROM blocked_ips
+            WHERE provider IS NULL
+              AND expires_at > ?
+            ORDER BY expires_at DESC, blocked_at DESC
+            "#,
+        )
+        .bind(unix_timestamp())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(items)
+    }
+
     #[cfg(any(feature = "api", test))]
     pub async fn cleanup_expired_blocked_ips(
         &self,

@@ -85,6 +85,99 @@ const feedbackNotes = reactive<Record<number, string>>({})
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
+function providerLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'local_rules':
+      return '本地规则'
+    case 'stub_model':
+      return '占位模型'
+    case 'openai_compatible':
+      return 'OpenAI 兼容接口'
+    case 'xiaomi_mimo':
+      return '小米 Mimo'
+    default:
+      return value || '暂无'
+  }
+}
+
+function riskLevelLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'low':
+      return '低'
+    case 'medium':
+      return '中'
+    case 'high':
+      return '高'
+    case 'critical':
+      return '紧急'
+    default:
+      return value || '未知'
+  }
+}
+
+function priorityLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'low':
+      return '低'
+    case 'medium':
+      return '中'
+    case 'high':
+      return '高'
+    case 'urgent':
+      return '紧急'
+    default:
+      return value || '未知'
+  }
+}
+
+function actionTypeLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'observe':
+      return '持续观察'
+    case 'tune_threshold':
+      return '调节阈值'
+    case 'add_rule':
+      return '添加规则'
+    case 'investigate':
+      return '人工排查'
+    default:
+      return value || '未知'
+  }
+}
+
+function feedbackStatusLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'confirmed':
+      return '已确认'
+    case 'false_positive':
+      return '误报'
+    case 'follow_up':
+      return '待跟进'
+    case 'unreviewed':
+      return '未标记'
+    default:
+      return value || '暂无'
+  }
+}
+
+function analysisModeLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'analysis_only':
+      return '仅分析'
+    default:
+      return value || '暂无'
+  }
+}
+
+function inputSourceLabel(value: string | null | undefined) {
+  switch ((value ?? '').toLowerCase()) {
+    case 'cc_behavior_joint_summary':
+      return 'CC 行为联合摘要'
+    default:
+      return value || '暂无'
+  }
+}
+
 useFlashMessages({
   error,
   success: successMessage,
@@ -111,9 +204,9 @@ const riskBadgeType = computed(() => {
 const providerStatusText = computed(() => {
   if (!report.value) return '尚未执行'
   if (report.value.fallback_used) {
-    return `已回退到 ${report.value.provider_used}`
+    return `已回退到 ${providerLabel(report.value.provider_used)}`
   }
-  return `当前输出来自 ${report.value.provider_used}`
+  return `当前输出来自 ${providerLabel(report.value.provider_used)}`
 })
 
 const cachedReportLabel = computed(() => {
@@ -139,7 +232,7 @@ const autoAuditTriggerFlags = computed(() => {
     flags.push('高压力')
   }
   if (autoAuditStatus.value.on_attack_mode) {
-    flags.push('attack 模式')
+    flags.push('攻击模式')
   }
   if (autoAuditStatus.value.on_hotspot_shift) {
     flags.push('热点变化')
@@ -343,8 +436,24 @@ function describeAutoTriggerReason(value: string | null | undefined) {
   if (!value) return '暂无'
   return value
     .split('+')
-    .map((item) => item.trim())
+    .map((item) => item.trim().toLowerCase())
     .filter(Boolean)
+    .map((item) => {
+      switch (item) {
+        case 'pressure':
+          return '高压力'
+        case 'attack':
+          return '攻击模式'
+        case 'hotspot':
+          return '热点变化'
+        case 'auto':
+          return '自动触发'
+        case 'manual':
+          return '手动执行'
+        default:
+          return item
+      }
+    })
     .join(' / ')
 }
 
@@ -357,7 +466,7 @@ function triggerReasonFilterLabel(value: typeof triggerReasonFilter.value) {
     case 'pressure':
       return '高压力'
     case 'attack':
-      return 'attack 模式'
+      return '攻击模式'
     case 'hotspot':
       return '热点变化'
     default:
@@ -634,7 +743,7 @@ onMounted(() => {
           <div class="flex items-start justify-between gap-3">
             <div>
               <p class="text-sm font-semibold text-slate-900">
-                模型与 Provider 配置
+                模型与服务配置
               </p>
             </div>
             <div class="rounded-2xl bg-white p-3 text-cyan-700 shadow-sm">
@@ -655,16 +764,16 @@ onMounted(() => {
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500"
-                >默认 provider</span
+                >默认服务商</span
               >
               <select
                 v-model="form.provider"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
               >
-                <option value="local_rules">local_rules</option>
-                <option value="stub_model">stub_model</option>
-                <option value="openai_compatible">openai_compatible</option>
-                <option value="xiaomi_mimo">xiaomi_mimo</option>
+                <option value="local_rules">本地规则（local_rules）</option>
+                <option value="stub_model">占位模型（stub_model）</option>
+                <option value="openai_compatible">OpenAI 兼容接口</option>
+                <option value="xiaomi_mimo">小米 Mimo</option>
               </select>
             </label>
             <label class="space-y-1">
@@ -681,7 +790,7 @@ onMounted(() => {
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">Base URL</span>
+              <span class="text-xs font-medium text-slate-500">接口地址</span>
               <input
                 v-model="form.base_url"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
@@ -694,12 +803,12 @@ onMounted(() => {
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">API Key</span>
+              <span class="text-xs font-medium text-slate-500">接口密钥</span>
               <input
                 v-model="form.api_key"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
                 type="password"
-                placeholder="留空时外部 provider 无法真正执行"
+                placeholder="留空时外部服务无法真正执行"
               />
             </label>
             <label class="space-y-1">
@@ -834,7 +943,7 @@ onMounted(() => {
                 type="checkbox"
                 class="h-4 w-4 accent-cyan-600"
               />
-              provider 失败时自动回退到 local_rules
+              外部服务失败时自动回退到本地规则
             </label>
             <label
               class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
@@ -894,7 +1003,7 @@ onMounted(() => {
                 type="checkbox"
                 class="h-4 w-4 accent-cyan-600"
               />
-              attack 模式时自动触发
+              攻击模式时自动触发
             </label>
             <label
               class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
@@ -914,12 +1023,12 @@ onMounted(() => {
                 type="checkbox"
                 class="h-4 w-4 accent-cyan-600"
               />
-              attack 模式强制回退 local_rules
+              攻击模式下强制回退本地规则
             </label>
             <span
               class="inline-flex items-center rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700"
             >
-              <code class="rounded bg-white/80 px-1 py-0.5">temp block</code>
+              <code class="rounded bg-white/80 px-1 py-0.5">临时封禁</code>
               <span class="ml-2">仍需人工确认，不参与自动执行</span>
             </span>
             <label class="space-y-1">
@@ -941,7 +1050,7 @@ onMounted(() => {
           <div class="flex flex-wrap items-center gap-2">
             <StatusBadge
               :type="riskBadgeType"
-              :text="report ? `风险 ${report.risk_level}` : '尚未执行'"
+              :text="report ? `风险 ${riskLevelLabel(report.risk_level)}` : '尚未执行'"
             />
             <StatusBadge type="muted" :text="providerStatusText" />
             <StatusBadge type="muted" :text="cachedReportLabel" />
@@ -971,7 +1080,7 @@ onMounted(() => {
               <p
                 class="text-xs font-medium uppercase tracking-[0.18em] text-slate-400"
               >
-                Executive Summary
+                审计摘要
               </p>
               <ul class="mt-2 space-y-2 text-sm leading-6 text-slate-700">
                 <li
@@ -1028,7 +1137,7 @@ onMounted(() => {
               >
                 <p class="text-xs text-slate-400">分析模式</p>
                 <p class="mt-1 text-sm font-semibold text-slate-900">
-                  {{ report.analysis_mode }}
+                  {{ analysisModeLabel(report.analysis_mode) }}
                 </p>
               </div>
               <div
@@ -1036,7 +1145,7 @@ onMounted(() => {
               >
                 <p class="text-xs text-slate-400">输入来源</p>
                 <p class="mt-1 text-sm font-semibold text-slate-900">
-                  {{ report.input_profile.source }}
+                  {{ inputSourceLabel(report.input_profile.source) }}
                 </p>
               </div>
               <div
@@ -1083,7 +1192,7 @@ onMounted(() => {
                 />
                 <StatusBadge
                   type="muted"
-                  :text="`Rust ${formatNumber(report.summary.safeline_correlation.rust_events)}`"
+                  :text="`Rust WAF ${formatNumber(report.summary.safeline_correlation.rust_events)}`"
                 />
                 <StatusBadge
                   type="warning"
@@ -1105,7 +1214,7 @@ onMounted(() => {
                   <p
                     class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
                   >
-                    雷池热点 Host
+                    雷池热点主机
                   </p>
                   <p class="mt-2 text-sm text-slate-700">
                     {{
@@ -1121,7 +1230,7 @@ onMounted(() => {
                   <p
                     class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
                   >
-                    Rust 热点 Host
+                    Rust WAF 热点主机
                   </p>
                   <p class="mt-2 text-sm text-slate-700">
                     {{
@@ -1137,7 +1246,7 @@ onMounted(() => {
                   <p
                     class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
                   >
-                    共同热点 Host
+                    共同热点主机
                   </p>
                   <p class="mt-2 text-sm text-slate-700">
                     {{
@@ -1153,7 +1262,7 @@ onMounted(() => {
                   <p
                     class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
                   >
-                    共同热点 Route
+                    共同热点路径
                   </p>
                   <p class="mt-2 text-sm text-slate-700">
                     {{
@@ -1169,7 +1278,7 @@ onMounted(() => {
                   <p
                     class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
                   >
-                    未回落 Host
+                    未回落主机
                   </p>
                   <p class="mt-2 text-sm text-slate-700">
                     {{
@@ -1186,7 +1295,7 @@ onMounted(() => {
                   <p
                     class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
                   >
-                    未回落 Route
+                    未回落路径
                   </p>
                   <p class="mt-2 text-sm text-slate-700">
                     {{
@@ -1315,7 +1424,7 @@ onMounted(() => {
                     </li>
                   </ul>
                   <p v-else class="mt-2 text-sm text-slate-500">
-                    没有新增 findings。
+                    没有新增发现。
                   </p>
                 </div>
                 <div
@@ -1338,7 +1447,7 @@ onMounted(() => {
                     </li>
                   </ul>
                   <p v-else class="mt-2 text-sm text-slate-500">
-                    没有消失的 findings。
+                    没有消失的发现。
                   </p>
                 </div>
               </div>
@@ -1363,10 +1472,10 @@ onMounted(() => {
             <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <p class="text-xs text-slate-400">调度参数</p>
               <p class="mt-1 text-sm font-semibold text-slate-900">
-                间隔 {{ formatNumber(autoAuditStatus?.interval_secs ?? 0) }}s
+                间隔 {{ formatNumber(autoAuditStatus?.interval_secs ?? 0) }} 秒
               </p>
               <p class="mt-1 text-xs text-slate-500">
-                冷却 {{ formatNumber(autoAuditStatus?.cooldown_secs ?? 0) }}s
+                冷却 {{ formatNumber(autoAuditStatus?.cooldown_secs ?? 0) }} 秒
               </p>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -1381,8 +1490,8 @@ onMounted(() => {
               <p class="mt-1 text-xs text-slate-500">
                 {{
                   autoAuditStatus?.force_local_rules_under_attack
-                    ? 'attack 模式下会强制回退 local_rules'
-                    : 'attack 模式下保持当前 provider'
+                    ? '攻击模式下会强制回退本地规则'
+                    : '攻击模式下保持当前服务商'
                 }}
               </p>
             </div>
@@ -1438,7 +1547,7 @@ onMounted(() => {
               v-if="!report.findings.length"
               class="mt-3 text-sm text-slate-500"
             >
-              当前没有新增 findings。
+              当前没有新增发现。
             </div>
             <div v-else class="mt-3 space-y-3">
               <article
@@ -1456,7 +1565,7 @@ onMounted(() => {
                           ? 'warning'
                           : 'muted'
                     "
-                    :text="finding.severity"
+                    :text="riskLevelLabel(finding.severity)"
                   />
                   <span class="text-sm font-semibold text-slate-900">{{
                     finding.title
@@ -1502,11 +1611,11 @@ onMounted(() => {
                         ? 'warning'
                         : 'info'
                     "
-                    :text="recommendation.priority"
+                    :text="priorityLabel(recommendation.priority)"
                   />
                   <StatusBadge
                     type="muted"
-                    :text="recommendation.action_type"
+                    :text="actionTypeLabel(recommendation.action_type)"
                   />
                   <span class="text-sm font-semibold text-slate-900">{{
                     recommendation.title
@@ -1710,7 +1819,7 @@ onMounted(() => {
                       自动治理
                       {{
                         policy.effect.auto_revoked
-                          ? `已撤销(${policy.effect.auto_revoke_reason || 'unknown'})`
+                          ? `已撤销（${policy.effect.auto_revoke_reason || '未知原因'}）`
                           : `已续期 ${formatNumber(policy.effect.auto_extensions)} 次`
                       }}
                       ·
@@ -1742,7 +1851,7 @@ onMounted(() => {
                           最近命中
                         </p>
                         <p class="mt-1 text-xs text-slate-600">
-                          {{ policy.effect.last_match_mode || 'unknown' }} ·
+                          {{ policy.effect.last_match_mode || '未知' }} ·
                           {{
                             policy.effect.last_matched_value ||
                             policy.effect.last_scope_value ||
@@ -1913,7 +2022,7 @@ onMounted(() => {
               <option value="auto">自动触发</option>
               <option value="manual">手动执行</option>
               <option value="pressure">高压力</option>
-              <option value="attack">attack 模式</option>
+              <option value="attack">攻击模式</option>
               <option value="hotspot">热点变化</option>
             </select>
             <StatusBadge
@@ -1949,14 +2058,14 @@ onMounted(() => {
                         ? 'warning'
                         : 'success'
                   "
-                  :text="item.risk_level"
+                  :text="riskLevelLabel(item.risk_level)"
                 />
                 <StatusBadge type="info" text="自动触发" />
-                <StatusBadge type="muted" :text="item.provider_used" />
+                <StatusBadge type="muted" :text="providerLabel(item.provider_used)" />
                 <StatusBadge
                   v-if="item.fallback_used"
                   type="warning"
-                  text="已走 fallback"
+                  text="已回退执行"
                 />
               </div>
               <p class="mt-2 text-sm font-semibold text-slate-900">
@@ -2001,18 +2110,18 @@ onMounted(() => {
                           ? 'warning'
                           : 'success'
                     "
-                    :text="item.risk_level"
+                    :text="riskLevelLabel(item.risk_level)"
                   />
-                  <StatusBadge type="muted" :text="item.provider_used" />
+                  <StatusBadge type="muted" :text="providerLabel(item.provider_used)" />
                   <StatusBadge
                     v-if="item.feedback_status"
                     type="info"
-                    :text="`反馈 ${item.feedback_status}`"
+                    :text="`反馈 ${feedbackStatusLabel(item.feedback_status)}`"
                   />
                   <StatusBadge
                     v-if="item.fallback_used"
                     type="warning"
-                    text="已走 fallback"
+                    text="已回退执行"
                   />
                   <StatusBadge
                     v-if="compareReportId === item.id"

@@ -18,10 +18,11 @@ use crate::rules::RuleEngine;
 use crate::storage::{AiTempPolicyEntry, AiTempPolicyHitRecord, SqliteStore};
 use anyhow::Result;
 use log::{info, warn};
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex};
 
 pub use adaptive_protection::AdaptiveProtectionRuntimeSnapshot;
@@ -144,7 +145,7 @@ impl WafContext {
             &adaptive_protection_runtime,
         );
 
-        Ok(Self {
+        let context = Self {
             runtime_config: Arc::new(RwLock::new(config.clone())),
             l4_inspector: RwLock::new(l4_enabled.then(|| {
                 Arc::new(L4Inspector::new(
@@ -192,7 +193,16 @@ impl WafContext {
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
-        })
+        };
+
+        if let (Some(store), Some(inspector)) = (
+            context.sqlite_store.as_ref(),
+            context.l4_inspector().as_ref().cloned(),
+        ) {
+            restore_runtime_blocked_ips(store.as_ref(), inspector.as_ref()).await?;
+        }
+
+        Ok(context)
     }
 
     pub fn config_snapshot(&self) -> Config {
@@ -828,6 +838,39 @@ impl WafContext {
     }
 }
 
+async fn restore_runtime_blocked_ips(store: &SqliteStore, inspector: &L4Inspector) -> Result<()> {
+    let now = unix_timestamp();
+    let blocked_ips = store.list_active_local_blocked_ips().await?;
+    let mut restored = 0_u64;
+    let mut restored_ips = HashSet::new();
+
+    for entry in blocked_ips {
+        let Ok(ip) = entry.ip.parse::<std::net::IpAddr>() else {
+            warn!(
+                "Skipping blocked IP restore for invalid address '{}' (id={})",
+                entry.ip, entry.id
+            );
+            continue;
+        };
+        if !restored_ips.insert(ip) {
+            continue;
+        }
+        let remaining_secs = entry.expires_at.saturating_sub(now);
+        if remaining_secs == 0 {
+            continue;
+        }
+        if inspector.block_ip(&ip, &entry.reason, Duration::from_secs(remaining_secs as u64)) {
+            restored = restored.saturating_add(1);
+        }
+    }
+
+    if restored > 0 {
+        info!("Restored {} active local blocked IP(s) into runtime memory", restored);
+    }
+
+    Ok(())
+}
+
 fn unix_timestamp() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1152,6 +1195,61 @@ mod tests {
         let refreshed = context.refresh_rules_from_storage().await.unwrap();
         assert!(refreshed);
         assert_eq!(context.active_rule_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_context_restores_active_local_blocked_ips_into_runtime_memory() {
+        let db_path = unique_test_db_path("blocked_ip_restore");
+        let bootstrap_store = SqliteStore::new(db_path.clone(), true).await.unwrap();
+        let now = unix_timestamp();
+        bootstrap_store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+            "203.0.113.10",
+            "restore me",
+            now,
+            now + 120,
+        ));
+        bootstrap_store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+            "203.0.113.11",
+            "already expired",
+            now - 120,
+            now - 1,
+        ));
+        bootstrap_store.flush().await.unwrap();
+        bootstrap_store.shutdown().await.unwrap();
+
+        let config = Config {
+            interface: "lo0".to_string(),
+            listen_addrs: vec!["127.0.0.1:0".to_string()],
+            tcp_upstream_addr: None,
+            udp_upstream_addr: None,
+            runtime_profile: RuntimeProfile::Standard,
+            api_enabled: false,
+            api_bind: "127.0.0.1:3740".to_string(),
+            bloom_enabled: false,
+            l4_bloom_false_positive_verification: false,
+            l7_bloom_false_positive_verification: false,
+            maintenance_interval_secs: 30,
+            l4_config: L4Config {
+                connection_rate_limit: 1,
+                ..L4Config::default()
+            },
+            l7_config: L7Config::default(),
+            http3_config: Http3Config::default(),
+            metrics_enabled: true,
+            sqlite_enabled: true,
+            sqlite_path: db_path,
+            sqlite_auto_migrate: true,
+            sqlite_rules_enabled: true,
+            max_concurrent_tasks: 128,
+            ..Config::default()
+        };
+
+        let context = WafContext::new(config).await.unwrap();
+        let stats = context
+            .l4_inspector()
+            .expect("l4 inspector should be available")
+            .get_statistics();
+        assert_eq!(stats.connections.blocked_connections, 1);
     }
 
     fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {

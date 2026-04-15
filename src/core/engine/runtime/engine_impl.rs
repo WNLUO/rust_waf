@@ -233,6 +233,12 @@ impl WafEngine {
         }
 
         if let Some(store) = self.context.sqlite_store.as_ref() {
+            if let Err(err) = store.flush_aggregated_security_events().await {
+                warn!(
+                    "Failed to flush aggregated security events before maintenance: {}",
+                    err
+                );
+            }
             let storage_policy = self.context.config_snapshot().storage_policy;
             let thresholds = [
                 (

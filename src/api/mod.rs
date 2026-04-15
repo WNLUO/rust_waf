@@ -1,3 +1,4 @@
+mod ai_audit;
 mod auth;
 mod conversions;
 mod error;

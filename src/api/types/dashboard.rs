@@ -62,6 +62,8 @@ pub struct AiAuditReportQueryParams {
     pub(crate) window_seconds: Option<u32>,
     pub(crate) sample_limit: Option<u32>,
     pub(crate) recent_limit: Option<u32>,
+    pub(crate) provider: Option<String>,
+    pub(crate) fallback_to_rules: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,6 +87,9 @@ pub struct AiAuditSummaryResponse {
 #[derive(Debug, Serialize)]
 pub struct AiAuditReportResponse {
     pub(crate) generated_at: i64,
+    pub(crate) provider_used: String,
+    pub(crate) fallback_used: bool,
+    pub(crate) execution_notes: Vec<String>,
     pub(crate) risk_level: String,
     pub(crate) headline: String,
     pub(crate) executive_summary: Vec<String>,

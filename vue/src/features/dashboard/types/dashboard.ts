@@ -33,6 +33,8 @@ export interface AiAuditSummaryQuery extends Record<string, ApiQueryValue> {
   window_seconds?: number
   sample_limit?: number
   recent_limit?: number
+  provider?: string
+  fallback_to_rules?: boolean
 }
 
 export interface AiAuditCountItem {
@@ -116,6 +118,9 @@ export interface AiAuditReportRecommendation {
 
 export interface AiAuditReportResponse {
   generated_at: number
+  provider_used: string
+  fallback_used: boolean
+  execution_notes: string[]
   risk_level: string
   headline: string
   executive_summary: string[]

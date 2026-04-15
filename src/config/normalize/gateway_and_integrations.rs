@@ -89,7 +89,7 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .clamp(10, 10_000);
     config.l7_config.cc_defense.ip_block_threshold =
         config.l7_config.cc_defense.ip_block_threshold.clamp(
-            config.l7_config.cc_defense.ip_challenge_threshold.max(10),
+            cc_block_floor(config.l7_config.cc_defense.ip_challenge_threshold, 10),
             20_000,
         );
     config.l7_config.cc_defense.host_challenge_threshold = config
@@ -99,7 +99,7 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .clamp(5, config.l7_config.cc_defense.ip_challenge_threshold.max(5));
     config.l7_config.cc_defense.host_block_threshold =
         config.l7_config.cc_defense.host_block_threshold.clamp(
-            config.l7_config.cc_defense.host_challenge_threshold.max(5),
+            cc_block_floor(config.l7_config.cc_defense.host_challenge_threshold, 5),
             config.l7_config.cc_defense.ip_block_threshold.max(5),
         );
     config.l7_config.cc_defense.route_challenge_threshold =
@@ -109,7 +109,7 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         );
     config.l7_config.cc_defense.route_block_threshold =
         config.l7_config.cc_defense.route_block_threshold.clamp(
-            config.l7_config.cc_defense.route_challenge_threshold.max(3),
+            cc_block_floor(config.l7_config.cc_defense.route_challenge_threshold, 3),
             config.l7_config.cc_defense.host_block_threshold.max(3),
         );
     config.l7_config.cc_defense.hot_path_challenge_threshold = config
@@ -119,11 +119,7 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .clamp(32, 200_000);
     config.l7_config.cc_defense.hot_path_block_threshold =
         config.l7_config.cc_defense.hot_path_block_threshold.clamp(
-            config
-                .l7_config
-                .cc_defense
-                .hot_path_challenge_threshold
-                .max(32),
+            cc_block_floor(config.l7_config.cc_defense.hot_path_challenge_threshold, 32),
             400_000,
         );
     config.l7_config.cc_defense.delay_threshold_percent = config
@@ -262,6 +258,13 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
             .response_template
             .content_type = default_rule_response_content_type();
     }
+}
+
+fn cc_block_floor(challenge_threshold: u32, minimum: u32) -> u32 {
+    challenge_threshold
+        .max(minimum)
+        .saturating_mul(2)
+        .max(minimum)
 }
 
 fn normalize_cidr_list(values: &[String]) -> Vec<String> {

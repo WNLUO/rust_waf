@@ -269,4 +269,31 @@ mod tests {
         assert_eq!(config.gateway_config.https_listen_addr, "0.0.0.0:9443");
         assert_eq!(config.http3_config.listen_addr, "0.0.0.0:9443");
     }
+
+    #[test]
+    fn normalized_keeps_cc_block_thresholds_safely_above_challenge_thresholds() {
+        let config = Config {
+            l7_config: L7Config {
+                cc_defense: l7::CcDefenseConfig {
+                    ip_challenge_threshold: 30,
+                    ip_block_threshold: 31,
+                    host_challenge_threshold: 18,
+                    host_block_threshold: 19,
+                    route_challenge_threshold: 9,
+                    route_block_threshold: 10,
+                    hot_path_challenge_threshold: 40,
+                    hot_path_block_threshold: 41,
+                    ..l7::CcDefenseConfig::default()
+                },
+                ..L7Config::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(config.l7_config.cc_defense.ip_block_threshold, 60);
+        assert_eq!(config.l7_config.cc_defense.host_block_threshold, 36);
+        assert_eq!(config.l7_config.cc_defense.route_block_threshold, 18);
+        assert_eq!(config.l7_config.cc_defense.hot_path_block_threshold, 80);
+    }
 }

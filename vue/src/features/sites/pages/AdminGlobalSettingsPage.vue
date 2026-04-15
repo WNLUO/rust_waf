@@ -53,6 +53,13 @@ function createDefaultSettings(): GlobalSettingsPayload {
       allow_auto_temp_block: true,
       allow_auto_extend_effective_policies: true,
       auto_revoke_warmup_secs: 300,
+      auto_audit_enabled: false,
+      auto_audit_interval_secs: 300,
+      auto_audit_cooldown_secs: 600,
+      auto_audit_on_pressure_high: true,
+      auto_audit_on_attack_mode: true,
+      auto_audit_on_hotspot_shift: true,
+      auto_audit_force_local_rules_under_attack: true,
     },
   }
 }

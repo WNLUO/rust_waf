@@ -52,6 +52,13 @@ function createDefaultSettings(): GlobalSettingsPayload {
       allow_auto_temp_block: true,
       allow_auto_extend_effective_policies: true,
       auto_revoke_warmup_secs: 300,
+      auto_audit_enabled: false,
+      auto_audit_interval_secs: 300,
+      auto_audit_cooldown_secs: 600,
+      auto_audit_on_pressure_high: true,
+      auto_audit_on_attack_mode: true,
+      auto_audit_on_hotspot_shift: true,
+      auto_audit_force_local_rules_under_attack: true,
     },
   }
 }
@@ -365,17 +372,93 @@ onMounted(loadSettings)
                   step="500"
                 />
               </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500"
+                  >自动审计间隔（秒）</span
+                >
+                <input
+                  v-model.number="settings.ai_audit.auto_audit_interval_secs"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                  type="number"
+                  min="60"
+                  step="60"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500"
+                  >自动审计冷却（秒）</span
+                >
+                <input
+                  v-model.number="settings.ai_audit.auto_audit_cooldown_secs"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                  type="number"
+                  min="60"
+                  step="60"
+                />
+              </label>
             </div>
-            <label
-              class="mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
-            >
-              <input
-                v-model="settings.ai_audit.fallback_to_rules"
-                type="checkbox"
-                class="h-4 w-4 accent-blue-600"
-              />
-              provider 失败时自动回退到 local_rules
-            </label>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.fallback_to_rules"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                provider 失败时自动回退到 local_rules
+              </label>
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.auto_audit_enabled"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                启用后台自动审计
+              </label>
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.auto_audit_on_pressure_high"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                高压力触发
+              </label>
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.auto_audit_on_attack_mode"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                attack 模式触发
+              </label>
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.auto_audit_on_hotspot_shift"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                热点变化触发
+              </label>
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.auto_audit_force_local_rules_under_attack"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                attack 时强制 local_rules
+              </label>
+            </div>
           </section>
         </div>
       </div>

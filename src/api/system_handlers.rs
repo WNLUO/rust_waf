@@ -1427,6 +1427,9 @@ async fn apply_ai_temp_policies_from_report(
         if !item.auto_apply {
             continue;
         }
+        if !ai_audit_action_allowed_for_auto_apply(item.action.as_str()) {
+            continue;
+        }
         if confidence < ai_config.auto_apply_min_confidence as i64 {
             continue;
         }
@@ -1474,6 +1477,18 @@ async fn apply_ai_temp_policies_from_report(
         applied += 1;
     }
     Ok(applied)
+}
+
+fn ai_audit_action_allowed_for_auto_apply(action: &str) -> bool {
+    matches!(
+        action,
+        "increase_delay"
+            | "tighten_route_cc"
+            | "tighten_host_cc"
+            | "raise_identity_risk"
+            | "add_behavior_watch"
+            | "increase_challenge"
+    )
 }
 
 fn ai_temp_policy_response_from_entry(
@@ -1907,6 +1922,14 @@ mod tests {
             .iter()
             .any(|item| item.key == "manual_review_due_to_degraded_input"));
         assert!(report.suggested_local_rules.iter().all(|item| !item.auto_apply));
+    }
+
+    #[test]
+    fn ai_audit_auto_apply_whitelist_excludes_temp_block() {
+        assert!(ai_audit_action_allowed_for_auto_apply("increase_delay"));
+        assert!(ai_audit_action_allowed_for_auto_apply("tighten_route_cc"));
+        assert!(!ai_audit_action_allowed_for_auto_apply("add_temp_block"));
+        assert!(!ai_audit_action_allowed_for_auto_apply("watch_only"));
     }
 
     #[test]

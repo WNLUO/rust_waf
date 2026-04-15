@@ -46,6 +46,13 @@ function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
     allow_auto_temp_block: true,
     allow_auto_extend_effective_policies: true,
     auto_revoke_warmup_secs: 300,
+    auto_audit_enabled: false,
+    auto_audit_interval_secs: 300,
+    auto_audit_cooldown_secs: 600,
+    auto_audit_on_pressure_high: true,
+    auto_audit_on_attack_mode: true,
+    auto_audit_on_hotspot_shift: true,
+    auto_audit_force_local_rules_under_attack: true,
   }
 }
 
@@ -686,6 +693,30 @@ onMounted(() => {
                 step="60"
               />
             </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >自动审计最小间隔（秒）</span
+              >
+              <input
+                v-model.number="form.auto_audit_interval_secs"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="60"
+                step="60"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >自动审计冷却（秒）</span
+              >
+              <input
+                v-model.number="form.auto_audit_cooldown_secs"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="60"
+                step="60"
+              />
+            </label>
           </div>
 
           <div class="mt-3 flex flex-wrap gap-3">
@@ -738,6 +769,56 @@ onMounted(() => {
                 class="h-4 w-4 accent-cyan-600"
               />
               允许自动续期有效策略
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.auto_audit_enabled"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              启用后台自动审计
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.auto_audit_on_pressure_high"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              高压力时自动触发
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.auto_audit_on_attack_mode"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              attack 模式时自动触发
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.auto_audit_on_hotspot_shift"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              热点变化时自动触发
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.auto_audit_force_local_rules_under_attack"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              attack 模式强制回退 local_rules
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500"

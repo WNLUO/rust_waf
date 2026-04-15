@@ -159,6 +159,13 @@ export interface AiAuditSettingsPayload {
   allow_auto_temp_block: boolean
   allow_auto_extend_effective_policies: boolean
   auto_revoke_warmup_secs: number
+  auto_audit_enabled: boolean
+  auto_audit_interval_secs: number
+  auto_audit_cooldown_secs: number
+  auto_audit_on_pressure_high: boolean
+  auto_audit_on_attack_mode: boolean
+  auto_audit_on_hotspot_shift: boolean
+  auto_audit_force_local_rules_under_attack: boolean
 }
 
 export interface GlobalSettingsPayload {

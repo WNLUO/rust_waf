@@ -160,6 +160,10 @@ impl TryFrom<crate::storage::RuleActionTemplateEntry> for RuleActionTemplateResp
 
 impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
     fn from(event: crate::storage::SecurityEventEntry) -> Self {
+        let decision_summary = build_security_event_decision_summary(
+            event.reason.as_str(),
+            event.details_json.as_deref(),
+        );
         Self {
             id: event.id,
             layer: event.layer,
@@ -182,8 +186,179 @@ impl From<crate::storage::SecurityEventEntry> for SecurityEventResponse {
             created_at: event.created_at,
             handled: event.handled,
             handled_at: event.handled_at,
+            decision_summary,
         }
     }
+}
+
+fn build_security_event_decision_summary(
+    reason: &str,
+    details_json: Option<&str>,
+) -> Option<SecurityEventDecisionSummary> {
+    let details = details_json.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
+
+    let identity_state = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["client_identity", "identity_state"]))
+        .map(ToOwned::to_owned);
+    let client_ip_source = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["client_identity", "client_ip_source"]))
+        .map(ToOwned::to_owned);
+    let forward_header_valid = details
+        .as_ref()
+        .and_then(|value| nested_bool(value, &["client_identity", "forward_header_valid"]));
+    let l4_overload_level = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["l4_runtime", "overload_level"]))
+        .map(ToOwned::to_owned);
+    let l7_rule_inspection_mode = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["inspection_runtime", "rule_inspection_mode"]))
+        .map(ToOwned::to_owned);
+    let cc_action = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["l7_cc", "action"]))
+        .map(ToOwned::to_owned);
+    let behavior_action = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["l7_behavior", "action"]))
+        .map(ToOwned::to_owned);
+
+    let primary_signal =
+        derive_primary_signal(reason, cc_action.as_deref(), behavior_action.as_deref());
+    let labels = derive_security_event_labels(
+        reason,
+        identity_state.as_deref(),
+        forward_header_valid,
+        l4_overload_level.as_deref(),
+        l7_rule_inspection_mode.as_deref(),
+        cc_action.as_deref(),
+        behavior_action.as_deref(),
+    );
+
+    if identity_state.is_none()
+        && client_ip_source.is_none()
+        && forward_header_valid.is_none()
+        && l4_overload_level.is_none()
+        && l7_rule_inspection_mode.is_none()
+        && cc_action.is_none()
+        && behavior_action.is_none()
+        && labels.is_empty()
+    {
+        return None;
+    }
+
+    Some(SecurityEventDecisionSummary {
+        primary_signal,
+        identity_state,
+        client_ip_source,
+        forward_header_valid,
+        l4_overload_level,
+        l7_rule_inspection_mode,
+        cc_action,
+        behavior_action,
+        labels,
+    })
+}
+
+fn nested_str<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a str> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current.as_str()
+}
+
+fn nested_bool(value: &serde_json::Value, path: &[&str]) -> Option<bool> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    match current {
+        serde_json::Value::Bool(value) => Some(*value),
+        serde_json::Value::String(value) => match value.as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn derive_primary_signal(
+    reason: &str,
+    cc_action: Option<&str>,
+    behavior_action: Option<&str>,
+) -> String {
+    if let Some(action) = behavior_action {
+        return format!("l7_behavior:{action}");
+    }
+    if let Some(action) = cc_action {
+        return format!("l7_cc:{action}");
+    }
+
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("slow attack") {
+        "slow_attack".to_string()
+    } else if lower.contains("safeline") {
+        "safeline".to_string()
+    } else if lower.contains("rule") {
+        "rule_engine".to_string()
+    } else if lower.contains("blocked ip") {
+        "blocked_ip".to_string()
+    } else {
+        "inspection".to_string()
+    }
+}
+
+fn derive_security_event_labels(
+    reason: &str,
+    identity_state: Option<&str>,
+    forward_header_valid: Option<bool>,
+    l4_overload_level: Option<&str>,
+    l7_rule_inspection_mode: Option<&str>,
+    cc_action: Option<&str>,
+    behavior_action: Option<&str>,
+) -> Vec<String> {
+    let mut labels = Vec::new();
+
+    if let Some(identity_state) = identity_state {
+        labels.push(format!("identity:{identity_state}"));
+    }
+    if matches!(forward_header_valid, Some(false)) {
+        labels.push("forward_header:invalid".to_string());
+    }
+    if let Some(level) = l4_overload_level {
+        labels.push(format!("l4_overload:{level}"));
+    }
+    if let Some(mode) = l7_rule_inspection_mode {
+        labels.push(format!("l7_rules:{mode}"));
+    }
+    if let Some(action) = cc_action {
+        labels.push(format!("cc:{action}"));
+    }
+    if let Some(action) = behavior_action {
+        labels.push(format!("behavior:{action}"));
+    }
+
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("slow attack") {
+        labels.push("trigger:slow_attack".to_string());
+    }
+    if lower.contains("safeline") {
+        labels.push("trigger:safeline".to_string());
+    }
+    if lower.contains("rule") {
+        labels.push("trigger:rule_engine".to_string());
+    }
+    if lower.contains("spoofed forwarded header") {
+        labels.push("trigger:spoofed_header".to_string());
+    }
+
+    labels.sort();
+    labels.dedup();
+    labels
 }
 
 impl From<crate::l7::behavior_guard::BehaviorProfileSnapshot> for BehaviorProfileResponse {
@@ -239,6 +414,70 @@ impl From<crate::storage::FingerprintProfileEntry> for FingerprintProfileRespons
             reputation_score: value.reputation_score,
             notes: value.notes,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_event_decision_summary_extracts_identity_and_runtime_labels() {
+        let details = serde_json::json!({
+            "client_identity": {
+                "identity_state": "trusted_cdn_forwarded",
+                "client_ip_source": "forwarded_header",
+                "forward_header_valid": "true"
+            },
+            "l7_cc": {
+                "action": "challenge"
+            },
+            "l7_behavior": {
+                "action": "delay:250ms"
+            },
+            "l4_runtime": {
+                "overload_level": "high"
+            },
+            "inspection_runtime": {
+                "rule_inspection_mode": "lightweight"
+            }
+        });
+
+        let summary = build_security_event_decision_summary(
+            "l7 behavior guard challenged suspicious session",
+            Some(&details.to_string()),
+        )
+        .expect("decision summary");
+
+        assert_eq!(summary.primary_signal, "l7_behavior:delay:250ms");
+        assert_eq!(
+            summary.identity_state.as_deref(),
+            Some("trusted_cdn_forwarded")
+        );
+        assert_eq!(
+            summary.client_ip_source.as_deref(),
+            Some("forwarded_header")
+        );
+        assert_eq!(summary.forward_header_valid, Some(true));
+        assert_eq!(summary.l4_overload_level.as_deref(), Some("high"));
+        assert_eq!(
+            summary.l7_rule_inspection_mode.as_deref(),
+            Some("lightweight")
+        );
+        assert!(summary
+            .labels
+            .contains(&"identity:trusted_cdn_forwarded".to_string()));
+        assert!(summary.labels.contains(&"l7_rules:lightweight".to_string()));
+    }
+
+    #[test]
+    fn security_event_decision_summary_uses_reason_fallbacks() {
+        let summary =
+            build_security_event_decision_summary("slow attack detected: kind=slow_headers", None)
+                .expect("fallback summary");
+
+        assert_eq!(summary.primary_signal, "slow_attack");
+        assert!(summary.labels.contains(&"trigger:slow_attack".to_string()));
     }
 }
 

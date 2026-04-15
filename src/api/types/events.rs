@@ -128,6 +128,20 @@ pub struct SecurityEventResponse {
     pub(crate) created_at: i64,
     pub(crate) handled: bool,
     pub(crate) handled_at: Option<i64>,
+    pub(crate) decision_summary: Option<SecurityEventDecisionSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SecurityEventDecisionSummary {
+    pub(crate) primary_signal: String,
+    pub(crate) identity_state: Option<String>,
+    pub(crate) client_ip_source: Option<String>,
+    pub(crate) forward_header_valid: Option<bool>,
+    pub(crate) l4_overload_level: Option<String>,
+    pub(crate) l7_rule_inspection_mode: Option<String>,
+    pub(crate) cc_action: Option<String>,
+    pub(crate) behavior_action: Option<String>,
+    pub(crate) labels: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

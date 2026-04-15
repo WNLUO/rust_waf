@@ -13,6 +13,9 @@ function createDefaultSettings(): GlobalSettingsPayload {
     http3_enabled: false,
     source_ip_strategy: 'connection',
     custom_source_ip_header: '',
+    custom_source_ip_header_auth_enabled: false,
+    custom_source_ip_header_auth_header: '',
+    custom_source_ip_header_auth_secret: '',
     trusted_proxy_cidrs: [],
     http_to_https_redirect: true,
     enable_hsts: true,
@@ -44,7 +47,6 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const successMessage = ref('')
-const trustedProxyCidrsText = ref('')
 const settings = reactive<GlobalSettingsPayload>(createDefaultSettings())
 
 useFlashMessages({
@@ -58,7 +60,6 @@ useFlashMessages({
 
 function assignSettings(payload: GlobalSettingsPayload) {
   Object.assign(settings, payload)
-  trustedProxyCidrsText.value = payload.trusted_proxy_cidrs.join('\n')
 }
 
 async function loadPage() {
@@ -88,14 +89,7 @@ async function saveSettings() {
   error.value = ''
   successMessage.value = ''
   try {
-    const payload: GlobalSettingsPayload = {
-      ...settings,
-      trusted_proxy_cidrs: trustedProxyCidrsText.value
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean),
-    }
-    const response = await updateGlobalSettings(payload)
+    const response = await updateGlobalSettings(settings)
     successMessage.value = response.message
     assignSettings(await fetchGlobalSettings())
   } catch (err) {
@@ -145,7 +139,7 @@ onMounted(loadPage)
         >
           <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
           <p class="mt-1 text-xs leading-5 text-slate-500">
-            这里的 Header 与可信代理配置会直接影响自适应 L7 对真实客户端的识别精度。它们属于入口解析配置，不建议当作手工防护阈值使用。
+            Header 模式下会直接以你配置的自定义 Header 识别用户真实 IP；如果开启认证，则还会额外校验认证 Header 与 Secret。
           </p>
           <div class="mt-4 grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
             <label class="space-y-1.5">
@@ -182,14 +176,47 @@ onMounted(loadPage)
                   placeholder="例如 x-cdn-real-ip"
                 />
               </label>
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm"
+              >
+                <input
+                  v-model="settings.custom_source_ip_header_auth_enabled"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                开启 Header 认证校验
+              </label>
+            </div>
+            <div
+              v-if="settings.source_ip_strategy === 'header'"
+              class="mt-4 grid gap-4 md:grid-cols-2"
+            >
               <label class="space-y-1.5">
-                <span class="text-xs text-slate-500">可信代理 CIDR</span>
-                <textarea
-                  v-model="trustedProxyCidrsText"
-                  class="min-h-[6.5rem] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-                  placeholder="每行一个，如 10.0.0.0/8"
+                <span class="text-xs text-slate-500">认证 Header 名称</span>
+                <input
+                  v-model="settings.custom_source_ip_header_auth_header"
+                  class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+                  type="text"
+                  placeholder="例如 x-cdn-auth"
+                  :disabled="!settings.custom_source_ip_header_auth_enabled"
                 />
               </label>
+              <label class="space-y-1.5">
+                <span class="text-xs text-slate-500">认证 Secret</span>
+                <input
+                  v-model="settings.custom_source_ip_header_auth_secret"
+                  class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+                  type="password"
+                  placeholder="开启认证后必填"
+                  :disabled="!settings.custom_source_ip_header_auth_enabled"
+                />
+              </label>
+            </div>
+            <div
+              v-if="settings.source_ip_strategy === 'header'"
+              class="mt-4 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800"
+            >
+              关闭认证时，只要请求携带你配置的真实来源 IP Header，就会被按 CDN 转发流量处理。
             </div>
           </div>
         </section>

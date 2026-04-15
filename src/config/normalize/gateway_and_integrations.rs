@@ -304,6 +304,16 @@ pub(super) fn normalize_console_and_gateway(config: &mut Config) {
         .custom_source_ip_header
         .trim()
         .to_ascii_lowercase();
+    config.gateway_config.custom_source_ip_header_auth_header = config
+        .gateway_config
+        .custom_source_ip_header_auth_header
+        .trim()
+        .to_ascii_lowercase();
+    config.gateway_config.custom_source_ip_header_auth_secret = config
+        .gateway_config
+        .custom_source_ip_header_auth_secret
+        .trim()
+        .to_string();
     config.gateway_config.rewrite_host_value =
         config.gateway_config.rewrite_host_value.trim().to_string();
     if config.gateway_config.rewrite_host_enabled

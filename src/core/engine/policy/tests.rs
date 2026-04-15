@@ -93,7 +93,7 @@ async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
 }
 
 #[tokio::test]
-async fn apply_client_identity_treats_untrusted_custom_source_ip_header_as_spoofed() {
+async fn apply_client_identity_trusts_custom_source_ip_header_when_auth_is_disabled() {
     let mut config = crate::config::Config::default();
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
@@ -104,18 +104,18 @@ async fn apply_client_identity_treats_untrusted_custom_source_ip_header_as_spoof
 
     apply_client_identity(&context, "198.18.0.10:443".parse().unwrap(), &mut request);
 
-    assert_eq!(request.client_ip.as_deref(), Some("198.18.0.10"));
+    assert_eq!(request.client_ip.as_deref(), Some("198.51.100.8"));
     assert_eq!(
         request
             .get_metadata("network.trusted_proxy_peer")
             .map(String::as_str),
-        Some("false")
+        Some("true")
     );
     assert_eq!(
         request
             .get_metadata("network.client_ip_source")
             .map(String::as_str),
-        Some("socket_peer")
+        Some("forwarded_header")
     );
     assert_eq!(
         request
@@ -127,13 +127,13 @@ async fn apply_client_identity_treats_untrusted_custom_source_ip_header_as_spoof
         request
             .get_metadata("network.identity_state")
             .map(String::as_str),
-        Some("spoofed_forward_header")
+        Some("trusted_cdn_forwarded")
     );
     assert_eq!(
         request
             .get_metadata("network.forward_header_valid")
             .map(String::as_str),
-        Some("false")
+        Some("true")
     );
 }
 
@@ -177,7 +177,6 @@ async fn apply_client_identity_marks_unresolved_client_ip_for_trusted_proxy() {
 #[tokio::test]
 async fn apply_client_identity_marks_trusted_header_resolution_state() {
     let mut config = crate::config::Config::default();
-    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
     let context = WafContext::new(config).await.unwrap();
@@ -200,12 +199,54 @@ async fn apply_client_identity_marks_trusted_header_resolution_state() {
             .map(String::as_str),
         Some("true")
     );
+    assert_eq!(
+        request
+            .get_metadata("network.trusted_proxy_peer")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn apply_client_identity_requires_auth_header_when_enabled() {
+    let mut config = crate::config::Config::default();
+    config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
+    config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
+    config.gateway_config.custom_source_ip_header_auth_enabled = true;
+    config.gateway_config.custom_source_ip_header_auth_header = "x-cdn-auth".to_string();
+    config.gateway_config.custom_source_ip_header_auth_secret = "secret-token".to_string();
+    let context = WafContext::new(config).await.unwrap();
+
+    let mut trusted_request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    trusted_request.add_header("x-cdn-real-ip".to_string(), "198.51.100.9".to_string());
+    trusted_request.add_header("x-cdn-auth".to_string(), "secret-token".to_string());
+
+    apply_client_identity(&context, "43.168.34.114:443".parse().unwrap(), &mut trusted_request);
+    assert_eq!(
+        trusted_request
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
+        Some("trusted_cdn_forwarded")
+    );
+    assert_eq!(trusted_request.client_ip.as_deref(), Some("198.51.100.9"));
+
+    let mut spoofed_request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    spoofed_request.add_header("x-cdn-real-ip".to_string(), "198.51.100.9".to_string());
+
+    apply_client_identity(&context, "43.168.34.114:443".parse().unwrap(), &mut spoofed_request);
+    assert_eq!(
+        spoofed_request
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
+        Some("spoofed_forward_header")
+    );
 }
 
 #[tokio::test]
 async fn inspect_blocked_client_ip_matches_resolved_forwarded_client_ip() {
     let mut config = crate::config::Config::default();
-    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "cf-connecting-ip".to_string();
     let context = WafContext::new(config).await.unwrap();
@@ -254,6 +295,7 @@ async fn inspect_blocked_client_ip_skips_socket_peer_when_header_strategy_unreso
 
     let mut request =
         UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    request.add_header("x-cdn-real-ip".to_string(), "not-an-ip".to_string());
 
     apply_client_identity(&context, "111.123.42.35:443".parse().unwrap(), &mut request);
 

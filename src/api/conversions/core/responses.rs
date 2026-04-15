@@ -591,6 +591,17 @@ impl GlobalSettingsResponse {
             source_ip_strategy: source_ip_strategy_label(config.gateway_config.source_ip_strategy)
                 .to_string(),
             custom_source_ip_header: config.gateway_config.custom_source_ip_header.clone(),
+            custom_source_ip_header_auth_enabled: config
+                .gateway_config
+                .custom_source_ip_header_auth_enabled,
+            custom_source_ip_header_auth_header: config
+                .gateway_config
+                .custom_source_ip_header_auth_header
+                .clone(),
+            custom_source_ip_header_auth_secret: config
+                .gateway_config
+                .custom_source_ip_header_auth_secret
+                .clone(),
             trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
             http_to_https_redirect: config.gateway_config.http_to_https_redirect,
             enable_hsts: config.gateway_config.enable_hsts,

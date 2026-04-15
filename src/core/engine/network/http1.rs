@@ -176,7 +176,7 @@ pub(crate) async fn handle_http1_connection(
             maybe_delay_request(&request).await;
             if policy.reject_new_connections {
                 if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_l4_bucket_budget_rejection();
+                    metrics.record_l4_request_budget_softened();
                 }
                 request.add_metadata("l4.force_close".to_string(), "true".to_string());
                 request.add_metadata("proxy_connection_mode".to_string(), "close".to_string());

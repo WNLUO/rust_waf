@@ -89,8 +89,10 @@ export interface AiAuditCounters {
   l7_behavior_challenges: number
   l7_behavior_blocks: number
   l7_behavior_delays: number
+  l4_bucket_budget_rejections: number
   trusted_proxy_permit_drops: number
   trusted_proxy_l4_degrade_actions: number
+  l4_request_budget_softened: number
   slow_attack_hits: number
   average_proxy_latency_micros: number
 }

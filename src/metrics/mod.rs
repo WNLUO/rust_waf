@@ -22,6 +22,7 @@ pub struct MetricsCollector {
     proxy_failures: AtomicU64,
     proxy_fail_close_rejections: AtomicU64,
     l4_bucket_budget_rejections: AtomicU64,
+    l4_request_budget_softened: AtomicU64,
     tls_pre_handshake_rejections: AtomicU64,
     trusted_proxy_permit_drops: AtomicU64,
     trusted_proxy_l4_degrade_actions: AtomicU64,
@@ -113,6 +114,7 @@ impl MetricsCollector {
             proxy_failures: AtomicU64::new(0),
             proxy_fail_close_rejections: AtomicU64::new(0),
             l4_bucket_budget_rejections: AtomicU64::new(0),
+            l4_request_budget_softened: AtomicU64::new(0),
             tls_pre_handshake_rejections: AtomicU64::new(0),
             trusted_proxy_permit_drops: AtomicU64::new(0),
             trusted_proxy_l4_degrade_actions: AtomicU64::new(0),
@@ -253,6 +255,11 @@ impl MetricsCollector {
 
     pub fn record_l4_bucket_budget_rejection(&self) {
         self.l4_bucket_budget_rejections
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l4_request_budget_softened(&self) {
+        self.l4_request_budget_softened
             .fetch_add(1, Ordering::Relaxed);
     }
 
@@ -406,6 +413,7 @@ impl MetricsCollector {
             proxy_failures: self.proxy_failures.load(Ordering::Relaxed),
             proxy_fail_close_rejections: self.proxy_fail_close_rejections.load(Ordering::Relaxed),
             l4_bucket_budget_rejections: self.l4_bucket_budget_rejections.load(Ordering::Relaxed),
+            l4_request_budget_softened: self.l4_request_budget_softened.load(Ordering::Relaxed),
             tls_pre_handshake_rejections: self.tls_pre_handshake_rejections.load(Ordering::Relaxed),
             trusted_proxy_permit_drops: self.trusted_proxy_permit_drops.load(Ordering::Relaxed),
             trusted_proxy_l4_degrade_actions: self
@@ -534,6 +542,7 @@ pub struct MetricsSnapshot {
     pub proxy_failures: u64,
     pub proxy_fail_close_rejections: u64,
     pub l4_bucket_budget_rejections: u64,
+    pub l4_request_budget_softened: u64,
     pub tls_pre_handshake_rejections: u64,
     pub trusted_proxy_permit_drops: u64,
     pub trusted_proxy_l4_degrade_actions: u64,
@@ -688,6 +697,7 @@ mod tests {
         metrics.record_proxy_success(std::time::Duration::from_millis(4));
         metrics.record_proxy_failure();
         metrics.record_fail_close_rejection();
+        metrics.record_l4_request_budget_softened();
         metrics.record_tls_pre_handshake_rejection();
         metrics.record_tls_handshake_timeout();
         metrics.record_tls_handshake_failure();
@@ -713,6 +723,7 @@ mod tests {
         assert_eq!(snapshot.proxy_failures, 1);
         assert_eq!(snapshot.proxy_fail_close_rejections, 1);
         assert_eq!(snapshot.l4_bucket_budget_rejections, 0);
+        assert_eq!(snapshot.l4_request_budget_softened, 1);
         assert_eq!(snapshot.tls_pre_handshake_rejections, 1);
         assert_eq!(snapshot.trusted_proxy_permit_drops, 1);
         assert_eq!(snapshot.trusted_proxy_l4_degrade_actions, 1);

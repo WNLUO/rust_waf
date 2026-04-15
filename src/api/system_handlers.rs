@@ -356,8 +356,10 @@ async fn build_ai_audit_summary(
             l7_behavior_challenges: metrics.l7_behavior_challenges,
             l7_behavior_blocks: metrics.l7_behavior_blocks,
             l7_behavior_delays: metrics.l7_behavior_delays,
+            l4_bucket_budget_rejections: metrics.l4_bucket_budget_rejections,
             trusted_proxy_permit_drops: metrics.trusted_proxy_permit_drops,
             trusted_proxy_l4_degrade_actions: metrics.trusted_proxy_l4_degrade_actions,
+            l4_request_budget_softened: metrics.l4_request_budget_softened,
             slow_attack_hits: metrics.slow_attack_idle_timeouts
                 + metrics.slow_attack_header_timeouts
                 + metrics.slow_attack_body_timeouts
@@ -390,7 +392,10 @@ fn top_count_items(map: BTreeMap<String, u64>, limit: usize) -> Vec<AiAuditCount
 }
 
 fn metrics_l4_overload_level(metrics: &crate::metrics::MetricsSnapshot) -> String {
-    if metrics.trusted_proxy_l4_degrade_actions > 0 || metrics.l4_bucket_budget_rejections > 0 {
+    if metrics.trusted_proxy_l4_degrade_actions > 0
+        || metrics.l4_bucket_budget_rejections > 0
+        || metrics.l4_request_budget_softened > 0
+    {
         "high".to_string()
     } else {
         "normal".to_string()
@@ -419,6 +424,10 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
                 format!(
                     "trusted_proxy_l4_degrade_actions={}",
                     summary.counters.trusted_proxy_l4_degrade_actions
+                ),
+                format!(
+                    "l4_request_budget_softened={}",
+                    summary.counters.l4_request_budget_softened
                 ),
             ],
         });
@@ -477,6 +486,35 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             title: "复核慢速攻击容忍窗口".to_string(),
             action: "结合 recent_events 和 top_source_ips，确认是否需要进一步收紧慢速攻击阈值或 keepalive 容忍度。".to_string(),
             rationale: "慢速攻击更容易拖垮连接资源，且在 CDN 场景下更需要结合身份态审计。".to_string(),
+        });
+    }
+
+    if summary.counters.l4_request_budget_softened > 0 {
+        findings.push(AiAuditReportFinding {
+            key: "l4_request_softening_active".to_string(),
+            severity: "medium".to_string(),
+            title: "L4 请求级软化正在生效".to_string(),
+            detail: format!(
+                "最近窗口里有 {} 次请求被 L4 请求桶软化为短连接降级，而不是直接拒绝。",
+                summary.counters.l4_request_budget_softened
+            ),
+            evidence: vec![
+                format!(
+                    "l4_request_budget_softened={}",
+                    summary.counters.l4_request_budget_softened
+                ),
+                format!(
+                    "l4_bucket_budget_rejections={}",
+                    summary.counters.l4_bucket_budget_rejections
+                ),
+            ],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "review_l4_request_softening".to_string(),
+            priority: "medium".to_string(),
+            title: "复核请求级软化是否持续升高".to_string(),
+            action: "关注 /admin/intelligence 的 AI 审计对比视图，确认软化次数是否持续放大，并结合热点路由与身份压力判断是否需要继续优化。".to_string(),
+            rationale: "请求级软化说明系统在保护可用性，如果长期升高，通常意味着热点流量或身份链路仍有持续压力。".to_string(),
         });
     }
 
@@ -577,8 +615,10 @@ mod tests {
                 l7_behavior_challenges: 4,
                 l7_behavior_blocks: 3,
                 l7_behavior_delays: 5,
+                l4_bucket_budget_rejections: 2,
                 trusted_proxy_permit_drops: 9,
                 trusted_proxy_l4_degrade_actions: 7,
+                l4_request_budget_softened: 4,
                 slow_attack_hits: 4,
                 average_proxy_latency_micros: 12_000,
             },
@@ -620,6 +660,10 @@ mod tests {
         summary.current.l7_friction_pressure_percent = 0.0;
         summary.current.slow_attack_pressure_percent = 0.0;
         summary.current.auto_tuning_last_adjust_reason = None;
+        summary.counters.l4_bucket_budget_rejections = 0;
+        summary.counters.trusted_proxy_permit_drops = 0;
+        summary.counters.trusted_proxy_l4_degrade_actions = 0;
+        summary.counters.l4_request_budget_softened = 0;
         summary.identity_states.clear();
         summary.primary_signals.clear();
         let report = build_ai_audit_report(summary);

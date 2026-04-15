@@ -186,8 +186,10 @@ pub struct AiAuditCountersResponse {
     pub(crate) l7_behavior_challenges: u64,
     pub(crate) l7_behavior_blocks: u64,
     pub(crate) l7_behavior_delays: u64,
+    pub(crate) l4_bucket_budget_rejections: u64,
     pub(crate) trusted_proxy_permit_drops: u64,
     pub(crate) trusted_proxy_l4_degrade_actions: u64,
+    pub(crate) l4_request_budget_softened: u64,
     pub(crate) slow_attack_hits: u64,
     pub(crate) average_proxy_latency_micros: u64,
 }

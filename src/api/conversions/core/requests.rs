@@ -452,6 +452,12 @@ impl GlobalSettingsUpdateRequest {
         current.gateway_config.source_ip_strategy =
             parse_source_ip_strategy(&self.source_ip_strategy)?;
         current.gateway_config.custom_source_ip_header = self.custom_source_ip_header;
+        current.gateway_config.custom_source_ip_header_auth_enabled =
+            self.custom_source_ip_header_auth_enabled;
+        current.gateway_config.custom_source_ip_header_auth_header =
+            self.custom_source_ip_header_auth_header;
+        current.gateway_config.custom_source_ip_header_auth_secret =
+            self.custom_source_ip_header_auth_secret;
         current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
         current.gateway_config.http_to_https_redirect = self.http_to_https_redirect;
         current.gateway_config.enable_hsts = self.enable_hsts;

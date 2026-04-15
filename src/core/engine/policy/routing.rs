@@ -214,12 +214,27 @@ pub(crate) fn resolve_client_identity(
         gateway.source_ip_strategy,
         crate::config::SourceIpStrategy::Header
     ) {
-        return match (trusted_proxy_peer, custom_header_ip) {
+        let auth_header_name = gateway.custom_source_ip_header_auth_header.trim();
+        let auth_header_value = if auth_header_name.is_empty() {
+            None
+        } else {
+            request.get_header(auth_header_name)
+        };
+        let auth_valid = if gateway.custom_source_ip_header_auth_enabled {
+            auth_header_value
+                .map(|value| value.trim() == gateway.custom_source_ip_header_auth_secret.trim())
+                .unwrap_or(false)
+        } else {
+            custom_header_present
+        };
+        let header_trusted = custom_header_present && auth_valid;
+
+        return match (header_trusted, custom_header_ip) {
             (true, Some(ip)) => ClientIdentityResolution {
                 resolved_client_ip: ip,
                 source_label: "forwarded_header",
                 source_header_name: Some(custom_header_name.to_string()),
-                trusted_proxy_peer,
+                trusted_proxy_peer: true,
                 forwarded_header_present: custom_header_present,
                 forwarded_header_valid: true,
                 identity_state: "trusted_cdn_forwarded",
@@ -228,7 +243,7 @@ pub(crate) fn resolve_client_identity(
                 resolved_client_ip: peer_addr.ip(),
                 source_label: "socket_peer",
                 source_header_name: None,
-                trusted_proxy_peer,
+                trusted_proxy_peer: true,
                 forwarded_header_present: custom_header_present,
                 forwarded_header_valid: false,
                 identity_state: "trusted_cdn_unresolved",
@@ -237,7 +252,7 @@ pub(crate) fn resolve_client_identity(
                 resolved_client_ip: peer_addr.ip(),
                 source_label: "socket_peer",
                 source_header_name: None,
-                trusted_proxy_peer,
+                trusted_proxy_peer: false,
                 forwarded_header_present: true,
                 forwarded_header_valid: false,
                 identity_state: "spoofed_forward_header",

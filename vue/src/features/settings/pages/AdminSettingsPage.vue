@@ -206,7 +206,7 @@ useFlashMessages({
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700 transition hover:border-blue-500/40 hover:text-blue-700"
                 @click="trustedCdnDialogOpen = true"
               >
-                可信CDN配置
+                CDN来源库（可选）
               </button>
               <label
                 class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"

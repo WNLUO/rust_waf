@@ -58,6 +58,12 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub custom_source_ip_header: String,
     #[serde(default)]
+    pub custom_source_ip_header_auth_enabled: bool,
+    #[serde(default)]
+    pub custom_source_ip_header_auth_header: String,
+    #[serde(default)]
+    pub custom_source_ip_header_auth_secret: String,
+    #[serde(default)]
     pub http_to_https_redirect: bool,
     #[serde(default)]
     pub enable_hsts: bool,
@@ -96,6 +102,9 @@ impl Default for GatewayConfig {
             enable_http1_0: default_enable_http1_0(),
             source_ip_strategy: SourceIpStrategy::default(),
             custom_source_ip_header: String::new(),
+            custom_source_ip_header_auth_enabled: false,
+            custom_source_ip_header_auth_header: String::new(),
+            custom_source_ip_header_auth_secret: String::new(),
             http_to_https_redirect: true,
             enable_hsts: true,
             rewrite_host_enabled: true,

@@ -235,11 +235,14 @@ async fn handle_http3_request(
         return Ok(());
     }
 
-    let cc_result = context.l7_cc_guard().inspect_request(&mut unified).await;
-    if let Some(metrics) = context.metrics.as_ref() {
-        record_l7_cc_metrics(metrics, &unified);
-    }
-    if let Some(result) = cc_result {
+    if let Some(result) = context
+        .l7_behavior_guard()
+        .inspect_request(&mut unified)
+        .await
+    {
+        if let Some(metrics) = context.metrics.as_ref() {
+            crate::core::engine::network::record_l7_behavior_metrics(metrics, &unified);
+        }
         if result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
         }
@@ -275,17 +278,20 @@ async fn handle_http3_request(
         return Ok(());
     }
 
-    if let Some(result) = context
-        .l7_behavior_guard()
-        .inspect_request(&mut unified)
-        .await
-    {
-        if let Some(metrics) = context.metrics.as_ref() {
-            crate::core::engine::network::record_l7_behavior_metrics(metrics, &unified);
-        }
+    let cc_result = context.l7_cc_guard().inspect_request(&mut unified).await;
+    if let Some(metrics) = context.metrics.as_ref() {
+        record_l7_cc_metrics(metrics, &unified);
+    }
+    if let Some(result) = cc_result {
         if result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
         }
+        crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+            context.as_ref(),
+            &packet,
+            &unified,
+            &result,
+        );
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(result.layer.clone());
         }

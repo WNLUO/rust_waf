@@ -270,6 +270,61 @@ pub(crate) async fn handle_http1_connection(
             continue;
         }
 
+        if let Some(result) = context
+            .l7_behavior_guard()
+            .inspect_request(&mut request)
+            .await
+        {
+            if let Some(metrics) = context.metrics.as_ref() {
+                crate::core::engine::network::record_l7_behavior_metrics(metrics, &request);
+            }
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+            }
+            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                context.as_ref(),
+                packet,
+                &request,
+                &result,
+            );
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response = resolve_runtime_custom_response(response);
+                let body = body_for_request(&request, &response.body);
+                http1_handler
+                    .write_response_with_headers(
+                        &mut stream,
+                        response.status_code,
+                        http_status_text(response.status_code),
+                        &response.headers,
+                        &body,
+                    )
+                    .await?;
+            } else {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        429,
+                        "Too Many Requests",
+                        result.reason.as_bytes(),
+                    )
+                    .await?;
+            }
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+
         let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
         if let Some(metrics) = context.metrics.as_ref() {
             record_l7_cc_metrics(metrics, &request);
@@ -319,55 +374,6 @@ pub(crate) async fn handle_http1_connection(
                         )
                         .await?;
                 }
-            } else {
-                http1_handler
-                    .write_response(
-                        &mut stream,
-                        429,
-                        "Too Many Requests",
-                        result.reason.as_bytes(),
-                    )
-                    .await?;
-            }
-            if !should_keep_client_connection_open(&request) {
-                return Ok(());
-            }
-            continue;
-        }
-
-        if let Some(result) = context
-            .l7_behavior_guard()
-            .inspect_request(&mut request)
-            .await
-        {
-            if let Some(metrics) = context.metrics.as_ref() {
-                crate::core::engine::network::record_l7_behavior_metrics(metrics, &request);
-            }
-            if result.should_persist_event() {
-                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
-            }
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
-            if let Some(response) = result.custom_response.as_ref() {
-                let response = resolve_runtime_custom_response(response);
-                let body = body_for_request(&request, &response.body);
-                http1_handler
-                    .write_response_with_headers(
-                        &mut stream,
-                        response.status_code,
-                        http_status_text(response.status_code),
-                        &response.headers,
-                        &body,
-                    )
-                    .await?;
             } else {
                 http1_handler
                     .write_response(

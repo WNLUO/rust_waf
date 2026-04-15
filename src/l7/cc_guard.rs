@@ -374,8 +374,10 @@ impl L7CcGuard {
                 || (hot_path_effective >= hot_path_challenge_threshold
                     && route_effective >= route_challenge_threshold.saturating_sub(4).max(1)))
         {
+            let action = challenge_action_name(html_mode);
             let reason = format!(
-                "l7 cc guard issued challenge: kind={} page_subresource={} ip={} host={} route={} hot_path={}",
+                "l7 cc guard {}: kind={} page_subresource={} ip={} host={} route={} hot_path={}",
+                challenge_reason_verb(html_mode),
                 request_kind.as_str(),
                 is_page_subresource,
                 ip_effective,
@@ -383,7 +385,7 @@ impl L7CcGuard {
                 route_effective,
                 hot_path_effective,
             );
-            request.add_metadata("l7.cc.action".to_string(), "challenge".to_string());
+            request.add_metadata("l7.cc.action".to_string(), action.to_string());
             return Some(InspectionResult::respond(
                 InspectionLayer::L7,
                 reason.clone(),
@@ -449,12 +451,23 @@ impl L7CcGuard {
                 headers: vec![
                     (
                         "content-type".to_string(),
-                        "text/plain; charset=utf-8".to_string(),
+                        "application/json; charset=utf-8".to_string(),
                     ),
                     ("cache-control".to_string(), "no-store".to_string()),
                     ("retry-after".to_string(), "10".to_string()),
+                    (
+                        "x-rust-waf-cc-action".to_string(),
+                        challenge_header_value(mode).to_string(),
+                    ),
                 ],
-                body: format!("challenge required: {reason}").into_bytes(),
+                body: serde_json::json!({
+                    "success": false,
+                    "action": challenge_header_value(mode),
+                    "message": "接口请求频率偏高，已施加访问摩擦，请稍后重试。",
+                    "reason": reason,
+                })
+                .to_string()
+                .into_bytes(),
                 tarpit: None,
                 random_status: None,
             };
@@ -524,7 +537,10 @@ impl L7CcGuard {
                     "text/html; charset=utf-8".to_string(),
                 ),
                 ("cache-control".to_string(), "no-store".to_string()),
-                ("x-rust-waf-cc-action".to_string(), "challenge".to_string()),
+                (
+                    "x-rust-waf-cc-action".to_string(),
+                    challenge_header_value(mode).to_string(),
+                ),
             ],
             body: html.into_bytes(),
             tarpit: None,
@@ -725,6 +741,27 @@ impl L7CcGuard {
             stale_before,
             cleanup_batch,
         );
+    }
+}
+
+fn challenge_action_name(mode: HtmlResponseMode) -> &'static str {
+    match mode {
+        HtmlResponseMode::HtmlChallenge => "challenge",
+        HtmlResponseMode::TextOnly => "api_friction",
+    }
+}
+
+fn challenge_reason_verb(mode: HtmlResponseMode) -> &'static str {
+    match mode {
+        HtmlResponseMode::HtmlChallenge => "issued challenge",
+        HtmlResponseMode::TextOnly => "applied api friction",
+    }
+}
+
+fn challenge_header_value(mode: HtmlResponseMode) -> &'static str {
+    match mode {
+        HtmlResponseMode::HtmlChallenge => "challenge",
+        HtmlResponseMode::TextOnly => "api-friction",
     }
 }
 
@@ -1357,6 +1394,17 @@ mod tests {
                 .map(String::as_str),
             Some("api")
         );
+        assert_eq!(
+            second.get_metadata("l7.cc.action").map(String::as_str),
+            Some("api_friction")
+        );
+        let response = result
+            .and_then(|item| item.custom_response)
+            .expect("api friction response");
+        assert_eq!(response.status_code, 429);
+        assert!(response.headers.iter().any(|(key, value)| {
+            key == "x-rust-waf-cc-action" && value == "api-friction"
+        }));
     }
 
     #[tokio::test]

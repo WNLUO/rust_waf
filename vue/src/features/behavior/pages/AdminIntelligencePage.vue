@@ -3,10 +3,15 @@ import { computed, onMounted, ref } from 'vue'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import { fetchBehaviorSessions, fetchFingerprintProfiles } from '@/shared/api/events'
+import {
+  fetchBehaviorProfiles,
+  fetchBehaviorSessions,
+  fetchFingerprintProfiles,
+} from '@/shared/api/events'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 import type {
+  BehaviorProfileItem,
   BehaviorSessionItem,
   FingerprintProfileItem,
 } from '@/shared/types'
@@ -18,6 +23,7 @@ const error = ref('')
 const tab = ref<'fingerprints' | 'sessions'>('fingerprints')
 const fingerprintProfiles = ref<FingerprintProfileItem[]>([])
 const behaviorSessions = ref<BehaviorSessionItem[]>([])
+const liveProfiles = ref<BehaviorProfileItem[]>([])
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
@@ -29,6 +35,9 @@ useFlashMessages({
 
 const topFingerprint = computed(() => fingerprintProfiles.value[0] || null)
 const topSession = computed(() => behaviorSessions.value[0] || null)
+const liveProfilesByIdentity = computed(
+  () => new Map(liveProfiles.value.map((profile) => [profile.identity, profile])),
+)
 
 function actionType(action: string | null) {
   if (action === 'block') return 'error' as const
@@ -49,10 +58,12 @@ async function loadPage(showLoader = false) {
   if (showLoader) loading.value = true
   refreshing.value = true
   try {
-    const [fingerprintsPayload, sessionsPayload] = await Promise.all([
+    const [liveProfilesPayload, fingerprintsPayload, sessionsPayload] = await Promise.all([
+      fetchBehaviorProfiles(),
       fetchFingerprintProfiles(),
       fetchBehaviorSessions(),
     ])
+    liveProfiles.value = liveProfilesPayload.profiles
     fingerprintProfiles.value = fingerprintsPayload.profiles
     behaviorSessions.value = sessionsPayload.sessions
   } catch (err) {
@@ -185,7 +196,14 @@ onMounted(() => {
             <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div class="space-y-2 min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
-                  <StatusBadge :type="actionType(profile.latest_action)" :text="actionLabel(profile.latest_action)" />
+                  <StatusBadge
+                    :type="liveProfilesByIdentity.get(profile.identity) ? 'success' : 'muted'"
+                    :text="liveProfilesByIdentity.get(profile.identity) ? '当前活跃' : '仅历史档案'"
+                  />
+                  <StatusBadge
+                    :type="actionType(profile.latest_action)"
+                    :text="`最近风险动作 ${actionLabel(profile.latest_action)}`"
+                  />
                   <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                     {{ profile.identity_kind }}
                   </span>
@@ -194,6 +212,15 @@ onMounted(() => {
                 <div class="font-mono text-sm text-slate-900 break-all">{{ profile.identity }}</div>
                 <div class="text-xs text-slate-500">
                   IP {{ profile.source_ip || '-' }} · 站点 {{ profile.last_site_domain || '-' }}
+                </div>
+                <div
+                  v-if="liveProfilesByIdentity.get(profile.identity)"
+                  class="text-xs text-cyan-700"
+                >
+                  当前主路径
+                  {{ liveProfilesByIdentity.get(profile.identity)?.dominant_route || liveProfilesByIdentity.get(profile.identity)?.latest_route || '-' }}
+                  · 当前分数
+                  {{ formatNumber(liveProfilesByIdentity.get(profile.identity)?.score || 0) }}
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-3 text-sm text-slate-600 lg:min-w-[20rem]">
@@ -238,7 +265,14 @@ onMounted(() => {
             <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div class="space-y-2 min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
-                  <StatusBadge :type="actionType(session.latest_action)" :text="actionLabel(session.latest_action)" />
+                  <StatusBadge
+                    :type="liveProfilesByIdentity.get(session.identity) ? 'success' : 'muted'"
+                    :text="liveProfilesByIdentity.get(session.identity) ? '当前活跃' : '历史会话'"
+                  />
+                  <StatusBadge
+                    :type="actionType(session.latest_action)"
+                    :text="`最近风险动作 ${actionLabel(session.latest_action)}`"
+                  />
                   <span class="text-xs text-slate-500">最近活跃 {{ formatTimestamp(session.last_seen_at) }}</span>
                 </div>
                 <div class="font-mono text-sm text-slate-900 break-all">{{ session.identity }}</div>
@@ -273,6 +307,13 @@ onMounted(() => {
             </div>
             <div class="mt-3 text-xs text-slate-500">
               主路径 {{ session.dominant_route || '-' }} · 关注页面 {{ session.focused_document_route || '-' }} · 关注接口 {{ session.focused_api_route || '-' }}
+            </div>
+            <div
+              v-if="liveProfilesByIdentity.get(session.identity)"
+              class="mt-2 text-xs text-cyan-700"
+            >
+              当前画像分数 {{ formatNumber(liveProfilesByIdentity.get(session.identity)?.score || 0) }}
+              · 当前路径 {{ liveProfilesByIdentity.get(session.identity)?.latest_route || '-' }}
             </div>
           </div>
         </div>

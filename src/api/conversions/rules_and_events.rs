@@ -537,6 +537,9 @@ impl EventsQueryParams {
             provider_site_id: self.provider_site_id,
             source_ip: self.source_ip,
             action: self.action,
+            identity_state: normalize_optional_query_value(self.identity_state),
+            primary_signal: normalize_optional_query_value(self.primary_signal),
+            labels: normalize_csv_query_values(self.labels),
             blocked_only: self.blocked_only.unwrap_or(false),
             handled_only: self.handled_only,
             created_from: self.created_from,
@@ -581,6 +584,17 @@ fn normalize_optional_query_value(value: Option<String>) -> Option<String> {
         let normalized = value.trim().to_string();
         (!normalized.is_empty()).then_some(normalized)
     })
+}
+
+fn normalize_csv_query_values(value: Option<String>) -> Vec<String> {
+    value
+        .into_iter()
+        .flat_map(|value| value.split(',').map(str::to_string).collect::<Vec<_>>())
+        .filter_map(|value| {
+            let normalized = value.trim().to_string();
+            (!normalized.is_empty()).then_some(normalized)
+        })
+        .collect()
 }
 
 pub(crate) fn default_generated_certificate_name(primary_domain: &str) -> String {

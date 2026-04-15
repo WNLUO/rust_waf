@@ -70,14 +70,6 @@ impl SqliteStore {
         let limit = normalized_limit(query.limit);
         let offset = query.offset;
 
-        let mut count_builder =
-            QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM security_events WHERE 1=1");
-        append_security_event_filters(&mut count_builder, query);
-        let total: i64 = count_builder
-            .build_query_scalar()
-            .fetch_one(&self.pool)
-            .await?;
-
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
             SELECT id, layer, provider, provider_event_id, provider_site_id, provider_site_name,
@@ -90,18 +82,24 @@ impl SqliteStore {
         );
         append_security_event_filters(&mut builder, query);
         append_event_sort(&mut builder, query);
-        builder.push(" LIMIT ");
-        builder.push_bind(i64::from(limit));
-        builder.push(" OFFSET ");
-        builder.push_bind(i64::from(offset));
 
         let items = builder
             .build_query_as::<SecurityEventEntry>()
             .fetch_all(&self.pool)
             .await?;
+        let filtered_items = items
+            .into_iter()
+            .filter(|entry| security_event_matches_derived_filters(entry, query))
+            .collect::<Vec<_>>();
+        let total = filtered_items.len() as u64;
+        let items = filtered_items
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect::<Vec<_>>();
 
         Ok(PagedResult {
-            total: total.max(0) as u64,
+            total,
             limit,
             offset,
             items,
@@ -313,4 +311,167 @@ impl SqliteStore {
 
         Ok(items)
     }
+}
+
+fn security_event_matches_derived_filters(
+    entry: &SecurityEventEntry,
+    query: &SecurityEventQuery,
+) -> bool {
+    if query.identity_state.is_none() && query.primary_signal.is_none() && query.labels.is_empty() {
+        return true;
+    }
+
+    let summary = derive_security_event_summary(entry);
+    if let Some(identity_state) = query.identity_state.as_deref() {
+        if summary.identity_state.as_deref() != Some(identity_state) {
+            return false;
+        }
+    }
+    if let Some(primary_signal) = query.primary_signal.as_deref() {
+        if summary.primary_signal.as_deref() != Some(primary_signal) {
+            return false;
+        }
+    }
+    query
+        .labels
+        .iter()
+        .all(|label| summary.labels.iter().any(|candidate| candidate == label))
+}
+
+#[derive(Default)]
+struct DerivedSecurityEventSummary {
+    identity_state: Option<String>,
+    primary_signal: Option<String>,
+    labels: Vec<String>,
+}
+
+fn derive_security_event_summary(entry: &SecurityEventEntry) -> DerivedSecurityEventSummary {
+    let details = entry
+        .details_json
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok());
+
+    let identity_state = details
+        .as_ref()
+        .and_then(|value| nested_str(value, &["client_identity", "identity_state"]))
+        .or_else(|| nested_str_from_option(details.as_ref(), &["identity_state"]));
+    let forward_header_valid =
+        nested_bool_from_option(details.as_ref(), &["client_identity", "forward_header_valid"])
+            .or_else(|| nested_bool_from_option(details.as_ref(), &["forward_header_valid"]));
+    let overload_level =
+        nested_str_from_option(details.as_ref(), &["l4_runtime", "overload_level"]);
+    let rule_mode =
+        nested_str_from_option(details.as_ref(), &["inspection_runtime", "rule_inspection_mode"]);
+    let cc_action = nested_str_from_option(details.as_ref(), &["l7", "cc", "action"])
+        .or_else(|| nested_str_from_option(details.as_ref(), &["cc_action"]));
+    let behavior_action = nested_str_from_option(details.as_ref(), &["l7", "behavior", "action"])
+        .or_else(|| nested_str_from_option(details.as_ref(), &["behavior_action"]));
+    let primary_signal = derive_primary_signal(
+        &entry.reason,
+        cc_action.as_deref(),
+        behavior_action.as_deref(),
+    );
+    let labels = derive_security_event_labels(
+        &entry.reason,
+        identity_state.as_deref(),
+        forward_header_valid,
+        overload_level.as_deref(),
+        rule_mode.as_deref(),
+        cc_action.as_deref(),
+        behavior_action.as_deref(),
+    );
+
+    DerivedSecurityEventSummary {
+        identity_state,
+        primary_signal: Some(primary_signal),
+        labels,
+    }
+}
+
+fn nested_str(value: &serde_json::Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(|value| value.to_string())
+}
+
+fn nested_str_from_option(value: Option<&serde_json::Value>, path: &[&str]) -> Option<String> {
+    value.and_then(|value| nested_str(value, path))
+}
+
+fn nested_bool_from_option(value: Option<&serde_json::Value>, path: &[&str]) -> Option<bool> {
+    let mut current = value?;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_bool()
+}
+
+fn derive_primary_signal(
+    reason: &str,
+    cc_action: Option<&str>,
+    behavior_action: Option<&str>,
+) -> String {
+    if let Some(action) = cc_action {
+        return format!("l7_cc:{action}");
+    }
+    if let Some(action) = behavior_action {
+        return format!("l7_behavior:{action}");
+    }
+    if reason.contains("slow attack") {
+        return "slow_attack".to_string();
+    }
+    if reason.contains("SafeLine") {
+        return "safeline".to_string();
+    }
+    if reason.contains("rule") || reason.contains("signature") {
+        return "rule_engine".to_string();
+    }
+    reason.to_ascii_lowercase().replace(' ', "_")
+}
+
+fn derive_security_event_labels(
+    reason: &str,
+    identity_state: Option<&str>,
+    forward_header_valid: Option<bool>,
+    overload_level: Option<&str>,
+    rule_mode: Option<&str>,
+    cc_action: Option<&str>,
+    behavior_action: Option<&str>,
+) -> Vec<String> {
+    let mut labels = Vec::new();
+    if let Some(identity_state) = identity_state {
+        labels.push(format!("identity:{identity_state}"));
+    }
+    if matches!(forward_header_valid, Some(false)) {
+        labels.push("forward_header:invalid".to_string());
+    }
+    if let Some(level) = overload_level {
+        labels.push(format!("l4_overload:{level}"));
+    }
+    if let Some(mode) = rule_mode {
+        labels.push(format!("l7_rules:{mode}"));
+    }
+    if let Some(action) = cc_action {
+        labels.push(format!("cc:{action}"));
+    }
+    if let Some(action) = behavior_action {
+        labels.push(format!("behavior:{action}"));
+    }
+    if reason.contains("slow attack") {
+        labels.push("trigger:slow_attack".to_string());
+    }
+    if reason.contains("SafeLine") {
+        labels.push("trigger:safeline".to_string());
+    }
+    if reason.contains("rule") || reason.contains("signature") {
+        labels.push("trigger:rule_engine".to_string());
+    }
+    if matches!(identity_state, Some("spoofed_forward_header")) {
+        labels.push("trigger:spoofed_header".to_string());
+    }
+    labels.sort();
+    labels.dedup();
+    labels
 }

@@ -50,9 +50,12 @@ const eventsFilters = reactive({
   provider: 'all',
   provider_site_id: 'all',
   action: 'all',
+  identity_state: 'all',
+  primary_signal: '',
   blocked_only: false,
   handled: 'all' as 'all' | 'handled' | 'unhandled',
   source_ip: '',
+  labels: '',
   created_from: '',
   created_to: '',
   sort_by: 'created_at',
@@ -62,6 +65,9 @@ const showAdvancedFiltersDialog = ref(false)
 const advancedFiltersDraft = reactive({
   provider: 'all',
   provider_site_id: 'all',
+  identity_state: 'all',
+  primary_signal: '',
+  labels: '',
   blocked_only: false,
   created_from: '',
   created_to: '',
@@ -72,6 +78,9 @@ const advancedFiltersDraft = reactive({
 const openAdvancedFilters = () => {
   advancedFiltersDraft.provider = eventsFilters.provider
   advancedFiltersDraft.provider_site_id = eventsFilters.provider_site_id
+  advancedFiltersDraft.identity_state = eventsFilters.identity_state
+  advancedFiltersDraft.primary_signal = eventsFilters.primary_signal
+  advancedFiltersDraft.labels = eventsFilters.labels
   advancedFiltersDraft.blocked_only = eventsFilters.blocked_only
   advancedFiltersDraft.created_from = eventsFilters.created_from
   advancedFiltersDraft.created_to = eventsFilters.created_to
@@ -87,6 +96,9 @@ const closeAdvancedFilters = () => {
 const resetAdvancedFilters = () => {
   advancedFiltersDraft.provider = 'all'
   advancedFiltersDraft.provider_site_id = 'all'
+  advancedFiltersDraft.identity_state = 'all'
+  advancedFiltersDraft.primary_signal = ''
+  advancedFiltersDraft.labels = ''
   advancedFiltersDraft.blocked_only = false
   advancedFiltersDraft.created_from = ''
   advancedFiltersDraft.created_to = ''
@@ -97,6 +109,9 @@ const resetAdvancedFilters = () => {
 const applyAdvancedFilters = () => {
   eventsFilters.provider = advancedFiltersDraft.provider
   eventsFilters.provider_site_id = advancedFiltersDraft.provider_site_id
+  eventsFilters.identity_state = advancedFiltersDraft.identity_state
+  eventsFilters.primary_signal = advancedFiltersDraft.primary_signal
+  eventsFilters.labels = advancedFiltersDraft.labels
   eventsFilters.blocked_only = advancedFiltersDraft.blocked_only
   eventsFilters.created_from = advancedFiltersDraft.created_from
   eventsFilters.created_to = advancedFiltersDraft.created_to
@@ -159,6 +174,20 @@ const matchesRealtimeFilters = (event: SecurityEventItem) => {
   ) {
     return false
   }
+  if (
+    eventsFilters.identity_state !== 'all' &&
+    (event.decision_summary?.identity_state || 'unknown') !==
+      eventsFilters.identity_state
+  ) {
+    return false
+  }
+  if (
+    eventsFilters.primary_signal.trim() &&
+    (event.decision_summary?.primary_signal || '') !==
+      eventsFilters.primary_signal.trim()
+  ) {
+    return false
+  }
   if (eventsFilters.blocked_only && event.action.toLowerCase() !== 'block') {
     return false
   }
@@ -179,6 +208,16 @@ const matchesRealtimeFilters = (event: SecurityEventItem) => {
     event.source_ip !== eventsFilters.source_ip.trim()
   ) {
     return false
+  }
+  if (eventsFilters.labels.trim()) {
+    const labels = event.decision_summary?.labels || []
+    const expected = eventsFilters.labels
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+    if (!expected.every((label) => labels.includes(label))) {
+      return false
+    }
   }
   const createdFrom = toUnixTimestamp(eventsFilters.created_from)
   if (createdFrom !== undefined && event.created_at < createdFrom) {
@@ -227,6 +266,12 @@ const loadEvents = async (showLoader = false) => {
           ? undefined
           : eventsFilters.provider_site_id,
       action: eventsFilters.action === 'all' ? undefined : eventsFilters.action,
+      identity_state:
+        eventsFilters.identity_state === 'all'
+          ? undefined
+          : eventsFilters.identity_state,
+      primary_signal: eventsFilters.primary_signal.trim() || undefined,
+      labels: eventsFilters.labels.trim() || undefined,
       handled_only:
         eventsFilters.handled === 'all'
           ? undefined
@@ -360,6 +405,34 @@ const eventPathPreview = (event: SecurityEventItem) =>
 const isPathTruncated = (event: SecurityEventItem) =>
   eventPathText(event).length > PATH_PREVIEW_LIMIT
 
+const identityStateLabelMap: Record<string, string> = {
+  trusted_cdn_forwarded: '可信 CDN',
+  trusted_cdn_unresolved: 'CDN 未解析',
+  direct_client: '直连客户端',
+  spoofed_forward_header: '伪造头部',
+}
+
+const primarySignalLabelMap: Record<string, string> = {
+  slow_attack: '慢速攻击',
+  safeline: '雷池',
+  rule_engine: '规则引擎',
+}
+
+const eventIdentityStateLabel = (event: SecurityEventItem) => {
+  const value = event.decision_summary?.identity_state
+  if (!value) return ''
+  return identityStateLabelMap[value] || value
+}
+
+const eventPrimarySignalLabel = (event: SecurityEventItem) => {
+  const value = event.decision_summary?.primary_signal
+  if (!value) return ''
+  return primarySignalLabelMap[value] || value
+}
+
+const eventLabelsPreview = (event: SecurityEventItem) =>
+  (event.decision_summary?.labels || []).slice(0, 3)
+
 const parseEventDetails = (event: SecurityEventItem) => {
   if (!event.details_json) return null
   try {
@@ -428,6 +501,21 @@ const applyFiltersFromRouteQuery = () => {
   const sourceIp = getValue('source_ip')
   if (typeof sourceIp === 'string' && sourceIp.trim()) {
     eventsFilters.source_ip = sourceIp.trim()
+  }
+
+  const identityState = getValue('identity_state')
+  if (typeof identityState === 'string' && identityState.trim()) {
+    eventsFilters.identity_state = identityState.trim()
+  }
+
+  const primarySignal = getValue('primary_signal')
+  if (typeof primarySignal === 'string' && primarySignal.trim()) {
+    eventsFilters.primary_signal = primarySignal.trim()
+  }
+
+  const labels = getValue('labels')
+  if (typeof labels === 'string' && labels.trim()) {
+    eventsFilters.labels = labels.trim()
   }
 
   const blockedOnly = getValue('blocked_only')
@@ -572,6 +660,22 @@ watch(currentPage, () => {
           <option value="log">记录</option>
         </select>
         <select
+          v-model="eventsFilters.identity_state"
+          class="w-full min-w-[160px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-auto"
+        >
+          <option value="all">全部身份态</option>
+          <option value="trusted_cdn_forwarded">可信 CDN</option>
+          <option value="trusted_cdn_unresolved">CDN 未解析</option>
+          <option value="direct_client">直连客户端</option>
+          <option value="spoofed_forward_header">伪造头部</option>
+        </select>
+        <input
+          v-model="eventsFilters.primary_signal"
+          type="text"
+          placeholder="主信号，如 slow_attack / l7_cc:block"
+          class="w-full min-w-[210px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-[260px]"
+        />
+        <select
           v-model="eventsFilters.handled"
           class="w-full min-w-[140px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 xl:w-auto"
         >
@@ -646,60 +750,88 @@ watch(currentPage, () => {
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="font-mono text-center text-xs text-slate-900">
-                    {{ event.source_ip }}
+                  <div class="space-y-1 text-center">
+                    <div class="font-mono text-xs text-slate-900">
+                      {{ event.source_ip }}
+                    </div>
+                    <div
+                      v-if="eventIdentityStateLabel(event)"
+                      class="text-[11px] text-slate-500"
+                    >
+                      {{ eventIdentityStateLabel(event) }}
+                    </div>
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex items-center justify-center gap-2 text-xs whitespace-nowrap">
-                    <div class="font-mono text-slate-600">
+                  <div class="space-y-1 text-center">
+                    <div class="font-mono text-xs text-slate-600">
                       {{ event.protocol }}
                       <span v-if="event.http_version"> / {{ event.http_version }}</span>
                     </div>
+                    <div
+                      v-if="eventPrimarySignalLabel(event)"
+                      class="text-[11px] text-slate-500"
+                    >
+                      {{ eventPrimarySignalLabel(event) }}
+                    </div>
                   </div>
                 </td>
                 <td class="px-3 py-2">
-                  <div class="flex items-center justify-center gap-2">
-                    <div class="min-w-0">
-                      <div
-                        class="event-reason-text text-sm text-slate-900"
-                        :title="eventReasonLabel(event)"
-                      >
-                        {{ eventReasonPreview(event) }}
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-center gap-2">
+                      <div class="min-w-0">
+                        <div
+                          class="event-reason-text text-sm text-slate-900"
+                          :title="eventReasonLabel(event)"
+                        >
+                          {{ eventReasonPreview(event) }}
+                        </div>
                       </div>
+                      <button
+                        v-if="isReasonTruncated(event)"
+                        class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
+                        title="查看完整原因"
+                        @click="openPreview('完整原因', eventReasonLabel(event))"
+                      >
+                        更多
+                      </button>
+                      <button
+                        v-if="event.details_json"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                        title="查看详情"
+                        @click="openPreview('事件详情', event.details_json)"
+                      >
+                        <Eye :size="14" />
+                      </button>
+                      <button
+                        v-if="hasClientIdentityDebug(event)"
+                        class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100"
+                        title="查看客户端身份调试"
+                        @click="openClientIdentityDebug(event)"
+                      >
+                        身份调试
+                      </button>
+                      <button
+                        v-if="hasUpstreamHttp2Debug(event)"
+                        class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-xs text-emerald-700 hover:bg-emerald-100"
+                        title="查看上游 HTTP/2 调试"
+                        @click="openUpstreamHttp2Debug(event)"
+                      >
+                        上游调试
+                      </button>
                     </div>
-                    <button
-                      v-if="isReasonTruncated(event)"
-                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
-                      title="查看完整原因"
-                      @click="openPreview('完整原因', eventReasonLabel(event))"
+                    <div
+                      v-if="eventLabelsPreview(event).length"
+                      class="flex flex-wrap justify-center gap-1"
                     >
-                      更多
-                    </button>
-                    <button
-                      v-if="event.details_json"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
-                      title="查看详情"
-                      @click="openPreview('事件详情', event.details_json)"
-                    >
-                      <Eye :size="14" />
-                    </button>
-                    <button
-                      v-if="hasClientIdentityDebug(event)"
-                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100"
-                      title="查看客户端身份调试"
-                      @click="openClientIdentityDebug(event)"
-                    >
-                      身份调试
-                    </button>
-                    <button
-                      v-if="hasUpstreamHttp2Debug(event)"
-                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-xs text-emerald-700 hover:bg-emerald-100"
-                      title="查看上游 HTTP/2 调试"
-                      @click="openUpstreamHttp2Debug(event)"
-                    >
-                      上游调试
-                    </button>
+                      <StatusBadge
+                        v-for="label in eventLabelsPreview(event)"
+                        :key="label"
+                        :text="label"
+                        type="muted"
+                        compact
+                      />
+                    </div>
                   </div>
                 </td>
                 <td class="px-3 py-2">
@@ -795,6 +927,28 @@ watch(currentPage, () => {
               {{ site.label }}
             </option>
           </select>
+          <select
+            v-model="advancedFiltersDraft.identity_state"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          >
+            <option value="all">全部身份态</option>
+            <option value="trusted_cdn_forwarded">可信 CDN</option>
+            <option value="trusted_cdn_unresolved">CDN 未解析</option>
+            <option value="direct_client">直连客户端</option>
+            <option value="spoofed_forward_header">伪造头部</option>
+          </select>
+          <input
+            v-model="advancedFiltersDraft.primary_signal"
+            type="text"
+            placeholder="主信号，如 slow_attack / l7_cc:block"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800"
+          />
+          <input
+            v-model="advancedFiltersDraft.labels"
+            type="text"
+            placeholder="标签，逗号分隔，如 identity:trusted_cdn_forwarded"
+            class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 md:col-span-2"
+          />
           <label
             class="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700"
           >

@@ -587,7 +587,18 @@ async fn test_sqlite_store_queries_events_and_blocked_ips() {
         provider_site_domain: None,
         action: "block".to_string(),
         reason: "sql injection".to_string(),
-        details_json: None,
+        details_json: Some(
+            serde_json::json!({
+                "client_identity": {
+                    "identity_state": "trusted_cdn_forwarded",
+                    "forward_header_valid": true
+                },
+                "inspection_runtime": {
+                    "rule_inspection_mode": "lightweight"
+                }
+            })
+            .to_string(),
+        ),
         source_ip: "10.0.0.1".to_string(),
         dest_ip: "10.0.0.2".to_string(),
         source_port: 50000,
@@ -608,7 +619,7 @@ async fn test_sqlite_store_queries_events_and_blocked_ips() {
         provider_site_name: None,
         provider_site_domain: None,
         action: "alert".to_string(),
-        reason: "port scan".to_string(),
+        reason: "slow attack detected".to_string(),
         details_json: None,
         source_ip: "10.0.0.3".to_string(),
         dest_ip: "10.0.0.2".to_string(),
@@ -671,7 +682,7 @@ async fn test_sqlite_store_queries_events_and_blocked_ips() {
         .await
         .unwrap();
     assert_eq!(recent_events.total, 1);
-    assert_eq!(recent_events.items[0].reason, "port scan");
+    assert_eq!(recent_events.items[0].reason, "slow attack detected");
 
     let source_sorted_events = store
         .list_security_events(&SecurityEventQuery {
@@ -694,6 +705,42 @@ async fn test_sqlite_store_queries_events_and_blocked_ips() {
         .unwrap();
     assert_eq!(port_sorted_events.total, 2);
     assert_eq!(port_sorted_events.items[0].dest_port, 22);
+
+    let identity_filtered_events = store
+        .list_security_events(&SecurityEventQuery {
+            identity_state: Some("trusted_cdn_forwarded".to_string()),
+            ..SecurityEventQuery::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(identity_filtered_events.total, 1);
+    assert_eq!(identity_filtered_events.items[0].reason, "sql injection");
+
+    let signal_filtered_events = store
+        .list_security_events(&SecurityEventQuery {
+            primary_signal: Some("slow_attack".to_string()),
+            ..SecurityEventQuery::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(signal_filtered_events.total, 1);
+    assert_eq!(
+        signal_filtered_events.items[0].reason,
+        "slow attack detected"
+    );
+
+    let labeled_events = store
+        .list_security_events(&SecurityEventQuery {
+            labels: vec![
+                "identity:trusted_cdn_forwarded".to_string(),
+                "l7_rules:lightweight".to_string(),
+            ],
+            ..SecurityEventQuery::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(labeled_events.total, 1);
+    assert_eq!(labeled_events.items[0].reason, "sql injection");
 
     let active_blocks = store
         .list_blocked_ips(&BlockedIpQuery {

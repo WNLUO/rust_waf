@@ -22,6 +22,19 @@ export interface SecurityEventItem {
   created_at: number
   handled: boolean
   handled_at: number | null
+  decision_summary: SecurityEventDecisionSummary | null
+}
+
+export interface SecurityEventDecisionSummary {
+  primary_signal: string
+  identity_state: string | null
+  client_ip_source: string | null
+  forward_header_valid: boolean | null
+  l4_overload_level: string | null
+  l7_rule_inspection_mode: string | null
+  cc_action: string | null
+  behavior_action: string | null
+  labels: string[]
 }
 
 export interface SecurityEventsResponse {
@@ -130,8 +143,13 @@ export interface EventsQuery extends Record<string, ApiQueryValue> {
   provider_site_id?: string
   source_ip?: string
   action?: string
+  identity_state?: string
+  primary_signal?: string
+  labels?: string
   blocked_only?: boolean
   handled_only?: boolean
+  created_from?: number
+  created_to?: number
   sort_by?: string
   sort_direction?: 'asc' | 'desc'
 }

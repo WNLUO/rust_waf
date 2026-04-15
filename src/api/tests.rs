@@ -175,6 +175,9 @@ fn test_events_query_params_into_query() {
         provider_site_id: Some("site-1".to_string()),
         source_ip: Some("10.0.0.1".to_string()),
         action: Some("block".to_string()),
+        identity_state: Some("trusted_cdn_forwarded".to_string()),
+        primary_signal: Some("l7_behavior:delay:250ms".to_string()),
+        labels: Some("identity:trusted_cdn_forwarded, l7_rules:lightweight".to_string()),
         blocked_only: Some(true),
         handled_only: Some(true),
         created_from: Some(100),
@@ -192,6 +195,21 @@ fn test_events_query_params_into_query() {
     assert_eq!(query.provider_site_id.as_deref(), Some("site-1"));
     assert_eq!(query.source_ip.as_deref(), Some("10.0.0.1"));
     assert_eq!(query.action.as_deref(), Some("block"));
+    assert_eq!(
+        query.identity_state.as_deref(),
+        Some("trusted_cdn_forwarded")
+    );
+    assert_eq!(
+        query.primary_signal.as_deref(),
+        Some("l7_behavior:delay:250ms")
+    );
+    assert_eq!(
+        query.labels,
+        vec![
+            "identity:trusted_cdn_forwarded".to_string(),
+            "l7_rules:lightweight".to_string()
+        ]
+    );
     assert!(query.blocked_only);
     assert_eq!(query.created_from, Some(100));
     assert_eq!(query.created_to, Some(200));

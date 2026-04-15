@@ -638,15 +638,75 @@ fn is_high_value_route(route: &str) -> bool {
 }
 
 fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
-    match request
+    if let Some(kind) = request
         .get_metadata("l7.cc.request_kind")
         .map(String::as_str)
     {
-        Some("document") => RequestKind::Document,
-        Some("static") => RequestKind::Static,
-        Some("api") => RequestKind::Api,
-        _ => RequestKind::Other,
+        return match kind {
+            "document" => RequestKind::Document,
+            "static" => RequestKind::Static,
+            "api" => RequestKind::Api,
+            _ => RequestKind::Other,
+        };
     }
+
+    let path = request_path(&request.uri).to_ascii_lowercase();
+    let accept = request
+        .get_header("accept")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let sec_fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let content_type = request
+        .get_header("content-type")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let x_requested_with = request
+        .get_header("x-requested-with")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if sec_fetch_dest == "document"
+        || accept.contains("text/html")
+        || path == "/"
+        || path.ends_with(".html")
+        || path.ends_with(".htm")
+    {
+        return RequestKind::Document;
+    }
+
+    if sec_fetch_dest == "script"
+        || sec_fetch_dest == "style"
+        || sec_fetch_dest == "image"
+        || sec_fetch_dest == "font"
+        || path.ends_with(".js")
+        || path.ends_with(".css")
+        || path.ends_with(".png")
+        || path.ends_with(".jpg")
+        || path.ends_with(".jpeg")
+        || path.ends_with(".gif")
+        || path.ends_with(".svg")
+        || path.ends_with(".ico")
+        || path.ends_with(".webp")
+        || path.ends_with(".woff")
+        || path.ends_with(".woff2")
+    {
+        return RequestKind::Static;
+    }
+
+    if path.starts_with("/api/")
+        || path.contains("/wp-json/")
+        || path.contains("/admin-ajax.php")
+        || accept.contains("application/json")
+        || content_type.contains("application/json")
+        || x_requested_with == "xmlhttprequest"
+    {
+        return RequestKind::Api;
+    }
+
+    RequestKind::Other
 }
 
 fn build_behavior_response(

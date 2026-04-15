@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const BEHAVIOR_WINDOW_SECS: u64 = 300;
+const ACTIVE_PROFILE_IDLE_SECS: i64 = 60;
 const MAX_SAMPLES_PER_IDENTITY: usize = 96;
 const CLEANUP_EVERY_REQUESTS: u64 = 512;
 const CHALLENGE_SCORE: u32 = 60;
@@ -274,9 +275,13 @@ impl L7BehaviorGuard {
             .buckets
             .iter()
             .filter_map(|entry| {
+                let last_seen_unix = entry.value().last_seen_unix.load(Ordering::Relaxed);
+                if unix_now.saturating_sub(last_seen_unix) > ACTIVE_PROFILE_IDLE_SECS {
+                    return None;
+                }
                 entry
                     .value()
-                    .snapshot(entry.key().clone(), now, unix_now, window)
+                    .snapshot(entry.key().clone(), now, window)
             })
             .collect::<Vec<_>>();
         profiles.sort_by(|left, right| {
@@ -381,7 +386,6 @@ impl BehaviorWindow {
         &self,
         identity: String,
         now: Instant,
-        unix_now: i64,
         window: Duration,
     ) -> Option<BehaviorProfileSnapshot> {
         let mut samples = self.samples.lock().expect("behavior window lock poisoned");
@@ -407,7 +411,7 @@ impl BehaviorWindow {
         let latest = samples_snapshot.back().cloned()?;
         Some(BehaviorProfileSnapshot {
             identity,
-            latest_seen_unix: unix_now,
+            latest_seen_unix: self.last_seen_unix.load(Ordering::Relaxed),
             score: assessment.score,
             dominant_route: assessment.dominant_route,
             focused_document_route: assessment.focused_document_route,
@@ -518,6 +522,21 @@ fn assess_samples(
     } else if document_requests >= 4 && document_repeated_ratio_percent >= 65 {
         score += 15;
         flags.push("focused_document_loop");
+    }
+    if document_requests >= 3
+        && document_repeated_ratio_percent >= 100
+        && non_document_requests >= 24
+        && session_span_secs <= 30
+    {
+        score += 60;
+        flags.push("document_reload_burst");
+    } else if document_requests >= 2
+        && document_repeated_ratio_percent >= 100
+        && non_document_requests >= 12
+        && session_span_secs <= 20
+    {
+        score += 40;
+        flags.push("document_reload_pair");
     }
     if api_requests >= 5 && distinct_routes <= 2 {
         score += 15;
@@ -920,6 +939,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn repeated_full_page_reloads_with_many_assets_trigger_challenge() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+
+        for cycle in 0..3 {
+            let mut doc = request("GET", "/article.html", "text/html");
+            doc.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            doc.add_metadata("l7.cc.route".to_string(), "/article.html".to_string());
+            last = guard.inspect_request(&mut doc).await;
+
+            for asset in 0..18 {
+                let mut static_request =
+                    request("GET", &format!("/static/{cycle}-{asset}.js"), "*/*");
+                static_request.add_metadata(
+                    "l7.cc.request_kind".to_string(),
+                    "static".to_string(),
+                );
+                static_request.add_metadata(
+                    "l7.cc.route".to_string(),
+                    format!("/static/{cycle}-{asset}.js"),
+                );
+                let _ = guard.inspect_request(&mut static_request).await;
+            }
+        }
+
+        assert!(last.is_some());
+    }
+
+    #[tokio::test]
     async fn repeated_challenges_escalate_to_block_and_persist() {
         let guard = L7BehaviorGuard::new();
         let mut actions = Vec::new();
@@ -942,5 +990,49 @@ mod tests {
         assert!(actions.iter().any(|action| action == "challenge"));
         assert!(actions.iter().any(|action| action == "block"));
         assert!(persisted.iter().any(|flag| *flag));
+    }
+
+    #[test]
+    fn snapshot_profiles_excludes_idle_identities() {
+        let guard = L7BehaviorGuard::new();
+        let stale_unix = unix_timestamp() - (ACTIVE_PROFILE_IDLE_SECS + 5);
+        let stale_window = BehaviorWindow::new();
+        {
+            let mut samples = stale_window
+                .samples
+                .lock()
+                .expect("behavior window lock poisoned");
+            samples.push_back(RequestSample {
+                route: "/stale".to_string(),
+                kind: RequestKind::Document,
+                at: Instant::now(),
+            });
+        }
+        stale_window
+            .last_seen_unix
+            .store(stale_unix, Ordering::Relaxed);
+        guard
+            .buckets
+            .insert("fp:stale".to_string(), stale_window);
+
+        let fresh_window = BehaviorWindow::new();
+        {
+            let mut samples = fresh_window
+                .samples
+                .lock()
+                .expect("behavior window lock poisoned");
+            samples.push_back(RequestSample {
+                route: "/fresh".to_string(),
+                kind: RequestKind::Document,
+                at: Instant::now(),
+            });
+        }
+        guard
+            .buckets
+            .insert("fp:fresh".to_string(), fresh_window);
+
+        let profiles = guard.snapshot_profiles(16);
+        assert!(profiles.iter().any(|profile| profile.identity == "fp:fresh"));
+        assert!(!profiles.iter().any(|profile| profile.identity == "fp:stale"));
     }
 }

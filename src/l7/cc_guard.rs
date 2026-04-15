@@ -311,14 +311,35 @@ impl L7CcGuard {
         let interactive_host_ip_block_multiplier = if interactive_session { 3 } else { 1 };
         let low_risk_subresource = request_kind == RequestKind::StaticAsset
             && (is_page_subresource || interactive_session);
+        let route_scale_percent = request
+            .get_metadata("ai.cc.route_threshold_scale_percent")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(100)
+            .clamp(10, 100);
+        let host_scale_percent = request
+            .get_metadata("ai.cc.host_threshold_scale_percent")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(100)
+            .clamp(10, 100);
+        let force_challenge = request
+            .get_metadata("ai.cc.force_challenge")
+            .map(|value| value == "true")
+            .unwrap_or(false);
+        let extra_delay_ms = request
+            .get_metadata("ai.cc.extra_delay_ms")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
 
         let route_block_threshold = config
             .route_block_threshold
-            .saturating_mul(block_multiplier);
+            .saturating_mul(block_multiplier)
+            .saturating_mul(route_scale_percent)
+            / 100;
         let host_block_threshold = config
             .host_block_threshold
             .saturating_mul(block_multiplier)
             .saturating_mul(interactive_host_ip_block_multiplier);
+        let host_block_threshold = host_block_threshold.saturating_mul(host_scale_percent) / 100;
         let ip_block_threshold = config
             .ip_block_threshold
             .saturating_mul(block_multiplier)
@@ -383,11 +404,15 @@ impl L7CcGuard {
 
         let route_challenge_threshold = config
             .route_challenge_threshold
-            .saturating_mul(challenge_multiplier);
+            .saturating_mul(challenge_multiplier)
+            .saturating_mul(route_scale_percent)
+            / 100;
         let host_challenge_threshold = config
             .host_challenge_threshold
             .saturating_mul(challenge_multiplier)
-            .saturating_mul(interactive_host_ip_multiplier);
+            .saturating_mul(interactive_host_ip_multiplier)
+            .saturating_mul(host_scale_percent)
+            / 100;
         let ip_challenge_threshold = config
             .ip_challenge_threshold
             .saturating_mul(challenge_multiplier)
@@ -406,7 +431,8 @@ impl L7CcGuard {
 
         if !verified
             && !low_risk_subresource
-            && (global_hot_path_pressure_challenge
+            && (force_challenge
+                || global_hot_path_pressure_challenge
                 || route_effective >= route_challenge_threshold
                 || host_effective >= host_challenge_threshold
                 || ip_effective >= ip_challenge_threshold
@@ -470,6 +496,13 @@ impl L7CcGuard {
                 format!("delay:{}ms", config.delay_ms),
             );
             tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
+        }
+        if extra_delay_ms > 0 {
+            request.add_metadata(
+                "l7.cc.action".to_string(),
+                format!("delay:{}ms", extra_delay_ms),
+            );
+            tokio::time::sleep(Duration::from_millis(extra_delay_ms)).await;
         }
 
         None

@@ -44,6 +44,14 @@ pub(super) fn build_router(state: ApiState) -> Router {
             patch(system_handlers::update_ai_audit_report_feedback_handler),
         )
         .route(
+            "/dashboard/ai-temp-policies",
+            get(system_handlers::list_ai_temp_policies_handler),
+        )
+        .route(
+            "/dashboard/ai-temp-policies/:id",
+            delete(system_handlers::delete_ai_temp_policy_handler),
+        )
+        .route(
             "/l4/config",
             get(settings_handlers::get_l4_config_handler)
                 .put(settings_handlers::update_l4_config_handler),

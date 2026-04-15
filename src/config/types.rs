@@ -142,6 +142,12 @@ pub struct AiAuditConfig {
     pub recent_event_limit: u32,
     #[serde(default = "default_ai_audit_include_raw_event_samples")]
     pub include_raw_event_samples: bool,
+    #[serde(default = "default_ai_audit_auto_apply_temp_policies")]
+    pub auto_apply_temp_policies: bool,
+    #[serde(default = "default_ai_audit_temp_policy_ttl_secs")]
+    pub temp_policy_ttl_secs: u64,
+    #[serde(default = "default_ai_audit_temp_block_ttl_secs")]
+    pub temp_block_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -248,6 +254,18 @@ const fn default_ai_audit_recent_event_limit() -> u32 {
 
 const fn default_ai_audit_include_raw_event_samples() -> bool {
     false
+}
+
+const fn default_ai_audit_auto_apply_temp_policies() -> bool {
+    true
+}
+
+const fn default_ai_audit_temp_policy_ttl_secs() -> u64 {
+    15 * 60
+}
+
+const fn default_ai_audit_temp_block_ttl_secs() -> u64 {
+    30 * 60
 }
 
 const fn default_security_event_retention_days() -> u64 {

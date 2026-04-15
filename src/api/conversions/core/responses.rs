@@ -649,6 +649,9 @@ impl AiAuditSettingsResponse {
             event_sample_limit: config.event_sample_limit,
             recent_event_limit: config.recent_event_limit,
             include_raw_event_samples: config.include_raw_event_samples,
+            auto_apply_temp_policies: config.auto_apply_temp_policies,
+            temp_policy_ttl_secs: config.temp_policy_ttl_secs,
+            temp_block_ttl_secs: config.temp_block_ttl_secs,
         }
     }
 }

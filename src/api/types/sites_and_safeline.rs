@@ -161,6 +161,9 @@ pub struct AiAuditSettingsResponse {
     pub(crate) event_sample_limit: u32,
     pub(crate) recent_event_limit: u32,
     pub(crate) include_raw_event_samples: bool,
+    pub(crate) auto_apply_temp_policies: bool,
+    pub(crate) temp_policy_ttl_secs: u64,
+    pub(crate) temp_block_ttl_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -178,6 +181,12 @@ pub struct AiAuditSettingsRequest {
     pub(crate) recent_event_limit: u32,
     #[serde(default)]
     pub(crate) include_raw_event_samples: bool,
+    #[serde(default)]
+    pub(crate) auto_apply_temp_policies: bool,
+    #[serde(default)]
+    pub(crate) temp_policy_ttl_secs: u64,
+    #[serde(default)]
+    pub(crate) temp_block_ttl_secs: u64,
 }
 
 #[derive(Debug, Serialize)]

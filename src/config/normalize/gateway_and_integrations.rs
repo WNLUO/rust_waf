@@ -410,6 +410,18 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
         50,
         12,
     ) as u32;
+    config.integrations.ai_audit.temp_policy_ttl_secs = clamp_u64(
+        config.integrations.ai_audit.temp_policy_ttl_secs,
+        60,
+        24 * 3600,
+        15 * 60,
+    );
+    config.integrations.ai_audit.temp_block_ttl_secs = clamp_u64(
+        config.integrations.ai_audit.temp_block_ttl_secs,
+        60,
+        24 * 3600,
+        30 * 60,
+    );
     config.storage_policy.security_event_retention_days = clamp_u64(
         config.storage_policy.security_event_retention_days,
         1,

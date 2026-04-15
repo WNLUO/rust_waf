@@ -40,6 +40,7 @@ impl WafEngine {
             .http_processor
             .start(self.context.as_ref())
             .await?;
+        self.context.refresh_ai_temp_policies().await?;
 
         #[cfg(feature = "api")]
         if startup_config.api_enabled {
@@ -237,54 +238,49 @@ impl WafEngine {
                 (
                     "security events",
                     store
-                        .purge_old_security_events(
-                            now.saturating_sub(
-                                (storage_policy.security_event_retention_days * 24 * 3600) as i64,
-                            ),
-                        )
+                        .purge_old_security_events(now.saturating_sub(
+                            (storage_policy.security_event_retention_days * 24 * 3600) as i64,
+                        ))
                         .await,
                 ),
                 (
                     "behavior events",
                     store
-                        .purge_old_behavior_events(
-                            now.saturating_sub(
-                                (storage_policy.behavior_event_retention_days * 24 * 3600) as i64,
-                            ),
-                        )
+                        .purge_old_behavior_events(now.saturating_sub(
+                            (storage_policy.behavior_event_retention_days * 24 * 3600) as i64,
+                        ))
                         .await,
                 ),
                 (
                     "behavior sessions",
                     store
-                        .purge_old_behavior_sessions(
-                            now.saturating_sub(
-                                (storage_policy.behavior_session_retention_days * 24 * 3600)
-                                    as i64,
-                            ),
-                        )
+                        .purge_old_behavior_sessions(now.saturating_sub(
+                            (storage_policy.behavior_session_retention_days * 24 * 3600) as i64,
+                        ))
                         .await,
                 ),
                 (
                     "fingerprint profiles",
                     store
-                        .purge_old_fingerprint_profiles(
-                            now.saturating_sub(
-                                (storage_policy.fingerprint_profile_retention_days * 24 * 3600)
-                                    as i64,
-                            ),
-                        )
+                        .purge_old_fingerprint_profiles(now.saturating_sub(
+                            (storage_policy.fingerprint_profile_retention_days * 24 * 3600) as i64,
+                        ))
                         .await,
                 ),
                 (
                     "AI audit reports",
                     store
-                        .purge_old_ai_audit_reports(
-                            now.saturating_sub(
-                                (storage_policy.ai_audit_report_retention_days * 24 * 3600)
-                                    as i64,
-                            ),
-                        )
+                        .purge_old_ai_audit_reports(now.saturating_sub(
+                            (storage_policy.ai_audit_report_retention_days * 24 * 3600) as i64,
+                        ))
+                        .await,
+                ),
+                (
+                    "inactive AI temp policies",
+                    store
+                        .purge_inactive_ai_temp_policies(now.saturating_sub(
+                            (storage_policy.ai_audit_report_retention_days * 24 * 3600) as i64,
+                        ))
                         .await,
                 ),
             ];
@@ -297,6 +293,10 @@ impl WafEngine {
                     Err(err) => warn!("Failed to purge stale {}: {}", label, err),
                 }
             }
+        }
+
+        if let Err(err) = self.context.refresh_ai_temp_policies().await {
+            warn!("Failed to refresh AI temp policies: {}", err);
         }
 
         if let Some(l4_inspector) = self.context.l4_inspector() {

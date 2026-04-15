@@ -128,6 +128,31 @@ export interface AiAuditReportRecommendation {
   title: string
   action: string
   rationale: string
+  action_type: string
+  rule_suggestion_key?: string | null
+}
+
+export interface AiAuditInputProfile {
+  source: string
+  sampled_events: number
+  included_recent_events: number
+  raw_samples_included: boolean
+}
+
+export interface AiAuditSuggestedRule {
+  key: string
+  title: string
+  policy_type: string
+  layer: string
+  scope_type: string
+  scope_value: string
+  target: string
+  action: string
+  operator: string
+  suggested_value: string
+  ttl_secs: number
+  auto_apply: boolean
+  rationale: string
 }
 
 export interface AiAuditReportResponse {
@@ -135,12 +160,15 @@ export interface AiAuditReportResponse {
   generated_at: number
   provider_used: string
   fallback_used: boolean
+  analysis_mode: string
   execution_notes: string[]
   risk_level: string
   headline: string
   executive_summary: string[]
+  input_profile: AiAuditInputProfile
   findings: AiAuditReportFinding[]
   recommendations: AiAuditReportRecommendation[]
+  suggested_local_rules: AiAuditSuggestedRule[]
   summary: AiAuditSummaryResponse
 }
 
@@ -162,6 +190,46 @@ export interface AiAuditReportsResponse {
   limit: number
   offset: number
   reports: AiAuditReportHistoryItem[]
+}
+
+export interface AiTempPolicyItem {
+  id: number
+  created_at: number
+  updated_at: number
+  expires_at: number
+  policy_key: string
+  title: string
+  policy_type: string
+  layer: string
+  scope_type: string
+  scope_value: string
+  action: string
+  operator: string
+  suggested_value: string
+  rationale: string
+  confidence: number
+  auto_applied: boolean
+  hit_count: number
+  last_hit_at: number | null
+  effect: AiTempPolicyEffect
+}
+
+export interface AiTempPolicyEffect {
+  total_hits: number
+  first_hit_at: number | null
+  last_hit_at: number | null
+  last_scope_type: string | null
+  last_scope_value: string | null
+  last_matched_value: string | null
+  last_match_mode: string | null
+  action_hits: Record<string, number>
+  match_modes: Record<string, number>
+  scope_hits: Record<string, number>
+}
+
+export interface AiTempPoliciesResponse {
+  total: number
+  policies: AiTempPolicyItem[]
 }
 
 export interface AiAuditFeedbackUpdatePayload {

@@ -361,7 +361,12 @@ pub(crate) fn enforce_runtime_http_block_if_needed(
     inspector.block_ip(
         &ip,
         &result.reason,
-        std::time::Duration::from_secs(crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS),
+        std::time::Duration::from_secs(
+            request
+                .get_metadata("ai.temp_block_duration_secs")
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS),
+        ),
     );
 }
 

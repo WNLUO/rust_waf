@@ -142,11 +142,7 @@ export interface HeaderOperationItem {
 
 export interface AiAuditSettingsPayload {
   enabled: boolean
-  provider:
-    | 'local_rules'
-    | 'stub_model'
-    | 'openai_compatible'
-    | 'xiaomi_mimo'
+  provider: 'local_rules' | 'stub_model' | 'openai_compatible' | 'xiaomi_mimo'
   model: string
   base_url: string
   api_key: string
@@ -155,6 +151,9 @@ export interface AiAuditSettingsPayload {
   event_sample_limit: number
   recent_event_limit: number
   include_raw_event_samples: boolean
+  auto_apply_temp_policies: boolean
+  temp_policy_ttl_secs: number
+  temp_block_ttl_secs: number
 }
 
 export interface GlobalSettingsPayload {

@@ -1,7 +1,7 @@
+use crate::config::types::StoragePolicyConfig;
 use anyhow::Result;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
-use crate::config::types::StoragePolicyConfig;
 
 use super::super::*;
 
@@ -121,6 +121,9 @@ impl Default for AiAuditConfig {
             event_sample_limit: 120,
             recent_event_limit: 12,
             include_raw_event_samples: false,
+            auto_apply_temp_policies: true,
+            temp_policy_ttl_secs: 15 * 60,
+            temp_block_ttl_secs: 30 * 60,
         }
     }
 }

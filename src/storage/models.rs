@@ -1,4 +1,5 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, Rule, RuleAction, RuleLayer, RuleResponseTemplate, Severity};
 
@@ -116,6 +117,84 @@ pub struct AiAuditReportEntry {
     pub feedback_status: Option<String>,
     pub feedback_notes: Option<String>,
     pub feedback_updated_at: Option<i64>,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiTempPolicyEntry {
+    pub id: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub expires_at: i64,
+    pub status: String,
+    pub source_report_id: Option<i64>,
+    pub policy_key: String,
+    pub title: String,
+    pub policy_type: String,
+    pub layer: String,
+    pub scope_type: String,
+    pub scope_value: String,
+    pub action: String,
+    pub operator: String,
+    pub suggested_value: String,
+    pub rationale: String,
+    pub confidence: i64,
+    pub auto_applied: bool,
+    pub hit_count: i64,
+    pub last_hit_at: Option<i64>,
+    pub effect_json: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiTempPolicyEffectStats {
+    #[serde(default)]
+    pub total_hits: i64,
+    #[serde(default)]
+    pub first_hit_at: Option<i64>,
+    #[serde(default)]
+    pub last_hit_at: Option<i64>,
+    #[serde(default)]
+    pub last_scope_type: Option<String>,
+    #[serde(default)]
+    pub last_scope_value: Option<String>,
+    #[serde(default)]
+    pub last_matched_value: Option<String>,
+    #[serde(default)]
+    pub last_match_mode: Option<String>,
+    #[serde(default)]
+    pub action_hits: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub match_modes: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub scope_hits: std::collections::BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiTempPolicyHitRecord {
+    pub id: i64,
+    pub action: String,
+    pub scope_type: String,
+    pub scope_value: String,
+    pub matched_value: String,
+    pub match_mode: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiTempPolicyUpsert {
+    pub source_report_id: Option<i64>,
+    pub policy_key: String,
+    pub title: String,
+    pub policy_type: String,
+    pub layer: String,
+    pub scope_type: String,
+    pub scope_value: String,
+    pub action: String,
+    pub operator: String,
+    pub suggested_value: String,
+    pub rationale: String,
+    pub confidence: i64,
+    pub auto_applied: bool,
+    pub expires_at: i64,
 }
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]

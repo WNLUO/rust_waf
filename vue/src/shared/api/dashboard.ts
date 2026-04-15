@@ -15,6 +15,7 @@ import type {
   AiAuditReportsQuery,
   AiAuditReportsResponse,
   AiAuditFeedbackUpdatePayload,
+  AiTempPoliciesResponse,
   TrafficMapQuery,
   TrafficMapResponse,
   WriteStatusResponse,
@@ -67,8 +68,7 @@ export async function fetchAiAuditSummary(
   )
 }
 
-export async function fetchAiAuditReport(
-): Promise<AiAuditReportResponse> {
+export async function fetchAiAuditReport(): Promise<AiAuditReportResponse> {
   return apiRequest<AiAuditReportResponse>('/dashboard/ai-audit-report')
 }
 
@@ -100,4 +100,16 @@ export async function updateAiAuditReportFeedback(
       body: JSON.stringify(payload),
     },
   )
+}
+
+export async function fetchAiTempPolicies(): Promise<AiTempPoliciesResponse> {
+  return apiRequest<AiTempPoliciesResponse>('/dashboard/ai-temp-policies')
+}
+
+export async function deleteAiTempPolicy(
+  id: number,
+): Promise<WriteStatusResponse> {
+  return apiRequest<WriteStatusResponse>(`/dashboard/ai-temp-policies/${id}`, {
+    method: 'DELETE',
+  })
 }

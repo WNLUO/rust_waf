@@ -2,7 +2,10 @@
 import { onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
+import {
+  fetchGlobalSettings,
+  updateGlobalSettings,
+} from '@/shared/api/settings'
 import type { GlobalSettingsPayload } from '@/shared/types'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
@@ -42,6 +45,9 @@ function createDefaultSettings(): GlobalSettingsPayload {
       event_sample_limit: 120,
       recent_event_limit: 12,
       include_raw_event_samples: false,
+      auto_apply_temp_policies: true,
+      temp_policy_ttl_secs: 900,
+      temp_block_ttl_secs: 1800,
     },
   }
 }
@@ -142,7 +148,8 @@ onMounted(loadPage)
         >
           <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
           <p class="mt-1 text-xs leading-5 text-slate-500">
-            Header 模式下会直接以你配置的自定义 Header 识别用户真实 IP；如果开启认证，则还会额外校验认证 Header 与 Secret。
+            Header 模式下会直接以你配置的自定义 Header 识别用户真实
+            IP；如果开启认证，则还会额外校验认证 Header 与 Secret。
           </p>
           <div class="mt-4 grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
             <label class="space-y-1.5">
@@ -219,7 +226,8 @@ onMounted(loadPage)
               v-if="settings.source_ip_strategy === 'header'"
               class="mt-4 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800"
             >
-              关闭认证时，只要请求携带你配置的真实来源 IP Header，就会被按 CDN 转发流量处理。
+              关闭认证时，只要请求携带你配置的真实来源 IP Header，就会被按 CDN
+              转发流量处理。
             </div>
           </div>
         </section>
@@ -229,7 +237,8 @@ onMounted(loadPage)
         >
           <p class="text-sm font-semibold text-stone-900">协议兼容</p>
           <p class="mt-1 text-xs leading-5 text-slate-500">
-            HTTP/3 依赖 QUIC、TLS 1.3 与可用证书配置；仅打开开关还需要服务端监听和证书链完整才能对外生效。
+            HTTP/3 依赖 QUIC、TLS 1.3
+            与可用证书配置；仅打开开关还需要服务端监听和证书链完整才能对外生效。
           </p>
           <div class="mt-4 grid gap-3 md:grid-cols-3">
             <label
@@ -299,7 +308,6 @@ onMounted(loadPage)
             />
           </label>
         </section>
-
       </template>
     </div>
   </AppLayout>

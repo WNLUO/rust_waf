@@ -255,10 +255,16 @@ fn build_provider_report(
             .map(|item| AiAuditSuggestedRuleResponse {
                 key: item.key,
                 title: item.title,
+                policy_type: item.policy_type,
                 layer: normalize_rule_layer(&item.layer),
+                scope_type: item.scope_type,
+                scope_value: item.scope_value,
                 target: item.target,
+                action: normalize_policy_action(&item.action),
                 operator: item.operator,
                 suggested_value: item.suggested_value,
+                ttl_secs: item.ttl_secs.max(60),
+                auto_apply: item.auto_apply,
                 rationale: item.rationale,
             })
             .collect(),
@@ -395,7 +401,7 @@ fn build_system_prompt() -> String {
         "findings items must contain: key, severity, title, detail, evidence.",
         "recommendations items must contain: key, priority, title, action, rationale, action_type, rule_suggestion_key.",
         "action_type must be one of: observe, tune_threshold, add_rule, investigate.",
-        "suggested_local_rules items must contain: key, title, layer, target, operator, suggested_value, rationale.",
+        "suggested_local_rules items must contain: key, title, policy_type, layer, scope_type, scope_value, target, action, operator, suggested_value, ttl_secs, auto_apply, rationale.",
         "layer must be one of: l4, l7.",
         "Do not include markdown fences or any extra commentary.",
         "This is an analysis-only task. Never claim that the model directly blocked traffic.",
@@ -579,6 +585,20 @@ fn normalize_rule_layer(value: &str) -> String {
     }
 }
 
+fn normalize_policy_action(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "tighten_route_cc"
+        | "tighten_host_cc"
+        | "raise_identity_risk"
+        | "add_behavior_watch"
+        | "add_temp_block"
+        | "increase_challenge"
+        | "increase_delay"
+        | "watch_only" => value.trim().to_ascii_lowercase(),
+        _ => "watch_only".to_string(),
+    }
+}
+
 fn normalize_severity(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "low" | "medium" | "high" | "critical" => value.trim().to_ascii_lowercase(),
@@ -728,10 +748,22 @@ struct AiAuditModelRecommendation {
 struct AiAuditModelSuggestedRule {
     key: String,
     title: String,
+    #[serde(default)]
+    policy_type: String,
     layer: String,
+    #[serde(default)]
+    scope_type: String,
+    #[serde(default)]
+    scope_value: String,
     target: String,
+    #[serde(default)]
+    action: String,
     operator: String,
     suggested_value: String,
+    #[serde(default)]
+    ttl_secs: u64,
+    #[serde(default)]
+    auto_apply: bool,
     rationale: String,
 }
 
@@ -809,6 +841,9 @@ mod tests {
             event_sample_limit: 64,
             recent_event_limit: 8,
             include_raw_event_samples: false,
+            auto_apply_temp_policies: true,
+            temp_policy_ttl_secs: 900,
+            temp_block_ttl_secs: 1800,
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());
@@ -837,6 +872,9 @@ mod tests {
             event_sample_limit: 64,
             recent_event_limit: 8,
             include_raw_event_samples: false,
+            auto_apply_temp_policies: true,
+            temp_policy_ttl_secs: 900,
+            temp_block_ttl_secs: 1800,
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());

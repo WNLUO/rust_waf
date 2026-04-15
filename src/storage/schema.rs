@@ -161,6 +161,37 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON ai_audit_reports(generated_at DESC);
         CREATE INDEX IF NOT EXISTS idx_ai_audit_reports_feedback_status
             ON ai_audit_reports(feedback_status);
+        CREATE TABLE IF NOT EXISTS ai_temp_policies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            source_report_id INTEGER,
+            policy_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            policy_type TEXT NOT NULL,
+            layer TEXT NOT NULL,
+            scope_type TEXT NOT NULL,
+            scope_value TEXT NOT NULL,
+            action TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            suggested_value TEXT NOT NULL,
+            rationale TEXT NOT NULL,
+            confidence INTEGER NOT NULL DEFAULT 0,
+            auto_applied INTEGER NOT NULL DEFAULT 0,
+            hit_count INTEGER NOT NULL DEFAULT 0,
+            last_hit_at INTEGER,
+            effect_json TEXT NOT NULL DEFAULT '{}',
+            UNIQUE(policy_key, scope_type, scope_value, status)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_temp_policies_expires_at
+            ON ai_temp_policies(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_ai_temp_policies_status
+            ON ai_temp_policies(status);
+        CREATE INDEX IF NOT EXISTS idx_ai_temp_policies_scope
+            ON ai_temp_policies(scope_type, scope_value);
         CREATE TABLE IF NOT EXISTS rules (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

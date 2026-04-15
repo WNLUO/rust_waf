@@ -508,6 +508,9 @@ impl AiAuditSettingsRequest {
             event_sample_limit: self.event_sample_limit,
             recent_event_limit: self.recent_event_limit,
             include_raw_event_samples: self.include_raw_event_samples,
+            auto_apply_temp_policies: self.auto_apply_temp_policies,
+            temp_policy_ttl_secs: self.temp_policy_ttl_secs,
+            temp_block_ttl_secs: self.temp_block_ttl_secs,
         })
     }
 }

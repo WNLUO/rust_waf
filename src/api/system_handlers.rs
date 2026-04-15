@@ -135,7 +135,9 @@ pub(super) async fn ai_audit_report_handler(
         .await
         .map_err(ApiError::internal)?;
     let Some(entry) = result.items.into_iter().next() else {
-        return Err(ApiError::not_found("暂无 AI 审计历史，请先执行一次 AI 审计"));
+        return Err(ApiError::not_found(
+            "暂无 AI 审计历史，请先执行一次 AI 审计",
+        ));
     };
     let report = crate::api::ai_audit::history_item_from_entry(entry)
         .map_err(ApiError::internal)?
@@ -190,6 +192,33 @@ pub(super) async fn run_ai_audit_report_handler(
                     .push("failed to persist ai audit report snapshot".to_string());
             }
         }
+        if config.integrations.ai_audit.auto_apply_temp_policies {
+            match apply_ai_temp_policies_from_report(
+                store,
+                report.report_id,
+                &report,
+                config.integrations.ai_audit.temp_policy_ttl_secs,
+                config.integrations.ai_audit.temp_block_ttl_secs,
+            )
+            .await
+            {
+                Ok(applied) => {
+                    if applied > 0 {
+                        report.execution_notes.push(format!(
+                            "auto applied {} temporary cc/behavior policies",
+                            applied
+                        ));
+                    }
+                }
+                Err(err) => {
+                    log::warn!("Failed to auto-apply AI temp policies: {:?}", err);
+                    report
+                        .execution_notes
+                        .push("failed to auto apply ai temporary policies".to_string());
+                }
+            }
+            let _ = state.context.refresh_ai_temp_policies().await;
+        }
     }
     Ok(Json(report))
 }
@@ -220,6 +249,39 @@ pub(super) async fn list_ai_audit_reports_handler(
         limit: result.limit,
         offset: result.offset,
         reports,
+    }))
+}
+
+pub(super) async fn list_ai_temp_policies_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<AiTempPoliciesResponse>> {
+    let items = state.context.active_ai_temp_policies();
+    Ok(Json(AiTempPoliciesResponse {
+        total: items.len() as u32,
+        policies: items.into_iter().map(AiTempPolicyResponse::from).collect(),
+    }))
+}
+
+pub(super) async fn delete_ai_temp_policy_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_ai_temp_policy(id)
+        .await
+        .map_err(ApiError::internal)?;
+    if !deleted {
+        return Err(ApiError::not_found("未找到对应的 AI 临时策略"));
+    }
+    state
+        .context
+        .refresh_ai_temp_policies()
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "AI 临时策略已撤销".to_string(),
     }))
 }
 
@@ -451,10 +513,20 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         suggested_local_rules.push(AiAuditSuggestedRuleResponse {
             key: "tighten_forward_identity_checks".to_string(),
             title: "收紧转发身份链路校验".to_string(),
+            policy_type: "raise_identity_risk".to_string(),
             layer: "l7".to_string(),
+            scope_type: "host".to_string(),
+            scope_value: summary
+                .top_hosts
+                .first()
+                .map(|item| item.key.clone())
+                .unwrap_or_else(|| "*".to_string()),
             target: "trusted_proxy_identity".to_string(),
+            action: "raise_identity_risk".to_string(),
             operator: "tighten".to_string(),
             suggested_value: "prefer_verified_forward_chain".to_string(),
+            ttl_secs: 1800,
+            auto_apply: true,
             rationale: "当身份压力持续升高时，应优先减少未解析转发流量进入宽松路径。".to_string(),
         });
     }
@@ -486,12 +558,52 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         suggested_local_rules.push(AiAuditSuggestedRuleResponse {
             key: "raise_hot_route_friction".to_string(),
             title: "提高热点路径摩擦".to_string(),
+            policy_type: "tighten_route_cc".to_string(),
             layer: "l7".to_string(),
+            scope_type: "route".to_string(),
+            scope_value: summary
+                .top_routes
+                .first()
+                .map(|item| item.key.clone())
+                .unwrap_or_else(|| "/".to_string()),
             target: "hot_route_threshold".to_string(),
+            action: "tighten_route_cc".to_string(),
             operator: "decrease_threshold".to_string(),
-            suggested_value: "10%-20%".to_string(),
-            rationale: "当热点信号稳定占优时，应优先收紧热点路径的 challenge 和 block 阈值。".to_string(),
+            suggested_value: "80".to_string(),
+            ttl_secs: 900,
+            auto_apply: true,
+            rationale: "当热点信号稳定占优时，应优先收紧热点路径的 challenge 和 block 阈值。"
+                .to_string(),
         });
+        if let Some(top_source) = summary.top_source_ips.first() {
+            suggested_local_rules.push(AiAuditSuggestedRuleResponse {
+                key: "auto_temp_block_top_source".to_string(),
+                title: "临时阻断热点来源".to_string(),
+                policy_type: "add_temp_block".to_string(),
+                layer: "l7".to_string(),
+                scope_type: "source_ip".to_string(),
+                scope_value: top_source.key.clone(),
+                target: "source_ip".to_string(),
+                action: "add_temp_block".to_string(),
+                operator: "equals".to_string(),
+                suggested_value: top_source.count.to_string(),
+                ttl_secs: 1800,
+                auto_apply: true,
+                rationale: "当单一来源持续主导高摩擦流量时，可先施加短时阻断压降。".to_string(),
+            });
+            recommendations.push(AiAuditReportRecommendation {
+                key: "auto_temp_block_top_source".to_string(),
+                priority: "high".to_string(),
+                title: "对热点来源启用临时阻断".to_string(),
+                action: format!(
+                    "对来源 {} 启用短时 temp block，并观察摩擦压力是否回落。",
+                    top_source.key
+                ),
+                rationale: "适用于已被多类信号重复指向且持续制造压力的热点来源。".to_string(),
+                action_type: "add_rule".to_string(),
+                rule_suggestion_key: Some("auto_temp_block_top_source".to_string()),
+            });
+        }
     }
 
     if summary.current.slow_attack_pressure_percent >= 1.0 {
@@ -520,10 +632,20 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         suggested_local_rules.push(AiAuditSuggestedRuleResponse {
             key: "tighten_slow_attack_window".to_string(),
             title: "收紧慢速攻击窗口".to_string(),
+            policy_type: "increase_delay".to_string(),
             layer: "l4".to_string(),
+            scope_type: "source_ip".to_string(),
+            scope_value: summary
+                .top_source_ips
+                .first()
+                .map(|item| item.key.clone())
+                .unwrap_or_else(|| "0.0.0.0".to_string()),
             target: "slow_attack_window".to_string(),
+            action: "increase_delay".to_string(),
             operator: "decrease_threshold".to_string(),
-            suggested_value: "header/body timeout -10%".to_string(),
+            suggested_value: "350".to_string(),
+            ttl_secs: 900,
+            auto_apply: true,
             rationale: "慢头和慢体事件持续出现时，应降低容忍窗口并强化短连接降级。".to_string(),
         });
     }
@@ -628,6 +750,92 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         recommendations,
         suggested_local_rules,
         summary,
+    }
+}
+
+async fn apply_ai_temp_policies_from_report(
+    store: &crate::storage::SqliteStore,
+    report_id: Option<i64>,
+    report: &AiAuditReportResponse,
+    default_ttl_secs: u64,
+    default_block_ttl_secs: u64,
+) -> anyhow::Result<usize> {
+    let now = unix_timestamp();
+    let mut applied = 0usize;
+    for item in &report.suggested_local_rules {
+        if !item.auto_apply {
+            continue;
+        }
+        let ttl_secs = if item.action == "add_temp_block" {
+            item.ttl_secs.max(default_block_ttl_secs)
+        } else {
+            item.ttl_secs.max(default_ttl_secs)
+        };
+        store
+            .upsert_ai_temp_policy(&crate::storage::AiTempPolicyUpsert {
+                source_report_id: report_id,
+                policy_key: item.key.clone(),
+                title: item.title.clone(),
+                policy_type: item.policy_type.clone(),
+                layer: item.layer.clone(),
+                scope_type: item.scope_type.clone(),
+                scope_value: item.scope_value.clone(),
+                action: item.action.clone(),
+                operator: item.operator.clone(),
+                suggested_value: item.suggested_value.clone(),
+                rationale: item.rationale.clone(),
+                confidence: match report.risk_level.as_str() {
+                    "critical" => 95,
+                    "high" => 85,
+                    "medium" => 70,
+                    _ => 55,
+                },
+                auto_applied: true,
+                expires_at: now.saturating_add(ttl_secs as i64),
+            })
+            .await?;
+        applied += 1;
+    }
+    Ok(applied)
+}
+
+impl From<crate::storage::AiTempPolicyEntry> for AiTempPolicyResponse {
+    fn from(value: crate::storage::AiTempPolicyEntry) -> Self {
+        let effect =
+            serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&value.effect_json)
+                .unwrap_or_default();
+        Self {
+            id: value.id,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            expires_at: value.expires_at,
+            policy_key: value.policy_key,
+            title: value.title,
+            policy_type: value.policy_type,
+            layer: value.layer,
+            scope_type: value.scope_type,
+            scope_value: value.scope_value,
+            action: value.action,
+            operator: value.operator,
+            suggested_value: value.suggested_value,
+            rationale: value.rationale,
+            confidence: value.confidence,
+            auto_applied: value.auto_applied,
+            hit_count: value.hit_count,
+            last_hit_at: value.last_hit_at,
+            effect: AiTempPolicyEffectResponse {
+                total_hits: effect.total_hits,
+                first_hit_at: effect.first_hit_at,
+                last_hit_at: effect.last_hit_at,
+                last_scope_type: effect.last_scope_type,
+                last_scope_value: effect.last_scope_value,
+                last_matched_value: effect.last_matched_value,
+                last_match_mode: effect.last_match_mode,
+                action_hits: effect.action_hits,
+                match_modes: effect.match_modes,
+                scope_hits: effect.scope_hits,
+            },
+        }
     }
 }
 

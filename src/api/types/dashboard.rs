@@ -106,14 +106,17 @@ pub struct AiAuditReportResponse {
     pub(crate) generated_at: i64,
     pub(crate) provider_used: String,
     pub(crate) fallback_used: bool,
+    #[serde(default)]
     pub(crate) analysis_mode: String,
     pub(crate) execution_notes: Vec<String>,
     pub(crate) risk_level: String,
     pub(crate) headline: String,
     pub(crate) executive_summary: Vec<String>,
+    #[serde(default)]
     pub(crate) input_profile: AiAuditInputProfileResponse,
     pub(crate) findings: Vec<AiAuditReportFinding>,
     pub(crate) recommendations: Vec<AiAuditReportRecommendation>,
+    #[serde(default)]
     pub(crate) suggested_local_rules: Vec<AiAuditSuggestedRuleResponse>,
     pub(crate) summary: AiAuditSummaryResponse,
 }
@@ -124,6 +127,49 @@ pub struct AiAuditReportsResponse {
     pub(crate) limit: u32,
     pub(crate) offset: u32,
     pub(crate) reports: Vec<AiAuditReportHistoryItem>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiTempPoliciesResponse {
+    pub(crate) total: u32,
+    pub(crate) policies: Vec<AiTempPolicyResponse>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AiTempPolicyEffectResponse {
+    pub(crate) total_hits: i64,
+    pub(crate) first_hit_at: Option<i64>,
+    pub(crate) last_hit_at: Option<i64>,
+    pub(crate) last_scope_type: Option<String>,
+    pub(crate) last_scope_value: Option<String>,
+    pub(crate) last_matched_value: Option<String>,
+    pub(crate) last_match_mode: Option<String>,
+    pub(crate) action_hits: std::collections::BTreeMap<String, i64>,
+    pub(crate) match_modes: std::collections::BTreeMap<String, i64>,
+    pub(crate) scope_hits: std::collections::BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AiTempPolicyResponse {
+    pub(crate) id: i64,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
+    pub(crate) expires_at: i64,
+    pub(crate) policy_key: String,
+    pub(crate) title: String,
+    pub(crate) policy_type: String,
+    pub(crate) layer: String,
+    pub(crate) scope_type: String,
+    pub(crate) scope_value: String,
+    pub(crate) action: String,
+    pub(crate) operator: String,
+    pub(crate) suggested_value: String,
+    pub(crate) rationale: String,
+    pub(crate) confidence: i64,
+    pub(crate) auto_applied: bool,
+    pub(crate) hit_count: i64,
+    pub(crate) last_hit_at: Option<i64>,
+    pub(crate) effect: AiTempPolicyEffectResponse,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -175,15 +221,21 @@ pub struct AiAuditReportRecommendation {
     pub(crate) title: String,
     pub(crate) action: String,
     pub(crate) rationale: String,
+    #[serde(default)]
     pub(crate) action_type: String,
+    #[serde(default)]
     pub(crate) rule_suggestion_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiAuditInputProfileResponse {
+    #[serde(default)]
     pub(crate) source: String,
+    #[serde(default)]
     pub(crate) sampled_events: u32,
+    #[serde(default)]
     pub(crate) included_recent_events: u32,
+    #[serde(default)]
     pub(crate) raw_samples_included: bool,
 }
 
@@ -191,10 +243,22 @@ pub struct AiAuditInputProfileResponse {
 pub struct AiAuditSuggestedRuleResponse {
     pub(crate) key: String,
     pub(crate) title: String,
+    #[serde(default)]
+    pub(crate) policy_type: String,
     pub(crate) layer: String,
+    #[serde(default)]
+    pub(crate) scope_type: String,
+    #[serde(default)]
+    pub(crate) scope_value: String,
     pub(crate) target: String,
+    #[serde(default)]
+    pub(crate) action: String,
     pub(crate) operator: String,
     pub(crate) suggested_value: String,
+    #[serde(default)]
+    pub(crate) ttl_secs: u64,
+    #[serde(default)]
+    pub(crate) auto_apply: bool,
     pub(crate) rationale: String,
 }
 

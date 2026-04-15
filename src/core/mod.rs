@@ -13,10 +13,12 @@ use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
 use crate::l7::{HttpTrafficProcessor, L7BehaviorGuard, L7CcGuard, SlowAttackGuard};
 use crate::metrics::MetricsCollector;
+use crate::protocol::UnifiedHttpRequest;
 use crate::rules::RuleEngine;
-use crate::storage::SqliteStore;
+use crate::storage::{AiTempPolicyEntry, AiTempPolicyHitRecord, SqliteStore};
 use anyhow::Result;
 use log::{info, warn};
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -70,6 +72,7 @@ pub struct WafContext {
     auto_tuning_runtime: RwLock<AutoTuningRuntimeSnapshot>,
     auto_tuning_controller: Mutex<AutoTuningControllerState>,
     adaptive_protection_runtime: RwLock<AdaptiveProtectionRuntimeSnapshot>,
+    ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -155,6 +158,7 @@ impl WafContext {
             auto_tuning_runtime: RwLock::new(auto_tuning_runtime),
             auto_tuning_controller: Mutex::new(AutoTuningControllerState::default()),
             adaptive_protection_runtime: RwLock::new(adaptive_protection_runtime),
+            ai_temp_policies: RwLock::new(Vec::new()),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,
@@ -233,6 +237,205 @@ impl WafContext {
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
         self.metrics.as_ref().map(MetricsCollector::get_stats)
+    }
+
+    pub fn active_ai_temp_policies(&self) -> Vec<AiTempPolicyEntry> {
+        self.ai_temp_policies
+            .read()
+            .expect("ai_temp_policies lock poisoned")
+            .clone()
+    }
+
+    pub async fn refresh_ai_temp_policies(&self) -> Result<()> {
+        let Some(store) = self.sqlite_store.as_ref() else {
+            return Ok(());
+        };
+        let now = unix_timestamp();
+        let _ = store.expire_ai_temp_policies(now).await?;
+        let items = store.list_active_ai_temp_policies(now).await?;
+        let mut guard = self
+            .ai_temp_policies
+            .write()
+            .expect("ai_temp_policies lock poisoned");
+        *guard = items;
+        Ok(())
+    }
+
+    pub fn apply_ai_temp_policies_to_request(
+        &self,
+        request: &mut UnifiedHttpRequest,
+    ) -> Option<InspectionResult> {
+        let policies = self.active_ai_temp_policies();
+        if policies.is_empty() {
+            return None;
+        }
+
+        let host = request
+            .get_header("host")
+            .map(|value| {
+                value
+                    .split(':')
+                    .next()
+                    .unwrap_or(value)
+                    .trim()
+                    .to_ascii_lowercase()
+            })
+            .unwrap_or_default();
+        let route = request
+            .uri
+            .split('?')
+            .next()
+            .unwrap_or(&request.uri)
+            .to_string();
+        let client_ip = request
+            .client_ip
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_default()
+            .to_string();
+        let identity = ai_request_identity(request);
+
+        let mut matched_hits = Vec::new();
+        let mut route_scale_percent = 100u32;
+        let mut host_scale_percent = 100u32;
+        let mut extra_delay_ms = 0u64;
+        let mut behavior_score_boost = 0u32;
+        let mut force_watch = false;
+        let mut force_challenge = false;
+        let mut block_reason = None::<String>;
+
+        for policy in policies {
+            let matched =
+                match_ai_temp_policy(&policy, &host, &route, &client_ip, identity.as_deref());
+            let Some(matched) = matched else {
+                continue;
+            };
+            matched_hits.push(AiTempPolicyHitRecord {
+                id: policy.id,
+                action: policy.action.clone(),
+                scope_type: policy.scope_type.clone(),
+                scope_value: policy.scope_value.clone(),
+                matched_value: matched.matched_value,
+                match_mode: matched.match_mode,
+            });
+            match policy.action.as_str() {
+                "add_temp_block" => {
+                    block_reason = Some(format!(
+                        "AI temp policy blocked request: {} ({})",
+                        policy.title, policy.rationale
+                    ));
+                    request.add_metadata(
+                        "ai.temp_block_duration_secs".to_string(),
+                        self.config_snapshot()
+                            .integrations
+                            .ai_audit
+                            .temp_block_ttl_secs
+                            .to_string(),
+                    );
+                }
+                "increase_delay" => {
+                    extra_delay_ms = extra_delay_ms
+                        .max(parse_suggested_delay_ms(&policy.suggested_value).unwrap_or(250));
+                }
+                "increase_challenge" => force_challenge = true,
+                "tighten_route_cc" => {
+                    route_scale_percent = route_scale_percent
+                        .min(parse_scale_percent(&policy.suggested_value).unwrap_or(80));
+                }
+                "tighten_host_cc" => {
+                    host_scale_percent = host_scale_percent
+                        .min(parse_scale_percent(&policy.suggested_value).unwrap_or(85));
+                }
+                "raise_identity_risk" => {
+                    behavior_score_boost = behavior_score_boost.max(35);
+                }
+                "add_behavior_watch" => {
+                    behavior_score_boost = behavior_score_boost.max(20);
+                    force_watch = true;
+                }
+                _ => {}
+            }
+        }
+
+        self.record_ai_temp_policy_hits(matched_hits);
+
+        if let Some(reason) = block_reason {
+            request.add_metadata("ai.policy.action".to_string(), "add_temp_block".to_string());
+            return Some(InspectionResult::respond_and_persist_ip(
+                InspectionLayer::L7,
+                reason.clone(),
+                CustomHttpResponse {
+                    status_code: 429,
+                    headers: vec![
+                        (
+                            "content-type".to_string(),
+                            "application/json; charset=utf-8".to_string(),
+                        ),
+                        ("cache-control".to_string(), "no-store".to_string()),
+                        ("x-rust-waf-ai-policy".to_string(), "temp_block".to_string()),
+                    ],
+                    body: serde_json::json!({
+                        "success": false,
+                        "action": "temp_block",
+                        "message": "访问已被专项防护策略临时阻断",
+                        "reason": reason,
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    tarpit: None,
+                    random_status: None,
+                },
+            ));
+        }
+
+        if route_scale_percent < 100 {
+            request.add_metadata(
+                "ai.cc.route_threshold_scale_percent".to_string(),
+                route_scale_percent.to_string(),
+            );
+        }
+        if host_scale_percent < 100 {
+            request.add_metadata(
+                "ai.cc.host_threshold_scale_percent".to_string(),
+                host_scale_percent.to_string(),
+            );
+        }
+        if extra_delay_ms > 0 {
+            request.add_metadata(
+                "ai.cc.extra_delay_ms".to_string(),
+                extra_delay_ms.to_string(),
+            );
+        }
+        if force_challenge {
+            request.add_metadata("ai.cc.force_challenge".to_string(), "true".to_string());
+        }
+        if behavior_score_boost > 0 {
+            request.add_metadata(
+                "ai.behavior.score_boost".to_string(),
+                behavior_score_boost.to_string(),
+            );
+        }
+        if force_watch {
+            request.add_metadata("ai.behavior.force_watch".to_string(), "true".to_string());
+        }
+
+        None
+    }
+
+    fn record_ai_temp_policy_hits(&self, hits: Vec<AiTempPolicyHitRecord>) {
+        if hits.is_empty() {
+            return;
+        }
+        let Some(store) = self.sqlite_store.as_ref().cloned() else {
+            return;
+        };
+        tokio::spawn(async move {
+            let now = unix_timestamp();
+            for hit in hits {
+                let _ = store.record_ai_temp_policy_hit(&hit, now).await;
+            }
+        });
     }
 
     pub async fn traffic_map_snapshot(
@@ -485,6 +688,210 @@ fn unix_timestamp() -> i64 {
         .as_secs() as i64
 }
 
+fn ai_request_identity(request: &UnifiedHttpRequest) -> Option<String> {
+    fn cookie_value(request: &UnifiedHttpRequest, name: &str) -> Option<String> {
+        let raw = request.get_header("cookie")?;
+        raw.split(';').find_map(|segment| {
+            let mut parts = segment.trim().splitn(2, '=');
+            let key = parts.next()?.trim();
+            let value = parts.next()?.trim();
+            (key.eq_ignore_ascii_case(name) && !value.is_empty()).then(|| value.to_string())
+        })
+    }
+
+    if let Some(value) = cookie_value(request, "rwaf_fp") {
+        return Some(format!("fp:{value}"));
+    }
+    if let Some(value) = request.get_header("x-browser-fingerprint-id") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(format!("fp:{trimmed}"));
+        }
+    }
+    let ip = request.client_ip.as_deref()?.trim();
+    if ip.is_empty() {
+        return None;
+    }
+    let ua = request
+        .get_header("user-agent")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("-");
+    Some(format!("ipua:{ip}|{ua}"))
+}
+
+fn parse_scale_percent(value: &str) -> Option<u32> {
+    let digits = value
+        .chars()
+        .filter(|char| char.is_ascii_digit())
+        .collect::<String>();
+    let parsed = digits.parse::<u32>().ok()?;
+    (parsed > 0).then_some(parsed.min(100))
+}
+
+fn parse_suggested_delay_ms(value: &str) -> Option<u64> {
+    let digits = value
+        .chars()
+        .filter(|char| char.is_ascii_digit())
+        .collect::<String>();
+    digits.parse::<u64>().ok()
+}
+
+#[derive(Debug, Clone)]
+struct AiTempPolicyMatch {
+    match_mode: String,
+    matched_value: String,
+}
+
+fn match_ai_temp_policy(
+    policy: &AiTempPolicyEntry,
+    host: &str,
+    route: &str,
+    client_ip: &str,
+    identity: Option<&str>,
+) -> Option<AiTempPolicyMatch> {
+    let operator = policy.operator.trim().to_ascii_lowercase();
+    match policy.scope_type.as_str() {
+        "host" => match_string_scope(host, &policy.scope_value, &operator, true),
+        "route" => match_string_scope(route, &policy.scope_value, &operator, false),
+        "source_ip" => match_ip_scope(client_ip, &policy.scope_value, &operator),
+        "identity" => match_string_scope(
+            identity.unwrap_or_default(),
+            &policy.scope_value,
+            &operator,
+            false,
+        ),
+        _ => None,
+    }
+}
+
+fn match_string_scope(
+    actual: &str,
+    expected: &str,
+    operator: &str,
+    case_insensitive: bool,
+) -> Option<AiTempPolicyMatch> {
+    let actual = actual.trim();
+    let expected = expected.trim();
+    if actual.is_empty() || expected.is_empty() {
+        return None;
+    }
+
+    let actual_cmp = if case_insensitive {
+        actual.to_ascii_lowercase()
+    } else {
+        actual.to_string()
+    };
+    let expected_cmp = if case_insensitive {
+        expected.to_ascii_lowercase()
+    } else {
+        expected.to_string()
+    };
+
+    if expected_cmp == actual_cmp {
+        return Some(AiTempPolicyMatch {
+            match_mode: "exact".to_string(),
+            matched_value: actual.to_string(),
+        });
+    }
+
+    let prefix_enabled =
+        operator == "prefix" || operator == "starts_with" || expected_cmp.ends_with('*');
+    if prefix_enabled {
+        let prefix = expected_cmp.trim_end_matches('*').trim_end();
+        if !prefix.is_empty() && actual_cmp.starts_with(prefix) {
+            return Some(AiTempPolicyMatch {
+                match_mode: "prefix".to_string(),
+                matched_value: actual.to_string(),
+            });
+        }
+    }
+
+    let suffix_enabled = operator == "suffix"
+        || operator == "ends_with"
+        || expected_cmp.starts_with("*.")
+        || expected_cmp.starts_with('.');
+    if suffix_enabled {
+        let suffix = expected_cmp.trim_start_matches('*').trim_start();
+        if !suffix.is_empty() && actual_cmp.ends_with(suffix) {
+            return Some(AiTempPolicyMatch {
+                match_mode: "suffix".to_string(),
+                matched_value: actual.to_string(),
+            });
+        }
+    }
+
+    let contains_enabled = operator == "contains";
+    if contains_enabled && actual_cmp.contains(&expected_cmp) {
+        return Some(AiTempPolicyMatch {
+            match_mode: "contains".to_string(),
+            matched_value: actual.to_string(),
+        });
+    }
+
+    None
+}
+
+fn match_ip_scope(actual: &str, expected: &str, operator: &str) -> Option<AiTempPolicyMatch> {
+    let actual = actual.trim();
+    let expected = expected.trim();
+    if actual.is_empty() || expected.is_empty() {
+        return None;
+    }
+    if actual == expected {
+        return Some(AiTempPolicyMatch {
+            match_mode: "exact".to_string(),
+            matched_value: actual.to_string(),
+        });
+    }
+    if operator == "cidr" || expected.contains('/') {
+        if ip_matches_cidr(actual, expected) {
+            return Some(AiTempPolicyMatch {
+                match_mode: "cidr".to_string(),
+                matched_value: actual.to_string(),
+            });
+        }
+    }
+    None
+}
+
+fn ip_matches_cidr(actual: &str, cidr: &str) -> bool {
+    let (base, prefix) = match cidr.split_once('/') {
+        Some(parts) => parts,
+        None => return false,
+    };
+    let Ok(actual_ip) = actual.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(base_ip) = base.trim().parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(prefix_len) = prefix.trim().parse::<u8>() else {
+        return false;
+    };
+    match (actual_ip, base_ip) {
+        (IpAddr::V4(actual_v4), IpAddr::V4(base_v4)) if prefix_len <= 32 => {
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u32::MAX << (32 - u32::from(prefix_len))
+            };
+            (u32::from(actual_v4) & mask) == (u32::from(base_v4) & mask)
+        }
+        (IpAddr::V6(actual_v6), IpAddr::V6(base_v6)) if prefix_len <= 128 => {
+            let actual_value = u128::from_be_bytes(actual_v6.octets());
+            let base_value = u128::from_be_bytes(base_v6.octets());
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u128::MAX << (128 - u32::from(prefix_len))
+            };
+            (actual_value & mask) == (base_value & mask)
+        }
+        _ => false,
+    }
+}
+
 async fn load_rule_engine_state(
     config: &Config,
     sqlite_store: Option<&SqliteStore>,
@@ -598,5 +1005,71 @@ mod tests {
         let refreshed = context.refresh_rules_from_storage().await.unwrap();
         assert!(refreshed);
         assert_eq!(context.active_rule_count(), 2);
+    }
+
+    fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {
+        AiTempPolicyEntry {
+            id: 1,
+            created_at: 0,
+            updated_at: 0,
+            expires_at: i64::MAX,
+            status: "active".to_string(),
+            source_report_id: None,
+            policy_key: "test".to_string(),
+            title: "test".to_string(),
+            policy_type: "test".to_string(),
+            layer: "l7".to_string(),
+            scope_type: scope_type.to_string(),
+            scope_value: scope_value.to_string(),
+            action: "increase_challenge".to_string(),
+            operator: operator.to_string(),
+            suggested_value: "80".to_string(),
+            rationale: "test".to_string(),
+            confidence: 80,
+            auto_applied: true,
+            hit_count: 0,
+            last_hit_at: None,
+            effect_json: "{}".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_route_prefix_temp_policy_matching() {
+        let matched = match_ai_temp_policy(
+            &test_policy("route", "/login/*", "prefix"),
+            "example.com",
+            "/login/submit",
+            "203.0.113.8",
+            Some("fp:abc"),
+        )
+        .unwrap();
+        assert_eq!(matched.match_mode, "prefix");
+        assert_eq!(matched.matched_value, "/login/submit");
+    }
+
+    #[test]
+    fn test_host_suffix_temp_policy_matching() {
+        let matched = match_ai_temp_policy(
+            &test_policy("host", "*.example.com", "suffix"),
+            "api.example.com",
+            "/",
+            "203.0.113.8",
+            Some("fp:abc"),
+        )
+        .unwrap();
+        assert_eq!(matched.match_mode, "suffix");
+    }
+
+    #[test]
+    fn test_source_ip_cidr_temp_policy_matching() {
+        let matched = match_ai_temp_policy(
+            &test_policy("source_ip", "203.0.113.0/24", "cidr"),
+            "example.com",
+            "/",
+            "203.0.113.77",
+            Some("fp:abc"),
+        )
+        .unwrap();
+        assert_eq!(matched.match_mode, "cidr");
     }
 }

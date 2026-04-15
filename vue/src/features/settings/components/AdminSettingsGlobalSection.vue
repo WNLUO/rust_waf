@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { RefreshCw, Save } from 'lucide-vue-next'
-import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
+import {
+  fetchGlobalSettings,
+  updateGlobalSettings,
+} from '@/shared/api/settings'
 import type { GlobalSettingsPayload } from '@/shared/types'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 
@@ -41,6 +44,9 @@ function createDefaultSettings(): GlobalSettingsPayload {
       event_sample_limit: 120,
       recent_event_limit: 12,
       include_raw_event_samples: false,
+      auto_apply_temp_policies: true,
+      temp_policy_ttl_secs: 900,
+      temp_block_ttl_secs: 1800,
     },
   }
 }
@@ -155,7 +161,8 @@ onMounted(loadSettings)
           <div>
             <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
             <p class="mt-0.5 text-xs leading-4 text-slate-500">
-              Header 模式下会直接以你配置的自定义 Header 识别用户真实 IP；你也可以额外开启认证 Header 校验，避免被伪造。
+              Header 模式下会直接以你配置的自定义 Header 识别用户真实
+              IP；你也可以额外开启认证 Header 校验，避免被伪造。
             </p>
           </div>
 
@@ -186,7 +193,9 @@ onMounted(loadSettings)
 
             <div class="grid gap-3 md:grid-cols-2">
               <label class="space-y-1">
-                <span class="text-xs font-medium text-slate-500">真实来源 IP Header</span>
+                <span class="text-xs font-medium text-slate-500"
+                  >真实来源 IP Header</span
+                >
                 <input
                   v-model="settings.custom_source_ip_header"
                   class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -211,7 +220,9 @@ onMounted(loadSettings)
               class="mt-3 grid gap-3 md:grid-cols-2"
             >
               <label class="space-y-1">
-                <span class="text-xs font-medium text-slate-500">认证 Header 名称</span>
+                <span class="text-xs font-medium text-slate-500"
+                  >认证 Header 名称</span
+                >
                 <input
                   v-model="settings.custom_source_ip_header_auth_header"
                   class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -221,7 +232,9 @@ onMounted(loadSettings)
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium text-slate-500">认证 Secret</span>
+                <span class="text-xs font-medium text-slate-500"
+                  >认证 Secret</span
+                >
                 <input
                   v-model="settings.custom_source_ip_header_auth_secret"
                   class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -235,7 +248,8 @@ onMounted(loadSettings)
               v-if="settings.source_ip_strategy === 'header'"
               class="mt-3 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800"
             >
-              关闭认证时，只要请求携带你配置的真实 IP Header，就会按 CDN 转发流量处理。
+              关闭认证时，只要请求携带你配置的真实 IP Header，就会按 CDN
+              转发流量处理。
             </div>
           </div>
         </section>
@@ -264,7 +278,9 @@ onMounted(loadSettings)
               </label>
             </div>
             <label class="mt-3 block space-y-1">
-              <span class="text-xs font-medium text-slate-500">SSL 加密套件</span>
+              <span class="text-xs font-medium text-slate-500"
+                >SSL 加密套件</span
+              >
               <input
                 v-model="settings.ssl_ciphers"
                 class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -277,7 +293,8 @@ onMounted(loadSettings)
           <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3">
             <p class="text-sm font-semibold text-stone-900">AI 审计 Provider</p>
             <p class="mt-0.5 text-xs leading-4 text-slate-500">
-              这里配置审计报告的默认 provider。当前仍以内置 `local_rules` 为兜底，外部模型只做占位接入准备。
+              这里配置审计报告的默认 provider。当前仍以内置 `local_rules`
+              为兜底，外部模型只做占位接入准备。
             </p>
             <div class="mt-3 grid gap-3 md:grid-cols-2">
               <label
@@ -291,7 +308,9 @@ onMounted(loadSettings)
                 启用 AI 审计 provider
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium text-slate-500">默认 provider</span>
+                <span class="text-xs font-medium text-slate-500"
+                  >默认 provider</span
+                >
                 <select
                   v-model="settings.ai_audit.provider"
                   class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
@@ -330,7 +349,9 @@ onMounted(loadSettings)
                 />
               </label>
               <label class="space-y-1">
-                <span class="text-xs font-medium text-slate-500">超时预算（毫秒）</span>
+                <span class="text-xs font-medium text-slate-500"
+                  >超时预算（毫秒）</span
+                >
                 <input
                   v-model.number="settings.ai_audit.timeout_ms"
                   class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"

@@ -4,12 +4,17 @@ import { BrainCircuit, RefreshCw, Save, Sparkles } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
+  deleteAiTempPolicy,
   fetchAiAuditReport,
   fetchAiAuditReports,
+  fetchAiTempPolicies,
   runAiAuditReport,
   updateAiAuditReportFeedback,
 } from '@/shared/api/dashboard'
-import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
+import {
+  fetchGlobalSettings,
+  updateGlobalSettings,
+} from '@/shared/api/settings'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 import type {
@@ -18,6 +23,7 @@ import type {
   AiAuditReportsResponse,
   GlobalSettingsPayload,
   AiAuditSettingsPayload,
+  AiTempPolicyItem,
 } from '@/shared/types'
 
 function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
@@ -32,6 +38,9 @@ function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
     event_sample_limit: 120,
     recent_event_limit: 12,
     include_raw_event_samples: false,
+    auto_apply_temp_policies: true,
+    temp_policy_ttl_secs: 900,
+    temp_block_ttl_secs: 1800,
   }
 }
 
@@ -40,13 +49,16 @@ const refreshing = ref(false)
 const saving = ref(false)
 const copying = ref(false)
 const historyLoading = ref(false)
+const policiesLoading = ref(false)
 const updatingFeedbackId = ref<number | null>(null)
+const revokingPolicyId = ref<number | null>(null)
 const error = ref('')
 const successMessage = ref('')
 const report = ref<AiAuditReportResponse | null>(null)
 const cachedReportAt = ref<number | null>(null)
 const reportHistory = ref<AiAuditReportHistoryItem[]>([])
 const historyTotal = ref(0)
+const activePolicies = ref<AiTempPolicyItem[]>([])
 const compareReportId = ref<number | null>(null)
 const form = reactive<AiAuditSettingsPayload>(createDefaultAiAuditSettings())
 const windowSeconds = ref(900)
@@ -96,7 +108,10 @@ const cachedReportLabel = computed(() => {
 const compareReport = computed(() => {
   if (!reportHistory.value.length) return null
   if (compareReportId.value != null) {
-    return reportHistory.value.find((item) => item.id === compareReportId.value) ?? null
+    return (
+      reportHistory.value.find((item) => item.id === compareReportId.value) ??
+      null
+    )
   }
   return (
     reportHistory.value.find((item) => {
@@ -120,14 +135,19 @@ const comparisonSummary = computed(() => {
   const currentRisk = riskOrder[report.value.risk_level] ?? 1
   const baselineRisk = riskOrder[compareReport.value.risk_level] ?? 1
   const riskDelta = currentRisk - baselineRisk
-  const findingsDelta = report.value.findings.length - compareReport.value.report.findings.length
+  const findingsDelta =
+    report.value.findings.length - compareReport.value.report.findings.length
   const recommendationsDelta =
-    report.value.recommendations.length - compareReport.value.report.recommendations.length
+    report.value.recommendations.length -
+    compareReport.value.report.recommendations.length
   const sampledEventsDelta =
-    report.value.summary.sampled_events - compareReport.value.report.summary.sampled_events
+    report.value.summary.sampled_events -
+    compareReport.value.report.summary.sampled_events
 
   const currentKeys = new Set(report.value.findings.map((item) => item.key))
-  const baselineKeys = new Set(compareReport.value.report.findings.map((item) => item.key))
+  const baselineKeys = new Set(
+    compareReport.value.report.findings.map((item) => item.key),
+  )
   const newFindingTitles = report.value.findings
     .filter((item) => !baselineKeys.has(item.key))
     .map((item) => item.title)
@@ -139,8 +159,7 @@ const comparisonSummary = computed(() => {
 
   return {
     baseline: compareReport.value,
-    riskDirection:
-      riskDelta > 0 ? 'up' : riskDelta < 0 ? 'down' : 'flat',
+    riskDirection: riskDelta > 0 ? 'up' : riskDelta < 0 ? 'down' : 'flat',
     findingsDelta,
     recommendationsDelta,
     sampledEventsDelta,
@@ -207,6 +226,16 @@ function assignHistory(payload: AiAuditReportsResponse) {
   }
 }
 
+function formatPolicyEffectMap(values: Record<string, number>, limit = 3) {
+  const entries = Object.entries(values)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, limit)
+  if (!entries.length) return '暂无'
+  return entries
+    .map(([key, value]) => `${key}:${formatNumber(value)}`)
+    .join(' · ')
+}
+
 watch(
   () => form.provider,
   (provider, previous) => {
@@ -242,6 +271,7 @@ async function loadSection(runReport = true) {
       persistReportSnapshot(await fetchAiAuditReport())
     }
     await loadHistory()
+    await loadPolicies()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载 AI 审计失败'
   } finally {
@@ -261,6 +291,7 @@ async function runAudit() {
       }),
     )
     await loadHistory()
+    await loadPolicies()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '执行 AI 审计失败'
   } finally {
@@ -279,6 +310,15 @@ async function loadHistory() {
     )
   } finally {
     historyLoading.value = false
+  }
+}
+
+async function loadPolicies() {
+  policiesLoading.value = true
+  try {
+    activePolicies.value = (await fetchAiTempPolicies()).policies
+  } finally {
+    policiesLoading.value = false
   }
 }
 
@@ -338,7 +378,8 @@ function downloadReportJson() {
 
 function useHistoryReport(item: AiAuditReportHistoryItem) {
   persistReportSnapshot(item.report)
-  compareReportId.value = reportHistory.value.find((entry) => entry.id !== item.id)?.id ?? null
+  compareReportId.value =
+    reportHistory.value.find((entry) => entry.id !== item.id)?.id ?? null
   successMessage.value = `已切换到 ${formatTimestamp(item.generated_at)} 的审计报告`
 }
 
@@ -368,9 +409,25 @@ async function updateFeedback(
   }
 }
 
+async function revokePolicy(id: number) {
+  revokingPolicyId.value = id
+  error.value = ''
+  successMessage.value = ''
+  try {
+    const response = await deleteAiTempPolicy(id)
+    successMessage.value = response.message
+    await loadPolicies()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '撤销 AI 临时策略失败'
+  } finally {
+    revokingPolicyId.value = null
+  }
+}
+
 onMounted(() => {
   loadCachedReportSnapshot()
   void loadSection(false)
+  void loadPolicies()
 })
 </script>
 
@@ -405,7 +462,10 @@ onMounted(() => {
           :disabled="loading || refreshing"
           @click="loadSection(false)"
         >
-          <RefreshCw :size="14" :class="{ 'animate-spin': loading || refreshing }" />
+          <RefreshCw
+            :size="14"
+            :class="{ 'animate-spin': loading || refreshing }"
+          />
           刷新配置
         </button>
         <button
@@ -432,11 +492,15 @@ onMounted(() => {
     </div>
 
     <div v-else class="space-y-5">
-      <section class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.25fr)]">
+      <section
+        class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.25fr)]"
+      >
         <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
           <div class="flex items-start justify-between gap-3">
             <div>
-              <p class="text-sm font-semibold text-slate-900">模型与 Provider 配置</p>
+              <p class="text-sm font-semibold text-slate-900">
+                模型与 Provider 配置
+              </p>
             </div>
             <div class="rounded-2xl bg-white p-3 text-cyan-700 shadow-sm">
               <BrainCircuit :size="18" />
@@ -455,24 +519,30 @@ onMounted(() => {
               启用外部 AI 审计
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">默认 provider</span>
+              <span class="text-xs font-medium text-slate-500"
+                >默认 provider</span
+              >
               <select
                 v-model="form.provider"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
-                >
-                  <option value="local_rules">local_rules</option>
-                  <option value="stub_model">stub_model</option>
-                  <option value="openai_compatible">openai_compatible</option>
-                  <option value="xiaomi_mimo">xiaomi_mimo</option>
-                </select>
-              </label>
+              >
+                <option value="local_rules">local_rules</option>
+                <option value="stub_model">stub_model</option>
+                <option value="openai_compatible">openai_compatible</option>
+                <option value="xiaomi_mimo">xiaomi_mimo</option>
+              </select>
+            </label>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500">模型名称</span>
               <input
                 v-model="form.model"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
                 type="text"
-                :placeholder="form.provider === 'xiaomi_mimo' ? '例如 mimo-v2-flash' : '例如 gpt-5.4-mini'"
+                :placeholder="
+                  form.provider === 'xiaomi_mimo'
+                    ? '例如 mimo-v2-flash'
+                    : '例如 gpt-5.4-mini'
+                "
               />
             </label>
             <label class="space-y-1">
@@ -481,7 +551,11 @@ onMounted(() => {
                 v-model="form.base_url"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
                 type="text"
-                :placeholder="form.provider === 'xiaomi_mimo' ? '例如 https://api.xiaomimimo.com/v1' : '例如 https://api.example.com/v1'"
+                :placeholder="
+                  form.provider === 'xiaomi_mimo'
+                    ? '例如 https://api.xiaomimimo.com/v1'
+                    : '例如 https://api.example.com/v1'
+                "
               />
             </label>
             <label class="space-y-1">
@@ -494,13 +568,63 @@ onMounted(() => {
               />
             </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">超时预算（毫秒）</span>
+              <span class="text-xs font-medium text-slate-500"
+                >超时预算（毫秒）</span
+              >
               <input
                 v-model.number="form.timeout_ms"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
                 type="number"
                 min="1000"
                 step="500"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >样本事件上限</span
+              >
+              <input
+                v-model.number="form.event_sample_limit"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="20"
+                step="10"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >近期事件样本</span
+              >
+              <input
+                v-model.number="form.recent_event_limit"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="0"
+                step="1"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >临时策略 TTL（秒）</span
+              >
+              <input
+                v-model.number="form.temp_policy_ttl_secs"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="60"
+                step="60"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >临时封禁 TTL（秒）</span
+              >
+              <input
+                v-model.number="form.temp_block_ttl_secs"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="60"
+                step="60"
               />
             </label>
           </div>
@@ -516,8 +640,30 @@ onMounted(() => {
               />
               provider 失败时自动回退到 local_rules
             </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.auto_apply_temp_policies"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              自动执行专项临时策略
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.include_raw_event_samples"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              向模型附带近期事件样本
+            </label>
             <label class="space-y-1">
-              <span class="text-xs font-medium text-slate-500">观察窗口（秒）</span>
+              <span class="text-xs font-medium text-slate-500"
+                >观察窗口（秒）</span
+              >
               <input
                 v-model.number="windowSeconds"
                 class="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
@@ -535,14 +681,8 @@ onMounted(() => {
               :type="riskBadgeType"
               :text="report ? `风险 ${report.risk_level}` : '尚未执行'"
             />
-            <StatusBadge
-              type="muted"
-              :text="providerStatusText"
-            />
-            <StatusBadge
-              type="muted"
-              :text="cachedReportLabel"
-            />
+            <StatusBadge type="muted" :text="providerStatusText" />
+            <StatusBadge type="muted" :text="cachedReportLabel" />
             <StatusBadge
               v-if="report?.summary.current.auto_tuning_last_adjust_reason"
               type="info"
@@ -552,7 +692,9 @@ onMounted(() => {
 
           <div v-if="report" class="mt-4 space-y-4">
             <div>
-              <p class="text-sm font-semibold text-slate-900">{{ report.headline }}</p>
+              <p class="text-sm font-semibold text-slate-900">
+                {{ report.headline }}
+              </p>
               <p class="mt-1 text-xs text-slate-500">
                 生成时间 {{ formatTimestamp(report.generated_at) }} · 采样事件
                 {{ formatNumber(report.summary.sampled_events) }} / 总事件
@@ -564,7 +706,9 @@ onMounted(() => {
               v-if="report.executive_summary.length"
               class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             >
-              <p class="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+              <p
+                class="text-xs font-medium uppercase tracking-[0.18em] text-slate-400"
+              >
                 Executive Summary
               </p>
               <ul class="mt-2 space-y-2 text-sm leading-6 text-slate-700">
@@ -578,22 +722,79 @@ onMounted(() => {
             </div>
 
             <div class="grid gap-3 md:grid-cols-3">
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
                 <p class="text-xs text-slate-400">身份解析压力</p>
                 <p class="mt-1 text-lg font-semibold text-slate-900">
-                  {{ formatNumber(report.summary.current.identity_pressure_percent) }}%
+                  {{
+                    formatNumber(
+                      report.summary.current.identity_pressure_percent,
+                    )
+                  }}%
                 </p>
               </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
                 <p class="text-xs text-slate-400">L7 摩擦压力</p>
                 <p class="mt-1 text-lg font-semibold text-slate-900">
-                  {{ formatNumber(report.summary.current.l7_friction_pressure_percent) }}%
+                  {{
+                    formatNumber(
+                      report.summary.current.l7_friction_pressure_percent,
+                    )
+                  }}%
                 </p>
               </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
                 <p class="text-xs text-slate-400">慢速攻击压力</p>
                 <p class="mt-1 text-lg font-semibold text-slate-900">
-                  {{ formatNumber(report.summary.current.slow_attack_pressure_percent) }}%
+                  {{
+                    formatNumber(
+                      report.summary.current.slow_attack_pressure_percent,
+                    )
+                  }}%
+                </p>
+              </div>
+            </div>
+
+            <div class="grid gap-3 md:grid-cols-4">
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <p class="text-xs text-slate-400">分析模式</p>
+                <p class="mt-1 text-sm font-semibold text-slate-900">
+                  {{ report.analysis_mode }}
+                </p>
+              </div>
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <p class="text-xs text-slate-400">输入来源</p>
+                <p class="mt-1 text-sm font-semibold text-slate-900">
+                  {{ report.input_profile.source }}
+                </p>
+              </div>
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <p class="text-xs text-slate-400">样本事件</p>
+                <p class="mt-1 text-sm font-semibold text-slate-900">
+                  {{ formatNumber(report.input_profile.sampled_events) }}
+                </p>
+              </div>
+              <div
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <p class="text-xs text-slate-400">近期样本透传</p>
+                <p class="mt-1 text-sm font-semibold text-slate-900">
+                  {{
+                    report.input_profile.raw_samples_included
+                      ? '已启用'
+                      : '关闭'
+                  }}
                 </p>
               </div>
             </div>
@@ -604,8 +805,20 @@ onMounted(() => {
             >
               <div class="flex flex-wrap items-center gap-2">
                 <StatusBadge
-                  :type="comparisonSummary.riskDirection === 'up' ? 'error' : comparisonSummary.riskDirection === 'down' ? 'success' : 'muted'"
-                  :text="comparisonSummary.riskDirection === 'up' ? '风险较上次上升' : comparisonSummary.riskDirection === 'down' ? '风险较上次下降' : '风险等级与上次持平'"
+                  :type="
+                    comparisonSummary.riskDirection === 'up'
+                      ? 'error'
+                      : comparisonSummary.riskDirection === 'down'
+                        ? 'success'
+                        : 'muted'
+                  "
+                  :text="
+                    comparisonSummary.riskDirection === 'up'
+                      ? '风险较上次上升'
+                      : comparisonSummary.riskDirection === 'down'
+                        ? '风险较上次下降'
+                        : '风险等级与上次持平'
+                  "
                 />
                 <StatusBadge
                   type="muted"
@@ -613,49 +826,76 @@ onMounted(() => {
                 />
               </div>
               <div class="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-2"
+                >
                   <p class="text-xs text-slate-400">发现变化</p>
                   <p class="mt-1 text-sm font-semibold text-slate-900">
-                    {{ comparisonSummary.findingsDelta >= 0 ? '+' : '' }}{{ comparisonSummary.findingsDelta }}
+                    {{ comparisonSummary.findingsDelta >= 0 ? '+' : ''
+                    }}{{ comparisonSummary.findingsDelta }}
                   </p>
                 </div>
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-2"
+                >
                   <p class="text-xs text-slate-400">建议变化</p>
                   <p class="mt-1 text-sm font-semibold text-slate-900">
-                    {{ comparisonSummary.recommendationsDelta >= 0 ? '+' : '' }}{{ comparisonSummary.recommendationsDelta }}
+                    {{ comparisonSummary.recommendationsDelta >= 0 ? '+' : ''
+                    }}{{ comparisonSummary.recommendationsDelta }}
                   </p>
                 </div>
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-2"
+                >
                   <p class="text-xs text-slate-400">采样事件</p>
                   <p class="mt-1 text-sm font-semibold text-slate-900">
-                    {{ comparisonSummary.sampledEventsDelta >= 0 ? '+' : '' }}{{ comparisonSummary.sampledEventsDelta }}
+                    {{ comparisonSummary.sampledEventsDelta >= 0 ? '+' : ''
+                    }}{{ comparisonSummary.sampledEventsDelta }}
                   </p>
                 </div>
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-2"
+                >
                   <p class="text-xs text-slate-400">身份压力</p>
                   <p class="mt-1 text-sm font-semibold text-slate-900">
-                    {{ comparisonSummary.identityPressureDelta >= 0 ? '+' : '' }}{{ formatNumber(comparisonSummary.identityPressureDelta) }}%
+                    {{ comparisonSummary.identityPressureDelta >= 0 ? '+' : ''
+                    }}{{
+                      formatNumber(comparisonSummary.identityPressureDelta)
+                    }}%
                   </p>
                 </div>
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-2"
+                >
                   <p class="text-xs text-slate-400">L7 摩擦</p>
                   <p class="mt-1 text-sm font-semibold text-slate-900">
-                    {{ comparisonSummary.l7FrictionDelta >= 0 ? '+' : '' }}{{ formatNumber(comparisonSummary.l7FrictionDelta) }}%
+                    {{ comparisonSummary.l7FrictionDelta >= 0 ? '+' : ''
+                    }}{{ formatNumber(comparisonSummary.l7FrictionDelta) }}%
                   </p>
                 </div>
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-2"
+                >
                   <p class="text-xs text-slate-400">慢攻压力</p>
                   <p class="mt-1 text-sm font-semibold text-slate-900">
-                    {{ comparisonSummary.slowAttackDelta >= 0 ? '+' : '' }}{{ formatNumber(comparisonSummary.slowAttackDelta) }}%
+                    {{ comparisonSummary.slowAttackDelta >= 0 ? '+' : ''
+                    }}{{ formatNumber(comparisonSummary.slowAttackDelta) }}%
                   </p>
                 </div>
               </div>
               <div class="mt-3 grid gap-3 md:grid-cols-2">
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-3">
-                  <p class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
                     新出现的发现
                   </p>
-                  <ul v-if="comparisonSummary.newFindingTitles.length" class="mt-2 space-y-1 text-sm text-slate-700">
+                  <ul
+                    v-if="comparisonSummary.newFindingTitles.length"
+                    class="mt-2 space-y-1 text-sm text-slate-700"
+                  >
                     <li
                       v-for="item in comparisonSummary.newFindingTitles"
                       :key="item"
@@ -663,13 +903,22 @@ onMounted(() => {
                       {{ item }}
                     </li>
                   </ul>
-                  <p v-else class="mt-2 text-sm text-slate-500">没有新增 findings。</p>
+                  <p v-else class="mt-2 text-sm text-slate-500">
+                    没有新增 findings。
+                  </p>
                 </div>
-                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-3">
-                  <p class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
                     已消失的发现
                   </p>
-                  <ul v-if="comparisonSummary.clearedFindingTitles.length" class="mt-2 space-y-1 text-sm text-slate-700">
+                  <ul
+                    v-if="comparisonSummary.clearedFindingTitles.length"
+                    class="mt-2 space-y-1 text-sm text-slate-700"
+                  >
                     <li
                       v-for="item in comparisonSummary.clearedFindingTitles"
                       :key="item"
@@ -677,7 +926,9 @@ onMounted(() => {
                       {{ item }}
                     </li>
                   </ul>
-                  <p v-else class="mt-2 text-sm text-slate-500">没有消失的 findings。</p>
+                  <p v-else class="mt-2 text-sm text-slate-500">
+                    没有消失的 findings。
+                  </p>
                 </div>
               </div>
             </div>
@@ -692,7 +943,10 @@ onMounted(() => {
         <div class="space-y-4">
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
             <p class="text-sm font-semibold text-slate-900">发现的问题</p>
-            <div v-if="!report.findings.length" class="mt-3 text-sm text-slate-500">
+            <div
+              v-if="!report.findings.length"
+              class="mt-3 text-sm text-slate-500"
+            >
               当前没有新增 findings。
             </div>
             <div v-else class="mt-3 space-y-3">
@@ -701,19 +955,33 @@ onMounted(() => {
                 :key="finding.key"
                 class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
               >
-              <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-center gap-2">
                   <StatusBadge
-                    :type="finding.severity === 'high' || finding.severity === 'critical' ? 'error' : finding.severity === 'medium' ? 'warning' : 'muted'"
+                    :type="
+                      finding.severity === 'high' ||
+                      finding.severity === 'critical'
+                        ? 'error'
+                        : finding.severity === 'medium'
+                          ? 'warning'
+                          : 'muted'
+                    "
                     :text="finding.severity"
                   />
-                  <span class="text-sm font-semibold text-slate-900">{{ finding.title }}</span>
+                  <span class="text-sm font-semibold text-slate-900">{{
+                    finding.title
+                  }}</span>
                 </div>
-                <p class="mt-2 text-sm leading-6 text-slate-700">{{ finding.detail }}</p>
+                <p class="mt-2 text-sm leading-6 text-slate-700">
+                  {{ finding.detail }}
+                </p>
                 <ul
                   v-if="finding.evidence.length"
                   class="mt-2 space-y-1 text-xs leading-5 text-slate-500"
                 >
-                  <li v-for="(item, index) in finding.evidence" :key="`${finding.key}-${index}`">
+                  <li
+                    v-for="(item, index) in finding.evidence"
+                    :key="`${finding.key}-${index}`"
+                  >
                     {{ item }}
                   </li>
                 </ul>
@@ -723,7 +991,10 @@ onMounted(() => {
 
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
             <p class="text-sm font-semibold text-slate-900">建议动作</p>
-            <div v-if="!report.recommendations.length" class="mt-3 text-sm text-slate-500">
+            <div
+              v-if="!report.recommendations.length"
+              class="mt-3 text-sm text-slate-500"
+            >
               当前没有新增建议。
             </div>
             <div v-else class="mt-3 space-y-3">
@@ -734,13 +1005,64 @@ onMounted(() => {
               >
                 <div class="flex flex-wrap items-center gap-2">
                   <StatusBadge
-                    :type="recommendation.priority === 'high' || recommendation.priority === 'urgent' ? 'warning' : 'info'"
+                    :type="
+                      recommendation.priority === 'high' ||
+                      recommendation.priority === 'urgent'
+                        ? 'warning'
+                        : 'info'
+                    "
                     :text="recommendation.priority"
                   />
-                  <span class="text-sm font-semibold text-slate-900">{{ recommendation.title }}</span>
+                  <StatusBadge
+                    type="muted"
+                    :text="recommendation.action_type"
+                  />
+                  <span class="text-sm font-semibold text-slate-900">{{
+                    recommendation.title
+                  }}</span>
                 </div>
-                <p class="mt-2 text-sm leading-6 text-slate-700">{{ recommendation.action }}</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">{{ recommendation.rationale }}</p>
+                <p class="mt-2 text-sm leading-6 text-slate-700">
+                  {{ recommendation.action }}
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  {{ recommendation.rationale }}
+                </p>
+              </article>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4">
+            <p class="text-sm font-semibold text-slate-900">专项临时策略候选</p>
+            <div
+              v-if="!report.suggested_local_rules.length"
+              class="mt-3 text-sm text-slate-500"
+            >
+              当前没有新增专项策略候选。
+            </div>
+            <div v-else class="mt-3 space-y-3">
+              <article
+                v-for="rule in report.suggested_local_rules"
+                :key="rule.key"
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    :type="rule.auto_apply ? 'warning' : 'muted'"
+                    :text="rule.action"
+                  />
+                  <StatusBadge
+                    type="muted"
+                    :text="`${rule.scope_type}:${rule.scope_value}`"
+                  />
+                  <StatusBadge type="muted" :text="`${rule.ttl_secs}s`" />
+                </div>
+                <p class="mt-2 text-sm font-semibold text-slate-900">
+                  {{ rule.title }}
+                </p>
+                <p class="mt-1 text-sm text-slate-700">
+                  {{ rule.operator }} {{ rule.suggested_value }} ·
+                  {{ rule.rationale }}
+                </p>
               </article>
             </div>
           </div>
@@ -749,7 +1071,10 @@ onMounted(() => {
         <div class="space-y-4">
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
             <p class="text-sm font-semibold text-slate-900">执行说明</p>
-            <div v-if="!report.execution_notes.length" class="mt-3 text-sm text-slate-500">
+            <div
+              v-if="!report.execution_notes.length"
+              class="mt-3 text-sm text-slate-500"
+            >
               当前没有额外执行说明。
             </div>
             <ul v-else class="mt-3 space-y-2 text-sm leading-6 text-slate-700">
@@ -785,7 +1110,9 @@ onMounted(() => {
                     :text="event.decision_summary.primary_signal"
                   />
                 </div>
-                <p class="mt-2 text-sm font-medium text-slate-900">{{ event.reason }}</p>
+                <p class="mt-2 text-sm font-medium text-slate-900">
+                  {{ event.reason }}
+                </p>
                 <p class="mt-1 text-xs text-slate-500">
                   {{ event.source_ip }} · {{ event.uri || '-' }} ·
                   {{ formatTimestamp(event.created_at) }}
@@ -793,15 +1120,132 @@ onMounted(() => {
               </article>
             </div>
           </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-sm font-semibold text-slate-900">
+                当前生效的 AI 临时策略
+              </p>
+              <StatusBadge
+                type="muted"
+                :text="`活跃 ${formatNumber(activePolicies.length)}`"
+              />
+            </div>
+            <div v-if="policiesLoading" class="mt-3 text-sm text-slate-500">
+              正在加载临时策略...
+            </div>
+            <div
+              v-else-if="!activePolicies.length"
+              class="mt-3 text-sm text-slate-500"
+            >
+              当前没有生效中的 AI 临时策略。
+            </div>
+            <div v-else class="mt-3 space-y-3">
+              <article
+                v-for="policy in activePolicies"
+                :key="policy.id"
+                class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <div
+                  class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
+                >
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        :type="
+                          policy.action === 'add_temp_block'
+                            ? 'error'
+                            : 'warning'
+                        "
+                        :text="policy.action"
+                      />
+                      <StatusBadge
+                        type="muted"
+                        :text="`${policy.scope_type}:${policy.scope_value}`"
+                      />
+                    </div>
+                    <p class="mt-2 text-sm font-semibold text-slate-900">
+                      {{ policy.title }}
+                    </p>
+                    <p class="mt-1 text-xs text-slate-500">
+                      命中 {{ formatNumber(policy.hit_count) }} · 到期
+                      {{ formatTimestamp(policy.expires_at) }}
+                    </p>
+                    <p class="mt-1 text-sm text-slate-700">
+                      {{ policy.rationale }}
+                    </p>
+                    <div class="mt-3 grid gap-2 md:grid-cols-2">
+                      <div
+                        class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
+                      >
+                        <p
+                          class="text-[11px] uppercase tracking-[0.14em] text-slate-400"
+                        >
+                          最近命中
+                        </p>
+                        <p class="mt-1 text-xs text-slate-600">
+                          {{ policy.effect.last_match_mode || 'unknown' }} ·
+                          {{
+                            policy.effect.last_matched_value ||
+                            policy.effect.last_scope_value ||
+                            '-'
+                          }}
+                        </p>
+                        <p class="mt-1 text-[11px] text-slate-500">
+                          {{
+                            policy.effect.last_hit_at
+                              ? formatTimestamp(policy.effect.last_hit_at)
+                              : '暂无命中时间'
+                          }}
+                        </p>
+                      </div>
+                      <div
+                        class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
+                      >
+                        <p
+                          class="text-[11px] uppercase tracking-[0.14em] text-slate-400"
+                        >
+                          效果摘要
+                        </p>
+                        <p class="mt-1 text-xs text-slate-600">
+                          匹配
+                          {{ formatPolicyEffectMap(policy.effect.match_modes) }}
+                        </p>
+                        <p class="mt-1 text-[11px] text-slate-500">
+                          动作
+                          {{ formatPolicyEffectMap(policy.effect.action_hits) }}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
+                    :disabled="revokingPolicyId === policy.id"
+                    @click="revokePolicy(policy.id)"
+                  >
+                    {{
+                      revokingPolicyId === policy.id ? '撤销中...' : '撤销策略'
+                    }}
+                  </button>
+                </div>
+              </article>
+            </div>
+          </div>
         </div>
       </section>
 
       <section class="rounded-2xl border border-slate-200 bg-white p-4">
-        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div
+          class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+        >
           <div>
-            <p class="text-sm font-semibold text-slate-900">审计历史与人工反馈</p>
+            <p class="text-sm font-semibold text-slate-900">
+              审计历史与人工反馈
+            </p>
             <p class="mt-1 text-xs leading-5 text-slate-500">
-              最近的 AI 审计报告会自动落库。你可以在这里把结论标成已确认、误报或待跟进，给后续调优留反馈样本。
+              最近的 AI
+              审计报告会自动落库。你可以在这里把结论标成已确认、误报或待跟进，给后续调优留反馈样本。
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -815,11 +1259,17 @@ onMounted(() => {
               <option value="false_positive">误报</option>
               <option value="follow_up">待跟进</option>
             </select>
-            <StatusBadge type="muted" :text="`历史 ${formatNumber(historyTotal)}`" />
+            <StatusBadge
+              type="muted"
+              :text="`历史 ${formatNumber(historyTotal)}`"
+            />
           </div>
         </div>
 
-        <div v-if="historyLoading" class="py-12 text-center text-sm text-slate-500">
+        <div
+          v-if="historyLoading"
+          class="py-12 text-center text-sm text-slate-500"
+        >
           正在加载 AI 审计历史...
         </div>
         <div
@@ -834,11 +1284,20 @@ onMounted(() => {
             :key="item.id"
             class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
           >
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div
+              class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"
+            >
               <div class="space-y-2 min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <StatusBadge
-                    :type="item.risk_level === 'high' || item.risk_level === 'critical' ? 'error' : item.risk_level === 'medium' ? 'warning' : 'success'"
+                    :type="
+                      item.risk_level === 'high' ||
+                      item.risk_level === 'critical'
+                        ? 'error'
+                        : item.risk_level === 'medium'
+                          ? 'warning'
+                          : 'success'
+                    "
                     :text="item.risk_level"
                   />
                   <StatusBadge type="muted" :text="item.provider_used" />
@@ -858,11 +1317,14 @@ onMounted(() => {
                     text="当前对比基线"
                   />
                 </div>
-                <p class="text-sm font-semibold text-slate-900">{{ item.headline }}</p>
+                <p class="text-sm font-semibold text-slate-900">
+                  {{ item.headline }}
+                </p>
                 <p class="text-xs text-slate-500">
                   生成于 {{ formatTimestamp(item.generated_at) }}
                   <template v-if="item.feedback_updated_at">
-                    · 反馈更新时间 {{ formatTimestamp(item.feedback_updated_at) }}
+                    · 反馈更新时间
+                    {{ formatTimestamp(item.feedback_updated_at) }}
                   </template>
                 </p>
                 <p
@@ -872,7 +1334,9 @@ onMounted(() => {
                   {{ item.report.executive_summary[0] }}
                 </p>
               </div>
-              <div class="grid grid-cols-3 gap-3 text-sm text-slate-600 lg:min-w-[18rem]">
+              <div
+                class="grid grid-cols-3 gap-3 text-sm text-slate-600 lg:min-w-[18rem]"
+              >
                 <div>
                   <div class="text-xs text-slate-400">发现问题</div>
                   <div class="mt-1 font-semibold text-slate-900">

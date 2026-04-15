@@ -120,8 +120,24 @@ impl L7BehaviorGuard {
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
-        let assessment =
+        let mut assessment =
             self.observe_and_assess(&identity, route, kind, client_ip, now, unix_now, window);
+        let ai_score_boost = request
+            .get_metadata("ai.behavior.score_boost")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        let ai_force_watch = request
+            .get_metadata("ai.behavior.force_watch")
+            .map(|value| value == "true")
+            .unwrap_or(false);
+        if ai_score_boost > 0 {
+            assessment.score = assessment.score.saturating_add(ai_score_boost).min(100);
+            assessment.flags.push("ai_temp_risk");
+        }
+        if ai_force_watch && assessment.score < DELAY_SCORE {
+            assessment.score = DELAY_SCORE;
+            assessment.flags.push("ai_temp_watch");
+        }
 
         request.add_metadata(
             "l7.behavior.identity".to_string(),

@@ -312,8 +312,14 @@ async fn test_sqlite_store_persists_ai_audit_reports_and_feedback() {
         .await
         .unwrap();
     assert_eq!(reports.total, 1);
-    assert_eq!(reports.items[0].feedback_status.as_deref(), Some("confirmed"));
-    assert_eq!(reports.items[0].feedback_notes.as_deref(), Some("looks good"));
+    assert_eq!(
+        reports.items[0].feedback_status.as_deref(),
+        Some("confirmed")
+    );
+    assert_eq!(
+        reports.items[0].feedback_notes.as_deref(),
+        Some("looks good")
+    );
 }
 
 #[tokio::test]

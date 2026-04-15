@@ -236,6 +236,17 @@ function formatPolicyEffectMap(values: Record<string, number>, limit = 3) {
     .join(' · ')
 }
 
+function formatCountItems(
+  items: Array<{ key: string; count: number }>,
+  limit = 3,
+) {
+  if (!items.length) return '暂无'
+  return items
+    .slice(0, limit)
+    .map((item) => `${item.key}:${formatNumber(item.count)}`)
+    .join(' · ')
+}
+
 watch(
   () => form.provider,
   (provider, previous) => {
@@ -796,6 +807,95 @@ onMounted(() => {
                       : '关闭'
                   }}
                 </p>
+              </div>
+            </div>
+
+            <div
+              class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  type="info"
+                  :text="`雷池 ${formatNumber(report.summary.safeline_correlation.safeline_events)}`"
+                />
+                <StatusBadge
+                  type="muted"
+                  :text="`Rust ${formatNumber(report.summary.safeline_correlation.rust_events)}`"
+                />
+                <StatusBadge
+                  type="warning"
+                  :text="`共同热点 host ${formatNumber(report.summary.safeline_correlation.overlap_hosts.length)}`"
+                />
+                <StatusBadge
+                  type="warning"
+                  :text="`共同热点 route ${formatNumber(report.summary.safeline_correlation.overlap_routes.length)}`"
+                />
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
+                    雷池热点 Host
+                  </p>
+                  <p class="mt-2 text-sm text-slate-700">
+                    {{
+                      formatCountItems(
+                        report.summary.safeline_correlation.safeline_top_hosts,
+                      )
+                    }}
+                  </p>
+                </div>
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
+                    Rust 热点 Host
+                  </p>
+                  <p class="mt-2 text-sm text-slate-700">
+                    {{
+                      formatCountItems(
+                        report.summary.safeline_correlation.rust_top_hosts,
+                      )
+                    }}
+                  </p>
+                </div>
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
+                    共同热点 Host
+                  </p>
+                  <p class="mt-2 text-sm text-slate-700">
+                    {{
+                      formatCountItems(
+                        report.summary.safeline_correlation.overlap_hosts,
+                      )
+                    }}
+                  </p>
+                </div>
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
+                    共同热点 Route
+                  </p>
+                  <p class="mt-2 text-sm text-slate-700">
+                    {{
+                      formatCountItems(
+                        report.summary.safeline_correlation.overlap_routes,
+                      )
+                    }}
+                  </p>
+                </div>
               </div>
             </div>
 

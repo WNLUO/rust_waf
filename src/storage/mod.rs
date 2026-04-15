@@ -8,8 +8,8 @@ mod upserts;
 pub use self::models::*;
 #[cfg(any(feature = "api", test))]
 pub use self::query::*;
-use self::support::*;
 pub(crate) use self::support::apply_write_pressure_detail_slimming;
+use self::support::*;
 pub use self::upserts::*;
 
 use crate::config::{Config, Rule};

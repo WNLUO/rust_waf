@@ -119,7 +119,8 @@ fn handle_browser_fingerprint_report(
         }),
     );
 
-    let details_json = match serde_json::to_string_pretty(&summarize_fingerprint_payload(&payload)) {
+    let details_json = match serde_json::to_string_pretty(&summarize_fingerprint_payload(&payload))
+    {
         Ok(serialized) => serialized,
         Err(err) => {
             return json_http_response(

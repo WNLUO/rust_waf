@@ -369,20 +369,46 @@ async fn build_ai_audit_summary(
     let mut top_source_ips = BTreeMap::new();
     let mut top_routes = BTreeMap::new();
     let mut top_hosts = BTreeMap::new();
+    let mut safeline_hosts = BTreeMap::new();
+    let mut rust_hosts = BTreeMap::new();
+    let mut safeline_routes = BTreeMap::new();
+    let mut rust_routes = BTreeMap::new();
+    let mut safeline_source_ips = BTreeMap::new();
+    let mut rust_source_ips = BTreeMap::new();
+    let mut safeline_events = 0u64;
+    let mut rust_events = 0u64;
 
     let sampled_events = result.items.len() as u32;
     let mut recent_events = Vec::new();
 
     for event in result.items.into_iter().map(SecurityEventResponse::from) {
+        let is_safeline = event.provider.as_deref() == Some("safeline");
         if recent_events.len() < recent_limit as usize {
             recent_events.push(AiAuditEventSampleResponse::from(event.clone()));
         }
         increment_map(&mut top_source_ips, &event.source_ip);
+        if is_safeline {
+            safeline_events += 1;
+            increment_map(&mut safeline_source_ips, &event.source_ip);
+        } else {
+            rust_events += 1;
+            increment_map(&mut rust_source_ips, &event.source_ip);
+        }
         if let Some(uri) = event.uri.as_deref() {
             increment_map(&mut top_routes, uri);
+            if is_safeline {
+                increment_map(&mut safeline_routes, uri);
+            } else {
+                increment_map(&mut rust_routes, uri);
+            }
         }
-        if let Some(host) = event.provider_site_domain.as_deref() {
-            increment_map(&mut top_hosts, host);
+        if let Some(host) = ai_audit_event_host(&event) {
+            increment_map(&mut top_hosts, &host);
+            if is_safeline {
+                increment_map(&mut safeline_hosts, &host);
+            } else {
+                increment_map(&mut rust_hosts, &host);
+            }
         }
         if let Some(summary) = event.decision_summary.as_ref() {
             if let Some(identity_state) = summary.identity_state.as_deref() {
@@ -440,12 +466,73 @@ async fn build_ai_audit_summary(
         top_source_ips: top_count_items(top_source_ips, 8),
         top_routes: top_count_items(top_routes, 8),
         top_hosts: top_count_items(top_hosts, 8),
+        safeline_correlation: AiAuditSafeLineCorrelationResponse {
+            safeline_events,
+            rust_events,
+            safeline_top_hosts: top_count_items(safeline_hosts.clone(), 6),
+            rust_top_hosts: top_count_items(rust_hosts.clone(), 6),
+            overlap_hosts: overlap_count_items(&safeline_hosts, &rust_hosts, 6),
+            overlap_routes: overlap_count_items(&safeline_routes, &rust_routes, 6),
+            overlap_source_ips: overlap_count_items(&safeline_source_ips, &rust_source_ips, 6),
+        },
         recent_events,
     })
 }
 
 fn increment_map(map: &mut BTreeMap<String, u64>, key: &str) {
     *map.entry(key.to_string()).or_insert(0) += 1;
+}
+
+fn overlap_count_items(
+    left: &BTreeMap<String, u64>,
+    right: &BTreeMap<String, u64>,
+    limit: usize,
+) -> Vec<AiAuditCountItem> {
+    let mut items = left
+        .iter()
+        .filter_map(|(key, left_count)| {
+            let right_count = right.get(key)?;
+            Some(AiAuditCountItem {
+                key: key.clone(),
+                count: (*left_count).min(*right_count),
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
+    items.truncate(limit);
+    items
+}
+
+fn ai_audit_event_host(event: &SecurityEventResponse) -> Option<String> {
+    event.provider_site_domain.clone().or_else(|| {
+        event
+            .details_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .as_ref()
+            .and_then(|details| {
+                details
+                    .get("l7_cc")
+                    .and_then(|value| value.get("host"))
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        details
+                            .get("client_identity")
+                            .and_then(|value| value.get("headers"))
+                            .and_then(|value| value.as_array())
+                            .and_then(|headers| {
+                                headers.iter().find_map(|entry| {
+                                    let pair = entry.as_array()?;
+                                    let key = pair.first()?.as_str()?.trim();
+                                    let value = pair.get(1)?.as_str()?.trim();
+                                    (key.eq_ignore_ascii_case("host") && !value.is_empty())
+                                        .then(|| value.to_string())
+                                })
+                            })
+                    })
+            })
+    })
 }
 
 fn top_count_items(map: BTreeMap<String, u64>, limit: usize) -> Vec<AiAuditCountItem> {
@@ -474,6 +561,83 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
     let mut recommendations = Vec::new();
     let mut executive_summary = Vec::new();
     let mut suggested_local_rules = Vec::new();
+
+    if !summary.safeline_correlation.overlap_hosts.is_empty()
+        || !summary.safeline_correlation.overlap_routes.is_empty()
+    {
+        let top_host = summary
+            .safeline_correlation
+            .overlap_hosts
+            .first()
+            .map(|item| item.key.clone());
+        let top_route = summary
+            .safeline_correlation
+            .overlap_routes
+            .first()
+            .map(|item| item.key.clone());
+        findings.push(AiAuditReportFinding {
+            key: "safeline_rust_overlap_detected".to_string(),
+            severity: "high".to_string(),
+            title: "雷池与 Rust 观察到同一批热点对象".to_string(),
+            detail: format!(
+                "最近窗口里雷池事件 {} 条，Rust 本地事件 {} 条，并且存在共同热点 host/route，说明前置拦截后仍有持续压力回流。",
+                summary.safeline_correlation.safeline_events,
+                summary.safeline_correlation.rust_events
+            ),
+            evidence: vec![
+                format!(
+                    "overlap_hosts={}",
+                    summary.safeline_correlation.overlap_hosts.len()
+                ),
+                format!(
+                    "overlap_routes={}",
+                    summary.safeline_correlation.overlap_routes.len()
+                ),
+                format!(
+                    "overlap_source_ips={}",
+                    summary.safeline_correlation.overlap_source_ips.len()
+                ),
+            ],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "tighten_safeline_overlap_objects".to_string(),
+            priority: "high".to_string(),
+            title: "优先收紧雷池与 Rust 共同热点".to_string(),
+            action: format!(
+                "围绕共同热点{}{}提高 challenge / delay / temp block 强度，重点观察雷池已拦截但仍持续回流的对象。",
+                top_host
+                    .as_deref()
+                    .map(|value| format!(" host {value}"))
+                    .unwrap_or_default(),
+                top_route
+                    .as_deref()
+                    .map(|value| format!(" route {value}"))
+                    .unwrap_or_default()
+            ),
+            rationale: "共同热点比单边热点更能说明攻击还没有被完全吸收，适合作为专项护盾的优先收紧对象。".to_string(),
+            action_type: "add_rule".to_string(),
+            rule_suggestion_key: Some("tighten_safeline_overlap_route".to_string()),
+        });
+        if let Some(route) = top_route {
+            suggested_local_rules.push(AiAuditSuggestedRuleResponse {
+                key: "tighten_safeline_overlap_route".to_string(),
+                title: "收紧雷池重叠热点路径".to_string(),
+                policy_type: "tighten_route_cc".to_string(),
+                layer: "l7".to_string(),
+                scope_type: "route".to_string(),
+                scope_value: route,
+                target: "safeline_overlap_route".to_string(),
+                action: "tighten_route_cc".to_string(),
+                operator: "prefix".to_string(),
+                suggested_value: "75".to_string(),
+                ttl_secs: 1200,
+                auto_apply: true,
+                rationale:
+                    "雷池与 Rust 同时观察到的热点路径更适合短期提高摩擦，压缩持续型 CC 的回流空间。"
+                        .to_string(),
+            });
+        }
+    }
 
     if summary.current.identity_pressure_percent >= 5.0 {
         findings.push(AiAuditReportFinding {
@@ -694,6 +858,17 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             top_signal.key, top_signal.count
         ));
     }
+    if !summary.safeline_correlation.overlap_hosts.is_empty()
+        || !summary.safeline_correlation.overlap_routes.is_empty()
+    {
+        executive_summary.push(format!(
+            "雷池事件 {} 条，Rust 事件 {} 条，共同热点 host {} 个、route {} 个。",
+            summary.safeline_correlation.safeline_events,
+            summary.safeline_correlation.rust_events,
+            summary.safeline_correlation.overlap_hosts.len(),
+            summary.safeline_correlation.overlap_routes.len()
+        ));
+    }
     if let Some(top_identity) = summary.identity_states.first() {
         executive_summary.push(format!(
             "最近窗口最常见身份态为 {}，命中 {} 次。",
@@ -741,7 +916,7 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         headline,
         executive_summary,
         input_profile: AiAuditInputProfileResponse {
-            source: "aggregated_summary".to_string(),
+            source: "cc_behavior_joint_summary".to_string(),
             sampled_events: summary.sampled_events,
             included_recent_events: summary.recent_events.len() as u32,
             raw_samples_included: true,
@@ -896,6 +1071,7 @@ mod tests {
             top_source_ips: Vec::new(),
             top_routes: Vec::new(),
             top_hosts: Vec::new(),
+            safeline_correlation: AiAuditSafeLineCorrelationResponse::default(),
             recent_events: Vec::new(),
         }
     }
@@ -931,5 +1107,45 @@ mod tests {
         assert!(report.findings.is_empty());
         assert_eq!(report.recommendations.len(), 1);
         assert_eq!(report.recommendations[0].key, "continue_monitoring");
+    }
+
+    #[test]
+    fn ai_audit_report_emits_safeline_overlap_recommendation() {
+        let mut summary = base_summary();
+        summary.safeline_correlation = AiAuditSafeLineCorrelationResponse {
+            safeline_events: 8,
+            rust_events: 12,
+            safeline_top_hosts: vec![AiAuditCountItem {
+                key: "api.example.com".to_string(),
+                count: 6,
+            }],
+            rust_top_hosts: vec![AiAuditCountItem {
+                key: "api.example.com".to_string(),
+                count: 5,
+            }],
+            overlap_hosts: vec![AiAuditCountItem {
+                key: "api.example.com".to_string(),
+                count: 5,
+            }],
+            overlap_routes: vec![AiAuditCountItem {
+                key: "/login".to_string(),
+                count: 4,
+            }],
+            overlap_source_ips: vec![AiAuditCountItem {
+                key: "203.0.113.10".to_string(),
+                count: 3,
+            }],
+        };
+
+        let report = build_ai_audit_report(summary);
+
+        assert!(report
+            .findings
+            .iter()
+            .any(|item| item.key == "safeline_rust_overlap_detected"));
+        assert!(report
+            .suggested_local_rules
+            .iter()
+            .any(|item| item.key == "tighten_safeline_overlap_route"));
     }
 }

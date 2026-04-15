@@ -547,7 +547,10 @@ fn sanitize_security_event_record(event: &mut SecurityEventRecord) {
     };
     let Ok(mut value) = serde_json::from_str::<Value>(details_json) else {
         if details_json.len() > MAX_EVENT_DETAILS_BYTES {
-            event.details_json = Some(format!("{{\"truncated\":true,\"raw\":\"{}...\"}}", &details_json[..MAX_EVENT_DETAILS_BYTES.min(details_json.len())]));
+            event.details_json = Some(format!(
+                "{{\"truncated\":true,\"raw\":\"{}...\"}}",
+                &details_json[..MAX_EVENT_DETAILS_BYTES.min(details_json.len())]
+            ));
         }
         return;
     };
@@ -560,10 +563,15 @@ fn sanitize_json_value(value: &mut Value) {
         return;
     };
 
-    if let Some(client_identity) = object.get_mut("client_identity").and_then(Value::as_object_mut)
+    if let Some(client_identity) = object
+        .get_mut("client_identity")
+        .and_then(Value::as_object_mut)
     {
         client_identity.remove("configured_real_ip_header_value");
-        if let Some(headers) = client_identity.get_mut("headers").and_then(Value::as_array_mut) {
+        if let Some(headers) = client_identity
+            .get_mut("headers")
+            .and_then(Value::as_array_mut)
+        {
             headers.retain(|entry| {
                 entry
                     .as_array()
@@ -600,7 +608,8 @@ fn truncate_json_value(value: &Value, max_bytes: usize) -> String {
         "summary".to_string(),
         Value::String(serialized.chars().take(max_bytes.min(512)).collect()),
     );
-    serde_json::to_string(&Value::Object(object)).unwrap_or_else(|_| "{\"truncated\":true}".to_string())
+    serde_json::to_string(&Value::Object(object))
+        .unwrap_or_else(|_| "{\"truncated\":true}".to_string())
 }
 
 #[derive(Debug)]

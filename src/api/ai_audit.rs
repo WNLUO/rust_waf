@@ -434,6 +434,7 @@ fn build_provider_input(
         "top_source_ips": summary.top_source_ips,
         "top_routes": summary.top_routes,
         "top_hosts": summary.top_hosts,
+        "safeline_correlation": summary.safeline_correlation,
         "recent_events": if include_raw_event_samples {
             serde_json::to_value(&summary.recent_events).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
         } else {
@@ -447,7 +448,7 @@ fn build_input_profile(
     raw_samples_included: bool,
 ) -> AiAuditInputProfileResponse {
     AiAuditInputProfileResponse {
-        source: "aggregated_summary".to_string(),
+        source: "cc_behavior_joint_summary".to_string(),
         sampled_events: summary.sampled_events,
         included_recent_events: if raw_samples_included {
             summary.recent_events.len() as u32
@@ -772,7 +773,7 @@ mod tests {
     use super::*;
     use crate::api::{
         AiAuditCountItem, AiAuditCountersResponse, AiAuditCurrentStateResponse,
-        AiAuditEventSampleResponse,
+        AiAuditEventSampleResponse, AiAuditSafeLineCorrelationResponse,
     };
 
     fn sample_summary() -> AiAuditSummaryResponse {
@@ -823,6 +824,7 @@ mod tests {
             top_source_ips: Vec::new(),
             top_routes: Vec::new(),
             top_hosts: Vec::new(),
+            safeline_correlation: AiAuditSafeLineCorrelationResponse::default(),
             recent_events: Vec::<AiAuditEventSampleResponse>::new(),
         }
     }
@@ -965,7 +967,7 @@ mod tests {
                 headline: "fallback".to_string(),
                 executive_summary: vec![],
                 input_profile: AiAuditInputProfileResponse {
-                    source: "aggregated_summary".to_string(),
+                    source: "cc_behavior_joint_summary".to_string(),
                     sampled_events: summary.sampled_events,
                     included_recent_events: 0,
                     raw_samples_included: false,

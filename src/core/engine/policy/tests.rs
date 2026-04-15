@@ -222,7 +222,11 @@ async fn apply_client_identity_requires_auth_header_when_enabled() {
     trusted_request.add_header("x-cdn-real-ip".to_string(), "198.51.100.9".to_string());
     trusted_request.add_header("x-cdn-auth".to_string(), "secret-token".to_string());
 
-    apply_client_identity(&context, "43.168.34.114:443".parse().unwrap(), &mut trusted_request);
+    apply_client_identity(
+        &context,
+        "43.168.34.114:443".parse().unwrap(),
+        &mut trusted_request,
+    );
     assert_eq!(
         trusted_request
             .get_metadata("network.identity_state")
@@ -235,7 +239,11 @@ async fn apply_client_identity_requires_auth_header_when_enabled() {
         UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
     spoofed_request.add_header("x-cdn-real-ip".to_string(), "198.51.100.9".to_string());
 
-    apply_client_identity(&context, "43.168.34.114:443".parse().unwrap(), &mut spoofed_request);
+    apply_client_identity(
+        &context,
+        "43.168.34.114:443".parse().unwrap(),
+        &mut spoofed_request,
+    );
     assert_eq!(
         spoofed_request
             .get_metadata("network.identity_state")

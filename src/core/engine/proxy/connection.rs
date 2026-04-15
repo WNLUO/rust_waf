@@ -232,7 +232,12 @@ async fn proxy_http2_request(
         }
         Ok(Err(err)) => {
             http2_pool().remove(&pool_key);
-            emit_http2_upstream_error_debug_event(context, request, "send_request", &err.to_string());
+            emit_http2_upstream_error_debug_event(
+                context,
+                request,
+                "send_request",
+                &err.to_string(),
+            );
             Err(err.into())
         }
         Err(_) => {

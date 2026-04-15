@@ -16,7 +16,9 @@ pub struct L4Inspector {
     behavior_engine: L4BehaviorEngine,
     ddos_enabled: bool,
     advanced_ddos_enabled: bool,
-    syn_flood_threshold: usize,
+    // This is a user-facing compatibility field name in config, but the runtime
+    // check is connection-rate based rather than TCP SYN-flag aware.
+    connection_flood_threshold: usize,
     bloom_manager: Option<L4BloomFilterManager>,
     port_stats: Mutex<HashMap<String, PortStats>>,
     ddos_events: AtomicU64,
@@ -50,7 +52,7 @@ impl L4Inspector {
             behavior_engine: L4BehaviorEngine::new(&config),
             ddos_enabled: config.ddos_protection_enabled,
             advanced_ddos_enabled: config.advanced_ddos_enabled,
-            syn_flood_threshold: config.syn_flood_threshold.max(1),
+            connection_flood_threshold: config.syn_flood_threshold.max(1),
             bloom_manager,
             port_stats: Mutex::new(HashMap::new()),
             ddos_events: AtomicU64::new(0),
@@ -282,16 +284,16 @@ impl L4Inspector {
         let burst_count = self
             .connection_manager
             .recent_connection_count(&packet.source_ip, Duration::from_secs(1));
-        if burst_count >= self.syn_flood_threshold {
+        if burst_count >= self.connection_flood_threshold {
             return true;
         }
 
         if self.advanced_ddos_enabled {
-            let sustained_threshold = self.syn_flood_threshold.saturating_mul(3);
+            let sustained_threshold = self.connection_flood_threshold.saturating_mul(3);
             let sustained_count = self
                 .connection_manager
                 .recent_connection_count(&packet.source_ip, Duration::from_secs(5));
-            if sustained_count >= sustained_threshold.max(self.syn_flood_threshold + 1) {
+            if sustained_count >= sustained_threshold.max(self.connection_flood_threshold + 1) {
                 return true;
             }
         }

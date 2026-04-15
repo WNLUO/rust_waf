@@ -38,6 +38,7 @@ struct SlidingWindowCounter {
 #[derive(Debug)]
 struct WeightedSlidingWindowCounter {
     events: Mutex<VecDeque<(Instant, u16)>>,
+    total_weight: AtomicU64,
     last_seen_unix: AtomicI64,
 }
 
@@ -604,21 +605,48 @@ impl L7CcGuard {
 
     fn maybe_cleanup(&self, unix_now: i64, config: &CcDefenseConfig) {
         let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        if !sequence.is_multiple_of(1024) {
+        let largest_map_len = [
+            self.ip_buckets.len(),
+            self.host_buckets.len(),
+            self.route_buckets.len(),
+            self.hot_path_buckets.len(),
+            self.ip_weighted_buckets.len(),
+            self.host_weighted_buckets.len(),
+            self.route_weighted_buckets.len(),
+            self.hot_path_weighted_buckets.len(),
+            self.page_load_windows.len(),
+            self.page_load_host_windows.len(),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        let cleanup_interval = cleanup_interval_for_size(largest_map_len);
+        if !sequence.is_multiple_of(cleanup_interval) {
             return;
         }
 
         let stale_before = unix_now - (config.request_window_secs as i64 * 6).max(30);
-        cleanup_map(&self.ip_buckets, stale_before);
-        cleanup_map(&self.host_buckets, stale_before);
-        cleanup_map(&self.route_buckets, stale_before);
-        cleanup_map(&self.hot_path_buckets, stale_before);
-        cleanup_weighted_map(&self.ip_weighted_buckets, stale_before);
-        cleanup_weighted_map(&self.host_weighted_buckets, stale_before);
-        cleanup_weighted_map(&self.route_weighted_buckets, stale_before);
-        cleanup_weighted_map(&self.hot_path_weighted_buckets, stale_before);
-        cleanup_page_window_map(&self.page_load_windows, unix_now, stale_before);
-        cleanup_page_window_map(&self.page_load_host_windows, unix_now, stale_before);
+        let cleanup_batch = cleanup_batch_for_size(largest_map_len);
+        cleanup_map(&self.ip_buckets, stale_before, cleanup_batch);
+        cleanup_map(&self.host_buckets, stale_before, cleanup_batch);
+        cleanup_map(&self.route_buckets, stale_before, cleanup_batch);
+        cleanup_map(&self.hot_path_buckets, stale_before, cleanup_batch);
+        cleanup_weighted_map(&self.ip_weighted_buckets, stale_before, cleanup_batch);
+        cleanup_weighted_map(&self.host_weighted_buckets, stale_before, cleanup_batch);
+        cleanup_weighted_map(&self.route_weighted_buckets, stale_before, cleanup_batch);
+        cleanup_weighted_map(&self.hot_path_weighted_buckets, stale_before, cleanup_batch);
+        cleanup_page_window_map(
+            &self.page_load_windows,
+            unix_now,
+            stale_before,
+            cleanup_batch,
+        );
+        cleanup_page_window_map(
+            &self.page_load_host_windows,
+            unix_now,
+            stale_before,
+            cleanup_batch,
+        );
     }
 }
 
@@ -649,6 +677,7 @@ impl WeightedSlidingWindowCounter {
     fn new() -> Self {
         Self {
             events: Mutex::new(VecDeque::new()),
+            total_weight: AtomicU64::new(0),
             last_seen_unix: AtomicI64::new(unix_timestamp()),
         }
     }
@@ -664,16 +693,23 @@ impl WeightedSlidingWindowCounter {
             .events
             .lock()
             .expect("cc weighted bucket lock poisoned");
+        let mut total_weight = self.total_weight.load(Ordering::Relaxed) as u32;
         while let Some((front, _)) = events.front() {
             if now.duration_since(*front) > window {
-                events.pop_front();
+                if let Some((_, expired_weight)) = events.pop_front() {
+                    total_weight = total_weight.saturating_sub(u32::from(expired_weight));
+                }
             } else {
                 break;
             }
         }
-        events.push_back((now, u16::from(weight_percent.max(1))));
+        let weight = u16::from(weight_percent.max(1));
+        events.push_back((now, weight));
+        total_weight = total_weight.saturating_add(u32::from(weight));
+        self.total_weight
+            .store(u64::from(total_weight), Ordering::Relaxed);
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
-        events.iter().map(|(_, weight)| u32::from(*weight)).sum()
+        total_weight
     }
 }
 
@@ -703,11 +739,27 @@ fn weighted_points_to_requests(points: u32) -> u32 {
     points.div_ceil(100)
 }
 
-fn cleanup_map(map: &DashMap<String, SlidingWindowCounter>, stale_before: i64) {
+fn cleanup_interval_for_size(size: usize) -> u64 {
+    match size {
+        0..=2_047 => 1_024,
+        2_048..=8_191 => 256,
+        _ => 64,
+    }
+}
+
+fn cleanup_batch_for_size(size: usize) -> usize {
+    match size {
+        0..=2_047 => 128,
+        2_048..=8_191 => 512,
+        _ => 2_048,
+    }
+}
+
+fn cleanup_map(map: &DashMap<String, SlidingWindowCounter>, stale_before: i64, limit: usize) {
     let keys = map
         .iter()
         .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
-        .take(128)
+        .take(limit)
         .map(|entry| entry.key().clone())
         .collect::<Vec<_>>();
 
@@ -716,11 +768,15 @@ fn cleanup_map(map: &DashMap<String, SlidingWindowCounter>, stale_before: i64) {
     }
 }
 
-fn cleanup_weighted_map(map: &DashMap<String, WeightedSlidingWindowCounter>, stale_before: i64) {
+fn cleanup_weighted_map(
+    map: &DashMap<String, WeightedSlidingWindowCounter>,
+    stale_before: i64,
+    limit: usize,
+) {
     let keys = map
         .iter()
         .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
-        .take(128)
+        .take(limit)
         .map(|entry| entry.key().clone())
         .collect::<Vec<_>>();
 
@@ -733,6 +789,7 @@ fn cleanup_page_window_map(
     map: &DashMap<String, PageLoadWindowState>,
     unix_now: i64,
     stale_before: i64,
+    limit: usize,
 ) {
     let keys = map
         .iter()
@@ -741,7 +798,7 @@ fn cleanup_page_window_map(
             value.expires_at_unix.load(Ordering::Relaxed) < unix_now
                 && value.last_seen_unix.load(Ordering::Relaxed) < stale_before
         })
-        .take(128)
+        .take(limit)
         .map(|entry| entry.key().clone())
         .collect::<Vec<_>>();
 
@@ -1245,5 +1302,15 @@ mod tests {
             "example.com",
             &config,
         ));
+    }
+
+    #[test]
+    fn cleanup_strategy_scales_with_map_size() {
+        assert_eq!(cleanup_interval_for_size(128), 1_024);
+        assert_eq!(cleanup_batch_for_size(128), 128);
+        assert_eq!(cleanup_interval_for_size(4_096), 256);
+        assert_eq!(cleanup_batch_for_size(4_096), 512);
+        assert_eq!(cleanup_interval_for_size(16_384), 64);
+        assert_eq!(cleanup_batch_for_size(16_384), 2_048);
     }
 }

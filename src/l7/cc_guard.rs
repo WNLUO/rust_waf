@@ -11,6 +11,7 @@ use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const BYPASS_PATHS: &[&str] = &["/.well-known/waf/browser-fingerprint-report"];
+const API_REQUEST_WEIGHT_PERCENT: u8 = 140;
 
 #[derive(Debug)]
 pub struct L7CcGuard {
@@ -535,6 +536,7 @@ impl L7CcGuard {
             return config.page_subresource_weight_percent;
         }
         match kind {
+            RequestKind::ApiLike => API_REQUEST_WEIGHT_PERCENT,
             RequestKind::StaticAsset => config.static_request_weight_percent,
             _ => 100,
         }
@@ -1152,6 +1154,53 @@ mod tests {
         );
 
         assert!(guard.inspect_request(&mut img).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn api_requests_accumulate_weight_faster_than_documents() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 3,
+            route_block_threshold: 20,
+            host_challenge_threshold: 20,
+            host_block_threshold: 40,
+            ip_challenge_threshold: 20,
+            ip_block_threshold: 40,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        let mut first = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/search".to_string(),
+        );
+        first.set_client_ip("203.0.113.10".to_string());
+        first.add_header("host".to_string(), "example.com".to_string());
+        first.add_header("accept".to_string(), "application/json".to_string());
+        assert!(guard.inspect_request(&mut first).await.is_none());
+        assert_eq!(
+            first
+                .get_metadata("l7.cc.weight_percent")
+                .map(String::as_str),
+            Some("140")
+        );
+
+        let mut second = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/search".to_string(),
+        );
+        second.set_client_ip("203.0.113.10".to_string());
+        second.add_header("host".to_string(), "example.com".to_string());
+        second.add_header("accept".to_string(), "application/json".to_string());
+        let result = guard.inspect_request(&mut second).await;
+        assert!(result.is_some(), "api-like traffic should challenge sooner");
+        assert_eq!(
+            second
+                .get_metadata("l7.cc.request_kind")
+                .map(String::as_str),
+            Some("api")
+        );
     }
 
     #[tokio::test]

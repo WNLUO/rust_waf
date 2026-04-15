@@ -468,9 +468,10 @@ fn build_http2_upstream_request(
     request: &UnifiedHttpRequest,
     upstream: &crate::core::gateway::UpstreamEndpoint,
 ) -> Result<Request<Full<Bytes>>> {
+    let upstream_authority = effective_http2_upstream_authority(request, upstream);
     let uri = format!(
         "https://{}{}",
-        upstream.authority,
+        upstream_authority,
         normalize_http2_upstream_path(&request.uri)
     );
     let mut builder = Request::builder().method(request.method.as_str()).uri(uri);
@@ -478,6 +479,8 @@ fn build_http2_upstream_request(
     for (key, value) in &request.headers {
         if key.eq_ignore_ascii_case(CONNECTION.as_str())
             || key.eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
+            || key.eq_ignore_ascii_case(HOST.as_str())
+            || should_strip_internal_upstream_header(key)
             || key.starts_with(':')
         {
             continue;
@@ -488,15 +491,35 @@ fn build_http2_upstream_request(
         builder = builder.header(key.as_str(), value.as_str());
     }
 
-    if request.get_header("host").is_none() {
-        if let Some(authority) = request.metadata.get("authority") {
-            builder = builder.header(HOST, authority.as_str());
-        }
-    }
+    builder = builder.header(HOST, upstream_authority.as_str());
 
     builder
         .body(Full::new(Bytes::from(request.body.clone())))
         .map_err(Into::into)
+}
+
+fn effective_http2_upstream_authority(
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> String {
+    request
+        .get_header("host")
+        .cloned()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            request
+                .metadata
+                .get("authority")
+                .cloned()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| upstream.authority.clone())
+}
+
+fn should_strip_internal_upstream_header(header_name: &str) -> bool {
+    header_name.eq_ignore_ascii_case("x-cdn-real-ip")
+        || header_name.eq_ignore_ascii_case("cdn-loop")
+        || header_name.starts_with("eo-")
 }
 
 fn normalize_http2_upstream_path(path: &str) -> String {
@@ -735,6 +758,37 @@ mod tests {
             .expect("selection should succeed");
 
         assert_eq!(selected, UpstreamTransport::Http1);
+    }
+
+    #[test]
+    fn http2_upstream_authority_prefers_original_host() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        request.add_header("host".to_string(), "wnluo.com".to_string());
+
+        let authority = effective_http2_upstream_authority(&request, &https_upstream("127.0.0.1:880"));
+
+        assert_eq!(authority, "wnluo.com");
+    }
+
+    #[test]
+    fn http2_upstream_request_strips_cdn_internal_headers() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        request.add_header("host".to_string(), "wnluo.com".to_string());
+        request.add_header("eo-log-uuid".to_string(), "trace".to_string());
+        request.add_header("cdn-loop".to_string(), "TencentEdgeOne; loops=2".to_string());
+        request.add_header("x-cdn-real-ip".to_string(), "1.2.3.4".to_string());
+        request.add_header("x-forwarded-for".to_string(), "1.2.3.4".to_string());
+
+        let built = build_http2_upstream_request(&request, &https_upstream("127.0.0.1:880"))
+            .expect("request should build");
+
+        assert_eq!(built.headers()["host"], "wnluo.com");
+        assert!(built.headers().get("eo-log-uuid").is_none());
+        assert!(built.headers().get("cdn-loop").is_none());
+        assert!(built.headers().get("x-cdn-real-ip").is_none());
+        assert_eq!(built.headers()["x-forwarded-for"], "1.2.3.4");
     }
 }
 

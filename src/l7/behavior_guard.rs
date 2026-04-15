@@ -120,15 +120,8 @@ impl L7BehaviorGuard {
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
-        let assessment = self.observe_and_assess(
-            &identity,
-            route,
-            kind,
-            client_ip,
-            now,
-            unix_now,
-            window,
-        );
+        let assessment =
+            self.observe_and_assess(&identity, route, kind, client_ip, now, unix_now, window);
 
         request.add_metadata(
             "l7.behavior.identity".to_string(),
@@ -187,10 +180,7 @@ impl L7BehaviorGuard {
             );
         }
         if let Some(route) = assessment.focused_api_route.as_ref() {
-            request.add_metadata(
-                "l7.behavior.focused_api_route".to_string(),
-                route.clone(),
-            );
+            request.add_metadata("l7.behavior.focused_api_route".to_string(), route.clone());
         }
         if let Some(jitter_ms) = assessment.jitter_ms {
             request.add_metadata(
@@ -324,9 +314,7 @@ impl L7BehaviorGuard {
                 if unix_now.saturating_sub(last_seen_unix) > ACTIVE_PROFILE_IDLE_SECS {
                     return None;
                 }
-                entry
-                    .value()
-                    .snapshot(entry.key().clone(), now, window)
+                entry.value().snapshot(entry.key().clone(), now, window)
             })
             .collect::<Vec<_>>();
         profiles.sort_by(|left, right| {
@@ -710,6 +698,11 @@ fn interval_jitter_ms(samples: &VecDeque<RequestSample>) -> Option<u64> {
 }
 
 fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
+    let identity_state = request
+        .get_metadata("network.identity_state")
+        .map(String::as_str)
+        .unwrap_or("unknown");
+
     if let Some(value) = cookie_value(request, "rwaf_fp") {
         return Some(format!("fp:{value}"));
     }
@@ -724,6 +717,9 @@ fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
     }
     if let Some(value) = cookie_value(request, "rwaf_cc") {
         return Some(format!("cookie:{value}"));
+    }
+    if identity_state == "trusted_cdn_unresolved" {
+        return None;
     }
     let ip = request.client_ip.as_deref()?.trim();
     if ip.is_empty() {
@@ -1054,14 +1050,9 @@ mod tests {
 
             for asset in 0..12 {
                 let mut static_request = request("GET", &format!("/static/{asset}.js"), "*/*");
-                static_request.add_metadata(
-                    "l7.cc.request_kind".to_string(),
-                    "static".to_string(),
-                );
-                static_request.add_metadata(
-                    "l7.cc.route".to_string(),
-                    format!("/static/{asset}.js"),
-                );
+                static_request.add_metadata("l7.cc.request_kind".to_string(), "static".to_string());
+                static_request
+                    .add_metadata("l7.cc.route".to_string(), format!("/static/{asset}.js"));
                 let _ = guard.inspect_request(&mut static_request).await;
             }
         }
@@ -1074,12 +1065,13 @@ mod tests {
         let guard = L7BehaviorGuard::new();
 
         for page in 0..3 {
-            let mut doc = request("GET", "/wp-admin/edit-tags.php?taxonomy=category", "text/html");
-            doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
-            doc.add_metadata(
-                "l7.cc.request_kind".to_string(),
-                "document".to_string(),
+            let mut doc = request(
+                "GET",
+                "/wp-admin/edit-tags.php?taxonomy=category",
+                "text/html",
             );
+            doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+            doc.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
             doc.add_metadata(
                 "l7.cc.route".to_string(),
                 "/wp-admin/edit-tags.php".to_string(),
@@ -1087,11 +1079,7 @@ mod tests {
             assert!(guard.inspect_request(&mut doc).await.is_none());
 
             for asset in 0..32 {
-                let mut req = request(
-                    "GET",
-                    &format!("/wp-admin/load-{page}-{asset}.css"),
-                    "*/*",
-                );
+                let mut req = request("GET", &format!("/wp-admin/load-{page}-{asset}.css"), "*/*");
                 req.add_header("sec-fetch-dest".to_string(), "style".to_string());
                 req.add_metadata("l7.cc.request_kind".to_string(), "static".to_string());
                 req.add_metadata(
@@ -1106,15 +1094,9 @@ mod tests {
                 "content-type".to_string(),
                 "application/json; charset=utf-8".to_string(),
             );
-            api.add_header(
-                "x-requested-with".to_string(),
-                "XMLHttpRequest".to_string(),
-            );
+            api.add_header("x-requested-with".to_string(), "XMLHttpRequest".to_string());
             api.add_metadata("l7.cc.request_kind".to_string(), "api".to_string());
-            api.add_metadata(
-                "l7.cc.route".to_string(),
-                "/admin/async/state".to_string(),
-            );
+            api.add_metadata("l7.cc.route".to_string(), "/admin/async/state".to_string());
             assert!(guard.inspect_request(&mut api).await.is_none());
         }
 
@@ -1176,9 +1158,7 @@ mod tests {
         stale_window
             .last_seen_unix
             .store(stale_unix, Ordering::Relaxed);
-        guard
-            .buckets
-            .insert("fp:stale".to_string(), stale_window);
+        guard.buckets.insert("fp:stale".to_string(), stale_window);
 
         let fresh_window = BehaviorWindow::new();
         {
@@ -1193,12 +1173,14 @@ mod tests {
                 at: Instant::now(),
             });
         }
-        guard
-            .buckets
-            .insert("fp:fresh".to_string(), fresh_window);
+        guard.buckets.insert("fp:fresh".to_string(), fresh_window);
 
         let profiles = guard.snapshot_profiles(16);
-        assert!(profiles.iter().any(|profile| profile.identity == "fp:fresh"));
-        assert!(!profiles.iter().any(|profile| profile.identity == "fp:stale"));
+        assert!(profiles
+            .iter()
+            .any(|profile| profile.identity == "fp:fresh"));
+        assert!(!profiles
+            .iter()
+            .any(|profile| profile.identity == "fp:stale"));
     }
 }

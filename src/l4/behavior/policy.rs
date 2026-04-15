@@ -374,6 +374,14 @@ pub(super) fn resolve_request_bucket_ip(
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
 ) -> IpAddr {
+    if matches!(
+        request
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
+        Some("trusted_cdn_unresolved" | "spoofed_forward_header")
+    ) {
+        return packet.source_ip;
+    }
     request
         .client_ip
         .as_deref()

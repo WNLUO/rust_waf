@@ -181,37 +181,93 @@ async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> Result<()> 
     engine_maintenance::probe_upstream_tcp(upstream_addr, timeout_ms).await
 }
 
-pub(crate) fn resolve_client_ip(
+#[derive(Debug, Clone)]
+pub(crate) struct ClientIdentityResolution {
+    pub resolved_client_ip: std::net::IpAddr,
+    pub source_label: &'static str,
+    pub source_header_name: Option<String>,
+    pub trusted_proxy_peer: bool,
+    pub forwarded_header_present: bool,
+    pub forwarded_header_valid: bool,
+    pub identity_state: &'static str,
+}
+
+pub(crate) fn resolve_client_identity(
     context: &WafContext,
     peer_addr: std::net::SocketAddr,
     request: &UnifiedHttpRequest,
-) -> (std::net::IpAddr, &'static str, Option<String>) {
+) -> ClientIdentityResolution {
     let config = context.config_snapshot();
     let gateway = &config.gateway_config;
     let trusted_proxy_peer = peer_is_trusted_proxy(context, peer_addr.ip());
+    let custom_header_name = gateway.custom_source_ip_header.trim();
+    let custom_header_value = if custom_header_name.is_empty() {
+        None
+    } else {
+        request.get_header(custom_header_name)
+    };
+    let custom_header_present = custom_header_value.is_some();
+    let custom_header_ip =
+        custom_header_value.and_then(|value| extract_forwarded_ip_by_strategy(value, 0));
 
     if matches!(
         gateway.source_ip_strategy,
         crate::config::SourceIpStrategy::Header
     ) {
-        let resolved = if gateway.custom_source_ip_header.trim().is_empty() {
-            None
-        } else {
-            request
-                .get_header(&gateway.custom_source_ip_header)
-                .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
-                .map(|ip| (ip, Some(gateway.custom_source_ip_header.clone())))
-        };
-
-        return if let Some((ip, header)) = resolved {
-            (ip, "forwarded_header", header)
-        } else {
-            (peer_addr.ip(), "socket_peer", None)
+        return match (trusted_proxy_peer, custom_header_ip) {
+            (true, Some(ip)) => ClientIdentityResolution {
+                resolved_client_ip: ip,
+                source_label: "forwarded_header",
+                source_header_name: Some(custom_header_name.to_string()),
+                trusted_proxy_peer,
+                forwarded_header_present: custom_header_present,
+                forwarded_header_valid: true,
+                identity_state: "trusted_cdn_forwarded",
+            },
+            (true, None) => ClientIdentityResolution {
+                resolved_client_ip: peer_addr.ip(),
+                source_label: "socket_peer",
+                source_header_name: None,
+                trusted_proxy_peer,
+                forwarded_header_present: custom_header_present,
+                forwarded_header_valid: false,
+                identity_state: "trusted_cdn_unresolved",
+            },
+            (false, Some(_)) => ClientIdentityResolution {
+                resolved_client_ip: peer_addr.ip(),
+                source_label: "socket_peer",
+                source_header_name: None,
+                trusted_proxy_peer,
+                forwarded_header_present: true,
+                forwarded_header_valid: false,
+                identity_state: "spoofed_forward_header",
+            },
+            (false, None) => ClientIdentityResolution {
+                resolved_client_ip: peer_addr.ip(),
+                source_label: "socket_peer",
+                source_header_name: None,
+                trusted_proxy_peer,
+                forwarded_header_present: false,
+                forwarded_header_valid: false,
+                identity_state: "direct_client",
+            },
         };
     }
 
     if !trusted_proxy_peer {
-        return (peer_addr.ip(), "socket_peer", None);
+        return ClientIdentityResolution {
+            resolved_client_ip: peer_addr.ip(),
+            source_label: "socket_peer",
+            source_header_name: None,
+            trusted_proxy_peer,
+            forwarded_header_present: custom_header_present,
+            forwarded_header_valid: false,
+            identity_state: if custom_header_present {
+                "spoofed_forward_header"
+            } else {
+                "direct_client"
+            },
+        };
     }
 
     let resolved = match gateway.source_ip_strategy {
@@ -240,9 +296,25 @@ pub(crate) fn resolve_client_ip(
     };
 
     if let Some((ip, header)) = resolved {
-        (ip, "forwarded_header", header)
+        ClientIdentityResolution {
+            resolved_client_ip: ip,
+            source_label: "forwarded_header",
+            source_header_name: header,
+            trusted_proxy_peer,
+            forwarded_header_present: custom_header_present,
+            forwarded_header_valid: true,
+            identity_state: "trusted_cdn_forwarded",
+        }
     } else {
-        (peer_addr.ip(), "socket_peer", None)
+        ClientIdentityResolution {
+            resolved_client_ip: peer_addr.ip(),
+            source_label: "socket_peer",
+            source_header_name: None,
+            trusted_proxy_peer,
+            forwarded_header_present: custom_header_present,
+            forwarded_header_valid: false,
+            identity_state: "trusted_cdn_unresolved",
+        }
     }
 }
 

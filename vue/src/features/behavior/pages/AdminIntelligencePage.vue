@@ -33,10 +33,20 @@ useFlashMessages({
   errorDuration: 5600,
 })
 
-const topFingerprint = computed(() => fingerprintProfiles.value[0] || null)
-const topSession = computed(() => behaviorSessions.value[0] || null)
 const liveProfilesByIdentity = computed(
   () => new Map(liveProfiles.value.map((profile) => [profile.identity, profile])),
+)
+const currentRiskCount = computed(
+  () => liveProfiles.value.filter((profile) => profile.blocked || profile.score >= 60).length,
+)
+const currentWatchingCount = computed(
+  () =>
+    liveProfiles.value.filter(
+      (profile) => !profile.blocked && profile.score >= 20 && profile.score < 60,
+    ).length,
+)
+const currentHealthyCount = computed(
+  () => liveProfiles.value.filter((profile) => !profile.blocked && profile.score < 20).length,
 )
 
 function actionType(action: string | null) {
@@ -52,6 +62,22 @@ function actionLabel(action: string | null) {
   if (action?.startsWith('delay')) return '已延迟'
   if (action) return action
   return '已记录'
+}
+
+function currentStateType(profile: BehaviorProfileItem | undefined) {
+  if (!profile) return 'muted' as const
+  if (profile.blocked) return 'error' as const
+  if (profile.score >= 60) return 'warning' as const
+  if (profile.score >= 20) return 'info' as const
+  return 'success' as const
+}
+
+function currentStateLabel(profile: BehaviorProfileItem | undefined) {
+  if (!profile) return '当前不活跃'
+  if (profile.blocked) return '当前封禁中'
+  if (profile.score >= 60) return '当前高风险'
+  if (profile.score >= 20) return '当前观察中'
+  return '当前正常'
 }
 
 async function loadPage(showLoader = false) {
@@ -93,10 +119,10 @@ onMounted(() => {
             </div>
             <div class="space-y-2">
               <h1 class="text-2xl font-semibold tracking-tight text-slate-900">
-                指纹档案与历史画像
+                当前状态与历史档案
               </h1>
               <p class="max-w-3xl text-sm leading-6 text-slate-600">
-                这里展示已经入库的稳定身份档案和会话画像历史。它不是只看当前窗口，而是为后续信誉分、聚类分析和 AI 风险判断准备的长期数据底座。
+                先看当前活跃身份是不是正常，再看已经入库的历史风险档案。这样测试时不会把过去的挑战或封禁，误读成“现在仍在发生”。
               </p>
             </div>
           </div>
@@ -117,9 +143,9 @@ onMounted(() => {
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">
             <div>
-              <p class="text-sm text-slate-500">指纹档案</p>
+              <p class="text-sm text-slate-500">当前活跃</p>
               <p class="mt-2 text-3xl font-semibold text-slate-900">
-                {{ formatNumber(fingerprintProfiles.length) }}
+                {{ formatNumber(liveProfiles.length) }}
               </p>
             </div>
             <div class="rounded-2xl bg-slate-100 p-3 text-slate-600">
@@ -130,9 +156,9 @@ onMounted(() => {
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">
             <div>
-              <p class="text-sm text-slate-500">历史会话</p>
+              <p class="text-sm text-slate-500">当前高风险</p>
               <p class="mt-2 text-3xl font-semibold text-slate-900">
-                {{ formatNumber(behaviorSessions.length) }}
+                {{ formatNumber(currentRiskCount) }}
               </p>
             </div>
             <div class="rounded-2xl bg-slate-100 p-3 text-slate-600">
@@ -143,9 +169,9 @@ onMounted(() => {
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">
             <div>
-              <p class="text-sm text-slate-500">最高风险指纹</p>
-              <p class="mt-2 text-lg font-semibold text-red-700">
-                {{ topFingerprint ? `${topFingerprint.identity} · ${formatNumber(topFingerprint.max_score)}` : '-' }}
+              <p class="text-sm text-slate-500">当前观察中</p>
+              <p class="mt-2 text-lg font-semibold text-amber-700">
+                {{ formatNumber(currentWatchingCount) }}
               </p>
             </div>
           </div>
@@ -153,14 +179,94 @@ onMounted(() => {
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">
             <div>
-              <p class="text-sm text-slate-500">最近会话动作</p>
-              <p class="mt-2 text-lg font-semibold text-amber-700">
-                {{ topSession ? actionLabel(topSession.latest_action) : '-' }}
+              <p class="text-sm text-slate-500">当前正常</p>
+              <p class="mt-2 text-lg font-semibold text-emerald-700">
+                {{ formatNumber(currentHealthyCount) }}
               </p>
             </div>
           </div>
         </CyberCard>
       </section>
+
+      <CyberCard
+        title="当前实时状态"
+        sub-title="这里只看最近活跃身份的当前风险，不混入历史 challenge / block 记录"
+      >
+        <div v-if="loading" class="py-16 text-center text-sm text-slate-500">正在加载实时状态...</div>
+        <div v-else-if="!liveProfiles.length" class="py-16 text-center text-sm text-slate-500">
+          当前没有活跃画像
+        </div>
+        <div v-else class="space-y-3">
+          <div
+            v-for="profile in liveProfiles"
+            :key="profile.identity"
+            class="rounded-2xl border border-slate-200 bg-white px-4 py-4"
+          >
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div class="space-y-2 min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    :type="currentStateType(profile)"
+                    :text="currentStateLabel(profile)"
+                  />
+                  <StatusBadge
+                    type="muted"
+                    :text="`当前分数 ${formatNumber(profile.score || 0)}`"
+                  />
+                  <span class="text-xs text-slate-500">
+                    最近活跃 {{ formatTimestamp(profile.latest_seen_at) }}
+                  </span>
+                </div>
+                <div class="font-mono text-sm text-slate-900 break-all">{{ profile.identity }}</div>
+                <div class="text-xs text-slate-500">
+                  {{ profile.source_ip || '-' }} · 当前路径 {{ profile.latest_route || '-' }}
+                </div>
+                <div class="text-xs text-slate-500">
+                  主路径 {{ profile.dominant_route || '-' }} · 页面 {{ formatNumber(profile.document_requests) }} · 接口 {{ formatNumber(profile.api_requests) }}
+                </div>
+                <div
+                  v-if="profile.blocked"
+                  class="text-xs text-red-700"
+                >
+                  当前封禁原因 {{ profile.blocked_reason || '-' }}
+                  <template v-if="profile.blocked_expires_at">
+                    · 预计结束 {{ formatTimestamp(profile.blocked_expires_at) }}
+                  </template>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3 text-sm text-slate-600 lg:min-w-[22rem]">
+                <div>
+                  <div class="text-xs text-slate-400">总重复率</div>
+                  <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(profile.repeated_ratio) }}%</div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">页面 / 接口重复率</div>
+                  <div class="mt-1 font-semibold text-slate-900">
+                    {{ formatNumber(profile.document_repeated_ratio) }}% / {{ formatNumber(profile.api_repeated_ratio) }}%
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">不同路径</div>
+                  <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(profile.distinct_routes) }}</div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">窗口挑战数</div>
+                  <div class="mt-1 font-semibold text-slate-900">{{ formatNumber(profile.challenge_count_window) }}</div>
+                </div>
+              </div>
+            </div>
+            <div v-if="profile.flags?.length" class="mt-3 flex flex-wrap gap-2">
+              <span
+                v-for="flag in profile.flags"
+                :key="flag"
+                class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700"
+              >
+                {{ flag }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </CyberCard>
 
       <section class="flex flex-wrap gap-3">
         <button
@@ -184,7 +290,7 @@ onMounted(() => {
       <CyberCard
         v-if="tab === 'fingerprints'"
         title="指纹档案"
-        sub-title="稳定身份的长期画像，用来承接信誉分、历史正常度和 AI 分析"
+        sub-title="这是历史风险档案，不代表当前仍在挑战或封禁"
       >
         <div v-if="loading" class="py-16 text-center text-sm text-slate-500">正在加载档案...</div>
         <div v-else class="space-y-3">
@@ -197,17 +303,17 @@ onMounted(() => {
               <div class="space-y-2 min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <StatusBadge
-                    :type="liveProfilesByIdentity.get(profile.identity) ? 'success' : 'muted'"
-                    :text="liveProfilesByIdentity.get(profile.identity) ? '当前活跃' : '仅历史档案'"
+                    :type="currentStateType(liveProfilesByIdentity.get(profile.identity))"
+                    :text="currentStateLabel(liveProfilesByIdentity.get(profile.identity))"
                   />
                   <StatusBadge
                     :type="actionType(profile.latest_action)"
-                    :text="`最近风险动作 ${actionLabel(profile.latest_action)}`"
+                    :text="`历史风险动作 ${actionLabel(profile.latest_action)}`"
                   />
                   <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                     {{ profile.identity_kind }}
                   </span>
-                  <span class="text-xs text-slate-500">最近出现 {{ formatTimestamp(profile.last_seen_at) }}</span>
+                  <span class="text-xs text-slate-500">历史最近出现 {{ formatTimestamp(profile.last_seen_at) }}</span>
                 </div>
                 <div class="font-mono text-sm text-slate-900 break-all">{{ profile.identity }}</div>
                 <div class="text-xs text-slate-500">
@@ -253,7 +359,7 @@ onMounted(() => {
       <CyberCard
         v-else
         title="历史会话"
-        sub-title="按 identity + site 归档的画像快照，适合回看一段时间内的访问形状"
+        sub-title="按 identity + site 归档的历史风险快照，不等于当前实时状态"
       >
         <div v-if="loading" class="py-16 text-center text-sm text-slate-500">正在加载会话...</div>
         <div v-else class="space-y-3">
@@ -266,14 +372,14 @@ onMounted(() => {
               <div class="space-y-2 min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                   <StatusBadge
-                    :type="liveProfilesByIdentity.get(session.identity) ? 'success' : 'muted'"
-                    :text="liveProfilesByIdentity.get(session.identity) ? '当前活跃' : '历史会话'"
+                    :type="currentStateType(liveProfilesByIdentity.get(session.identity))"
+                    :text="currentStateLabel(liveProfilesByIdentity.get(session.identity))"
                   />
                   <StatusBadge
                     :type="actionType(session.latest_action)"
-                    :text="`最近风险动作 ${actionLabel(session.latest_action)}`"
+                    :text="`历史风险动作 ${actionLabel(session.latest_action)}`"
                   />
-                  <span class="text-xs text-slate-500">最近活跃 {{ formatTimestamp(session.last_seen_at) }}</span>
+                  <span class="text-xs text-slate-500">历史最近活跃 {{ formatTimestamp(session.last_seen_at) }}</span>
                 </div>
                 <div class="font-mono text-sm text-slate-900 break-all">{{ session.identity }}</div>
                 <div class="text-xs text-slate-500">

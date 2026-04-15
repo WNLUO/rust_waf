@@ -329,11 +329,10 @@ async fn test_sqlite_store_persists_fingerprint_profiles_and_behavior_history() 
         .fetch_one(&pool)
         .await
         .unwrap();
-    let behavior_session_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM behavior_sessions")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let behavior_session_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM behavior_sessions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     let behavior_event_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM behavior_events")
         .fetch_one(&pool)
         .await

@@ -255,6 +255,17 @@ pub(super) fn unix_timestamp() -> i64 {
 
 fn request_bucket_peer_kind(peer_ip: IpAddr, request: &UnifiedHttpRequest) -> BucketPeerKind {
     match request
+        .get_metadata("network.identity_state")
+        .map(String::as_str)
+    {
+        Some("trusted_cdn_forwarded") => return BucketPeerKind::TrustedProxy,
+        Some("trusted_cdn_unresolved" | "spoofed_forward_header" | "direct_client") => {
+            return BucketPeerKind::DirectClient;
+        }
+        _ => {}
+    }
+
+    match request
         .get_metadata("network.client_ip_source")
         .map(String::as_str)
     {

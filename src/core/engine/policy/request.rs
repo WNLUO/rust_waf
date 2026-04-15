@@ -5,42 +5,47 @@ pub(crate) fn apply_client_identity(
     peer_addr: std::net::SocketAddr,
     request: &mut UnifiedHttpRequest,
 ) {
-    let (resolved_client_ip, source_label, source_header_name) =
-        resolve_client_ip(context, peer_addr, request);
-    let trusted_proxy_peer = context
-        .config_snapshot()
-        .effective_trusted_proxy_cidrs()
-        .iter()
-        .filter_map(|cidr| cidr.parse::<ipnet::IpNet>().ok())
-        .any(|network| network.contains(&peer_addr.ip()));
-    let used_forwarded_header = source_label != "socket_peer";
+    let identity = resolve_client_identity(context, peer_addr, request);
+    let used_forwarded_header = identity.source_label != "socket_peer";
 
-    request.set_client_ip(resolved_client_ip.to_string());
+    request.set_client_ip(identity.resolved_client_ip.to_string());
     request.add_metadata(
         "network.trusted_proxy_peer".to_string(),
-        trusted_proxy_peer.to_string(),
+        identity.trusted_proxy_peer.to_string(),
     );
     request.add_metadata("network.peer_ip".to_string(), peer_addr.ip().to_string());
     request.add_metadata(
         "network.client_ip".to_string(),
-        resolved_client_ip.to_string(),
+        identity.resolved_client_ip.to_string(),
     );
     request.add_metadata(
         "network.client_ip_source".to_string(),
-        source_label.to_string(),
+        identity.source_label.to_string(),
     );
     request.add_metadata(
         "network.client_ip_unresolved".to_string(),
-        (trusted_proxy_peer && source_label == "socket_peer").to_string(),
+        (identity.identity_state == "trusted_cdn_unresolved").to_string(),
+    );
+    request.add_metadata(
+        "network.forward_header_present".to_string(),
+        identity.forwarded_header_present.to_string(),
+    );
+    request.add_metadata(
+        "network.forward_header_valid".to_string(),
+        identity.forwarded_header_valid.to_string(),
+    );
+    request.add_metadata(
+        "network.identity_state".to_string(),
+        identity.identity_state.to_string(),
     );
 
     apply_proxy_headers(
         context,
         peer_addr,
         request,
-        resolved_client_ip,
+        identity.resolved_client_ip,
         used_forwarded_header,
-        source_header_name.as_deref(),
+        identity.source_header_name.as_deref(),
     );
 }
 
@@ -48,15 +53,10 @@ pub(crate) async fn inspect_blocked_client_ip(
     context: &WafContext,
     request: &UnifiedHttpRequest,
 ) -> Option<InspectionResult> {
-    let config = context.config_snapshot();
-    let client_ip_source = request
-        .get_metadata("network.client_ip_source")
+    let identity_state = request
+        .get_metadata("network.identity_state")
         .map(String::as_str);
-    if matches!(
-        config.gateway_config.source_ip_strategy,
-        crate::config::SourceIpStrategy::Header
-    ) && client_ip_source == Some("socket_peer")
-    {
+    if matches!(identity_state, Some("trusted_cdn_unresolved")) {
         return None;
     }
 

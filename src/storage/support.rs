@@ -564,7 +564,9 @@ async fn persist_behavior_intelligence(
     Ok(())
 }
 
-fn parse_security_context(event: &crate::storage::SecurityEventEntry) -> Option<ParsedSecurityContext> {
+fn parse_security_context(
+    event: &crate::storage::SecurityEventEntry,
+) -> Option<ParsedSecurityContext> {
     let details = event
         .details_json
         .as_deref()
@@ -574,7 +576,12 @@ fn parse_security_context(event: &crate::storage::SecurityEventEntry) -> Option<
         .and_then(parse_behavior_identity)
         .or_else(|| {
             (event.provider.as_deref() == Some("browser_fingerprint"))
-                .then(|| event.provider_event_id.as_deref().map(|value| format!("fp:{value}")))
+                .then(|| {
+                    event
+                        .provider_event_id
+                        .as_deref()
+                        .map(|value| format!("fp:{value}"))
+                })
                 .flatten()
         })?;
     let identity_kind = identity_kind(&identity).to_string();
@@ -587,9 +594,7 @@ fn parse_security_context(event: &crate::storage::SecurityEventEntry) -> Option<
         .clone()
         .or_else(|| details.as_ref().and_then(parse_client_identity_host));
     let user_agent = details.as_ref().and_then(parse_client_identity_user_agent);
-    let behavior = details
-        .as_ref()
-        .and_then(parse_behavior_payload);
+    let behavior = details.as_ref().and_then(parse_behavior_payload);
 
     Some(ParsedSecurityContext {
         identity,
@@ -615,7 +620,11 @@ fn parse_client_identity_source_ip(details: &Value) -> Option<String> {
     details
         .get("client_identity")
         .and_then(|value| value.get("resolved_client_ip"))
-        .or_else(|| details.get("client_identity").and_then(|value| value.get("source_ip")))
+        .or_else(|| {
+            details
+                .get("client_identity")
+                .and_then(|value| value.get("source_ip"))
+        })
         .and_then(|value| value.as_str())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -647,7 +656,11 @@ fn parse_client_identity_header(details: &Value, name: &str) -> Option<String> {
 
 fn parse_behavior_payload(details: &Value) -> Option<ParsedBehaviorPayload> {
     let behavior = details.get("l7_behavior")?;
-    let identity = behavior.get("identity").and_then(Value::as_str).unwrap_or("").trim();
+    let identity = behavior
+        .get("identity")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
     if identity.is_empty() {
         return None;
     }

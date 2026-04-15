@@ -135,15 +135,35 @@ impl L7CcGuard {
         let method = request.method.to_ascii_uppercase();
         let request_kind = classify_request(request, &route_path);
         let html_mode = challenge_mode(request, &route_path);
+        let identity_state = request
+            .get_metadata("network.identity_state")
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
         let client_identity_unresolved = request
             .get_metadata("network.client_ip_unresolved")
             .map(|value| value == "true")
             .unwrap_or(false);
+        let spoofed_forward_header = identity_state == "spoofed_forward_header";
         let verified = self.has_valid_challenge_cookie(request, client_ip, &host, &config);
         let interactive_session = is_interactive_session(request, &host, verified);
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(config.request_window_secs.max(1));
+
+        request.add_metadata("l7.cc.identity_state".to_string(), identity_state.clone());
+
+        if spoofed_forward_header {
+            let reason = format!(
+                "l7 cc guard blocked spoofed forwarded header request: host={} route={} peer_ip={} header_present=true",
+                host, route_path, client_ip
+            );
+            request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+            return Some(InspectionResult::respond(
+                InspectionLayer::L7,
+                reason.clone(),
+                build_block_response(request, &reason),
+            ));
+        }
 
         if request_kind == RequestKind::Document {
             self.record_page_load_window(client_ip, &host, &route_path, unix_now, &config);
@@ -384,8 +404,7 @@ impl L7CcGuard {
                 && hot_path_client_count >= global_hot_path_client_challenge_threshold
                 && hot_path_effective >= global_hot_path_effective_challenge_threshold;
 
-        if !client_identity_unresolved
-            && !verified
+        if !verified
             && !low_risk_subresource
             && (global_hot_path_pressure_challenge
                 || route_effective >= route_challenge_threshold
@@ -780,11 +799,7 @@ fn challenge_action_name(mode: HtmlResponseMode) -> &'static str {
     }
 }
 
-fn is_interactive_session(
-    request: &UnifiedHttpRequest,
-    host: &str,
-    verified: bool,
-) -> bool {
+fn is_interactive_session(request: &UnifiedHttpRequest, host: &str, verified: bool) -> bool {
     let has_stable_identity = cookie_value(request, "rwaf_fp").is_some()
         || request
             .get_header("x-browser-fingerprint-id")
@@ -815,8 +830,8 @@ fn is_interactive_session(
         .get_header("sec-fetch-mode")
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
-    let interactive_fetch = x_requested_with
-        || matches!(sec_fetch_mode.as_str(), "navigate" | "cors" | "same-origin");
+    let interactive_fetch =
+        x_requested_with || matches!(sec_fetch_mode.as_str(), "navigate" | "cors" | "same-origin");
     let behavior_score_low = request
         .get_metadata("l7.behavior.score")
         .and_then(|value| value.parse::<u32>().ok())
@@ -824,7 +839,11 @@ fn is_interactive_session(
         .unwrap_or(false);
     let broad_navigation = request
         .get_metadata("l7.behavior.flags")
-        .map(|value| value.split(',').any(|flag| flag.trim() == "broad_navigation_context"))
+        .map(|value| {
+            value
+                .split(',')
+                .any(|flag| flag.trim() == "broad_navigation_context")
+        })
         .unwrap_or(false);
 
     interactive_fetch
@@ -1374,6 +1393,19 @@ mod tests {
             "network.client_ip_unresolved".to_string(),
             "true".to_string(),
         );
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+        request
+    }
+
+    fn spoofed_forward_header_request(uri: &str) -> UnifiedHttpRequest {
+        let mut request = request(uri);
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "spoofed_forward_header".to_string(),
+        );
         request
     }
 
@@ -1492,9 +1524,10 @@ mod tests {
             .and_then(|item| item.custom_response)
             .expect("api friction response");
         assert_eq!(response.status_code, 429);
-        assert!(response.headers.iter().any(|(key, value)| {
-            key == "x-rust-waf-cc-action" && value == "api-friction"
-        }));
+        assert!(response
+            .headers
+            .iter()
+            .any(|(key, value)| { key == "x-rust-waf-cc-action" && value == "api-friction" }));
     }
 
     #[tokio::test]
@@ -1603,7 +1636,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unresolved_proxy_identity_degrades_with_delay_instead_of_challenge_or_block() {
+    async fn unresolved_proxy_identity_can_be_challenged_without_direct_block() {
         let config = CcDefenseConfig {
             route_challenge_threshold: 2,
             route_block_threshold: 2,
@@ -1611,7 +1644,7 @@ mod tests {
             host_block_threshold: 2,
             ip_challenge_threshold: 2,
             ip_block_threshold: 2,
-            delay_threshold_percent: 50,
+            delay_threshold_percent: 100,
             delay_ms: 1,
             ..CcDefenseConfig::default()
         };
@@ -1620,24 +1653,39 @@ mod tests {
         let mut first = unresolved_proxy_request("/search?q=1");
         let first_result = guard.inspect_request(&mut first).await;
         assert!(first_result.is_none());
-        assert_eq!(
-            first.get_metadata("l7.cc.action").map(String::as_str),
-            Some("delay:1ms")
-        );
 
         let mut second = unresolved_proxy_request("/search?q=2");
         let second_result = guard.inspect_request(&mut second).await;
-        assert!(second_result.is_none());
+        assert!(second_result.is_some());
+        let second_result = second_result.unwrap();
         assert_eq!(
             second.get_metadata("l7.cc.action").map(String::as_str),
-            Some("delay:1ms")
+            Some("challenge")
         );
+        assert_eq!(second_result.action, crate::core::InspectionAction::Respond);
         assert_eq!(
             second
                 .get_metadata("l7.cc.client_identity_unresolved")
                 .map(String::as_str),
             Some("true")
         );
+    }
+
+    #[tokio::test]
+    async fn spoofed_forward_header_requests_are_blocked_immediately() {
+        let guard = L7CcGuard::new(&CcDefenseConfig::default());
+        let mut request = spoofed_forward_header_request("/search?q=1");
+
+        let result = guard.inspect_request(&mut request).await;
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert_eq!(result.action, crate::core::InspectionAction::Respond);
+        assert_eq!(
+            request.get_metadata("l7.cc.action").map(String::as_str),
+            Some("block")
+        );
+        assert!(result.reason.contains("spoofed forwarded header"));
     }
 
     #[tokio::test]
@@ -1755,10 +1803,7 @@ mod tests {
                 request.add_metadata("l7.behavior.score".to_string(), "0".to_string());
             } else {
                 request.add_header("accept".to_string(), "application/json".to_string());
-                request.add_header(
-                    "x-requested-with".to_string(),
-                    "XMLHttpRequest".to_string(),
-                );
+                request.add_header("x-requested-with".to_string(), "XMLHttpRequest".to_string());
                 request.add_metadata(
                     "l7.behavior.flags".to_string(),
                     "broad_navigation_context".to_string(),

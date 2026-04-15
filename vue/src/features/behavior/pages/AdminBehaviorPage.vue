@@ -351,6 +351,20 @@ function actionLabel(action: BehaviorEventView['action']) {
   return '已记录'
 }
 
+function currentStateType(profile: BehaviorProfileView) {
+  if (profile.blocked) return 'error' as const
+  if (profile.maxScore >= 60) return 'warning' as const
+  if (profile.maxScore >= 20) return 'info' as const
+  return 'success' as const
+}
+
+function currentStateLabel(profile: BehaviorProfileView) {
+  if (profile.blocked) return '当前封禁中'
+  if (profile.maxScore >= 60) return '当前高风险'
+  if (profile.maxScore >= 20) return '当前观察中'
+  return '当前正常'
+}
+
 function mergeBehaviorEvent(event: BehaviorEventView) {
   const merged = [event, ...behaviorEvents.value].filter(
     (item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index,
@@ -452,10 +466,10 @@ onBeforeUnmount(() => {
             </div>
             <div class="space-y-2">
               <h1 class="text-2xl font-semibold tracking-tight text-slate-900">
-                看见所有正在访问的用户画像
+                当前实时状态与异常轨迹
               </h1>
               <p class="max-w-3xl text-sm leading-6 text-slate-600">
-                这里先展示最近活跃会话的实时画像，再用异常轨迹辅助判断哪些访问不自然。这样即使还没触发 challenge，你也能先看到自己当前访问的路径、节奏和分数。
+                这里先看最近活跃会话的当前状态，再看历史异常轨迹。这样测试时不会把旧的 challenge 或 block 误读成“现在仍然在发生”。
               </p>
             </div>
           </div>
@@ -487,7 +501,7 @@ onBeforeUnmount(() => {
                 {{ formatNumber(profiles.length) }}
               </p>
               <p class="mt-2 text-xs text-slate-500">
-                最近 5 分钟行为快照
+                最近活跃会话的实时快照
               </p>
             </div>
             <div class="rounded-2xl bg-slate-100 p-3 text-slate-600">
@@ -504,7 +518,7 @@ onBeforeUnmount(() => {
                 {{ formatNumber(metrics?.l7_behavior_challenges || 0) }}
               </p>
               <p class="mt-2 text-xs text-slate-500">
-                当前仍以 challenge-first 为主
+                指当前累计次数，不等于当前仍在挑战
               </p>
             </div>
             <div class="rounded-2xl bg-amber-50 p-3 text-amber-700">
@@ -521,7 +535,7 @@ onBeforeUnmount(() => {
                 {{ formatNumber(metrics?.l7_behavior_blocks || 0) }}
               </p>
               <p class="mt-2 text-xs text-slate-500">
-                反复 challenge 后会升级到名单页
+                指历史累计次数，不等于当前仍在封禁
               </p>
             </div>
             <div class="rounded-2xl bg-red-50 p-3 text-red-700">
@@ -538,7 +552,7 @@ onBeforeUnmount(() => {
                 {{ formatNumber(metrics?.l7_behavior_delays || 0) }}
               </p>
               <p class="mt-2 text-xs text-slate-500">
-                低分异常会先进入柔性摩擦
+                指历史累计次数，不等于当前仍在延迟
               </p>
             </div>
             <div class="rounded-2xl bg-blue-50 p-3 text-blue-700">
@@ -551,7 +565,7 @@ onBeforeUnmount(() => {
       <section class="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <CyberCard
           title="活跃会话画像"
-          sub-title="按 identity 展示最近活跃访问者，分数高的会排在前面，但正常访问也会出现"
+          sub-title="这里只看当前活跃画像，顶部标签表示当前状态，不直接复用历史事件动作"
         >
           <div v-if="loading" class="py-16 text-center text-sm text-slate-500">
             正在加载行为画像...
@@ -579,19 +593,24 @@ onBeforeUnmount(() => {
                 <div class="min-w-0 space-y-2">
                   <div class="flex flex-wrap items-center gap-2">
                     <StatusBadge
-                      :type="actionBadgeType(profile.latestAction)"
-                      :text="actionLabel(profile.latestAction)"
+                      :type="currentStateType(profile)"
+                      :text="currentStateLabel(profile)"
                     />
                     <StatusBadge
                       v-if="profile.blocked"
                       type="error"
                       text="封禁名单中"
                     />
+                    <StatusBadge
+                      v-else
+                      type="muted"
+                      :text="`历史动作 ${actionLabel(profile.latestAction)}`"
+                    />
                     <span class="rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-medium text-white">
-                      最高分 {{ formatNumber(profile.maxScore) }}
+                      当前分数 {{ formatNumber(profile.maxScore) }}
                     </span>
                     <span class="text-xs text-slate-500">
-                      最近命中 {{ formatTimestamp(profile.latestSeenAt) }}
+                      最近活跃 {{ formatTimestamp(profile.latestSeenAt) }}
                     </span>
                   </div>
                   <div class="font-mono text-sm text-slate-900 break-all">
@@ -605,13 +624,13 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="grid grid-cols-2 gap-3 text-sm text-slate-600 lg:min-w-[18rem]">
                   <div>
-                    <div class="text-xs text-slate-400">事件数</div>
+                    <div class="text-xs text-slate-400">历史事件数</div>
                     <div class="mt-1 font-semibold text-slate-900">
                       {{ formatNumber(profile.eventCount) }}
                     </div>
                   </div>
                   <div>
-                    <div class="text-xs text-slate-400">挑战 / 封禁</div>
+                    <div class="text-xs text-slate-400">历史挑战 / 封禁</div>
                     <div class="mt-1 font-semibold text-slate-900">
                       {{ formatNumber(profile.challengeCount) }} / {{ formatNumber(profile.blockCount) }}
                     </div>
@@ -648,7 +667,7 @@ onBeforeUnmount(() => {
 
         <CyberCard
           title="画像详情"
-          sub-title="把当前会话的活跃状态和异常线索拆成你能直接读懂的字段"
+          sub-title="先看当前状态，再把历史异常线索拆成你能直接读懂的字段"
         >
           <div
             v-if="!selectedProfile"
@@ -660,13 +679,18 @@ onBeforeUnmount(() => {
             <div class="space-y-3">
               <div class="flex flex-wrap items-center gap-2">
                 <StatusBadge
-                  :type="actionBadgeType(selectedProfile.latestAction)"
-                  :text="actionLabel(selectedProfile.latestAction)"
+                  :type="currentStateType(selectedProfile)"
+                  :text="currentStateLabel(selectedProfile)"
                 />
                 <StatusBadge
                   v-if="selectedProfile.blocked"
                   type="error"
                   :text="selectedProfile.blockedExpiresAt ? `已封禁至 ${formatTimestamp(selectedProfile.blockedExpiresAt)}` : '已进入封禁名单'"
+                />
+                <StatusBadge
+                  v-else
+                  type="muted"
+                  :text="`历史动作 ${actionLabel(selectedProfile.latestAction)}`"
                 />
                 <StatusBadge
                   type="info"
@@ -778,7 +802,7 @@ onBeforeUnmount(() => {
 
             <div class="rounded-2xl border border-slate-200 bg-white">
               <div class="border-b border-slate-200 px-4 py-3">
-                <h3 class="text-sm font-semibold text-slate-900">最近动作轨迹</h3>
+                <h3 class="text-sm font-semibold text-slate-900">历史异常轨迹</h3>
               </div>
               <div class="divide-y divide-slate-100">
                 <div

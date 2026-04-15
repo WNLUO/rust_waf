@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { BrainCircuit, RefreshCw, Save, Sparkles } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
@@ -28,9 +28,11 @@ function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
 const loading = ref(true)
 const refreshing = ref(false)
 const saving = ref(false)
+const copying = ref(false)
 const error = ref('')
 const successMessage = ref('')
 const report = ref<AiAuditReportResponse | null>(null)
+const cachedReportAt = ref<number | null>(null)
 const form = reactive<AiAuditSettingsPayload>(createDefaultAiAuditSettings())
 const windowSeconds = ref(900)
 
@@ -67,9 +69,60 @@ const providerStatusText = computed(() => {
   return `当前输出来自 ${report.value.provider_used}`
 })
 
+const cachedReportLabel = computed(() => {
+  if (!cachedReportAt.value) return '当前没有本地快照'
+  return `本地快照 ${formatTimestamp(cachedReportAt.value)}`
+})
+
+function persistReportSnapshot(next: AiAuditReportResponse) {
+  report.value = next
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(
+    'waf-ai-audit-last-report',
+    JSON.stringify({
+      cached_at: Date.now(),
+      report: next,
+    }),
+  )
+  cachedReportAt.value = Date.now()
+}
+
+function loadCachedReportSnapshot() {
+  if (typeof window === 'undefined') return
+  const raw = window.localStorage.getItem('waf-ai-audit-last-report')
+  if (!raw) return
+  try {
+    const payload = JSON.parse(raw) as {
+      cached_at?: number
+      report?: AiAuditReportResponse
+    }
+    if (payload.report) {
+      report.value = payload.report
+      cachedReportAt.value = payload.cached_at ?? null
+    }
+  } catch {
+    window.localStorage.removeItem('waf-ai-audit-last-report')
+  }
+}
+
 function assignAiAudit(payload: GlobalSettingsPayload) {
   Object.assign(form, payload.ai_audit)
 }
+
+watch(
+  () => form.provider,
+  (provider, previous) => {
+    if (provider === previous) return
+    if (provider === 'xiaomi_mimo') {
+      if (!form.base_url.trim()) {
+        form.base_url = 'https://api.xiaomimimo.com/v1'
+      }
+      if (!form.model.trim() || form.model === 'gpt-5.4-mini') {
+        form.model = 'mimo-v2-flash'
+      }
+    }
+  },
+)
 
 async function loadSection(runReport = true) {
   loading.value = true
@@ -78,9 +131,11 @@ async function loadSection(runReport = true) {
     const settings = await fetchGlobalSettings()
     assignAiAudit(settings)
     if (runReport) {
-      report.value = await fetchAiAuditReport({
-        window_seconds: windowSeconds.value,
-      })
+      persistReportSnapshot(
+        await fetchAiAuditReport({
+          window_seconds: windowSeconds.value,
+        }),
+      )
     }
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载 AI 审计失败'
@@ -93,11 +148,13 @@ async function runAudit() {
   refreshing.value = true
   error.value = ''
   try {
-    report.value = await fetchAiAuditReport({
-      window_seconds: windowSeconds.value,
-      provider: form.provider,
-      fallback_to_rules: form.fallback_to_rules,
-    })
+    persistReportSnapshot(
+      await fetchAiAuditReport({
+        window_seconds: windowSeconds.value,
+        provider: form.provider,
+        fallback_to_rules: form.fallback_to_rules,
+      }),
+    )
   } catch (err) {
     error.value = err instanceof Error ? err.message : '执行 AI 审计失败'
   } finally {
@@ -130,7 +187,37 @@ async function saveAiAuditSettings() {
   }
 }
 
+async function copyReportJson() {
+  if (!report.value) return
+  copying.value = true
+  error.value = ''
+  successMessage.value = ''
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(report.value, null, 2))
+    successMessage.value = 'AI 审计 JSON 已复制到剪贴板'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '复制 AI 审计 JSON 失败'
+  } finally {
+    copying.value = false
+  }
+}
+
+function downloadReportJson() {
+  if (!report.value || typeof window === 'undefined') return
+  const blob = new Blob([JSON.stringify(report.value, null, 2)], {
+    type: 'application/json',
+  })
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `ai-audit-report-${report.value.generated_at}.json`
+  link.click()
+  window.URL.revokeObjectURL(url)
+  successMessage.value = 'AI 审计 JSON 已导出'
+}
+
 onMounted(() => {
+  loadCachedReportSnapshot()
   void loadSection(true)
 })
 </script>
@@ -168,6 +255,22 @@ onMounted(() => {
         >
           <RefreshCw :size="14" :class="{ 'animate-spin': loading || refreshing }" />
           刷新
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
+          :disabled="!report || copying"
+          @click="copyReportJson"
+        >
+          {{ copying ? '复制中...' : '复制 JSON' }}
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
+          :disabled="!report"
+          @click="downloadReportJson"
+        >
+          导出 JSON
         </button>
       </div>
     </template>
@@ -207,19 +310,20 @@ onMounted(() => {
               <select
                 v-model="form.provider"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
-              >
-                <option value="local_rules">local_rules</option>
-                <option value="stub_model">stub_model</option>
-                <option value="openai_compatible">openai_compatible</option>
-              </select>
-            </label>
+                >
+                  <option value="local_rules">local_rules</option>
+                  <option value="stub_model">stub_model</option>
+                  <option value="openai_compatible">openai_compatible</option>
+                  <option value="xiaomi_mimo">xiaomi_mimo</option>
+                </select>
+              </label>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500">模型名称</span>
               <input
                 v-model="form.model"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
                 type="text"
-                placeholder="例如 gpt-5.4-mini"
+                :placeholder="form.provider === 'xiaomi_mimo' ? '例如 mimo-v2-flash' : '例如 gpt-5.4-mini'"
               />
             </label>
             <label class="space-y-1">
@@ -228,7 +332,7 @@ onMounted(() => {
                 v-model="form.base_url"
                 class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
                 type="text"
-                placeholder="例如 https://api.example.com/v1"
+                :placeholder="form.provider === 'xiaomi_mimo' ? '例如 https://api.xiaomimimo.com/v1' : '例如 https://api.example.com/v1'"
               />
             </label>
             <label class="space-y-1">
@@ -263,6 +367,12 @@ onMounted(() => {
               />
               provider 失败时自动回退到 local_rules
             </label>
+            <div
+              v-if="form.provider === 'xiaomi_mimo'"
+              class="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800"
+            >
+              小米 MIMO 预设会优先使用 `api-key` 请求头，并在未填写地址时默认走 `https://api.xiaomimimo.com/v1`。
+            </div>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500">观察窗口（秒）</span>
               <input
@@ -285,6 +395,10 @@ onMounted(() => {
             <StatusBadge
               type="muted"
               :text="providerStatusText"
+            />
+            <StatusBadge
+              type="muted"
+              :text="cachedReportLabel"
             />
             <StatusBadge
               v-if="report?.summary.current.auto_tuning_last_adjust_reason"

@@ -142,7 +142,11 @@ export interface HeaderOperationItem {
 
 export interface AiAuditSettingsPayload {
   enabled: boolean
-  provider: 'local_rules' | 'stub_model' | 'openai_compatible'
+  provider:
+    | 'local_rules'
+    | 'stub_model'
+    | 'openai_compatible'
+    | 'xiaomi_mimo'
   model: string
   base_url: string
   api_key: string

@@ -628,6 +628,7 @@ impl AiAuditSettingsResponse {
                 crate::config::AiAuditProviderConfig::OpenAiCompatible => {
                     "openai_compatible".to_string()
                 }
+                crate::config::AiAuditProviderConfig::XiaomiMimo => "xiaomi_mimo".to_string(),
             },
             model: config.model.clone(),
             base_url: config.base_url.clone(),

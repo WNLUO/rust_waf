@@ -482,9 +482,10 @@ impl AiAuditSettingsRequest {
             "" | "local_rules" => crate::config::AiAuditProviderConfig::LocalRules,
             "stub_model" => crate::config::AiAuditProviderConfig::StubModel,
             "openai_compatible" => crate::config::AiAuditProviderConfig::OpenAiCompatible,
+            "xiaomi_mimo" => crate::config::AiAuditProviderConfig::XiaomiMimo,
             other => {
                 return Err(format!(
-                    "AI 审计 provider 仅支持 local_rules/stub_model/openai_compatible，收到 '{}'",
+                    "AI 审计 provider 仅支持 local_rules/stub_model/openai_compatible/xiaomi_mimo，收到 '{}'",
                     other
                 ))
             }

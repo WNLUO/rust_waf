@@ -129,6 +129,7 @@ pub enum AiAuditProviderConfig {
     LocalRules,
     StubModel,
     OpenAiCompatible,
+    XiaomiMimo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

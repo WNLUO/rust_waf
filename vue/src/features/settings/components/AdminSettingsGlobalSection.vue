@@ -268,6 +268,7 @@ onMounted(loadSettings)
                   <option value="local_rules">local_rules</option>
                   <option value="stub_model">stub_model</option>
                   <option value="openai_compatible">openai_compatible</option>
+                  <option value="xiaomi_mimo">xiaomi_mimo</option>
                 </select>
               </label>
               <label class="space-y-1">

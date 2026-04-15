@@ -23,10 +23,7 @@ impl SqliteStore {
     }
 
     #[cfg(any(feature = "api", test))]
-    pub async fn list_behavior_sessions(
-        &self,
-        limit: u32,
-    ) -> Result<Vec<BehaviorSessionEntry>> {
+    pub async fn list_behavior_sessions(&self, limit: u32) -> Result<Vec<BehaviorSessionEntry>> {
         let limit = normalized_limit(limit).min(500);
         let items = sqlx::query_as::<_, BehaviorSessionEntry>(
             r#"
@@ -69,6 +66,48 @@ impl SqliteStore {
     ) -> Result<PagedResult<SecurityEventEntry>> {
         let limit = normalized_limit(query.limit);
         let offset = query.offset;
+        let requires_derived_filtering = query.identity_state.is_some()
+            || query.primary_signal.is_some()
+            || !query.labels.is_empty();
+
+        if !requires_derived_filtering {
+            let mut count_builder =
+                QueryBuilder::<Sqlite>::new("SELECT COUNT(*) FROM security_events WHERE 1=1");
+            append_security_event_filters(&mut count_builder, query);
+            let total: i64 = count_builder
+                .build_query_scalar()
+                .fetch_one(&self.pool)
+                .await?;
+
+            let mut page_builder = QueryBuilder::<Sqlite>::new(
+                r#"
+                SELECT id, layer, provider, provider_event_id, provider_site_id, provider_site_name,
+                       provider_site_domain, action, reason, details_json, source_ip, dest_ip, source_port,
+                       dest_port, protocol, http_method, uri, http_version,
+                       created_at, handled, handled_at
+                FROM security_events
+                WHERE 1=1
+                "#,
+            );
+            append_security_event_filters(&mut page_builder, query);
+            append_event_sort(&mut page_builder, query);
+            page_builder.push(" LIMIT ");
+            page_builder.push_bind(i64::from(limit));
+            page_builder.push(" OFFSET ");
+            page_builder.push_bind(i64::from(offset));
+
+            let items = page_builder
+                .build_query_as::<SecurityEventEntry>()
+                .fetch_all(&self.pool)
+                .await?;
+
+            return Ok(PagedResult {
+                total: total.max(0) as u64,
+                limit,
+                offset,
+                items,
+            });
+        }
 
         let mut builder = QueryBuilder::<Sqlite>::new(
             r#"
@@ -387,13 +426,17 @@ fn derive_security_event_summary(entry: &SecurityEventEntry) -> DerivedSecurityE
         .as_ref()
         .and_then(|value| nested_str(value, &["client_identity", "identity_state"]))
         .or_else(|| nested_str_from_option(details.as_ref(), &["identity_state"]));
-    let forward_header_valid =
-        nested_bool_from_option(details.as_ref(), &["client_identity", "forward_header_valid"])
-            .or_else(|| nested_bool_from_option(details.as_ref(), &["forward_header_valid"]));
+    let forward_header_valid = nested_bool_from_option(
+        details.as_ref(),
+        &["client_identity", "forward_header_valid"],
+    )
+    .or_else(|| nested_bool_from_option(details.as_ref(), &["forward_header_valid"]));
     let overload_level =
         nested_str_from_option(details.as_ref(), &["l4_runtime", "overload_level"]);
-    let rule_mode =
-        nested_str_from_option(details.as_ref(), &["inspection_runtime", "rule_inspection_mode"]);
+    let rule_mode = nested_str_from_option(
+        details.as_ref(),
+        &["inspection_runtime", "rule_inspection_mode"],
+    );
     let cc_action = nested_str_from_option(details.as_ref(), &["l7", "cc", "action"])
         .or_else(|| nested_str_from_option(details.as_ref(), &["cc_action"]));
     let behavior_action = nested_str_from_option(details.as_ref(), &["l7", "behavior", "action"])

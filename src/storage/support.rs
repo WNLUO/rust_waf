@@ -15,6 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Notify};
 
 const MAX_EVENT_DETAILS_BYTES: usize = 4 * 1024;
+const SQLITE_POOL_MAX_CONNECTIONS: u32 = 8;
 
 use super::{
     SqliteOpenErrorKind, SQLITE_CORRUPT_BACKUP_RETENTION, SQLITE_STARTUP_BACKUP_RETENTION,
@@ -36,7 +37,7 @@ pub(super) async fn open_pool(db_path: &Path, auto_migrate: bool) -> Result<Sqli
             .synchronous(SqliteSynchronous::Full)
             .foreign_keys(true);
     let pool = SqlitePoolOptions::new()
-        .max_connections(1)
+        .max_connections(SQLITE_POOL_MAX_CONNECTIONS)
         .connect_with(connect_options)
         .await?;
     validate_database(&pool).await?;

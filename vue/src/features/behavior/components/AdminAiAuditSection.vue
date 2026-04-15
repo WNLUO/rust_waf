@@ -131,6 +131,21 @@ const autoAuditStatusText = computed(() => {
   return '自动审计已启用，尚未触发'
 })
 
+const autoAuditTriggerFlags = computed(() => {
+  if (!autoAuditStatus.value) return []
+  const flags: string[] = []
+  if (autoAuditStatus.value.on_pressure_high) {
+    flags.push('高压力')
+  }
+  if (autoAuditStatus.value.on_attack_mode) {
+    flags.push('attack 模式')
+  }
+  if (autoAuditStatus.value.on_hotspot_shift) {
+    flags.push('热点变化')
+  }
+  return flags
+})
+
 const compareReport = computed(() => {
   if (!reportHistory.value.length) return null
   if (compareReportId.value != null) {
@@ -277,6 +292,21 @@ function formatDelta(value: number | null, suffix = '%') {
   if (value == null) return '暂无基线'
   const sign = value > 0 ? '+' : ''
   return `${sign}${formatNumber(value)}${suffix}`
+}
+
+function truncateMiddle(value: string | null | undefined, head = 16, tail = 10) {
+  if (!value) return '暂无'
+  if (value.length <= head + tail + 3) return value
+  return `${value.slice(0, head)}...${value.slice(-tail)}`
+}
+
+function describeAutoTriggerReason(value: string | null | undefined) {
+  if (!value) return '暂无'
+  return value
+    .split('+')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(' / ')
 }
 
 watch(
@@ -1143,6 +1173,16 @@ onMounted(() => {
                   type="muted"
                   :text="`对比基线 ${formatTimestamp(comparisonSummary.baseline.generated_at)}`"
                 />
+                <StatusBadge
+                  v-if="comparisonSummary.baseline.auto_generated"
+                  type="info"
+                  text="基线为自动触发"
+                />
+                <StatusBadge
+                  v-if="comparisonSummary.baseline.auto_trigger_reason"
+                  type="warning"
+                  :text="`基线触发 ${describeAutoTriggerReason(comparisonSummary.baseline.auto_trigger_reason)}`"
+                />
               </div>
               <div class="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
                 <div
@@ -1250,6 +1290,86 @@ onMounted(() => {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge
+              :type="autoAuditStatus?.enabled ? 'info' : 'muted'"
+              :text="autoAuditStatus?.enabled ? '自动审计已启用' : '自动审计未启用'"
+            />
+            <StatusBadge type="muted" :text="autoAuditStatusText" />
+            <StatusBadge
+              v-if="autoAuditStatus?.last_trigger_reason"
+              type="warning"
+              :text="`最近触发 ${describeAutoTriggerReason(autoAuditStatus.last_trigger_reason)}`"
+            />
+          </div>
+          <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">调度参数</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900">
+                间隔 {{ formatNumber(autoAuditStatus?.interval_secs ?? 0) }}s
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                冷却 {{ formatNumber(autoAuditStatus?.cooldown_secs ?? 0) }}s
+              </p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">触发条件</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900">
+                {{
+                  autoAuditTriggerFlags.length
+                    ? autoAuditTriggerFlags.join(' / ')
+                    : '暂无'
+                }}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                {{
+                  autoAuditStatus?.force_local_rules_under_attack
+                    ? 'attack 模式下会强制回退 local_rules'
+                    : 'attack 模式下保持当前 provider'
+                }}
+              </p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">最近运行</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900">
+                {{
+                  autoAuditStatus?.last_run_at
+                    ? formatTimestamp(autoAuditStatus.last_run_at)
+                    : '暂无'
+                }}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                最近完成
+                {{
+                  autoAuditStatus?.last_completed_at
+                    ? formatTimestamp(autoAuditStatus.last_completed_at)
+                    : '暂无'
+                }}
+              </p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs text-slate-400">最近结果</p>
+              <p class="mt-1 text-sm font-semibold text-slate-900">
+                {{
+                  autoAuditStatus?.last_report_id
+                    ? `报告 #${autoAuditStatus.last_report_id}`
+                    : '暂无'
+                }}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                签名
+                {{
+                  truncateMiddle(
+                    autoAuditStatus?.last_trigger_signature ??
+                      autoAuditStatus?.last_observed_signature,
+                  )
+                }}
+              </p>
             </div>
           </div>
         </div>
@@ -1789,6 +1909,16 @@ onMounted(() => {
                     v-if="compareReportId === item.id"
                     type="info"
                     text="当前对比基线"
+                  />
+                  <StatusBadge
+                    v-if="item.auto_generated"
+                    type="info"
+                    text="自动触发"
+                  />
+                  <StatusBadge
+                    v-if="item.auto_trigger_reason"
+                    type="warning"
+                    :text="describeAutoTriggerReason(item.auto_trigger_reason)"
                   />
                 </div>
                 <p class="text-sm font-semibold text-slate-900">

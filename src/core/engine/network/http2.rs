@@ -315,6 +315,21 @@ pub(crate) async fn handle_http2_connection(
                     debug!("HTTP/2.0 request: {} {}", request.method, request.uri);
 
                     let request_dump = request.to_inspection_string();
+                    let critical_overload = request_in_critical_overload(&request);
+                    let rule_inspection_mode = if critical_overload {
+                        "lightweight"
+                    } else {
+                        "full"
+                    };
+                    request.add_metadata(
+                        "l7.rule_inspection_mode".to_string(),
+                        rule_inspection_mode.to_string(),
+                    );
+                    let rule_payload = if critical_overload {
+                        request.to_lightweight_inspection_string()
+                    } else {
+                        request_dump.clone()
+                    };
                     let traffic_source_ip = request
                         .client_ip
                         .clone()
@@ -323,16 +338,12 @@ pub(crate) async fn handle_http2_connection(
                         metrics.record_packet(request_dump.len());
                     }
 
-                    let inspection_result = if request_in_critical_overload(&request) {
-                        InspectionResult::allow(InspectionLayer::L7)
-                    } else {
-                        inspect_application_layers(
-                            context.as_ref(),
-                            &packet,
-                            &request,
-                            &request_dump,
-                        )
-                    };
+                    let inspection_result = inspect_application_layers(
+                        context.as_ref(),
+                        &packet,
+                        &request,
+                        &rule_payload,
+                    );
 
                     if inspection_result.should_persist_event() {
                         persist_http_inspection_event(

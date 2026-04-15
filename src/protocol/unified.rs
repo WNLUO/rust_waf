@@ -90,6 +90,14 @@ impl UnifiedHttpRequest {
     ///
     /// 将头部和请求体组合成文本格式，供现有的正则表达式检测使用
     pub fn to_inspection_string(&self) -> String {
+        self.build_inspection_string(true)
+    }
+
+    pub fn to_lightweight_inspection_string(&self) -> String {
+        self.build_inspection_string(false)
+    }
+
+    fn build_inspection_string(&self, include_body: bool) -> String {
         let mut inspection_text = String::new();
 
         // 添加方法和URI
@@ -107,7 +115,7 @@ impl UnifiedHttpRequest {
         }
 
         // 添加请求体
-        if !self.body.is_empty() {
+        if include_body && !self.body.is_empty() {
             inspection_text.push('\n');
             let body_str = String::from_utf8_lossy(&self.body);
             inspection_text.push_str(&body_str);
@@ -271,6 +279,20 @@ mod tests {
         assert!(inspection_text.contains("host: example.com"));
         assert!(inspection_text.contains("@quic.version: 1"));
         assert!(inspection_text.contains("test data"));
+    }
+
+    #[test]
+    fn test_lightweight_inspection_string_excludes_body() {
+        let mut request = UnifiedHttpRequest::default();
+        request.add_header("Host".to_string(), "example.com".to_string());
+        request.add_metadata("l4.overload_level".to_string(), "critical".to_string());
+        request.body = b"secret body".to_vec();
+
+        let inspection_text = request.to_lightweight_inspection_string();
+        assert!(inspection_text.contains("GET /"));
+        assert!(inspection_text.contains("host: example.com"));
+        assert!(inspection_text.contains("@l4.overload_level: critical"));
+        assert!(!inspection_text.contains("secret body"));
     }
 
     #[test]

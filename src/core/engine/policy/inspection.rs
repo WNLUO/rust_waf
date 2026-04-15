@@ -440,6 +440,18 @@ fn build_request_identity_details_with_header(
             "challenge_count_window": request.get_metadata("l7.behavior.challenge_count_window").cloned(),
             "session_span_secs": request.get_metadata("l7.behavior.session_span_secs").cloned(),
             "flags": request.get_metadata("l7.behavior.flags").cloned(),
+        },
+        "l4_runtime": {
+            "identity_state": request.get_metadata("l4.identity_state").cloned(),
+            "bucket_risk": request.get_metadata("l4.bucket_risk").cloned(),
+            "bucket_score": request.get_metadata("l4.bucket_score").cloned(),
+            "overload_level": request.get_metadata("l4.overload_level").cloned(),
+            "force_close": request.get_metadata("l4.force_close").cloned(),
+            "suggested_delay_ms": request.get_metadata("l4.suggested_delay_ms").cloned(),
+        },
+        "inspection_runtime": {
+            "rule_inspection_mode": request.get_metadata("l7.rule_inspection_mode").cloned(),
+            "cc_identity_state": request.get_metadata("l7.cc.identity_state").cloned(),
         }
     });
 

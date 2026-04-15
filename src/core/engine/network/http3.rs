@@ -322,6 +322,21 @@ async fn handle_http3_request(
     persist_http_identity_debug_event(context.as_ref(), &packet, &unified);
 
     let request_dump = unified.to_inspection_string();
+    let critical_overload = request_in_critical_overload(&unified);
+    let rule_inspection_mode = if critical_overload {
+        "lightweight"
+    } else {
+        "full"
+    };
+    unified.add_metadata(
+        "l7.rule_inspection_mode".to_string(),
+        rule_inspection_mode.to_string(),
+    );
+    let rule_payload = if critical_overload {
+        unified.to_lightweight_inspection_string()
+    } else {
+        request_dump.clone()
+    };
     let traffic_source_ip = unified
         .client_ip
         .clone()
@@ -330,11 +345,8 @@ async fn handle_http3_request(
         metrics.record_packet(request_dump.len());
     }
 
-    let inspection_result = if request_in_critical_overload(&unified) {
-        InspectionResult::allow(InspectionLayer::L7)
-    } else {
-        inspect_application_layers(context.as_ref(), &packet, &unified, &request_dump)
-    };
+    let inspection_result =
+        inspect_application_layers(context.as_ref(), &packet, &unified, &rule_payload);
 
     if inspection_result.should_persist_event() {
         persist_http_inspection_event(context.as_ref(), &packet, &unified, &inspection_result);

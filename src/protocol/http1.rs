@@ -9,6 +9,12 @@ use tokio::time::{sleep, Duration};
 /// 处理HTTP/1.1协议的请求和响应
 pub struct Http1Handler;
 
+#[derive(Debug, Clone)]
+pub struct PendingHttp1Body {
+    buffered: Vec<u8>,
+    expected_length: Option<usize>,
+}
+
 impl Http1Handler {
     /// 创建新的HTTP/1.1处理器
     pub fn new() -> Self {
@@ -30,11 +36,42 @@ impl Http1Handler {
     where
         R: AsyncReadExt + Unpin,
     {
+        let (mut request, pending_body) = self
+            .read_request_head(
+                reader,
+                max_size,
+                first_byte_timeout_ms,
+                read_idle_timeout_ms,
+                header_min_bytes_per_sec,
+            )
+            .await?;
+        self.read_request_body(
+            reader,
+            &mut request,
+            pending_body,
+            max_size,
+            read_idle_timeout_ms,
+            body_min_bytes_per_sec,
+        )
+        .await?;
+        Ok(request)
+    }
+
+    pub async fn read_request_head<R>(
+        &self,
+        reader: &mut R,
+        max_size: usize,
+        first_byte_timeout_ms: u64,
+        read_idle_timeout_ms: u64,
+        header_min_bytes_per_sec: u32,
+    ) -> Result<(UnifiedHttpRequest, PendingHttp1Body), ProtocolError>
+    where
+        R: AsyncReadExt + Unpin,
+    {
         let mut buffer = Vec::with_capacity(max_size.min(4096));
         let mut temp_buffer = vec![0u8; 1024];
         let mut headers_complete = false;
         let mut content_length: Option<usize> = None;
-        let mut body_bytes_read = 0;
         let request_started_at = std::time::Instant::now();
         let mut header_progress_started_at: Option<std::time::Instant> = None;
 
@@ -109,74 +146,95 @@ impl Http1Handler {
         }
 
         if !headers_complete {
-            return Ok(UnifiedHttpRequest::default());
+            return Ok((
+                UnifiedHttpRequest::default(),
+                PendingHttp1Body {
+                    buffered: Vec::new(),
+                    expected_length: None,
+                },
+            ));
         }
 
-        // 读取请求体（如果有Content-Length）
-        if let Some(expected_length) = content_length {
-            let headers_end = buffer
-                .iter()
-                .position(|_b| {
-                    buffer.get(buffer.len().saturating_sub(3)) == Some(&b'\r')
-                        && buffer.get(buffer.len().saturating_sub(2)) == Some(&b'\n')
-                        && buffer.get(buffer.len().saturating_sub(1)) == Some(&b'\r')
-                        && buffer.last() == Some(&b'\n')
-                })
-                .unwrap_or(0);
+        let headers_end = buffer
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|index| index + 4)
+            .unwrap_or(buffer.len());
+        let mut request = self.parse_request(&buffer[..headers_end])?;
+        let buffered = buffer[headers_end..].to_vec();
+        request.body = buffered.clone();
+        Ok((
+            request,
+            PendingHttp1Body {
+                buffered,
+                expected_length: content_length,
+            },
+        ))
+    }
 
-            if let Some(headers_end_pos) = headers_end.checked_add(4) {
-                let current_body_size = buffer.len().saturating_sub(headers_end_pos);
-                let body_started_at = std::time::Instant::now();
+    pub async fn read_request_body<R>(
+        &self,
+        reader: &mut R,
+        request: &mut UnifiedHttpRequest,
+        pending_body: PendingHttp1Body,
+        max_size: usize,
+        read_idle_timeout_ms: u64,
+        body_min_bytes_per_sec: u32,
+    ) -> Result<(), ProtocolError>
+    where
+        R: AsyncReadExt + Unpin,
+    {
+        let Some(expected_length) = pending_body.expected_length else {
+            request.body = pending_body.buffered;
+            return Ok(());
+        };
 
-                // 继续读取请求体直到达到Content-Length
-                while body_bytes_read + current_body_size < expected_length
-                    && buffer.len() < max_size
-                {
-                    let bytes_to_read = (expected_length - body_bytes_read - current_body_size)
-                        .min(temp_buffer.len());
+        let mut body = pending_body.buffered;
+        if body.len() >= expected_length {
+            request.body = body;
+            return Ok(());
+        }
 
-                    let bytes_read = tokio::time::timeout(
-                        std::time::Duration::from_millis(read_idle_timeout_ms),
-                        reader.read(&mut temp_buffer[..bytes_to_read]),
-                    )
-                    .await
-                    .map_err(|_| ProtocolError::SlowBody {
-                        bytes_read: body_bytes_read + current_body_size,
-                        expected_bytes: expected_length,
-                        elapsed_ms: body_started_at
-                            .elapsed()
-                            .as_millis()
-                            .min(u128::from(u64::MAX)) as u64,
-                    })??;
-                    if bytes_read == 0 {
-                        break;
-                    }
-
-                    let remaining = max_size.saturating_sub(buffer.len());
-                    let to_copy = remaining.min(bytes_read);
-                    buffer.extend_from_slice(&temp_buffer[..to_copy]);
-                    body_bytes_read += to_copy;
-                    if below_min_rate(
-                        body_bytes_read + current_body_size,
-                        Some(&body_started_at),
-                        body_min_bytes_per_sec,
-                    ) {
-                        return Err(ProtocolError::SlowBody {
-                            bytes_read: body_bytes_read + current_body_size,
-                            expected_bytes: expected_length,
-                            elapsed_ms: body_started_at
-                                .elapsed()
-                                .as_millis()
-                                .min(u128::from(u64::MAX))
-                                as u64,
-                        });
-                    }
-                }
+        let mut temp_buffer = vec![0u8; 1024];
+        let body_started_at = std::time::Instant::now();
+        let header_bytes = request.total_size().saturating_sub(request.body.len());
+        while body.len() < expected_length && header_bytes.saturating_add(body.len()) < max_size {
+            let bytes_to_read = (expected_length - body.len()).min(temp_buffer.len());
+            let bytes_read = tokio::time::timeout(
+                std::time::Duration::from_millis(read_idle_timeout_ms),
+                reader.read(&mut temp_buffer[..bytes_to_read]),
+            )
+            .await
+            .map_err(|_| ProtocolError::SlowBody {
+                bytes_read: body.len(),
+                expected_bytes: expected_length,
+                elapsed_ms: body_started_at
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64,
+            })??;
+            if bytes_read == 0 {
+                break;
+            }
+            let remaining = max_size.saturating_sub(body.len());
+            let to_copy = remaining.min(bytes_read);
+            body.extend_from_slice(&temp_buffer[..to_copy]);
+            if below_min_rate(body.len(), Some(&body_started_at), body_min_bytes_per_sec) {
+                return Err(ProtocolError::SlowBody {
+                    bytes_read: body.len(),
+                    expected_bytes: expected_length,
+                    elapsed_ms: body_started_at
+                        .elapsed()
+                        .as_millis()
+                        .min(u128::from(u64::MAX)) as u64,
+                });
+            }
+            if header_bytes.saturating_add(body.len()) >= max_size {
+                break;
             }
         }
-
-        // 解析HTTP请求
-        self.parse_request(&buffer)
+        request.body = body;
+        Ok(())
     }
 
     /// 解析HTTP/1.1请求

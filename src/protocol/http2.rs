@@ -150,18 +150,20 @@ impl Http2Handler {
         B::Error: std::fmt::Display,
     {
         let (parts, body) = request.into_parts();
+        let mut unified = Self::request_parts_to_unified(parts, client_ip, listener_port)?;
         let body =
             read_http2_request_body(body, max_size, read_idle_timeout_ms, body_min_bytes_per_sec)
                 .await?;
+        unified.body = body.to_vec();
 
-        if body.len() > max_size {
-            return Err(ProtocolError::ParseError(format!(
-                "HTTP/2 request body exceeded limit: {} > {}",
-                body.len(),
-                max_size
-            )));
-        }
+        Ok(unified)
+    }
 
+    pub fn request_parts_to_unified(
+        parts: http::request::Parts,
+        client_ip: &str,
+        listener_port: u16,
+    ) -> Result<UnifiedHttpRequest, ProtocolError> {
         let method = parts.method.as_str().to_string();
         let uri = parts
             .uri
@@ -170,7 +172,6 @@ impl Http2Handler {
             .unwrap_or_else(|| parts.uri.path().to_string());
 
         let mut unified = UnifiedHttpRequest::new(HttpVersion::Http2_0, method, uri);
-        unified.body = body.to_vec();
         unified.set_client_ip(client_ip.to_string());
         unified.add_metadata("listener_port".to_string(), listener_port.to_string());
         unified.add_metadata("protocol".to_string(), "HTTP/2.0".to_string());

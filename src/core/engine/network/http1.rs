@@ -35,8 +35,8 @@ pub(crate) async fn handle_http1_connection(
                 .slow_attack_defense
                 .idle_keepalive_timeout_ms
         };
-        let mut request = match http1_handler
-            .read_request(
+        let (mut request, pending_body) = match http1_handler
+            .read_request_head(
                 &mut stream,
                 config.l7_config.max_request_size,
                 first_byte_timeout_ms,
@@ -45,7 +45,6 @@ pub(crate) async fn handle_http1_connection(
                     .l7_config
                     .slow_attack_defense
                     .header_min_bytes_per_sec,
-                config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
             )
             .await
         {
@@ -55,7 +54,6 @@ pub(crate) async fn handle_http1_connection(
                     err,
                     crate::protocol::ProtocolError::IdleTimeout { .. }
                         | crate::protocol::ProtocolError::SlowHeader { .. }
-                        | crate::protocol::ProtocolError::SlowBody { .. }
                 ) =>
             {
                 handle_slow_attack_error(
@@ -239,6 +237,111 @@ pub(crate) async fn handle_http1_connection(
                 return Ok(());
             }
             continue;
+        }
+
+        if let Err(err) = enforce_http1_request_safety(context.as_ref(), &request) {
+            http1_handler
+                .write_response(&mut stream, 400, "Bad Request", err.to_string().as_bytes())
+                .await?;
+            return Ok(());
+        }
+
+        let early_rule_payload = request.to_lightweight_inspection_string();
+        let early_inspection_result =
+            inspect_application_layers(context.as_ref(), packet, &request, &early_rule_payload);
+        if early_inspection_result.blocked {
+            if early_inspection_result.should_persist_event() {
+                persist_http_inspection_event(
+                    context.as_ref(),
+                    packet,
+                    &request,
+                    &early_inspection_result,
+                );
+            }
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(early_inspection_result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if let Some(response) = early_inspection_result.custom_response.as_ref() {
+                let response = crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
+                let body = body_for_request(&request, &response.body);
+                if let Some(tarpit) = response.tarpit.as_ref() {
+                    http1_handler
+                        .write_response_with_headers_tarpit(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                            tarpit,
+                        )
+                        .await?;
+                } else {
+                    http1_handler
+                        .write_response_with_headers(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                        )
+                        .await?;
+                }
+            } else {
+                http1_handler
+                    .write_response(
+                        &mut stream,
+                        403,
+                        "Forbidden",
+                        early_inspection_result.reason.as_bytes(),
+                    )
+                    .await?;
+            }
+            if !should_keep_client_connection_open(&request) {
+                return Ok(());
+            }
+            continue;
+        }
+
+        if let Err(err) = http1_handler
+            .read_request_body(
+                &mut stream,
+                &mut request,
+                pending_body,
+                config.l7_config.max_request_size,
+                config.l7_config.read_idle_timeout_ms,
+                config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
+            )
+            .await
+        {
+            if matches!(err, crate::protocol::ProtocolError::SlowBody { .. }) {
+                handle_slow_attack_error(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    packet,
+                    peer_addr,
+                    &err,
+                    trusted_proxy_peer,
+                )
+                .await?;
+                if let (Some(inspector), Some(bucket_key)) =
+                    (context.l4_inspector(), bucket_key.as_ref())
+                {
+                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                }
+                return Ok(());
+            }
+            return Err(err.into());
         }
 
         if let Some(response) = try_handle_browser_fingerprint_report(

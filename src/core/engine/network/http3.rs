@@ -117,31 +117,9 @@ async fn handle_http3_request(
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let (request, mut stream) = resolver.resolve_request().await?;
-    let body = match read_http3_request_body(
-        &mut stream,
-        config.l7_config.max_request_size,
-        config.l7_config.read_idle_timeout_ms,
-        config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
-    )
-    .await
-    {
-        Ok(body) => body,
-        Err(err)
-            if matches!(
-                err,
-                crate::protocol::ProtocolError::SlowBody { .. }
-                    | crate::protocol::ProtocolError::IdleTimeout { .. }
-            ) =>
-        {
-            handle_http3_slow_attack_error(context.as_ref(), &packet, &mut stream, err).await?;
-            return Ok(());
-        }
-        Err(err) => return Err(err.into()),
-    };
-
     let mut unified = http3_handler.request_to_unified(
         &request,
-        body,
+        Vec::new(),
         &packet.source_ip.to_string(),
         packet.dest_port,
     );
@@ -216,6 +194,77 @@ async fn handle_http3_request(
         .await?;
         return Ok(());
     }
+
+    let early_rule_payload = unified.to_lightweight_inspection_string();
+    let early_inspection_result =
+        inspect_application_layers(context.as_ref(), &packet, &unified, &early_rule_payload);
+    if early_inspection_result.blocked {
+        if early_inspection_result.should_persist_event() {
+            persist_http_inspection_event(
+                context.as_ref(),
+                &packet,
+                &unified,
+                &early_inspection_result,
+            );
+        }
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(early_inspection_result.layer.clone());
+        }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.record_l7_feedback(
+                &packet,
+                &unified,
+                crate::l4::behavior::FeedbackSource::L7Block,
+            );
+        }
+        if let Some(response) = early_inspection_result.custom_response.as_ref() {
+            let response = crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                context.as_ref(),
+                &resolve_runtime_custom_response(response),
+            );
+            send_http3_response(
+                &mut stream,
+                response.status_code,
+                &response.headers,
+                body_for_request(&unified, &response.body),
+                response.tarpit.as_ref(),
+            )
+            .await?;
+        } else {
+            send_http3_response(
+                &mut stream,
+                403,
+                &[],
+                body_for_request(&unified, early_inspection_result.reason.as_bytes()),
+                None,
+            )
+            .await?;
+        }
+        return Ok(());
+    }
+
+    let body = match read_http3_request_body(
+        &mut stream,
+        config.l7_config.max_request_size,
+        config.l7_config.read_idle_timeout_ms,
+        config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
+    )
+    .await
+    {
+        Ok(body) => body,
+        Err(err)
+            if matches!(
+                err,
+                crate::protocol::ProtocolError::SlowBody { .. }
+                    | crate::protocol::ProtocolError::IdleTimeout { .. }
+            ) =>
+        {
+            handle_http3_slow_attack_error(context.as_ref(), &packet, &mut stream, err).await?;
+            return Ok(());
+        }
+        Err(err) => return Err(err.into()),
+    };
+    unified.body = body;
 
     if let Some(response) = try_handle_browser_fingerprint_report(
         context.as_ref(),

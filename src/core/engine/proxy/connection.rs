@@ -427,7 +427,10 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
     }
 }
 
-fn enforce_http1_request_safety(context: &WafContext, request: &UnifiedHttpRequest) -> Result<()> {
+pub(crate) fn enforce_http1_request_safety(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+) -> Result<()> {
     let config = &context.config_snapshot().l7_config;
     if !config.upstream_http1_strict_mode {
         return Ok(());
@@ -465,8 +468,12 @@ fn enforce_http1_request_safety(context: &WafContext, request: &UnifiedHttpReque
     if config.reject_expect_100_continue && has_expect_100_continue {
         anyhow::bail!("rejected HTTP/1 request carrying Expect: 100-continue");
     }
+    let declared_body_len = request
+        .get_header("content-length")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
     if config.reject_body_on_safe_http_methods
-        && !request.body.is_empty()
+        && (declared_body_len > 0 || !request.body.is_empty())
         && matches!(request.method.as_str(), "GET" | "HEAD" | "OPTIONS")
     {
         anyhow::bail!(

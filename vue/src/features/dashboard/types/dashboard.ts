@@ -118,11 +118,15 @@ export interface AiAuditSummaryResponse {
 export interface AiAuditSafeLineCorrelation {
   safeline_events: number
   rust_events: number
+  rust_persistence_percent: number
   safeline_top_hosts: AiAuditCountItem[]
   rust_top_hosts: AiAuditCountItem[]
   overlap_hosts: AiAuditCountItem[]
   overlap_routes: AiAuditCountItem[]
   overlap_source_ips: AiAuditCountItem[]
+  persistent_overlap_hosts: AiAuditCountItem[]
+  persistent_overlap_routes: AiAuditCountItem[]
+  persistent_overlap_source_ips: AiAuditCountItem[]
 }
 
 export interface AiAuditReportFinding {

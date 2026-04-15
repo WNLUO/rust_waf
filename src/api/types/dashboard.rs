@@ -106,11 +106,15 @@ pub struct AiAuditSummaryResponse {
 pub struct AiAuditSafeLineCorrelationResponse {
     pub(crate) safeline_events: u64,
     pub(crate) rust_events: u64,
+    pub(crate) rust_persistence_percent: f64,
     pub(crate) safeline_top_hosts: Vec<AiAuditCountItem>,
     pub(crate) rust_top_hosts: Vec<AiAuditCountItem>,
     pub(crate) overlap_hosts: Vec<AiAuditCountItem>,
     pub(crate) overlap_routes: Vec<AiAuditCountItem>,
     pub(crate) overlap_source_ips: Vec<AiAuditCountItem>,
+    pub(crate) persistent_overlap_hosts: Vec<AiAuditCountItem>,
+    pub(crate) persistent_overlap_routes: Vec<AiAuditCountItem>,
+    pub(crate) persistent_overlap_source_ips: Vec<AiAuditCountItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -830,6 +830,10 @@ onMounted(() => {
                   type="warning"
                   :text="`共同热点 route ${formatNumber(report.summary.safeline_correlation.overlap_routes.length)}`"
                 />
+                <StatusBadge
+                  type="error"
+                  :text="`持续压力 ${formatNumber(report.summary.safeline_correlation.rust_persistence_percent)}%`"
+                />
               </div>
               <div class="mt-3 grid gap-3 md:grid-cols-2">
                 <div
@@ -892,6 +896,40 @@ onMounted(() => {
                     {{
                       formatCountItems(
                         report.summary.safeline_correlation.overlap_routes,
+                      )
+                    }}
+                  </p>
+                </div>
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
+                    未回落 Host
+                  </p>
+                  <p class="mt-2 text-sm text-slate-700">
+                    {{
+                      formatCountItems(
+                        report.summary.safeline_correlation
+                          .persistent_overlap_hosts,
+                      )
+                    }}
+                  </p>
+                </div>
+                <div
+                  class="rounded-xl border border-white/80 bg-white/80 px-3 py-3"
+                >
+                  <p
+                    class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400"
+                  >
+                    未回落 Route
+                  </p>
+                  <p class="mt-2 text-sm text-slate-700">
+                    {{
+                      formatCountItems(
+                        report.summary.safeline_correlation
+                          .persistent_overlap_routes,
                       )
                     }}
                   </p>

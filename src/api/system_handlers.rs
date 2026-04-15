@@ -469,11 +469,19 @@ async fn build_ai_audit_summary(
         safeline_correlation: AiAuditSafeLineCorrelationResponse {
             safeline_events,
             rust_events,
+            rust_persistence_percent: rust_persistence_percent(safeline_events, rust_events),
             safeline_top_hosts: top_count_items(safeline_hosts.clone(), 6),
             rust_top_hosts: top_count_items(rust_hosts.clone(), 6),
             overlap_hosts: overlap_count_items(&safeline_hosts, &rust_hosts, 6),
             overlap_routes: overlap_count_items(&safeline_routes, &rust_routes, 6),
             overlap_source_ips: overlap_count_items(&safeline_source_ips, &rust_source_ips, 6),
+            persistent_overlap_hosts: persistent_overlap_items(&safeline_hosts, &rust_hosts, 6),
+            persistent_overlap_routes: persistent_overlap_items(&safeline_routes, &rust_routes, 6),
+            persistent_overlap_source_ips: persistent_overlap_items(
+                &safeline_source_ips,
+                &rust_source_ips,
+                6,
+            ),
         },
         recent_events,
     })
@@ -501,6 +509,37 @@ fn overlap_count_items(
     items.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
     items.truncate(limit);
     items
+}
+
+fn persistent_overlap_items(
+    safeline: &BTreeMap<String, u64>,
+    rust: &BTreeMap<String, u64>,
+    limit: usize,
+) -> Vec<AiAuditCountItem> {
+    let mut items = safeline
+        .iter()
+        .filter_map(|(key, safeline_count)| {
+            let rust_count = rust.get(key)?;
+            if *rust_count > *safeline_count {
+                Some(AiAuditCountItem {
+                    key: key.clone(),
+                    count: rust_count.saturating_sub(*safeline_count),
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    items.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.key.cmp(&b.key)));
+    items.truncate(limit);
+    items
+}
+
+fn rust_persistence_percent(safeline_events: u64, rust_events: u64) -> f64 {
+    if safeline_events == 0 {
+        return if rust_events > 0 { 100.0 } else { 0.0 };
+    }
+    ((rust_events as f64 / safeline_events as f64) * 100.0).clamp(0.0, 999.0)
 }
 
 fn ai_audit_event_host(event: &SecurityEventResponse) -> Option<String> {
@@ -635,6 +674,77 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
                 rationale:
                     "雷池与 Rust 同时观察到的热点路径更适合短期提高摩擦，压缩持续型 CC 的回流空间。"
                         .to_string(),
+            });
+        }
+    }
+
+    if !summary
+        .safeline_correlation
+        .persistent_overlap_hosts
+        .is_empty()
+        || !summary
+            .safeline_correlation
+            .persistent_overlap_routes
+            .is_empty()
+    {
+        let persistent_route = summary
+            .safeline_correlation
+            .persistent_overlap_routes
+            .first()
+            .map(|item| item.key.clone());
+        findings.push(AiAuditReportFinding {
+            key: "safeline_relief_incomplete".to_string(),
+            severity: "high".to_string(),
+            title: "雷池拦截后仍有未回落的持续热点".to_string(),
+            detail: format!(
+                "Rust 持续压力约为雷池事件量的 {:.1}%，并且存在在雷池之后依旧扩大的热点对象，说明前置拦截尚未完全压住回流。",
+                summary.safeline_correlation.rust_persistence_percent
+            ),
+            evidence: vec![
+                format!(
+                    "persistent_overlap_hosts={}",
+                    summary.safeline_correlation.persistent_overlap_hosts.len()
+                ),
+                format!(
+                    "persistent_overlap_routes={}",
+                    summary.safeline_correlation.persistent_overlap_routes.len()
+                ),
+                format!(
+                    "persistent_overlap_source_ips={}",
+                    summary.safeline_correlation.persistent_overlap_source_ips.len()
+                ),
+            ],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "raise_post_safeline_friction".to_string(),
+            priority: "high".to_string(),
+            title: "对雷池后持续热点加一层摩擦".to_string(),
+            action: format!(
+                "优先对雷池后仍未回落的对象{}追加 delay / challenge / temp block，避免同类流量在 Rust 层继续消耗连接和行为状态。",
+                persistent_route
+                    .as_deref()
+                    .map(|value| format!("，重点观察 route {value}"))
+                    .unwrap_or_default()
+            ),
+            rationale: "只有看到雷池后仍持续扩大的对象，AI 才能更准确地做最后一道补刀，而不是对已经被吸收的热点重复加压。".to_string(),
+            action_type: "add_rule".to_string(),
+            rule_suggestion_key: Some("raise_post_safeline_friction".to_string()),
+        });
+        if let Some(route) = persistent_route {
+            suggested_local_rules.push(AiAuditSuggestedRuleResponse {
+                key: "raise_post_safeline_friction".to_string(),
+                title: "提高雷池后持续热点路径摩擦".to_string(),
+                policy_type: "increase_delay".to_string(),
+                layer: "l7".to_string(),
+                scope_type: "route".to_string(),
+                scope_value: route,
+                target: "post_safeline_persistent_route".to_string(),
+                action: "increase_delay".to_string(),
+                operator: "prefix".to_string(),
+                suggested_value: "350".to_string(),
+                ttl_secs: 900,
+                auto_apply: true,
+                rationale: "对雷池之后仍持续扩大的热点路径增加延迟，可以优先压降连接和请求节奏，再观察是否需要升级到更强动作。".to_string(),
             });
         }
     }
@@ -867,6 +977,22 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             summary.safeline_correlation.rust_events,
             summary.safeline_correlation.overlap_hosts.len(),
             summary.safeline_correlation.overlap_routes.len()
+        ));
+    }
+    if !summary
+        .safeline_correlation
+        .persistent_overlap_hosts
+        .is_empty()
+        || !summary
+            .safeline_correlation
+            .persistent_overlap_routes
+            .is_empty()
+    {
+        executive_summary.push(format!(
+            "雷池后持续压力约为 {:.1}%，未回落热点 host {} 个、route {} 个。",
+            summary.safeline_correlation.rust_persistence_percent,
+            summary.safeline_correlation.persistent_overlap_hosts.len(),
+            summary.safeline_correlation.persistent_overlap_routes.len()
         ));
     }
     if let Some(top_identity) = summary.identity_states.first() {
@@ -1115,6 +1241,7 @@ mod tests {
         summary.safeline_correlation = AiAuditSafeLineCorrelationResponse {
             safeline_events: 8,
             rust_events: 12,
+            rust_persistence_percent: 150.0,
             safeline_top_hosts: vec![AiAuditCountItem {
                 key: "api.example.com".to_string(),
                 count: 6,
@@ -1135,6 +1262,18 @@ mod tests {
                 key: "203.0.113.10".to_string(),
                 count: 3,
             }],
+            persistent_overlap_hosts: vec![AiAuditCountItem {
+                key: "api.example.com".to_string(),
+                count: 2,
+            }],
+            persistent_overlap_routes: vec![AiAuditCountItem {
+                key: "/login".to_string(),
+                count: 2,
+            }],
+            persistent_overlap_source_ips: vec![AiAuditCountItem {
+                key: "203.0.113.10".to_string(),
+                count: 1,
+            }],
         };
 
         let report = build_ai_audit_report(summary);
@@ -1147,5 +1286,9 @@ mod tests {
             .suggested_local_rules
             .iter()
             .any(|item| item.key == "tighten_safeline_overlap_route"));
+        assert!(report
+            .suggested_local_rules
+            .iter()
+            .any(|item| item.key == "raise_post_safeline_friction"));
     }
 }

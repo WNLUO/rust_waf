@@ -454,44 +454,25 @@ onBeforeUnmount(() => {
 
 <template>
   <AppLayout>
+    <template #header-extra>
+      <div class="flex items-center gap-3">
+        <StatusBadge
+          :type="realtimeState.connected ? 'success' : realtimeState.connecting ? 'info' : 'muted'"
+          :text="statusLabel"
+        />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="refreshing"
+          @click="loadPage()"
+        >
+          <RefreshCw :size="16" :class="{ 'animate-spin': refreshing }" />
+          刷新观测
+        </button>
+      </div>
+    </template>
+
     <div class="space-y-6">
-      <section
-        class="overflow-hidden rounded-[28px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-amber-50 shadow-sm"
-      >
-        <div class="flex flex-col gap-6 px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
-          <div class="space-y-3">
-            <div class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white/80 px-3 py-1 text-xs font-medium text-amber-700">
-              <Fingerprint :size="14" />
-              行为画像观测
-            </div>
-            <div class="space-y-2">
-              <h1 class="text-2xl font-semibold tracking-tight text-slate-900">
-                当前实时状态与异常轨迹
-              </h1>
-              <p class="max-w-3xl text-sm leading-6 text-slate-600">
-                这里先看最近活跃会话的当前状态，再看历史异常轨迹。这样测试时不会把旧的 challenge 或 block 误读成“现在仍然在发生”。
-              </p>
-            </div>
-          </div>
-
-          <div class="flex flex-col items-start gap-3 lg:items-end">
-            <StatusBadge
-              :type="realtimeState.connected ? 'success' : realtimeState.connecting ? 'info' : 'muted'"
-              :text="statusLabel"
-            />
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="refreshing"
-              @click="loadPage()"
-            >
-              <RefreshCw :size="16" :class="{ 'animate-spin': refreshing }" />
-              刷新观测
-            </button>
-          </div>
-        </div>
-      </section>
-
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">

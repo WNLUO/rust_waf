@@ -11,8 +11,12 @@ import type {
   AiAuditSummaryQuery,
   AiAuditSummaryResponse,
   AiAuditReportResponse,
+  AiAuditReportsQuery,
+  AiAuditReportsResponse,
+  AiAuditFeedbackUpdatePayload,
   TrafficMapQuery,
   TrafficMapResponse,
+  WriteStatusResponse,
 } from '@/shared/types'
 import { apiRequest, buildQuery, withDefaults } from './core'
 
@@ -67,5 +71,26 @@ export async function fetchAiAuditReport(
 ): Promise<AiAuditReportResponse> {
   return apiRequest<AiAuditReportResponse>(
     `/dashboard/ai-audit-report${buildQuery(options)}`,
+  )
+}
+
+export async function fetchAiAuditReports(
+  options: AiAuditReportsQuery = {},
+): Promise<AiAuditReportsResponse> {
+  return apiRequest<AiAuditReportsResponse>(
+    `/dashboard/ai-audit-reports${buildQuery(options)}`,
+  )
+}
+
+export async function updateAiAuditReportFeedback(
+  id: number,
+  payload: AiAuditFeedbackUpdatePayload,
+): Promise<WriteStatusResponse> {
+  return apiRequest<WriteStatusResponse>(
+    `/dashboard/ai-audit-reports/${id}/feedback`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
   )
 }

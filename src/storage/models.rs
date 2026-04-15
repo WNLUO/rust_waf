@@ -105,6 +105,21 @@ pub struct SecurityEventEntry {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiAuditReportEntry {
+    pub id: i64,
+    pub generated_at: i64,
+    pub provider_used: String,
+    pub fallback_used: bool,
+    pub risk_level: String,
+    pub headline: String,
+    pub report_json: String,
+    pub feedback_status: Option<String>,
+    pub feedback_notes: Option<String>,
+    pub feedback_updated_at: Option<i64>,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct BlockedIpEntry {
     pub id: i64,
     pub provider: Option<String>,

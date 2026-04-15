@@ -108,6 +108,14 @@ pub struct PagedResult<T> {
 }
 
 #[cfg(any(feature = "api", test))]
+#[derive(Debug, Clone, Default)]
+pub struct AiAuditReportQuery {
+    pub limit: u32,
+    pub offset: u32,
+    pub feedback_status: Option<String>,
+}
+
+#[cfg(any(feature = "api", test))]
 pub(super) fn normalized_limit(limit: u32) -> u32 {
     if limit == 0 {
         50

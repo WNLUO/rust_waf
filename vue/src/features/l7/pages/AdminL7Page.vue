@@ -18,7 +18,6 @@ const {
   http3StatusType,
   lastUpdated,
   loading,
-  meta,
   protocolTags,
   proxySuccessRate,
   refreshAll,
@@ -79,18 +78,6 @@ const lastUpdatedLabel = computed(() => {
     </div>
 
     <div v-else class="space-y-4">
-      <section
-        v-if="meta.adaptive_managed_fields && meta.adaptive_runtime"
-        class="rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(240,253,244,0.95),rgba(236,253,245,0.88),rgba(239,246,255,0.9))] p-4 shadow-sm"
-      >
-        <p class="text-sm font-semibold text-emerald-800">L7 已由自适应控制器主导</p>
-        <p class="mt-2 text-sm leading-6 text-stone-700">
-          当前系统压力为 {{ meta.adaptive_runtime.system_pressure }}。CC 窗口、延迟和 challenge / block 阈值会按运行时状态自动收紧或放宽，这里优先作为观测面板使用。
-        </p>
-        <p class="mt-2 text-xs leading-5 text-slate-500">
-          旧的 CC 阈值和自动调优细项已归档到 `advanced_compatibility` 兼容层，主视图优先展示自动控制器当前生效策略。
-        </p>
-      </section>
       <AdminL7OverviewSection
         :config-form="configForm"
         :failure-mode-label="failureModeLabel"

@@ -143,6 +143,24 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON behavior_events(session_key);
         CREATE INDEX IF NOT EXISTS idx_behavior_events_created_at
             ON behavior_events(created_at);
+
+        CREATE TABLE IF NOT EXISTS ai_audit_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            generated_at INTEGER NOT NULL,
+            provider_used TEXT NOT NULL,
+            fallback_used INTEGER NOT NULL DEFAULT 0,
+            risk_level TEXT NOT NULL,
+            headline TEXT NOT NULL,
+            report_json TEXT NOT NULL,
+            feedback_status TEXT,
+            feedback_notes TEXT,
+            feedback_updated_at INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_audit_reports_generated_at
+            ON ai_audit_reports(generated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ai_audit_reports_feedback_status
+            ON ai_audit_reports(feedback_status);
         CREATE TABLE IF NOT EXISTS rules (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

@@ -136,9 +136,107 @@ pub(super) async fn ai_audit_report_handler(
         summary_query.recent_limit,
     )
     .await?;
-    Ok(Json(
-        crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report).await?,
-    ))
+    let mut report =
+        crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report).await?;
+    if let Some(store) = state.context.sqlite_store.as_ref() {
+        let persist_result = match serde_json::to_string(&report) {
+            Ok(report_json) => store
+                .create_ai_audit_report(
+                    report.generated_at,
+                    &report.provider_used,
+                    report.fallback_used,
+                    &report.risk_level,
+                    &report.headline,
+                    &report_json,
+                )
+                .await
+                .map_err(ApiError::internal),
+            Err(err) => Err(ApiError::internal(err)),
+        };
+        match persist_result {
+            Ok(id) => report.report_id = Some(id),
+            Err(err) => {
+                log::warn!("Failed to persist AI audit report: {:?}", err);
+                report
+                    .execution_notes
+                    .push("failed to persist ai audit report snapshot".to_string());
+            }
+        }
+    }
+    Ok(Json(report))
+}
+
+pub(super) async fn list_ai_audit_reports_handler(
+    State(state): State<ApiState>,
+    Query(params): Query<AiAuditReportsQueryParams>,
+) -> ApiResult<Json<AiAuditReportsResponse>> {
+    let store = sqlite_store(&state)?;
+    let result = store
+        .list_ai_audit_reports(&crate::storage::AiAuditReportQuery {
+            limit: params.limit.unwrap_or(20),
+            offset: params.offset.unwrap_or(0),
+            feedback_status: params.feedback_status,
+        })
+        .await
+        .map_err(ApiError::internal)?;
+
+    let reports = result
+        .items
+        .into_iter()
+        .map(crate::api::ai_audit::history_item_from_entry)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(AiAuditReportsResponse {
+        total: result.total,
+        limit: result.limit,
+        offset: result.offset,
+        reports,
+    }))
+}
+
+pub(super) async fn update_ai_audit_report_feedback_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    ExtractJson(payload): ExtractJson<AiAuditFeedbackUpdateRequest>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let feedback_status = payload
+        .feedback_status
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(status) = feedback_status {
+        let normalized = status.to_ascii_lowercase();
+        if !matches!(
+            normalized.as_str(),
+            "confirmed" | "false_positive" | "follow_up"
+        ) {
+            return Err(ApiError::bad_request(
+                "feedback_status 仅支持 confirmed / false_positive / follow_up",
+            ));
+        }
+    }
+    let updated = store
+        .update_ai_audit_report_feedback(
+            id,
+            feedback_status,
+            payload
+                .feedback_notes
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        )
+        .await
+        .map_err(ApiError::internal)?;
+    if !updated {
+        return Err(ApiError::not_found("未找到对应的 AI 审计报告"));
+    }
+
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "AI 审计反馈已更新".to_string(),
+    }))
 }
 
 async fn build_ai_audit_summary(
@@ -402,6 +500,7 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
     .to_string();
 
     AiAuditReportResponse {
+        report_id: None,
         generated_at: summary.generated_at,
         provider_used: "local_rules".to_string(),
         fallback_used: false,

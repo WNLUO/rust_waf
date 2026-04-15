@@ -37,6 +37,12 @@ export interface AiAuditSummaryQuery extends Record<string, ApiQueryValue> {
   fallback_to_rules?: boolean
 }
 
+export interface AiAuditReportsQuery extends Record<string, ApiQueryValue> {
+  limit?: number
+  offset?: number
+  feedback_status?: string
+}
+
 export interface AiAuditCountItem {
   key: string
   count: number
@@ -117,6 +123,7 @@ export interface AiAuditReportRecommendation {
 }
 
 export interface AiAuditReportResponse {
+  report_id?: number | null
   generated_at: number
   provider_used: string
   fallback_used: boolean
@@ -127,6 +134,31 @@ export interface AiAuditReportResponse {
   findings: AiAuditReportFinding[]
   recommendations: AiAuditReportRecommendation[]
   summary: AiAuditSummaryResponse
+}
+
+export interface AiAuditReportHistoryItem {
+  id: number
+  generated_at: number
+  provider_used: string
+  fallback_used: boolean
+  risk_level: string
+  headline: string
+  feedback_status: string | null
+  feedback_notes: string | null
+  feedback_updated_at: number | null
+  report: AiAuditReportResponse
+}
+
+export interface AiAuditReportsResponse {
+  total: number
+  limit: number
+  offset: number
+  reports: AiAuditReportHistoryItem[]
+}
+
+export interface AiAuditFeedbackUpdatePayload {
+  feedback_status?: 'confirmed' | 'false_positive' | 'follow_up' | null
+  feedback_notes?: string | null
 }
 
 export interface EventMapNode {

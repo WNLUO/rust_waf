@@ -3,12 +3,18 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { BrainCircuit, RefreshCw, Save, Sparkles } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import { fetchAiAuditReport } from '@/shared/api/dashboard'
+import {
+  fetchAiAuditReport,
+  fetchAiAuditReports,
+  updateAiAuditReportFeedback,
+} from '@/shared/api/dashboard'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 import type {
   AiAuditReportResponse,
+  AiAuditReportHistoryItem,
+  AiAuditReportsResponse,
   GlobalSettingsPayload,
   AiAuditSettingsPayload,
 } from '@/shared/types'
@@ -29,12 +35,20 @@ const loading = ref(true)
 const refreshing = ref(false)
 const saving = ref(false)
 const copying = ref(false)
+const historyLoading = ref(false)
+const updatingFeedbackId = ref<number | null>(null)
 const error = ref('')
 const successMessage = ref('')
 const report = ref<AiAuditReportResponse | null>(null)
 const cachedReportAt = ref<number | null>(null)
+const reportHistory = ref<AiAuditReportHistoryItem[]>([])
+const historyTotal = ref(0)
 const form = reactive<AiAuditSettingsPayload>(createDefaultAiAuditSettings())
 const windowSeconds = ref(900)
+const feedbackFilter = ref<
+  'all' | 'unreviewed' | 'confirmed' | 'false_positive' | 'follow_up'
+>('all')
+const feedbackNotes = reactive<Record<number, string>>({})
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
@@ -109,6 +123,14 @@ function assignAiAudit(payload: GlobalSettingsPayload) {
   Object.assign(form, payload.ai_audit)
 }
 
+function assignHistory(payload: AiAuditReportsResponse) {
+  reportHistory.value = payload.reports
+  historyTotal.value = payload.total
+  for (const item of payload.reports) {
+    feedbackNotes[item.id] = item.feedback_notes ?? ''
+  }
+}
+
 watch(
   () => form.provider,
   (provider, previous) => {
@@ -124,6 +146,10 @@ watch(
   },
 )
 
+watch(feedbackFilter, () => {
+  void loadHistory()
+})
+
 async function loadSection(runReport = true) {
   loading.value = true
   error.value = ''
@@ -137,6 +163,7 @@ async function loadSection(runReport = true) {
         }),
       )
     }
+    await loadHistory()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载 AI 审计失败'
   } finally {
@@ -155,10 +182,25 @@ async function runAudit() {
         fallback_to_rules: form.fallback_to_rules,
       }),
     )
+    await loadHistory()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '执行 AI 审计失败'
   } finally {
     refreshing.value = false
+  }
+}
+
+async function loadHistory() {
+  historyLoading.value = true
+  try {
+    assignHistory(
+      await fetchAiAuditReports({
+        limit: 10,
+        feedback_status: feedbackFilter.value,
+      }),
+    )
+  } finally {
+    historyLoading.value = false
   }
 }
 
@@ -214,6 +256,27 @@ function downloadReportJson() {
   link.click()
   window.URL.revokeObjectURL(url)
   successMessage.value = 'AI 审计 JSON 已导出'
+}
+
+async function updateFeedback(
+  reportId: number,
+  feedbackStatus: 'confirmed' | 'false_positive' | 'follow_up',
+) {
+  updatingFeedbackId.value = reportId
+  error.value = ''
+  successMessage.value = ''
+  try {
+    const response = await updateAiAuditReportFeedback(reportId, {
+      feedback_status: feedbackStatus,
+      feedback_notes: feedbackNotes[reportId]?.trim() || null,
+    })
+    successMessage.value = response.message
+    await loadHistory()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '更新 AI 审计反馈失败'
+  } finally {
+    updatingFeedbackId.value = null
+  }
 }
 
 onMounted(() => {
@@ -566,6 +629,136 @@ onMounted(() => {
               </article>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-200 bg-white p-4">
+        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">审计历史与人工反馈</p>
+            <p class="mt-1 text-xs leading-5 text-slate-500">
+              最近的 AI 审计报告会自动落库。你可以在这里把结论标成已确认、误报或待跟进，给后续调优留反馈样本。
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <select
+              v-model="feedbackFilter"
+              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+            >
+              <option value="all">全部</option>
+              <option value="unreviewed">未标记</option>
+              <option value="confirmed">已确认</option>
+              <option value="false_positive">误报</option>
+              <option value="follow_up">待跟进</option>
+            </select>
+            <StatusBadge type="muted" :text="`历史 ${formatNumber(historyTotal)}`" />
+          </div>
+        </div>
+
+        <div v-if="historyLoading" class="py-12 text-center text-sm text-slate-500">
+          正在加载 AI 审计历史...
+        </div>
+        <div
+          v-else-if="!reportHistory.length"
+          class="py-12 text-center text-sm text-slate-500"
+        >
+          还没有历史审计报告
+        </div>
+        <div v-else class="mt-4 space-y-4">
+          <article
+            v-for="item in reportHistory"
+            :key="item.id"
+            class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4"
+          >
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div class="space-y-2 min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <StatusBadge
+                    :type="item.risk_level === 'high' || item.risk_level === 'critical' ? 'error' : item.risk_level === 'medium' ? 'warning' : 'success'"
+                    :text="item.risk_level"
+                  />
+                  <StatusBadge type="muted" :text="item.provider_used" />
+                  <StatusBadge
+                    v-if="item.feedback_status"
+                    type="info"
+                    :text="`反馈 ${item.feedback_status}`"
+                  />
+                  <StatusBadge
+                    v-if="item.fallback_used"
+                    type="warning"
+                    text="已走 fallback"
+                  />
+                </div>
+                <p class="text-sm font-semibold text-slate-900">{{ item.headline }}</p>
+                <p class="text-xs text-slate-500">
+                  生成于 {{ formatTimestamp(item.generated_at) }}
+                  <template v-if="item.feedback_updated_at">
+                    · 反馈更新时间 {{ formatTimestamp(item.feedback_updated_at) }}
+                  </template>
+                </p>
+                <p
+                  v-if="item.report.executive_summary.length"
+                  class="text-sm leading-6 text-slate-700"
+                >
+                  {{ item.report.executive_summary[0] }}
+                </p>
+              </div>
+              <div class="grid grid-cols-3 gap-3 text-sm text-slate-600 lg:min-w-[18rem]">
+                <div>
+                  <div class="text-xs text-slate-400">发现问题</div>
+                  <div class="mt-1 font-semibold text-slate-900">
+                    {{ formatNumber(item.report.findings.length) }}
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">建议动作</div>
+                  <div class="mt-1 font-semibold text-slate-900">
+                    {{ formatNumber(item.report.recommendations.length) }}
+                  </div>
+                </div>
+                <div>
+                  <div class="text-xs text-slate-400">采样事件</div>
+                  <div class="mt-1 font-semibold text-slate-900">
+                    {{ formatNumber(item.report.summary.sampled_events) }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+              <textarea
+                v-model="feedbackNotes[item.id]"
+                class="min-h-[5.5rem] w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                placeholder="给这次 AI 审计补一条人工备注，例如为什么确认、为什么认为是误报。"
+              />
+              <div class="flex flex-wrap items-start gap-2">
+                <button
+                  type="button"
+                  class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+                  :disabled="updatingFeedbackId === item.id"
+                  @click="updateFeedback(item.id, 'confirmed')"
+                >
+                  标记已确认
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-60"
+                  :disabled="updatingFeedbackId === item.id"
+                  @click="updateFeedback(item.id, 'follow_up')"
+                >
+                  标记待跟进
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                  :disabled="updatingFeedbackId === item.id"
+                  @click="updateFeedback(item.id, 'false_positive')"
+                >
+                  标记误报
+                </button>
+              </div>
+            </div>
+          </article>
         </div>
       </section>
     </div>

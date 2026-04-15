@@ -105,6 +105,12 @@ async fn test_sqlite_store_initializes_schema() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    let ai_audit_reports_exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'ai_audit_reports'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
 
     assert_eq!(security_events_exists, 1);
     assert_eq!(blocked_ips_exists, 1);
@@ -119,6 +125,7 @@ async fn test_sqlite_store_initializes_schema() {
     assert_eq!(fingerprint_profiles_exists, 1);
     assert_eq!(behavior_sessions_exists, 1);
     assert_eq!(behavior_events_exists, 1);
+    assert_eq!(ai_audit_reports_exists, 1);
 }
 
 #[tokio::test]
@@ -258,6 +265,55 @@ async fn test_sqlite_store_persists_records() {
     assert_eq!(summary.queue_capacity, 1024);
     assert_eq!(summary.dropped_security_events, 0);
     assert_eq!(summary.dropped_blocked_ips, 0);
+}
+
+#[tokio::test]
+async fn test_sqlite_store_persists_ai_audit_reports_and_feedback() {
+    let path = unique_test_db_path("ai_audit_reports");
+    let store = SqliteStore::new(path, true).await.unwrap();
+
+    let report_id = store
+        .create_ai_audit_report(
+            123,
+            "xiaomi_mimo",
+            false,
+            "medium",
+            "headline",
+            r#"{"report_id":null,"generated_at":123,"provider_used":"xiaomi_mimo","fallback_used":false,"execution_notes":[],"risk_level":"medium","headline":"headline","executive_summary":[],"findings":[],"recommendations":[],"summary":{"generated_at":123,"window_seconds":300,"sampled_events":0,"total_events":0,"active_rules":0,"current":{"adaptive_system_pressure":"normal","adaptive_reasons":[],"l4_overload_level":"normal","auto_tuning_controller_state":"stable","auto_tuning_last_adjust_reason":null,"auto_tuning_last_adjust_diff":[],"identity_pressure_percent":0.0,"l7_friction_pressure_percent":0.0,"slow_attack_pressure_percent":0.0},"counters":{"proxied_requests":0,"blocked_packets":0,"blocked_l4":0,"blocked_l7":0,"l7_cc_challenges":0,"l7_cc_blocks":0,"l7_cc_delays":0,"l7_behavior_challenges":0,"l7_behavior_blocks":0,"l7_behavior_delays":0,"trusted_proxy_permit_drops":0,"trusted_proxy_l4_degrade_actions":0,"slow_attack_hits":0,"average_proxy_latency_micros":0},"identity_states":[],"primary_signals":[],"labels":[],"top_source_ips":[],"top_routes":[],"top_hosts":[],"recent_events":[]}}"#,
+        )
+        .await
+        .unwrap();
+
+    let reports = store
+        .list_ai_audit_reports(&AiAuditReportQuery {
+            limit: 10,
+            offset: 0,
+            feedback_status: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(reports.total, 1);
+    assert_eq!(reports.items[0].id, report_id);
+    assert_eq!(reports.items[0].provider_used, "xiaomi_mimo");
+
+    let updated = store
+        .update_ai_audit_report_feedback(report_id, Some("confirmed"), Some("looks good"))
+        .await
+        .unwrap();
+    assert!(updated);
+
+    let reports = store
+        .list_ai_audit_reports(&AiAuditReportQuery {
+            limit: 10,
+            offset: 0,
+            feedback_status: Some("confirmed".to_string()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(reports.total, 1);
+    assert_eq!(reports.items[0].feedback_status.as_deref(), Some("confirmed"));
+    assert_eq!(reports.items[0].feedback_notes.as_deref(), Some("looks good"));
 }
 
 #[tokio::test]

@@ -79,18 +79,6 @@ const lastUpdatedLabel = computed(() => {
     </div>
 
     <div v-else class="space-y-4">
-      <section
-        v-if="meta.adaptive_managed_fields && meta.adaptive_runtime"
-        class="rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(240,253,244,0.95),rgba(236,253,245,0.88),rgba(239,246,255,0.9))] p-4 shadow-sm"
-      >
-        <p class="text-sm font-semibold text-emerald-800">L4 已由自适应控制器主导</p>
-        <p class="mt-2 text-sm leading-6 text-stone-700">
-          当前系统压力为 {{ meta.adaptive_runtime.system_pressure }}，连接预算、延迟和拒绝阈值都按运行时状态自动调整。这里保留的是观测视图，不再建议把 L4 当成手工调阈值页面。
-        </p>
-        <p class="mt-2 text-xs leading-5 text-slate-500">
-          旧的行为引擎细粒度字段已归档到 `advanced_compatibility` 兼容层，主视图只展示当前生效值。
-        </p>
-      </section>
       <AdminL4OverviewSection
         :format-number="formatNumber"
         :stats="stats"

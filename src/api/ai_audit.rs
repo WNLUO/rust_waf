@@ -1,8 +1,10 @@
 use super::{
-    AiAuditReportFinding, AiAuditReportQueryParams, AiAuditReportRecommendation,
-    AiAuditReportResponse, AiAuditSummaryQueryParams, AiAuditSummaryResponse, ApiError, ApiResult,
+    AiAuditReportFinding, AiAuditReportHistoryItem, AiAuditReportQueryParams,
+    AiAuditReportRecommendation, AiAuditReportResponse, AiAuditSummaryQueryParams,
+    AiAuditSummaryResponse, ApiError, ApiResult,
 };
 use crate::config::{AiAuditConfig, AiAuditProviderConfig, Config};
+use crate::storage::AiAuditReportEntry;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -206,6 +208,7 @@ fn build_provider_report(
     execution_notes.extend(execution.execution_notes.clone());
 
     AiAuditReportResponse {
+        report_id: None,
         generated_at: summary.generated_at,
         provider_used: provider_used.to_string(),
         fallback_used,
@@ -510,6 +513,25 @@ fn truncate_for_error(body: &str) -> String {
     }
 }
 
+pub(super) fn history_item_from_entry(
+    entry: AiAuditReportEntry,
+) -> anyhow::Result<AiAuditReportHistoryItem> {
+    let mut report = serde_json::from_str::<AiAuditReportResponse>(&entry.report_json)?;
+    report.report_id = Some(entry.id);
+    Ok(AiAuditReportHistoryItem {
+        id: entry.id,
+        generated_at: entry.generated_at,
+        provider_used: entry.provider_used,
+        fallback_used: entry.fallback_used,
+        risk_level: entry.risk_level,
+        headline: entry.headline,
+        feedback_status: entry.feedback_status,
+        feedback_notes: entry.feedback_notes,
+        feedback_updated_at: entry.feedback_updated_at,
+        report,
+    })
+}
+
 #[derive(Debug, Serialize)]
 struct OpenAiCompatibleChatRequest {
     model: String,
@@ -759,6 +781,7 @@ mod tests {
         };
         let report = execute_report(execution, sample_summary(), |summary| {
             AiAuditReportResponse {
+                report_id: None,
                 generated_at: summary.generated_at,
                 provider_used: "local_rules".to_string(),
                 fallback_used: false,

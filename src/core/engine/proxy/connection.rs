@@ -480,7 +480,6 @@ fn build_http2_upstream_request(
         if key.eq_ignore_ascii_case(CONNECTION.as_str())
             || key.eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
             || key.eq_ignore_ascii_case(HOST.as_str())
-            || should_strip_internal_upstream_header(key)
             || key.starts_with(':')
         {
             continue;
@@ -514,12 +513,6 @@ fn effective_http2_upstream_authority(
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or_else(|| upstream.authority.clone())
-}
-
-fn should_strip_internal_upstream_header(header_name: &str) -> bool {
-    header_name.eq_ignore_ascii_case("x-cdn-real-ip")
-        || header_name.eq_ignore_ascii_case("cdn-loop")
-        || header_name.starts_with("eo-")
 }
 
 fn normalize_http2_upstream_path(path: &str) -> String {
@@ -772,7 +765,7 @@ mod tests {
     }
 
     #[test]
-    fn http2_upstream_request_strips_cdn_internal_headers() {
+    fn http2_upstream_request_preserves_forwarded_headers() {
         let mut request =
             UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
         request.add_header("host".to_string(), "wnluo.com".to_string());
@@ -785,9 +778,9 @@ mod tests {
             .expect("request should build");
 
         assert_eq!(built.headers()["host"], "wnluo.com");
-        assert!(built.headers().get("eo-log-uuid").is_none());
-        assert!(built.headers().get("cdn-loop").is_none());
-        assert!(built.headers().get("x-cdn-real-ip").is_none());
+        assert_eq!(built.headers()["eo-log-uuid"], "trace");
+        assert_eq!(built.headers()["cdn-loop"], "TencentEdgeOne; loops=2");
+        assert_eq!(built.headers()["x-cdn-real-ip"], "1.2.3.4");
         assert_eq!(built.headers()["x-forwarded-for"], "1.2.3.4");
     }
 }

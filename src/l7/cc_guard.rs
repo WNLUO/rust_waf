@@ -122,6 +122,17 @@ impl L7CcGuard {
         *guard = config.clone();
     }
 
+    pub fn allows_browser_fingerprint_report(
+        &self,
+        request: &UnifiedHttpRequest,
+        fallback_client_ip: std::net::IpAddr,
+    ) -> bool {
+        let config = self.config();
+        let client_ip = request_client_ip(request).unwrap_or(fallback_client_ip);
+        let host = normalized_host(request);
+        self.has_valid_challenge_cookie(request, client_ip, &host, &config)
+    }
+
     pub async fn inspect_request(
         &self,
         request: &mut UnifiedHttpRequest,
@@ -1907,6 +1918,28 @@ mod tests {
             "example.com",
             &config,
         ));
+    }
+
+    #[test]
+    fn browser_fingerprint_report_requires_valid_challenge_cookie() {
+        let config = CcDefenseConfig::default();
+        let guard = L7CcGuard::new(&config);
+        let client_ip = "203.0.113.10".parse().unwrap();
+        let mut request = request("/");
+        let expires_at = unix_timestamp() + 60;
+        let nonce = "fpcheck";
+        let signature = sign_challenge(&guard.secret, client_ip, "example.com", expires_at, nonce);
+        request.add_header(
+            "cookie".to_string(),
+            format!(
+                "{}={expires_at}:{nonce}:{signature}",
+                guard.config().challenge_cookie_name
+            ),
+        );
+
+        assert!(guard.allows_browser_fingerprint_report(&request, client_ip));
+        request.headers.remove("cookie");
+        assert!(!guard.allows_browser_fingerprint_report(&request, client_ip));
     }
 
     #[test]

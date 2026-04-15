@@ -35,7 +35,7 @@ pub(crate) async fn handle_connection(
                 "http",
                 skip_l4_connection_budget,
             );
-            maybe_delay_policy(&policy).await;
+            maybe_delay_policy(context.as_ref(), &policy).await;
             if policy.reject_new_connections {
                 debug!(
                     "Rejecting TCP connection from {} due to coarse admission pressure",
@@ -116,7 +116,7 @@ pub(crate) async fn handle_tls_connection(
                 "tls",
                 skip_l4_connection_budget,
             );
-            maybe_delay_policy(&policy).await;
+            maybe_delay_policy(context.as_ref(), &policy).await;
             if policy.reject_new_connections {
                 warn!(
                     "Rejecting TLS connection from {} before handshake due to coarse admission pressure",
@@ -276,7 +276,7 @@ pub(crate) async fn handle_tls_connection(
     if !skip_l4_connection_budget {
         if let (Some(inspector), Some(bucket_key)) = (context.l4_inspector(), l4_bucket.as_ref()) {
             let policy = inspector.connection_admission_policy(bucket_key);
-            maybe_delay_policy(&policy).await;
+            maybe_delay_policy(context.as_ref(), &policy).await;
             if policy.reject_new_connections {
                 warn!(
                     "Rejecting TLS connection from {} due to bucket admission pressure",

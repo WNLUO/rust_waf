@@ -42,6 +42,7 @@ fn handle_browser_fingerprint_report(
     request: &UnifiedHttpRequest,
     matched_site: Option<&GatewaySiteRuntime>,
 ) -> CustomHttpResponse {
+    let pressure = context.runtime_pressure_snapshot();
     if !request.method.eq_ignore_ascii_case("POST") {
         return json_http_response(
             405,
@@ -70,6 +71,39 @@ fn handle_browser_fingerprint_report(
             serde_json::json!({
                 "success": false,
                 "message": "浏览器指纹上报体不能为空",
+            }),
+            &[],
+        );
+    }
+
+    if request.body.len() > MAX_BROWSER_FINGERPRINT_DETAILS_BYTES {
+        return json_http_response(
+            413,
+            serde_json::json!({
+                "success": false,
+                "message": format!(
+                    "浏览器指纹上报体过大，最大允许 {} 字节",
+                    MAX_BROWSER_FINGERPRINT_DETAILS_BYTES
+                ),
+            }),
+            &[],
+        );
+    }
+
+    let challenge_verified = context
+        .l7_cc_guard()
+        .allows_browser_fingerprint_report(request, packet.source_ip);
+    if !challenge_verified {
+        let status_code = if matches!(pressure.level, "high" | "attack") {
+            204
+        } else {
+            202
+        };
+        return json_http_response(
+            status_code,
+            serde_json::json!({
+                "success": true,
+                "message": "浏览器指纹上报已忽略，当前请求未绑定有效挑战会话",
             }),
             &[],
         );
@@ -113,7 +147,6 @@ fn handle_browser_fingerprint_report(
         .clone()
         .unwrap_or_else(|| packet.source_ip.to_string());
     let provider_event_id = provided_provider_event_id.unwrap_or(derived_provider_event_id);
-    let pressure = context.runtime_pressure_snapshot();
 
     payload_object.insert(
         "fingerprintId".to_string(),

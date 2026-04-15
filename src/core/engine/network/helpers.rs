@@ -42,7 +42,13 @@ pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
     peer_is_configured_trusted_proxy(context, peer_ip)
 }
 
-pub(crate) async fn maybe_delay_policy(policy: &crate::l4::behavior::L4AdaptivePolicy) {
+pub(crate) async fn maybe_delay_policy(
+    context: &crate::core::WafContext,
+    policy: &crate::l4::behavior::L4AdaptivePolicy,
+) {
+    if context.runtime_pressure_snapshot().drop_delay {
+        return;
+    }
     if policy.suggested_delay_ms > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(policy.suggested_delay_ms)).await;
     }

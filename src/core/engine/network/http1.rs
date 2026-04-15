@@ -106,7 +106,7 @@ pub(crate) async fn handle_http1_connection(
                 (context.l4_inspector(), bucket_key.as_ref())
             {
                 let policy = inspector.connection_admission_policy(bucket_key);
-                maybe_delay_policy(&policy).await;
+                maybe_delay_policy(context.as_ref(), &policy).await;
                 if policy.reject_new_connections {
                     if let Some(metrics) = context.metrics.as_ref() {
                         metrics.record_l4_bucket_budget_rejection();

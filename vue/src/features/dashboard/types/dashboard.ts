@@ -98,6 +98,32 @@ export interface AiAuditSummaryResponse {
   recent_events: AiAuditEventSample[]
 }
 
+export interface AiAuditReportFinding {
+  key: string
+  severity: string
+  title: string
+  detail: string
+  evidence: string[]
+}
+
+export interface AiAuditReportRecommendation {
+  key: string
+  priority: string
+  title: string
+  action: string
+  rationale: string
+}
+
+export interface AiAuditReportResponse {
+  generated_at: number
+  risk_level: string
+  headline: string
+  executive_summary: string[]
+  findings: AiAuditReportFinding[]
+  recommendations: AiAuditReportRecommendation[]
+  summary: AiAuditSummaryResponse
+}
+
 export interface EventMapNode {
   id: string
   name: string

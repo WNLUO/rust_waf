@@ -111,11 +111,42 @@ pub(super) async fn ai_audit_summary_handler(
     State(state): State<ApiState>,
     Query(params): Query<AiAuditSummaryQueryParams>,
 ) -> ApiResult<Json<AiAuditSummaryResponse>> {
+    Ok(Json(
+        build_ai_audit_summary(
+            &state,
+            params.window_seconds,
+            params.sample_limit,
+            params.recent_limit,
+        )
+        .await?,
+    ))
+}
+
+pub(super) async fn ai_audit_report_handler(
+    State(state): State<ApiState>,
+    Query(params): Query<AiAuditReportQueryParams>,
+) -> ApiResult<Json<AiAuditReportResponse>> {
+    let summary = build_ai_audit_summary(
+        &state,
+        params.window_seconds,
+        params.sample_limit,
+        params.recent_limit,
+    )
+    .await?;
+    Ok(Json(build_ai_audit_report(summary)))
+}
+
+async fn build_ai_audit_summary(
+    state: &ApiState,
+    window_seconds: Option<u32>,
+    sample_limit: Option<u32>,
+    recent_limit: Option<u32>,
+) -> ApiResult<AiAuditSummaryResponse> {
     let store = sqlite_store(&state)?;
     let now = unix_timestamp();
-    let window_seconds = params.window_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
-    let sample_limit = params.sample_limit.unwrap_or(200).clamp(20, 1000);
-    let recent_limit = params.recent_limit.unwrap_or(20).clamp(5, 100);
+    let window_seconds = window_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
+    let sample_limit = sample_limit.unwrap_or(200).clamp(20, 1000);
+    let recent_limit = recent_limit.unwrap_or(20).clamp(5, 100);
     let created_from = now.saturating_sub(window_seconds as i64);
 
     let result = store
@@ -166,7 +197,7 @@ pub(super) async fn ai_audit_summary_handler(
         }
     }
 
-    Ok(Json(AiAuditSummaryResponse {
+    Ok(AiAuditSummaryResponse {
         generated_at: now,
         window_seconds,
         sampled_events,
@@ -210,7 +241,7 @@ pub(super) async fn ai_audit_summary_handler(
         top_routes: top_count_items(top_routes, 8),
         top_hosts: top_count_items(top_hosts, 8),
         recent_events,
-    }))
+    })
 }
 
 fn increment_map(map: &mut BTreeMap<String, u64>, key: &str) {
@@ -232,5 +263,235 @@ fn metrics_l4_overload_level(metrics: &crate::metrics::MetricsSnapshot) -> Strin
         "high".to_string()
     } else {
         "normal".to_string()
+    }
+}
+
+fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportResponse {
+    let mut findings = Vec::new();
+    let mut recommendations = Vec::new();
+    let mut executive_summary = Vec::new();
+
+    if summary.current.identity_pressure_percent >= 5.0 {
+        findings.push(AiAuditReportFinding {
+            key: "identity_pressure_high".to_string(),
+            severity: "high".to_string(),
+            title: "CDN 身份解析压力偏高".to_string(),
+            detail: format!(
+                "identity pressure 为 {:.2}%，说明可信代理流量里仍有较多未解析或受限处理请求。",
+                summary.current.identity_pressure_percent
+            ),
+            evidence: vec![
+                format!(
+                    "trusted_proxy_permit_drops={}",
+                    summary.counters.trusted_proxy_permit_drops
+                ),
+                format!(
+                    "trusted_proxy_l4_degrade_actions={}",
+                    summary.counters.trusted_proxy_l4_degrade_actions
+                ),
+            ],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "review_real_ip_chain".to_string(),
+            priority: "high".to_string(),
+            title: "复核 CDN 回源真实 IP 链路".to_string(),
+            action: "检查自定义真实 IP 头是否稳定透传，并核对可信 CDN CIDR 列表是否完整。"
+                .to_string(),
+            rationale: "身份解析不稳会让 L4/L7 自动化长期处在收紧模式，影响可用性和判定精度。"
+                .to_string(),
+        });
+    }
+
+    if summary.current.l7_friction_pressure_percent >= 20.0 {
+        findings.push(AiAuditReportFinding {
+            key: "l7_friction_high".to_string(),
+            severity: "high".to_string(),
+            title: "L7 摩擦信号明显升高".to_string(),
+            detail: format!(
+                "l7 friction 为 {:.2}%，说明 challenge / block / delay 明显增多。",
+                summary.current.l7_friction_pressure_percent
+            ),
+            evidence: vec![
+                format!("l7_cc_challenges={}", summary.counters.l7_cc_challenges),
+                format!("l7_cc_blocks={}", summary.counters.l7_cc_blocks),
+                format!("l7_behavior_blocks={}", summary.counters.l7_behavior_blocks),
+            ],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "review_hot_signals".to_string(),
+            priority: "high".to_string(),
+            title: "排查热点主信号和标签".to_string(),
+            action: "优先查看 primary_signals、labels、top_routes，确认是否存在单一路径或单类标签持续主导。".to_string(),
+            rationale: "L7 摩擦升高通常意味着某类攻击或误伤模式已经形成稳定热点。".to_string(),
+        });
+    }
+
+    if summary.current.slow_attack_pressure_percent >= 1.0 {
+        findings.push(AiAuditReportFinding {
+            key: "slow_attack_present".to_string(),
+            severity: "medium".to_string(),
+            title: "慢速攻击信号持续存在".to_string(),
+            detail: format!(
+                "slow attack pressure 为 {:.2}%，说明慢头/慢体/慢握手事件持续出现。",
+                summary.current.slow_attack_pressure_percent
+            ),
+            evidence: vec![format!(
+                "slow_attack_hits={}",
+                summary.counters.slow_attack_hits
+            )],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "tighten_slow_attack_review".to_string(),
+            priority: "medium".to_string(),
+            title: "复核慢速攻击容忍窗口".to_string(),
+            action: "结合 recent_events 和 top_source_ips，确认是否需要进一步收紧慢速攻击阈值或 keepalive 容忍度。".to_string(),
+            rationale: "慢速攻击更容易拖垮连接资源，且在 CDN 场景下更需要结合身份态审计。".to_string(),
+        });
+    }
+
+    if summary.current.auto_tuning_last_adjust_reason.is_some() {
+        executive_summary.push(format!(
+            "自动调优最近一次原因为 {:?}，当前控制器状态为 {}。",
+            summary.current.auto_tuning_last_adjust_reason,
+            summary.current.auto_tuning_controller_state
+        ));
+    }
+    if let Some(top_signal) = summary.primary_signals.first() {
+        executive_summary.push(format!(
+            "最近窗口主导信号为 {}，命中 {} 次。",
+            top_signal.key, top_signal.count
+        ));
+    }
+    if let Some(top_identity) = summary.identity_states.first() {
+        executive_summary.push(format!(
+            "最近窗口最常见身份态为 {}，命中 {} 次。",
+            top_identity.key, top_identity.count
+        ));
+    }
+    if executive_summary.is_empty() {
+        executive_summary.push("当前窗口未发现明显高风险聚合信号，建议继续观察。".to_string());
+    }
+
+    if recommendations.is_empty() {
+        recommendations.push(AiAuditReportRecommendation {
+            key: "continue_monitoring".to_string(),
+            priority: "low".to_string(),
+            title: "继续观察当前流量窗口".to_string(),
+            action: "保持现有自动防护配置，并持续采样新的审计摘要。".to_string(),
+            rationale: "当前未发现需要立即介入的强烈异常。".to_string(),
+        });
+    }
+
+    let risk_level = if findings.iter().any(|item| item.severity == "high") {
+        "high"
+    } else if findings.iter().any(|item| item.severity == "medium") {
+        "medium"
+    } else {
+        "low"
+    };
+    let headline = match risk_level {
+        "high" => "检测到需要优先排查的高风险审计信号",
+        "medium" => "检测到可持续观察的中风险审计信号",
+        _ => "当前窗口整体风险较低",
+    }
+    .to_string();
+
+    AiAuditReportResponse {
+        generated_at: summary.generated_at,
+        risk_level: risk_level.to_string(),
+        headline,
+        executive_summary,
+        findings,
+        recommendations,
+        summary,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_summary() -> AiAuditSummaryResponse {
+        AiAuditSummaryResponse {
+            generated_at: 1,
+            window_seconds: 3600,
+            sampled_events: 10,
+            total_events: 10,
+            active_rules: 5,
+            current: AiAuditCurrentStateResponse {
+                adaptive_system_pressure: "elevated".to_string(),
+                adaptive_reasons: vec!["identity_resolution_pressure".to_string()],
+                l4_overload_level: "high".to_string(),
+                auto_tuning_controller_state: "adjusted".to_string(),
+                auto_tuning_last_adjust_reason: Some(
+                    "adjust_for_identity_resolution_pressure".to_string(),
+                ),
+                auto_tuning_last_adjust_diff: vec!["l4 budget tightened".to_string()],
+                identity_pressure_percent: 6.2,
+                l7_friction_pressure_percent: 24.0,
+                slow_attack_pressure_percent: 1.2,
+            },
+            counters: AiAuditCountersResponse {
+                proxied_requests: 100,
+                blocked_packets: 20,
+                blocked_l4: 3,
+                blocked_l7: 17,
+                l7_cc_challenges: 12,
+                l7_cc_blocks: 6,
+                l7_cc_delays: 8,
+                l7_behavior_challenges: 4,
+                l7_behavior_blocks: 3,
+                l7_behavior_delays: 5,
+                trusted_proxy_permit_drops: 9,
+                trusted_proxy_l4_degrade_actions: 7,
+                slow_attack_hits: 4,
+                average_proxy_latency_micros: 12_000,
+            },
+            identity_states: vec![AiAuditCountItem {
+                key: "trusted_cdn_unresolved".to_string(),
+                count: 6,
+            }],
+            primary_signals: vec![AiAuditCountItem {
+                key: "l7_cc:block".to_string(),
+                count: 4,
+            }],
+            labels: vec![AiAuditCountItem {
+                key: "identity:trusted_cdn_unresolved".to_string(),
+                count: 6,
+            }],
+            top_source_ips: Vec::new(),
+            top_routes: Vec::new(),
+            top_hosts: Vec::new(),
+            recent_events: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ai_audit_report_promotes_high_risk_findings() {
+        let report = build_ai_audit_report(base_summary());
+
+        assert_eq!(report.risk_level, "high");
+        assert!(!report.findings.is_empty());
+        assert!(report
+            .recommendations
+            .iter()
+            .any(|item| item.key == "review_real_ip_chain"));
+    }
+
+    #[test]
+    fn ai_audit_report_falls_back_to_monitoring_when_quiet() {
+        let mut summary = base_summary();
+        summary.current.identity_pressure_percent = 0.0;
+        summary.current.l7_friction_pressure_percent = 0.0;
+        summary.current.slow_attack_pressure_percent = 0.0;
+        summary.current.auto_tuning_last_adjust_reason = None;
+        summary.identity_states.clear();
+        summary.primary_signals.clear();
+        let report = build_ai_audit_report(summary);
+
+        assert_eq!(report.risk_level, "low");
+        assert!(report.findings.is_empty());
+        assert_eq!(report.recommendations.len(), 1);
+        assert_eq!(report.recommendations[0].key, "continue_monitoring");
     }
 }

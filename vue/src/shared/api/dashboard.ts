@@ -10,6 +10,7 @@ import type {
   SecurityEventsResponse,
   AiAuditSummaryQuery,
   AiAuditSummaryResponse,
+  AiAuditReportResponse,
   TrafficMapQuery,
   TrafficMapResponse,
 } from '@/shared/types'
@@ -58,5 +59,13 @@ export async function fetchAiAuditSummary(
 ): Promise<AiAuditSummaryResponse> {
   return apiRequest<AiAuditSummaryResponse>(
     `/dashboard/ai-audit-summary${buildQuery(options)}`,
+  )
+}
+
+export async function fetchAiAuditReport(
+  options: AiAuditSummaryQuery = {},
+): Promise<AiAuditReportResponse> {
+  return apiRequest<AiAuditReportResponse>(
+    `/dashboard/ai-audit-report${buildQuery(options)}`,
   )
 }

@@ -57,6 +57,13 @@ pub struct AiAuditSummaryQueryParams {
     pub(crate) recent_limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct AiAuditReportQueryParams {
+    pub(crate) window_seconds: Option<u32>,
+    pub(crate) sample_limit: Option<u32>,
+    pub(crate) recent_limit: Option<u32>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AiAuditSummaryResponse {
     pub(crate) generated_at: i64,
@@ -76,6 +83,17 @@ pub struct AiAuditSummaryResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AiAuditReportResponse {
+    pub(crate) generated_at: i64,
+    pub(crate) risk_level: String,
+    pub(crate) headline: String,
+    pub(crate) executive_summary: Vec<String>,
+    pub(crate) findings: Vec<AiAuditReportFinding>,
+    pub(crate) recommendations: Vec<AiAuditReportRecommendation>,
+    pub(crate) summary: AiAuditSummaryResponse,
+}
+
+#[derive(Debug, Serialize)]
 pub struct AiAuditCurrentStateResponse {
     pub(crate) adaptive_system_pressure: String,
     pub(crate) adaptive_reasons: Vec<String>,
@@ -86,6 +104,24 @@ pub struct AiAuditCurrentStateResponse {
     pub(crate) identity_pressure_percent: f64,
     pub(crate) l7_friction_pressure_percent: f64,
     pub(crate) slow_attack_pressure_percent: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditReportFinding {
+    pub(crate) key: String,
+    pub(crate) severity: String,
+    pub(crate) title: String,
+    pub(crate) detail: String,
+    pub(crate) evidence: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditReportRecommendation {
+    pub(crate) key: String,
+    pub(crate) priority: String,
+    pub(crate) title: String,
+    pub(crate) action: String,
+    pub(crate) rationale: String,
 }
 
 #[derive(Debug, Serialize)]

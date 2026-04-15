@@ -239,6 +239,9 @@ pub struct AdaptiveProtectionRuntimeResponse {
     pub(crate) goal: String,
     pub(crate) system_pressure: String,
     pub(crate) reasons: Vec<String>,
+    pub(crate) identity_pressure_percent: f64,
+    pub(crate) l7_friction_pressure_percent: f64,
+    pub(crate) slow_attack_pressure_percent: f64,
     pub(crate) l4: AdaptiveProtectionL4RuntimeResponse,
     pub(crate) l7: AdaptiveProtectionL7RuntimeResponse,
 }

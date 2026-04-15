@@ -127,6 +127,9 @@ pub struct AutoTuningRuntimeResponse {
     pub(crate) last_observed_tls_handshake_timeout_rate_percent: f64,
     pub(crate) last_observed_bucket_reject_rate_percent: f64,
     pub(crate) last_observed_avg_proxy_latency_ms: u64,
+    pub(crate) last_observed_identity_resolution_pressure_percent: f64,
+    pub(crate) last_observed_l7_friction_pressure_percent: f64,
+    pub(crate) last_observed_slow_attack_pressure_percent: f64,
     pub(crate) recommendation: AutoTuningRecommendationResponse,
 }
 

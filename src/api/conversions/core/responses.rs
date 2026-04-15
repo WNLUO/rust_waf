@@ -386,6 +386,9 @@ impl AdaptiveProtectionRuntimeResponse {
             goal: snapshot.goal.clone(),
             system_pressure: snapshot.system_pressure.clone(),
             reasons: snapshot.reasons.clone(),
+            identity_pressure_percent: snapshot.identity_pressure_percent,
+            l7_friction_pressure_percent: snapshot.l7_friction_pressure_percent,
+            slow_attack_pressure_percent: snapshot.slow_attack_pressure_percent,
             l4: AdaptiveProtectionL4RuntimeResponse {
                 normal_connection_budget_per_minute: snapshot
                     .l4

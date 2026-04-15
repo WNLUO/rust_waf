@@ -13,6 +13,9 @@ pub struct AdaptiveProtectionRuntimeSnapshot {
     pub goal: String,
     pub system_pressure: String,
     pub reasons: Vec<String>,
+    pub identity_pressure_percent: f64,
+    pub l7_friction_pressure_percent: f64,
+    pub slow_attack_pressure_percent: f64,
     pub l4: AdaptiveL4RuntimePolicy,
     pub l7: AdaptiveL7RuntimePolicy,
 }
@@ -50,6 +53,9 @@ impl Default for AdaptiveProtectionRuntimeSnapshot {
             goal: "balanced".to_string(),
             system_pressure: "normal".to_string(),
             reasons: vec![],
+            identity_pressure_percent: 0.0,
+            l7_friction_pressure_percent: 0.0,
+            slow_attack_pressure_percent: 0.0,
             l4: AdaptiveL4RuntimePolicy {
                 normal_connection_budget_per_minute: 960,
                 suspicious_connection_budget_per_minute: 480,
@@ -93,6 +99,8 @@ pub fn build_runtime_snapshot(
     let l7 = derive_l7_policy(
         adaptive,
         pressure.level.as_str(),
+        pressure.identity_pressure_percent,
+        pressure.l7_friction_pressure_percent,
         &config.l7_config.cc_defense,
     );
 
@@ -102,6 +110,9 @@ pub fn build_runtime_snapshot(
         goal: goal_label(adaptive.goal).to_string(),
         system_pressure: pressure.level,
         reasons,
+        identity_pressure_percent: pressure.identity_pressure_percent,
+        l7_friction_pressure_percent: pressure.l7_friction_pressure_percent,
+        slow_attack_pressure_percent: pressure.slow_attack_pressure_percent,
         l4: AdaptiveL4RuntimePolicy {
             normal_connection_budget_per_minute: l4_budgets.0,
             suspicious_connection_budget_per_minute: l4_budgets.1,
@@ -189,6 +200,9 @@ fn capacity_scale(auto: &AutoTuningRuntimeSnapshot) -> f64 {
 struct DerivedPressure {
     level: String,
     reasons: Vec<String>,
+    identity_pressure_percent: f64,
+    l7_friction_pressure_percent: f64,
+    slow_attack_pressure_percent: f64,
 }
 
 fn derive_pressure(
@@ -197,6 +211,9 @@ fn derive_pressure(
 ) -> DerivedPressure {
     let mut score = 0u8;
     let mut reasons = Vec::new();
+    let identity_pressure_percent = auto.last_observed_identity_resolution_pressure_percent;
+    let l7_friction_pressure_percent = auto.last_observed_l7_friction_pressure_percent;
+    let slow_attack_pressure_percent = auto.last_observed_slow_attack_pressure_percent;
 
     if auto.last_observed_avg_proxy_latency_ms > 250 {
         score += 1;
@@ -213,6 +230,30 @@ fn derive_pressure(
     if auto.last_observed_bucket_reject_rate_percent > 0.1 {
         score += 1;
         reasons.push("bucket_reject_observed".to_string());
+    }
+    if identity_pressure_percent >= 1.0 {
+        score += 1;
+        reasons.push("identity_resolution_pressure".to_string());
+    }
+    if identity_pressure_percent >= 5.0 {
+        score += 2;
+        reasons.push("identity_resolution_pressure_high".to_string());
+    }
+    if l7_friction_pressure_percent >= 10.0 {
+        score += 1;
+        reasons.push("l7_friction_elevated".to_string());
+    }
+    if l7_friction_pressure_percent >= 25.0 {
+        score += 2;
+        reasons.push("l7_friction_high".to_string());
+    }
+    if slow_attack_pressure_percent >= 0.5 {
+        score += 1;
+        reasons.push("slow_attack_signal_present".to_string());
+    }
+    if slow_attack_pressure_percent >= 2.0 {
+        score += 2;
+        reasons.push("slow_attack_signal_high".to_string());
     }
 
     if let Some(metrics) = metrics {
@@ -240,6 +281,9 @@ fn derive_pressure(
     DerivedPressure {
         level: level.to_string(),
         reasons,
+        identity_pressure_percent,
+        l7_friction_pressure_percent,
+        slow_attack_pressure_percent,
     }
 }
 
@@ -292,8 +336,24 @@ fn derive_l4_policy_parts(
 fn derive_l7_policy(
     adaptive: &AdaptiveProtectionConfig,
     pressure: &str,
+    identity_pressure_percent: f64,
+    l7_friction_pressure_percent: f64,
     base: &CcDefenseConfig,
 ) -> AdaptiveL7RuntimePolicy {
+    let identity_scale = if identity_pressure_percent >= 5.0 {
+        0.82
+    } else if identity_pressure_percent >= 1.0 {
+        0.92
+    } else {
+        1.0
+    };
+    let friction_scale = if l7_friction_pressure_percent >= 25.0 {
+        0.86
+    } else if l7_friction_pressure_percent >= 10.0 {
+        0.94
+    } else {
+        1.0
+    };
     let challenge_scale = match adaptive.mode {
         AdaptiveProtectionMode::Relaxed => 1.25,
         AdaptiveProtectionMode::Balanced => 1.0,
@@ -307,7 +367,8 @@ fn derive_l7_policy(
         "elevated" => 0.9,
         "high" => 0.75,
         _ => 0.6,
-    };
+    } * identity_scale
+        * friction_scale;
 
     let scale = |value: u32| ((value as f64) * challenge_scale).round().max(3.0) as u32;
     let delay_ms = match pressure {
@@ -315,7 +376,14 @@ fn derive_l7_policy(
         "elevated" => base.delay_ms.max(180),
         "high" => base.delay_ms.max(260),
         _ => base.delay_ms.max(350),
-    };
+    }
+    .max(if identity_pressure_percent >= 5.0 {
+        base.delay_ms.max(260)
+    } else if identity_pressure_percent >= 1.0 {
+        base.delay_ms.max(200)
+    } else {
+        base.delay_ms
+    });
 
     AdaptiveL7RuntimePolicy {
         request_window_secs: base.request_window_secs,
@@ -381,6 +449,9 @@ mod tests {
             last_observed_tls_handshake_timeout_rate_percent: 0.0,
             last_observed_bucket_reject_rate_percent: 0.0,
             last_observed_avg_proxy_latency_ms: 0,
+            last_observed_identity_resolution_pressure_percent: 0.0,
+            last_observed_l7_friction_pressure_percent: 0.0,
+            last_observed_slow_attack_pressure_percent: 0.0,
             recommendation: AutoTuningRecommendationSnapshot {
                 l4_normal_connection_budget_per_minute: 960,
                 l4_suspicious_connection_budget_per_minute: 480,
@@ -399,6 +470,8 @@ mod tests {
             last_observed_avg_proxy_latency_ms: 1200,
             last_observed_tls_handshake_timeout_rate_percent: 0.2,
             last_observed_bucket_reject_rate_percent: 0.2,
+            last_observed_identity_resolution_pressure_percent: 6.0,
+            last_observed_l7_friction_pressure_percent: 28.0,
             ..base_auto_snapshot()
         };
         let metrics = MetricsSnapshot {
@@ -415,10 +488,15 @@ mod tests {
         assert!(runtime.l4.normal_connection_budget_per_minute < 960);
         assert!(runtime.l4.soft_delay_ms >= 45);
         assert!(runtime.l7.delay_ms >= 350);
+        assert!(runtime.identity_pressure_percent >= 6.0);
         assert!(runtime
             .reasons
             .iter()
             .any(|reason| reason == "request_permit_pressure"));
+        assert!(runtime
+            .reasons
+            .iter()
+            .any(|reason| reason == "identity_resolution_pressure_high"));
     }
 
     #[test]

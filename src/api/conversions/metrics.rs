@@ -236,6 +236,12 @@ impl L7StatsResponse {
                 last_observed_bucket_reject_rate_percent: auto
                     .last_observed_bucket_reject_rate_percent,
                 last_observed_avg_proxy_latency_ms: auto.last_observed_avg_proxy_latency_ms,
+                last_observed_identity_resolution_pressure_percent: auto
+                    .last_observed_identity_resolution_pressure_percent,
+                last_observed_l7_friction_pressure_percent: auto
+                    .last_observed_l7_friction_pressure_percent,
+                last_observed_slow_attack_pressure_percent: auto
+                    .last_observed_slow_attack_pressure_percent,
                 recommendation: AutoTuningRecommendationResponse {
                     l4_normal_connection_budget_per_minute: auto
                         .recommendation

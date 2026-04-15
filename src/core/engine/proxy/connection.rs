@@ -500,8 +500,6 @@ fn build_http2_upstream_request(
         builder = builder.header(key.as_str(), value.as_str());
     }
 
-    builder = builder.header(HOST, upstream_authority.as_str());
-
     builder
         .body(Full::new(Bytes::from(request.body.clone())))
         .map_err(Into::into)
@@ -535,9 +533,9 @@ fn emit_http2_upstream_request_debug_event(
             "uri": upstream_request.uri().to_string(),
             "connect_target": upstream.authority,
             "host": upstream_request
-                .headers()
-                .get(HOST)
-                .and_then(|value| value.to_str().ok())
+                .uri()
+                .authority()
+                .map(|value| value.as_str())
                 .unwrap_or("<missing>"),
             "sni": sni,
             "headers": forwarded_headers,
@@ -884,7 +882,11 @@ mod tests {
         let built = build_http2_upstream_request(&request, &https_upstream("127.0.0.1:880"))
             .expect("request should build");
 
-        assert_eq!(built.headers()["host"], "wnluo.com");
+        assert_eq!(
+            built.uri().authority().map(|value| value.as_str()),
+            Some("wnluo.com")
+        );
+        assert!(built.headers().get("host").is_none());
         assert!(built.headers().get("eo-log-uuid").is_none());
         assert!(built.headers().get("cdn-loop").is_none());
         assert!(built.headers().get("via").is_none());

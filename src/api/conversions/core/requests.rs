@@ -282,6 +282,7 @@ impl L7ConfigUpdateRequest {
                 current.l7_config.cc_defense = cc_defense.into_config();
             }
         }
+        current.l7_config.slow_attack_defense = self.slow_attack_defense.into_config();
         if let Some(safeline_intercept) = self.safeline_intercept {
             current.l7_config.safeline_intercept = safeline_intercept.into_config()?;
         }
@@ -332,6 +333,20 @@ impl CcDefenseConfigRequest {
             hard_hot_path_block_multiplier: self
                 .hard_hot_path_block_multiplier
                 .unwrap_or(defaults.hard_hot_path_block_multiplier),
+        }
+    }
+}
+
+impl SlowAttackDefenseConfigRequest {
+    pub(crate) fn into_config(self) -> crate::config::l7::SlowAttackDefenseConfig {
+        crate::config::l7::SlowAttackDefenseConfig {
+            enabled: self.enabled,
+            header_min_bytes_per_sec: self.header_min_bytes_per_sec,
+            body_min_bytes_per_sec: self.body_min_bytes_per_sec,
+            idle_keepalive_timeout_ms: self.idle_keepalive_timeout_ms,
+            event_window_secs: self.event_window_secs,
+            max_events_per_window: self.max_events_per_window,
+            block_duration_secs: self.block_duration_secs,
         }
     }
 }
@@ -697,6 +712,15 @@ mod tests {
                 hard_ip_block_multiplier: None,
                 hard_hot_path_block_multiplier: None,
             }),
+            slow_attack_defense: SlowAttackDefenseConfigRequest {
+                enabled: true,
+                header_min_bytes_per_sec: 64,
+                body_min_bytes_per_sec: 256,
+                idle_keepalive_timeout_ms: 5000,
+                event_window_secs: 300,
+                max_events_per_window: 6,
+                block_duration_secs: 900,
+            },
             safeline_intercept: None,
             auto_tuning: None,
         }

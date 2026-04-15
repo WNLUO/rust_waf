@@ -370,6 +370,42 @@ export function useAdminL7() {
         20,
         3,
       )
+      targetForm.slow_attack_defense.header_min_bytes_per_sec = clampInteger(
+        targetForm.slow_attack_defense.header_min_bytes_per_sec,
+        1,
+        65_535,
+        64,
+      )
+      targetForm.slow_attack_defense.body_min_bytes_per_sec = clampInteger(
+        targetForm.slow_attack_defense.body_min_bytes_per_sec,
+        1,
+        1_048_576,
+        256,
+      )
+      targetForm.slow_attack_defense.idle_keepalive_timeout_ms = clampInteger(
+        targetForm.slow_attack_defense.idle_keepalive_timeout_ms,
+        100,
+        300_000,
+        5000,
+      )
+      targetForm.slow_attack_defense.event_window_secs = clampInteger(
+        targetForm.slow_attack_defense.event_window_secs,
+        10,
+        86_400,
+        300,
+      )
+      targetForm.slow_attack_defense.max_events_per_window = clampInteger(
+        targetForm.slow_attack_defense.max_events_per_window,
+        1,
+        10_000,
+        6,
+      )
+      targetForm.slow_attack_defense.block_duration_secs = clampInteger(
+        targetForm.slow_attack_defense.block_duration_secs,
+        30,
+        604_800,
+        900,
+      )
       targetForm.safeline_intercept.max_body_bytes = clampInteger(
         targetForm.safeline_intercept.max_body_bytes,
         256,

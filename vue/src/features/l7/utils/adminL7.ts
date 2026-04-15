@@ -77,6 +77,15 @@ export function createDefaultL7ConfigForm(): L7ConfigForm {
       hard_ip_block_multiplier: 4,
       hard_hot_path_block_multiplier: 3,
     },
+    slow_attack_defense: {
+      enabled: true,
+      header_min_bytes_per_sec: 64,
+      body_min_bytes_per_sec: 256,
+      idle_keepalive_timeout_ms: 5000,
+      event_window_secs: 300,
+      max_events_per_window: 6,
+      block_duration_secs: 900,
+    },
     safeline_intercept: {
       enabled: true,
       action: 'replace',

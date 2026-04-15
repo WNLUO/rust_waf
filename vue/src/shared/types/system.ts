@@ -22,8 +22,15 @@ export interface MetricsResponse {
   proxy_fail_close_rejections: number
   l4_bucket_budget_rejections: number
   tls_pre_handshake_rejections: number
+  trusted_proxy_permit_drops: number
+  trusted_proxy_l4_degrade_actions: number
   tls_handshake_timeouts: number
   tls_handshake_failures: number
+  slow_attack_idle_timeouts: number
+  slow_attack_header_timeouts: number
+  slow_attack_body_timeouts: number
+  slow_attack_tls_handshake_hits: number
+  slow_attack_blocks: number
   upstream_healthcheck_successes: number
   upstream_healthcheck_failures: number
   proxy_latency_micros_total: number
@@ -33,8 +40,19 @@ export interface MetricsResponse {
   persisted_security_events: number
   persisted_blocked_ips: number
   persisted_rules: number
+  sqlite_queue_capacity: number
+  sqlite_queue_depth: number
+  sqlite_dropped_security_events: number
+  sqlite_dropped_blocked_ips: number
   last_persisted_event_at: number | null
   last_rule_update_at: number | null
+  l4_bucket_count: number
+  l4_fine_grained_buckets: number
+  l4_coarse_buckets: number
+  l4_peer_only_buckets: number
+  l4_high_risk_buckets: number
+  l4_behavior_dropped_events: number
+  l4_overload_level: string
 }
 
 export interface AdaptiveProtectionL4RuntimePayload {

@@ -142,6 +142,7 @@ pub struct L7ConfigResponse {
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
     pub(crate) cc_defense: CcDefenseConfigResponse,
+    pub(crate) slow_attack_defense: SlowAttackDefenseConfigResponse,
     pub(crate) safeline_intercept: SafeLineInterceptConfigResponse,
     pub(crate) auto_tuning: AutoTuningConfigResponse,
 }
@@ -295,6 +296,17 @@ pub struct L7AdvancedCompatibilityResponse {
     pub(crate) persisted_auto_tuning: AutoTuningConfigResponse,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SlowAttackDefenseConfigResponse {
+    pub(crate) enabled: bool,
+    pub(crate) header_min_bytes_per_sec: u64,
+    pub(crate) body_min_bytes_per_sec: u64,
+    pub(crate) idle_keepalive_timeout_ms: u64,
+    pub(crate) event_window_secs: u64,
+    pub(crate) max_events_per_window: u32,
+    pub(crate) block_duration_secs: u64,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct TrustedCdnConfigRequest {
     #[serde(default)]
@@ -373,10 +385,22 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) http3_enable_tls13: bool,
     #[serde(default)]
     pub(crate) cc_defense: Option<CcDefenseConfigRequest>,
+    pub(crate) slow_attack_defense: SlowAttackDefenseConfigRequest,
     #[serde(default)]
     pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
     #[serde(default)]
     pub(crate) auto_tuning: Option<AutoTuningConfigRequest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SlowAttackDefenseConfigRequest {
+    pub(crate) enabled: bool,
+    pub(crate) header_min_bytes_per_sec: u64,
+    pub(crate) body_min_bytes_per_sec: u64,
+    pub(crate) idle_keepalive_timeout_ms: u64,
+    pub(crate) event_window_secs: u64,
+    pub(crate) max_events_per_window: u32,
+    pub(crate) block_duration_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

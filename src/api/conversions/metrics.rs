@@ -137,6 +137,26 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.tls_handshake_failures)
                 .unwrap_or(0),
+            slow_attack_idle_timeouts: metrics
+                .as_ref()
+                .map(|value| value.slow_attack_idle_timeouts)
+                .unwrap_or(0),
+            slow_attack_header_timeouts: metrics
+                .as_ref()
+                .map(|value| value.slow_attack_header_timeouts)
+                .unwrap_or(0),
+            slow_attack_body_timeouts: metrics
+                .as_ref()
+                .map(|value| value.slow_attack_body_timeouts)
+                .unwrap_or(0),
+            slow_attack_tls_handshake_hits: metrics
+                .as_ref()
+                .map(|value| value.slow_attack_tls_handshake_hits)
+                .unwrap_or(0),
+            slow_attack_blocks: metrics
+                .as_ref()
+                .map(|value| value.slow_attack_blocks)
+                .unwrap_or(0),
             average_proxy_latency_micros: metrics
                 .as_ref()
                 .map(|value| value.average_proxy_latency_micros)

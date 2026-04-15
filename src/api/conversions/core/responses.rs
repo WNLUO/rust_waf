@@ -298,6 +298,9 @@ impl L7ConfigResponse {
                 .unwrap_or_default(),
             http3_enable_tls13: config.http3_config.enable_tls13,
             cc_defense: CcDefenseConfigResponse::from_config(&effective_cc_defense),
+            slow_attack_defense: SlowAttackDefenseConfigResponse::from_config(
+                &config.l7_config.slow_attack_defense,
+            ),
             safeline_intercept: SafeLineInterceptConfigResponse::from_config(
                 &config.l7_config.safeline_intercept,
             ),
@@ -330,6 +333,20 @@ impl CcDefenseConfigResponse {
             hard_host_block_multiplier: config.hard_host_block_multiplier,
             hard_ip_block_multiplier: config.hard_ip_block_multiplier,
             hard_hot_path_block_multiplier: config.hard_hot_path_block_multiplier,
+        }
+    }
+}
+
+impl SlowAttackDefenseConfigResponse {
+    pub(crate) fn from_config(config: &crate::config::l7::SlowAttackDefenseConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            header_min_bytes_per_sec: config.header_min_bytes_per_sec,
+            body_min_bytes_per_sec: config.body_min_bytes_per_sec,
+            idle_keepalive_timeout_ms: config.idle_keepalive_timeout_ms,
+            event_window_secs: config.event_window_secs,
+            max_events_per_window: config.max_events_per_window,
+            block_duration_secs: config.block_duration_secs,
         }
     }
 }

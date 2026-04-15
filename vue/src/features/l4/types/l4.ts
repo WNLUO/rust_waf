@@ -177,6 +177,7 @@ export interface L4BucketItem {
   recent_feedback_120s: number
   l7_block_hits: number
   safeline_hits: number
+  slow_attack_hits: number
   risk_score: number
   risk_level: 'normal' | 'suspicious' | 'high'
   policy: L4BucketPolicy

@@ -108,6 +108,16 @@ export interface AutoTuningRuntimePayload {
   }
 }
 
+export interface SlowAttackDefenseConfigPayload {
+  enabled: boolean
+  header_min_bytes_per_sec: number
+  body_min_bytes_per_sec: number
+  idle_keepalive_timeout_ms: number
+  event_window_secs: number
+  max_events_per_window: number
+  block_duration_secs: number
+}
+
 export interface L7AdvancedCompatibilityPayload {
   persisted_cc_defense: CcDefenseConfigPayload
   persisted_auto_tuning: AutoTuningConfigPayload
@@ -160,6 +170,7 @@ export interface L7ConfigPayload {
   http3_private_key_path: string
   http3_enable_tls13: boolean
   cc_defense: CcDefenseConfigPayload
+  slow_attack_defense: SlowAttackDefenseConfigPayload
   safeline_intercept: SafeLineInterceptConfigPayload
   auto_tuning: AutoTuningConfigPayload
 }
@@ -177,8 +188,15 @@ export interface L7StatsPayload {
   proxy_fail_close_rejections: number
   l4_bucket_budget_rejections: number
   tls_pre_handshake_rejections: number
+  trusted_proxy_permit_drops: number
+  trusted_proxy_l4_degrade_actions: number
   tls_handshake_timeouts: number
   tls_handshake_failures: number
+  slow_attack_idle_timeouts: number
+  slow_attack_header_timeouts: number
+  slow_attack_body_timeouts: number
+  slow_attack_tls_handshake_hits: number
+  slow_attack_blocks: number
   average_proxy_latency_micros: number
   upstream_healthy: boolean
   upstream_last_check_at: number | null

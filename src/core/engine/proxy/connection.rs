@@ -480,6 +480,7 @@ fn build_http2_upstream_request(
         if key.eq_ignore_ascii_case(CONNECTION.as_str())
             || key.eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
             || key.eq_ignore_ascii_case(HOST.as_str())
+            || should_strip_loop_detection_header(key)
             || key.starts_with(':')
         {
             continue;
@@ -513,6 +514,12 @@ fn effective_http2_upstream_authority(
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or_else(|| upstream.authority.clone())
+}
+
+fn should_strip_loop_detection_header(header_name: &str) -> bool {
+    header_name.eq_ignore_ascii_case("cdn-loop")
+        || header_name.eq_ignore_ascii_case("via")
+        || header_name.eq_ignore_ascii_case("eo-log-uuid")
 }
 
 fn normalize_http2_upstream_path(path: &str) -> String {
@@ -771,6 +778,7 @@ mod tests {
         request.add_header("host".to_string(), "wnluo.com".to_string());
         request.add_header("eo-log-uuid".to_string(), "trace".to_string());
         request.add_header("cdn-loop".to_string(), "TencentEdgeOne; loops=2".to_string());
+        request.add_header("via".to_string(), "ens-cache".to_string());
         request.add_header("x-cdn-real-ip".to_string(), "1.2.3.4".to_string());
         request.add_header("x-forwarded-for".to_string(), "1.2.3.4".to_string());
 
@@ -778,8 +786,9 @@ mod tests {
             .expect("request should build");
 
         assert_eq!(built.headers()["host"], "wnluo.com");
-        assert_eq!(built.headers()["eo-log-uuid"], "trace");
-        assert_eq!(built.headers()["cdn-loop"], "TencentEdgeOne; loops=2");
+        assert!(built.headers().get("eo-log-uuid").is_none());
+        assert!(built.headers().get("cdn-loop").is_none());
+        assert!(built.headers().get("via").is_none());
         assert_eq!(built.headers()["x-cdn-real-ip"], "1.2.3.4");
         assert_eq!(built.headers()["x-forwarded-for"], "1.2.3.4");
     }

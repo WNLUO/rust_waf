@@ -126,7 +126,8 @@ pub(super) async fn ai_audit_report_handler(
     State(state): State<ApiState>,
     Query(params): Query<AiAuditReportQueryParams>,
 ) -> ApiResult<Json<AiAuditReportResponse>> {
-    let provider = crate::api::ai_audit::provider_from_report_query(&params);
+    let config = state.context.config_snapshot();
+    let execution = crate::api::ai_audit::resolve_report_execution(&config, &params);
     let summary_query = crate::api::ai_audit::summary_query_from_report(&params);
     let summary = build_ai_audit_summary(
         &state,
@@ -135,12 +136,9 @@ pub(super) async fn ai_audit_report_handler(
         summary_query.recent_limit,
     )
     .await?;
-    Ok(Json(crate::api::ai_audit::finalize_report_execution(
-        provider,
-        params.fallback_to_rules.unwrap_or(true),
-        summary,
-        build_ai_audit_report,
-    )))
+    Ok(Json(
+        crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report).await?,
+    ))
 }
 
 async fn build_ai_audit_summary(

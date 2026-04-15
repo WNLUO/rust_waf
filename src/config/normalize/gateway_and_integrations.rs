@@ -378,6 +378,17 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
     config.integrations.safeline.blocklist_ip_group_ids =
         normalize_string_list(&config.integrations.safeline.blocklist_ip_group_ids);
 
+    config.integrations.ai_audit.model = config.integrations.ai_audit.model.trim().to_string();
+    config.integrations.ai_audit.base_url =
+        normalize_base_url(&config.integrations.ai_audit.base_url);
+    config.integrations.ai_audit.api_key = config.integrations.ai_audit.api_key.trim().to_string();
+    config.integrations.ai_audit.timeout_ms = clamp_u64(
+        config.integrations.ai_audit.timeout_ms,
+        1_000,
+        120_000,
+        15_000,
+    );
+
     config.admin_api_auth.bearer_token = config.admin_api_auth.bearer_token.trim().to_string();
     config.admin_api_auth.enabled =
         config.admin_api_auth.enabled || !config.admin_api_auth.bearer_token.is_empty();

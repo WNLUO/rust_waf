@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import AppLayout from '@/app/layout/AppLayout.vue'
+import AdminAiAuditSection from '@/features/behavior/components/AdminAiAuditSection.vue'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
@@ -187,6 +188,8 @@ onMounted(() => {
           </div>
         </CyberCard>
       </section>
+
+      <AdminAiAuditSection />
 
       <CyberCard
         title="当前实时状态"

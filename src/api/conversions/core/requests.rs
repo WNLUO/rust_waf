@@ -470,8 +470,35 @@ impl GlobalSettingsUpdateRequest {
         current.gateway_config.header_operations = header_operations;
         current.l7_config.http2_config.enabled = self.http2_enabled;
         current.http3_config.enabled = self.http3_enabled;
+        current.integrations.ai_audit = self.ai_audit.into_config()?;
 
         Ok(current.normalized())
+    }
+}
+
+impl AiAuditSettingsRequest {
+    pub(crate) fn into_config(self) -> Result<crate::config::AiAuditConfig, String> {
+        let provider = match self.provider.trim().to_ascii_lowercase().as_str() {
+            "" | "local_rules" => crate::config::AiAuditProviderConfig::LocalRules,
+            "stub_model" => crate::config::AiAuditProviderConfig::StubModel,
+            "openai_compatible" => crate::config::AiAuditProviderConfig::OpenAiCompatible,
+            other => {
+                return Err(format!(
+                    "AI 审计 provider 仅支持 local_rules/stub_model/openai_compatible，收到 '{}'",
+                    other
+                ))
+            }
+        };
+
+        Ok(crate::config::AiAuditConfig {
+            enabled: self.enabled,
+            provider,
+            model: self.model,
+            base_url: self.base_url,
+            api_key: self.api_key,
+            timeout_ms: self.timeout_ms,
+            fallback_to_rules: self.fallback_to_rules,
+        })
     }
 }
 

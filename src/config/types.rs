@@ -100,6 +100,35 @@ pub enum AdaptiveProtectionGoal {
 pub struct IntegrationsConfig {
     #[serde(default)]
     pub safeline: SafeLineConfig,
+    #[serde(default)]
+    pub ai_audit: AiAuditConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAuditConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: AiAuditProviderConfig,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_ai_audit_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_ai_audit_fallback_to_rules")]
+    pub fallback_to_rules: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AiAuditProviderConfig {
+    #[default]
+    LocalRules,
+    StubModel,
+    OpenAiCompatible,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,6 +204,14 @@ pub struct AutoTuningConfig {
 }
 
 const fn default_adaptive_protection_enabled() -> bool {
+    true
+}
+
+const fn default_ai_audit_timeout_ms() -> u64 {
+    15_000
+}
+
+const fn default_ai_audit_fallback_to_rules() -> bool {
     true
 }
 

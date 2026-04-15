@@ -27,6 +27,15 @@ function createDefaultSettings(): GlobalSettingsPayload {
     ssl_protocols: ['TLSv1.2', 'TLSv1.3'],
     ssl_ciphers: '',
     header_operations: [],
+    ai_audit: {
+      enabled: false,
+      provider: 'local_rules',
+      model: '',
+      base_url: '',
+      api_key: '',
+      timeout_ms: 15000,
+      fallback_to_rules: true,
+    },
   }
 }
 
@@ -231,6 +240,83 @@ onMounted(loadSettings)
                 type="text"
                 placeholder="留空则沿用默认"
               />
+            </label>
+          </section>
+
+          <section class="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+            <p class="text-sm font-semibold text-stone-900">AI 审计 Provider</p>
+            <p class="mt-0.5 text-xs leading-4 text-slate-500">
+              这里配置审计报告的默认 provider。当前仍以内置 `local_rules` 为兜底，外部模型只做占位接入准备。
+            </p>
+            <div class="mt-3 grid gap-3 md:grid-cols-2">
+              <label
+                class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+              >
+                <input
+                  v-model="settings.ai_audit.enabled"
+                  type="checkbox"
+                  class="h-4 w-4 accent-blue-600"
+                />
+                启用 AI 审计 provider
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500">默认 provider</span>
+                <select
+                  v-model="settings.ai_audit.provider"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                >
+                  <option value="local_rules">local_rules</option>
+                  <option value="stub_model">stub_model</option>
+                  <option value="openai_compatible">openai_compatible</option>
+                </select>
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500">模型名称</span>
+                <input
+                  v-model="settings.ai_audit.model"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                  type="text"
+                  placeholder="例如 gpt-5.4-mini"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500">Base URL</span>
+                <input
+                  v-model="settings.ai_audit.base_url"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                  type="text"
+                  placeholder="例如 https://api.example.com/v1"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500">API Key</span>
+                <input
+                  v-model="settings.ai_audit.api_key"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                  type="password"
+                  placeholder="留空则只保留本地报告链路"
+                />
+              </label>
+              <label class="space-y-1">
+                <span class="text-xs font-medium text-slate-500">超时预算（毫秒）</span>
+                <input
+                  v-model.number="settings.ai_audit.timeout_ms"
+                  class="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                  type="number"
+                  min="1000"
+                  step="500"
+                />
+              </label>
+            </div>
+            <label
+              class="mt-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+            >
+              <input
+                v-model="settings.ai_audit.fallback_to_rules"
+                type="checkbox"
+                class="h-4 w-4 accent-blue-600"
+              />
+              provider 失败时自动回退到 local_rules
             </label>
           </section>
         </div>

@@ -66,7 +66,7 @@ pub struct AiAuditReportQueryParams {
     pub(crate) fallback_to_rules: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AiAuditSummaryResponse {
     pub(crate) generated_at: i64,
     pub(crate) window_seconds: u32,
@@ -98,7 +98,7 @@ pub struct AiAuditReportResponse {
     pub(crate) summary: AiAuditSummaryResponse,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AiAuditCurrentStateResponse {
     pub(crate) adaptive_system_pressure: String,
     pub(crate) adaptive_reasons: Vec<String>,
@@ -129,7 +129,7 @@ pub struct AiAuditReportRecommendation {
     pub(crate) rationale: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AiAuditCountersResponse {
     pub(crate) proxied_requests: u64,
     pub(crate) blocked_packets: u64,
@@ -147,13 +147,13 @@ pub struct AiAuditCountersResponse {
     pub(crate) average_proxy_latency_micros: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AiAuditCountItem {
     pub(crate) key: String,
     pub(crate) count: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AiAuditEventSampleResponse {
     pub(crate) id: i64,
     pub(crate) created_at: i64,

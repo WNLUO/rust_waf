@@ -613,6 +613,27 @@ impl GlobalSettingsResponse {
                 .iter()
                 .map(HeaderOperationPayload::from_config)
                 .collect(),
+            ai_audit: AiAuditSettingsResponse::from_config(&config.integrations.ai_audit),
+        }
+    }
+}
+
+impl AiAuditSettingsResponse {
+    pub(crate) fn from_config(config: &crate::config::AiAuditConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            provider: match config.provider {
+                crate::config::AiAuditProviderConfig::LocalRules => "local_rules".to_string(),
+                crate::config::AiAuditProviderConfig::StubModel => "stub_model".to_string(),
+                crate::config::AiAuditProviderConfig::OpenAiCompatible => {
+                    "openai_compatible".to_string()
+                }
+            },
+            model: config.model.clone(),
+            base_url: config.base_url.clone(),
+            api_key: config.api_key.clone(),
+            timeout_ms: config.timeout_ms,
+            fallback_to_rules: config.fallback_to_rules,
         }
     }
 }

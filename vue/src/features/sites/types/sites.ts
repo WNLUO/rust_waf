@@ -140,6 +140,16 @@ export interface HeaderOperationItem {
   value: string
 }
 
+export interface AiAuditSettingsPayload {
+  enabled: boolean
+  provider: 'local_rules' | 'stub_model' | 'openai_compatible'
+  model: string
+  base_url: string
+  api_key: string
+  timeout_ms: number
+  fallback_to_rules: boolean
+}
+
 export interface GlobalSettingsPayload {
   enable_http1_0: boolean
   http2_enabled: boolean
@@ -168,6 +178,7 @@ export interface GlobalSettingsPayload {
   ssl_protocols: string[]
   ssl_ciphers: string
   header_operations: HeaderOperationItem[]
+  ai_audit: AiAuditSettingsPayload
 }
 
 export interface LocalSiteDraft {

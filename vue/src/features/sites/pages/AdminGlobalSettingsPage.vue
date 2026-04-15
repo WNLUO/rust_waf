@@ -28,6 +28,15 @@ function createDefaultSettings(): GlobalSettingsPayload {
     ssl_protocols: ['TLSv1.2', 'TLSv1.3'],
     ssl_ciphers: '',
     header_operations: [],
+    ai_audit: {
+      enabled: false,
+      provider: 'local_rules',
+      model: '',
+      base_url: '',
+      api_key: '',
+      timeout_ms: 15000,
+      fallback_to_rules: true,
+    },
   }
 }
 

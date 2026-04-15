@@ -106,6 +106,20 @@ impl Default for SafeLineConfig {
     }
 }
 
+impl Default for AiAuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: AiAuditProviderConfig::LocalRules,
+            model: String::new(),
+            base_url: String::new(),
+            api_key: String::new(),
+            timeout_ms: 15_000,
+            fallback_to_rules: true,
+        }
+    }
+}
+
 impl Default for AdminApiAuthConfig {
     fn default() -> Self {
         Self {

@@ -114,6 +114,7 @@ pub struct GlobalSettingsResponse {
     pub(crate) ssl_protocols: Vec<String>,
     pub(crate) ssl_ciphers: String,
     pub(crate) header_operations: Vec<HeaderOperationPayload>,
+    pub(crate) ai_audit: AiAuditSettingsResponse,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +140,29 @@ pub struct GlobalSettingsUpdateRequest {
     pub(crate) ssl_ciphers: String,
     #[serde(default)]
     pub(crate) header_operations: Vec<HeaderOperationPayload>,
+    pub(crate) ai_audit: AiAuditSettingsRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAuditSettingsResponse {
+    pub(crate) enabled: bool,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) timeout_ms: u64,
+    pub(crate) fallback_to_rules: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AiAuditSettingsRequest {
+    pub(crate) enabled: bool,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) base_url: String,
+    pub(crate) api_key: String,
+    pub(crate) timeout_ms: u64,
+    pub(crate) fallback_to_rules: bool,
 }
 
 #[derive(Debug, Serialize)]

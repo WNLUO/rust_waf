@@ -6,6 +6,7 @@ import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
   fetchAiAuditReport,
   fetchAiAuditReports,
+  runAiAuditReport,
   updateAiAuditReportFeedback,
 } from '@/shared/api/dashboard'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
@@ -158,10 +159,12 @@ async function loadSection(runReport = true) {
     assignAiAudit(settings)
     if (runReport) {
       persistReportSnapshot(
-        await fetchAiAuditReport({
+        await runAiAuditReport({
           window_seconds: windowSeconds.value,
         }),
       )
+    } else if (!report.value) {
+      persistReportSnapshot(await fetchAiAuditReport())
     }
     await loadHistory()
   } catch (err) {
@@ -176,7 +179,7 @@ async function runAudit() {
   error.value = ''
   try {
     persistReportSnapshot(
-      await fetchAiAuditReport({
+      await runAiAuditReport({
         window_seconds: windowSeconds.value,
         provider: form.provider,
         fallback_to_rules: form.fallback_to_rules,
@@ -281,7 +284,7 @@ async function updateFeedback(
 
 onMounted(() => {
   loadCachedReportSnapshot()
-  void loadSection(true)
+  void loadSection(false)
 })
 </script>
 
@@ -314,10 +317,10 @@ onMounted(() => {
           type="button"
           class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
           :disabled="loading || refreshing"
-          @click="loadSection(true)"
+          @click="loadSection(false)"
         >
           <RefreshCw :size="14" :class="{ 'animate-spin': loading || refreshing }" />
-          刷新
+          刷新配置
         </button>
         <button
           type="button"
@@ -339,7 +342,7 @@ onMounted(() => {
     </template>
 
     <div v-if="loading" class="py-12 text-center text-sm text-slate-500">
-      正在加载 AI 审计配置与报告...
+      正在加载 AI 审计配置与历史...
     </div>
 
     <div v-else class="space-y-5">

@@ -11,20 +11,23 @@ import {
 } from '@/shared/api/events'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
+import { useAdminRealtimeState } from '@/shared/realtime/adminRealtime'
 import type {
   BehaviorProfileItem,
   BehaviorSessionItem,
   FingerprintProfileItem,
 } from '@/shared/types'
-import { BrainCircuit, Fingerprint, RefreshCw, Route } from 'lucide-vue-next'
+import { Fingerprint, RefreshCw, Route } from 'lucide-vue-next'
 
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
 const tab = ref<'fingerprints' | 'sessions'>('fingerprints')
+const lastUpdated = ref<number | null>(null)
 const fingerprintProfiles = ref<FingerprintProfileItem[]>([])
 const behaviorSessions = ref<BehaviorSessionItem[]>([])
 const liveProfiles = ref<BehaviorProfileItem[]>([])
+const realtimeState = useAdminRealtimeState()
 
 const { formatNumber, formatTimestamp } = useFormatters()
 
@@ -49,6 +52,25 @@ const currentWatchingCount = computed(
 const currentHealthyCount = computed(
   () => liveProfiles.value.filter((profile) => !profile.blocked && profile.score < 20).length,
 )
+const statusLabel = computed(() => {
+  if (refreshing.value) return '正在同步智能档案...'
+  if (realtimeState.connected && lastUpdated.value) {
+    return `实时通道已连接：${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(lastUpdated.value))}`
+  }
+  if (realtimeState.connecting) return '实时通道连接中...'
+  if (lastUpdated.value) {
+    return `上次刷新：${new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).format(new Date(lastUpdated.value))}`
+  }
+  return '等待首次同步'
+})
 
 function actionType(action: string | null) {
   if (action === 'block') return 'error' as const
@@ -93,6 +115,7 @@ async function loadPage(showLoader = false) {
     liveProfiles.value = liveProfilesPayload.profiles
     fingerprintProfiles.value = fingerprintsPayload.profiles
     behaviorSessions.value = sessionsPayload.sessions
+    lastUpdated.value = Date.now()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载智能档案失败'
   } finally {
@@ -108,38 +131,25 @@ onMounted(() => {
 
 <template>
   <AppLayout>
+    <template #header-extra>
+      <div class="flex items-center gap-3">
+        <StatusBadge
+          :type="realtimeState.connected ? 'success' : realtimeState.connecting ? 'info' : 'muted'"
+          :text="statusLabel"
+        />
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="refreshing"
+          @click="loadPage()"
+        >
+          <RefreshCw :size="16" :class="{ 'animate-spin': refreshing }" />
+          刷新档案
+        </button>
+      </div>
+    </template>
+
     <div class="space-y-6">
-      <section
-        class="overflow-hidden rounded-[28px] border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-cyan-50 shadow-sm"
-      >
-        <div class="flex flex-col gap-6 px-6 py-6 lg:flex-row lg:items-end lg:justify-between">
-          <div class="space-y-3">
-            <div class="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/80 px-3 py-1 text-xs font-medium text-cyan-700">
-              <BrainCircuit :size="14" />
-              智能档案
-            </div>
-            <div class="space-y-2">
-              <h1 class="text-2xl font-semibold tracking-tight text-slate-900">
-                当前状态与历史档案
-              </h1>
-              <p class="max-w-3xl text-sm leading-6 text-slate-600">
-                先看当前活跃身份是不是正常，再看已经入库的历史风险档案。这样测试时不会把过去的挑战或封禁，误读成“现在仍在发生”。
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="refreshing"
-            @click="loadPage()"
-          >
-            <RefreshCw :size="16" :class="{ 'animate-spin': refreshing }" />
-            刷新档案
-          </button>
-        </div>
-      </section>
-
       <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <CyberCard no-padding>
           <div class="flex items-start justify-between px-5 py-4">

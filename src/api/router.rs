@@ -32,6 +32,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(system_handlers::ai_audit_report_handler),
         )
         .route(
+            "/dashboard/ai-audit-report/run",
+            post(system_handlers::run_ai_audit_report_handler),
+        )
+        .route(
             "/dashboard/ai-audit-reports",
             get(system_handlers::list_ai_audit_reports_handler),
         )

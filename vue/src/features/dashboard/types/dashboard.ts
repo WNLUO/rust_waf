@@ -33,6 +33,12 @@ export interface AiAuditSummaryQuery extends Record<string, ApiQueryValue> {
   window_seconds?: number
   sample_limit?: number
   recent_limit?: number
+}
+
+export interface AiAuditRunPayload {
+  window_seconds?: number
+  sample_limit?: number
+  recent_limit?: number
   provider?: string
   fallback_to_rules?: boolean
 }

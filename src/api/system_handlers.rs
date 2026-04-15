@@ -124,8 +124,36 @@ pub(super) async fn ai_audit_summary_handler(
 
 pub(super) async fn ai_audit_report_handler(
     State(state): State<ApiState>,
-    Query(params): Query<AiAuditReportQueryParams>,
 ) -> ApiResult<Json<AiAuditReportResponse>> {
+    let store = sqlite_store(&state)?;
+    let result = store
+        .list_ai_audit_reports(&crate::storage::AiAuditReportQuery {
+            limit: 1,
+            offset: 0,
+            feedback_status: None,
+        })
+        .await
+        .map_err(ApiError::internal)?;
+    let Some(entry) = result.items.into_iter().next() else {
+        return Err(ApiError::not_found("暂无 AI 审计历史，请先执行一次 AI 审计"));
+    };
+    let report = crate::api::ai_audit::history_item_from_entry(entry)
+        .map_err(ApiError::internal)?
+        .report;
+    Ok(Json(report))
+}
+
+pub(super) async fn run_ai_audit_report_handler(
+    State(state): State<ApiState>,
+    ExtractJson(payload): ExtractJson<AiAuditRunRequest>,
+) -> ApiResult<Json<AiAuditReportResponse>> {
+    let params = AiAuditReportQueryParams {
+        window_seconds: payload.window_seconds,
+        sample_limit: payload.sample_limit,
+        recent_limit: payload.recent_limit,
+        provider: payload.provider,
+        fallback_to_rules: payload.fallback_to_rules,
+    };
     let config = state.context.config_snapshot();
     let execution = crate::api::ai_audit::resolve_report_execution(&config, &params);
     let summary_query = crate::api::ai_audit::summary_query_from_report(&params);

@@ -11,6 +11,7 @@ import type {
   AiAuditSummaryQuery,
   AiAuditSummaryResponse,
   AiAuditReportResponse,
+  AiAuditRunPayload,
   AiAuditReportsQuery,
   AiAuditReportsResponse,
   AiAuditFeedbackUpdatePayload,
@@ -67,11 +68,17 @@ export async function fetchAiAuditSummary(
 }
 
 export async function fetchAiAuditReport(
-  options: AiAuditSummaryQuery = {},
 ): Promise<AiAuditReportResponse> {
-  return apiRequest<AiAuditReportResponse>(
-    `/dashboard/ai-audit-report${buildQuery(options)}`,
-  )
+  return apiRequest<AiAuditReportResponse>('/dashboard/ai-audit-report')
+}
+
+export async function runAiAuditReport(
+  payload: AiAuditRunPayload = {},
+): Promise<AiAuditReportResponse> {
+  return apiRequest<AiAuditReportResponse>('/dashboard/ai-audit-report/run', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function fetchAiAuditReports(

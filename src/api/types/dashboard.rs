@@ -67,6 +67,15 @@ pub struct AiAuditReportQueryParams {
 }
 
 #[derive(Debug, Deserialize, Default)]
+pub struct AiAuditRunRequest {
+    pub(crate) window_seconds: Option<u32>,
+    pub(crate) sample_limit: Option<u32>,
+    pub(crate) recent_limit: Option<u32>,
+    pub(crate) provider: Option<String>,
+    pub(crate) fallback_to_rules: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub struct AiAuditReportsQueryParams {
     pub(crate) limit: Option<u32>,
     pub(crate) offset: Option<u32>,

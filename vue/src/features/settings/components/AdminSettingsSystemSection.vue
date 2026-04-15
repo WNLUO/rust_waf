@@ -273,6 +273,9 @@ function truncateCertificateName(name: string, maxLength = 18) {
               </option>
             </select>
           </label>
+        </div>
+
+        <div class="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
           <label
             class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-800"
           >
@@ -293,6 +296,16 @@ function truncateCertificateName(name: string, maxLength = 18) {
               class="ui-switch"
             />
           </label>
+          <label
+            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+          >
+            <span>身份调试事件</span>
+            <input
+              v-model="clientIdentityDebugEnabled"
+              type="checkbox"
+              class="ui-switch"
+            />
+          </label>
         </div>
 
         <p class="mt-3 text-xs leading-5 text-slate-500">
@@ -300,7 +313,8 @@ function truncateCertificateName(name: string, maxLength = 18) {
           Rust 侧自身造成 525，方便排查是否为 CDN、证书或源站链路问题。
         </p>
 
-        <div class="mt-4 grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-2">
+        <div class="mt-4 border-t border-slate-100 pt-3">
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
           <label class="flex items-center gap-2.5 px-1 py-1.5">
             <span class="shrink-0 text-xs font-medium text-slate-500">防护模式</span>
             <select
@@ -323,6 +337,8 @@ function truncateCertificateName(name: string, maxLength = 18) {
               <option value="security_first">安全优先</option>
             </select>
           </label>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-3">
           <label class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700">
             <span>CDN 前置架构</span>
             <input v-model="adaptiveProtectionCdnFronted" type="checkbox" class="ui-switch" />
@@ -331,6 +347,7 @@ function truncateCertificateName(name: string, maxLength = 18) {
             <span>允许极端拒绝</span>
             <input v-model="adaptiveEmergencyReject" type="checkbox" class="ui-switch" />
           </label>
+          </div>
         </div>
 
         <p class="text-xs leading-5 text-slate-500">
@@ -476,26 +493,6 @@ function truncateCertificateName(name: string, maxLength = 18) {
         </div>
       </section>
 
-      <section class="rounded-2xl border border-slate-200/90 bg-white/90 p-4">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold text-stone-900">调试与诊断</p>
-            <p class="mt-1 text-xs leading-5 text-slate-500">
-              仅在排查真实 IP 透传、代理链路或请求身份识别问题时临时开启。
-              开启后每个到达 Rust 的 HTTP 请求都会额外写入身份调试事件；使用上游 HTTP/2
-              代理时，也会同步记录上游请求、响应和错误诊断事件。
-            </p>
-          </div>
-          <label class="inline-flex items-center gap-3">
-            <span class="text-xs font-medium text-slate-500">身份调试事件</span>
-            <input
-              v-model="clientIdentityDebugEnabled"
-              type="checkbox"
-              class="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-            />
-          </label>
-        </div>
-      </section>
   </div>
 </template>
 

@@ -125,6 +125,19 @@ pub(crate) fn request_in_critical_overload(request: &crate::protocol::UnifiedHtt
         .unwrap_or(false)
 }
 
+pub(crate) fn should_hard_reject_l4_request_budget(
+    request: &crate::protocol::UnifiedHttpRequest,
+) -> bool {
+    match request
+        .get_metadata("network.identity_state")
+        .map(String::as_str)
+    {
+        Some("spoofed_forward_header") => true,
+        Some("trusted_cdn_unresolved") => request_in_critical_overload(request),
+        _ => false,
+    }
+}
+
 pub(crate) fn next_connection_id(
     peer_addr: std::net::SocketAddr,
     local_addr: std::net::SocketAddr,
@@ -133,4 +146,37 @@ pub(crate) fn next_connection_id(
     static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     format!("{transport}-{peer_addr}-{local_addr}-{id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{HttpVersion, UnifiedHttpRequest};
+
+    #[test]
+    fn request_budget_hard_rejects_spoofed_forward_headers() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "spoofed_forward_header".to_string(),
+        );
+
+        assert!(should_hard_reject_l4_request_budget(&request));
+    }
+
+    #[test]
+    fn request_budget_only_hard_rejects_unresolved_cdn_in_critical_overload() {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+        request.add_metadata("l4.overload_level".to_string(), "high".to_string());
+        assert!(!should_hard_reject_l4_request_budget(&request));
+
+        request.add_metadata("l4.overload_level".to_string(), "critical".to_string());
+        assert!(should_hard_reject_l4_request_budget(&request));
+    }
 }

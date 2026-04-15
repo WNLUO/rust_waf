@@ -255,6 +255,7 @@ pub(super) async fn run_trusted_cdn_sync_loop(context: Arc<WafContext>) {
 
 pub(super) async fn run_upstream_healthcheck_loop(context: Arc<WafContext>) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
+    let mut last_probe_at: Option<i64> = None;
 
     loop {
         interval.tick().await;
@@ -265,6 +266,15 @@ pub(super) async fn run_upstream_healthcheck_loop(context: Arc<WafContext>) {
         let Some(upstream_addr) = config.tcp_upstream_addr.clone() else {
             continue;
         };
+        let now = unix_timestamp();
+        if !should_run_upstream_probe(
+            last_probe_at,
+            now,
+            config.l7_config.upstream_healthcheck_interval_secs,
+        ) {
+            continue;
+        }
+        last_probe_at = Some(now);
         match probe_upstream_tcp(
             &upstream_addr,
             config.l7_config.upstream_healthcheck_timeout_ms,
@@ -310,9 +320,29 @@ pub(super) async fn probe_upstream_tcp(upstream_addr: &str, timeout_ms: u64) -> 
     Ok(())
 }
 
+fn should_run_upstream_probe(last_probe_at: Option<i64>, now: i64, interval_secs: u64) -> bool {
+    match last_probe_at {
+        None => true,
+        Some(last) => now.saturating_sub(last) >= interval_secs.max(1) as i64,
+    }
+}
+
 fn unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_run_upstream_probe;
+
+    #[test]
+    fn upstream_probe_respects_configured_interval() {
+        assert!(should_run_upstream_probe(None, 100, 5));
+        assert!(!should_run_upstream_probe(Some(100), 104, 5));
+        assert!(should_run_upstream_probe(Some(100), 105, 5));
+        assert!(should_run_upstream_probe(Some(100), 101, 0));
+    }
 }

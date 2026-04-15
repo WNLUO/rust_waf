@@ -2,19 +2,27 @@ use crate::config::l7::SlowAttackDefenseConfig;
 use crate::core::CustomHttpResponse;
 use dashmap::DashMap;
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
+
+const MAX_SLOW_ATTACK_BUCKETS: usize = 16_384;
+const OVERFLOW_SHARDS: u64 = 64;
+const CLEANUP_EVERY_EVENTS: u64 = 256;
 
 #[derive(Debug)]
 pub struct SlowAttackGuard {
     config: RwLock<SlowAttackDefenseConfig>,
     event_buckets: DashMap<String, SlidingWindowCounter>,
+    event_sequence: AtomicU64,
 }
 
 #[derive(Debug)]
 struct SlidingWindowCounter {
     events: Mutex<VecDeque<Instant>>,
+    last_seen_unix: AtomicI64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +59,7 @@ impl SlowAttackGuard {
         Self {
             config: RwLock::new(config.clone()),
             event_buckets: DashMap::new(),
+            event_sequence: AtomicU64::new(0),
         }
     }
 
@@ -73,11 +82,20 @@ impl SlowAttackGuard {
         let config = self.config();
         let window_secs = slow_attack_window_secs(&config, observation.kind);
         let block_threshold = slow_attack_block_threshold(&config, observation.kind);
-        let key = observation
+        let unix_now = unix_timestamp();
+        let raw_key = observation
             .client_ip
             .unwrap_or(observation.peer_ip)
             .to_string();
-        let event_count = self.observe(key, Duration::from_secs(window_secs));
+        let key = bounded_dashmap_key(
+            &self.event_buckets,
+            raw_key,
+            MAX_SLOW_ATTACK_BUCKETS,
+            "slow_attack",
+            OVERFLOW_SHARDS,
+        );
+        let event_count = self.observe(key, Duration::from_secs(window_secs), unix_now);
+        self.maybe_cleanup(unix_now, window_secs as i64);
         let block_ip = self.block_target_ip(&observation);
         let should_block_ip =
             config.enabled && block_ip.is_some() && event_count >= block_threshold;
@@ -145,12 +163,31 @@ impl SlowAttackGuard {
         }
     }
 
-    fn observe(&self, key: String, window: Duration) -> u32 {
+    fn observe(&self, key: String, window: Duration, unix_now: i64) -> u32 {
         let mut entry = self
             .event_buckets
             .entry(key)
             .or_insert_with(SlidingWindowCounter::new);
-        entry.observe(window)
+        entry.observe(window, unix_now)
+    }
+
+    fn maybe_cleanup(&self, unix_now: i64, window_secs: i64) {
+        let sequence = self.event_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        if !sequence.is_multiple_of(CLEANUP_EVERY_EVENTS) {
+            return;
+        }
+
+        let stale_before = unix_now - window_secs.saturating_mul(3).max(180);
+        let keys = self
+            .event_buckets
+            .iter()
+            .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
+            .take(512)
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        for key in keys {
+            self.event_buckets.remove(&key);
+        }
     }
 
     fn block_target_ip(&self, observation: &SlowAttackObservation) -> Option<IpAddr> {
@@ -192,10 +229,11 @@ impl SlidingWindowCounter {
     fn new() -> Self {
         Self {
             events: Mutex::new(VecDeque::new()),
+            last_seen_unix: AtomicI64::new(unix_timestamp()),
         }
     }
 
-    fn observe(&mut self, window: Duration) -> u32 {
+    fn observe(&mut self, window: Duration, unix_now: i64) -> u32 {
         let now = Instant::now();
         let mut events = self
             .events
@@ -209,6 +247,7 @@ impl SlidingWindowCounter {
             }
         }
         events.push_back(now);
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
         events.len().min(u32::MAX as usize) as u32
     }
 }
@@ -222,6 +261,38 @@ impl SlowAttackKind {
             Self::SlowTlsHandshake => "slow_tls_handshake",
         }
     }
+}
+
+fn bounded_dashmap_key<T>(
+    map: &DashMap<String, T>,
+    key: String,
+    limit: usize,
+    namespace: &str,
+    overflow_shards: u64,
+) -> String {
+    if map.contains_key(&key) || map.len() < limit {
+        key
+    } else {
+        overflow_bucket_key(namespace, &key, overflow_shards)
+    }
+}
+
+fn overflow_bucket_key(namespace: &str, value: &str, overflow_shards: u64) -> String {
+    let shard = stable_hash(value) % overflow_shards.max(1);
+    format!("__overflow__:{namespace}:{shard:02x}")
+}
+
+fn stable_hash(value: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]
@@ -294,5 +365,16 @@ mod tests {
         assert!(!guard.assess(make_observation()).should_block_ip);
         assert!(!guard.assess(make_observation()).should_block_ip);
         assert!(guard.assess(make_observation()).should_block_ip);
+    }
+
+    #[test]
+    fn bounded_dashmap_key_overflows_when_limit_is_hit() {
+        let map = DashMap::new();
+        map.insert("first".to_string(), SlidingWindowCounter::new());
+        map.insert("second".to_string(), SlidingWindowCounter::new());
+
+        let key = bounded_dashmap_key(&map, "third".to_string(), 2, "slow-test", 4);
+
+        assert!(key.starts_with("__overflow__:slow-test:"));
     }
 }

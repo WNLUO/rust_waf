@@ -2264,7 +2264,6 @@ mod tests {
                 l7_cc_unresolved_identity_delays: 3 + index as u64 * 3,
                 l7_cc_challenges: 6 + index as u64 * 4,
                 l7_behavior_delays: 4 + index as u64 * 2,
-                slow_attack_header_timeouts: 1 + index as u64,
                 ..MetricsSnapshot::default()
             };
             let decision = run_control_step(

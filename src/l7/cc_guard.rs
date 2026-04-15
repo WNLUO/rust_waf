@@ -6,12 +6,19 @@ use log::debug;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const BYPASS_PATHS: &[&str] = &["/.well-known/waf/browser-fingerprint-report"];
 const API_REQUEST_WEIGHT_PERCENT: u8 = 140;
+const MAX_COUNTER_BUCKETS: usize = 65_536;
+const MAX_PAGE_WINDOW_BUCKETS: usize = 32_768;
+const MAX_BUCKET_KEY_LEN: usize = 192;
+const MAX_ROUTE_PATH_LEN: usize = 160;
+const MAX_HOST_LEN: usize = 96;
+const OVERFLOW_SHARDS: u64 = 64;
 
 #[derive(Debug)]
 pub struct L7CcGuard {
@@ -654,6 +661,7 @@ impl L7CcGuard {
         unix_now: i64,
         window: Duration,
     ) -> u32 {
+        let key = bounded_dashmap_key(map, key, MAX_COUNTER_BUCKETS, "cc", OVERFLOW_SHARDS);
         let mut entry = map.entry(key).or_insert_with(SlidingWindowCounter::new);
         entry.observe(now, unix_now, window)
     }
@@ -667,6 +675,13 @@ impl L7CcGuard {
         window: Duration,
         weight_percent: u8,
     ) -> u32 {
+        let key = bounded_dashmap_key(
+            map,
+            key,
+            MAX_COUNTER_BUCKETS,
+            "cc_weighted",
+            OVERFLOW_SHARDS,
+        );
         let mut entry = map
             .entry(key)
             .or_insert_with(WeightedSlidingWindowCounter::new);
@@ -682,6 +697,13 @@ impl L7CcGuard {
         unix_now: i64,
         window: Duration,
     ) -> u32 {
+        let key = bounded_dashmap_key(
+            map,
+            key,
+            MAX_COUNTER_BUCKETS,
+            "cc_distinct",
+            OVERFLOW_SHARDS,
+        );
         let mut entry = map
             .entry(key)
             .or_insert_with(DistinctSlidingWindowCounter::new);
@@ -721,8 +743,20 @@ impl L7CcGuard {
         unix_now: i64,
         config: &CcDefenseConfig,
     ) {
-        let key = page_window_key(client_ip, host, document_path);
-        let host_key = page_host_window_key(client_ip, host);
+        let key = bounded_dashmap_key(
+            &self.page_load_windows,
+            page_window_key(client_ip, host, document_path),
+            MAX_PAGE_WINDOW_BUCKETS,
+            "cc_page_window",
+            OVERFLOW_SHARDS,
+        );
+        let host_key = bounded_dashmap_key(
+            &self.page_load_host_windows,
+            page_host_window_key(client_ip, host),
+            MAX_PAGE_WINDOW_BUCKETS,
+            "cc_page_host_window",
+            OVERFLOW_SHARDS,
+        );
         let expires_at = unix_now + config.page_load_grace_secs as i64;
         let mut entry = self
             .page_load_windows
@@ -752,7 +786,13 @@ impl L7CcGuard {
 
         if let Some((referer_host, referer_path)) = referer_host_path(request) {
             if referer_host.eq_ignore_ascii_case(host) {
-                let key = page_window_key(client_ip, host, &normalized_route_path(&referer_path));
+                let key = bounded_dashmap_key(
+                    &self.page_load_windows,
+                    page_window_key(client_ip, host, &normalized_route_path(&referer_path)),
+                    MAX_PAGE_WINDOW_BUCKETS,
+                    "cc_page_window",
+                    OVERFLOW_SHARDS,
+                );
                 if self
                     .page_load_windows
                     .get(&key)
@@ -769,7 +809,13 @@ impl L7CcGuard {
         if !looks_like_static_asset(route_path) {
             return false;
         }
-        let host_key = page_host_window_key(client_ip, host);
+        let host_key = bounded_dashmap_key(
+            &self.page_load_host_windows,
+            page_host_window_key(client_ip, host),
+            MAX_PAGE_WINDOW_BUCKETS,
+            "cc_page_host_window",
+            OVERFLOW_SHARDS,
+        );
         self.page_load_host_windows
             .get(&host_key)
             .map(|entry| entry.is_active(unix_now))
@@ -1321,7 +1367,7 @@ fn normalized_route_path(path: &str) -> String {
     if trimmed == "/" {
         return "/".to_string();
     }
-    trimmed.trim_end_matches('/').to_string()
+    compact_component("route", trimmed.trim_end_matches('/'), MAX_ROUTE_PATH_LEN)
 }
 
 fn normalized_host(request: &UnifiedHttpRequest) -> String {
@@ -1336,17 +1382,19 @@ fn normalized_host(request: &UnifiedHttpRequest) -> String {
     }
     if let Ok(uri) = format!("http://{raw}").parse::<http::Uri>() {
         if let Some(authority) = uri.authority() {
-            return authority.host().to_ascii_lowercase();
+            return compact_component("host", &authority.host().to_ascii_lowercase(), MAX_HOST_LEN);
         }
     }
-    raw.trim_start_matches('[')
+    let normalized = raw
+        .trim_start_matches('[')
         .split(']')
         .next()
         .unwrap_or(raw)
         .split(':')
         .next()
         .unwrap_or(raw)
-        .to_ascii_lowercase()
+        .to_ascii_lowercase();
+    compact_component("host", &normalized, MAX_HOST_LEN)
 }
 
 fn looks_like_static_asset(path: &str) -> bool {
@@ -1403,6 +1451,40 @@ fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn bounded_dashmap_key<T>(
+    map: &DashMap<String, T>,
+    key: String,
+    limit: usize,
+    namespace: &str,
+    overflow_shards: u64,
+) -> String {
+    let compacted = compact_component(namespace, &key, MAX_BUCKET_KEY_LEN);
+    if map.contains_key(&compacted) || map.len() < limit {
+        compacted
+    } else {
+        overflow_bucket_key(namespace, &compacted, overflow_shards)
+    }
+}
+
+fn compact_component(label: &str, value: &str, max_len: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= max_len {
+        return trimmed.to_string();
+    }
+    format!("{label}:{:016x}", stable_hash(trimmed))
+}
+
+fn overflow_bucket_key(namespace: &str, value: &str, overflow_shards: u64) -> String {
+    let shard = stable_hash(value) % overflow_shards.max(1);
+    format!("__overflow__:{namespace}:{shard:02x}")
+}
+
+fn stable_hash(value: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]
@@ -1794,6 +1876,30 @@ mod tests {
         assert_eq!(cleanup_batch_for_size(4_096), 512);
         assert_eq!(cleanup_interval_for_size(16_384), 64);
         assert_eq!(cleanup_batch_for_size(16_384), 2_048);
+    }
+
+    #[test]
+    fn long_route_and_host_are_compacted() {
+        let mut request = request("/");
+        request.add_header("host".to_string(), "a".repeat(MAX_HOST_LEN + 48));
+        let host = normalized_host(&request);
+        assert!(host.len() <= MAX_HOST_LEN);
+        assert!(host.starts_with("host:"));
+
+        let route = normalized_route_path(&format!("/{}", "x".repeat(MAX_ROUTE_PATH_LEN + 48)));
+        assert!(route.len() <= MAX_ROUTE_PATH_LEN);
+        assert!(route.starts_with("route:"));
+    }
+
+    #[test]
+    fn bounded_dashmap_key_overflows_when_limit_is_hit() {
+        let map = DashMap::new();
+        map.insert("first".to_string(), SlidingWindowCounter::new());
+        map.insert("second".to_string(), SlidingWindowCounter::new());
+
+        let key = bounded_dashmap_key(&map, "third".to_string(), 2, "cc-test", 4);
+
+        assert!(key.starts_with("__overflow__:cc-test:"));
     }
 
     #[tokio::test]

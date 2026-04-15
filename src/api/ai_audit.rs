@@ -1129,7 +1129,10 @@ mod tests {
 
         assert_eq!(output.headline, "true");
         assert_eq!(output.findings[0].key, "123");
-        assert_eq!(output.recommendations[0].rule_suggestion_key.as_deref(), Some("6"));
+        assert_eq!(
+            output.recommendations[0].rule_suggestion_key.as_deref(),
+            Some("6")
+        );
         assert_eq!(output.suggested_local_rules[0].ttl_secs, 500);
         assert!(output.suggested_local_rules[0].auto_apply);
     }

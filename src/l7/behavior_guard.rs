@@ -3,6 +3,7 @@ use crate::protocol::UnifiedHttpRequest;
 use dashmap::DashMap;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -17,6 +18,10 @@ const DELAY_SCORE: u32 = 35;
 const DELAY_MS: u64 = 250;
 pub const AUTO_BLOCK_DURATION_SECS: u64 = 15 * 60;
 const CHALLENGES_BEFORE_AUTO_BLOCK: usize = 2;
+const MAX_BEHAVIOR_BUCKETS: usize = 32_768;
+const MAX_BEHAVIOR_KEY_LEN: usize = 160;
+const MAX_BEHAVIOR_ROUTE_LEN: usize = 160;
+const OVERFLOW_SHARDS: u64 = 64;
 
 #[derive(Debug)]
 pub struct L7BehaviorGuard {
@@ -272,19 +277,18 @@ impl L7BehaviorGuard {
         unix_now: i64,
         window: Duration,
     ) -> BehaviorAssessment {
+        let identity = bounded_dashmap_key(
+            &self.buckets,
+            compact_component("identity", &identity, MAX_BEHAVIOR_KEY_LEN),
+            MAX_BEHAVIOR_BUCKETS,
+            "behavior",
+            OVERFLOW_SHARDS,
+        );
         let mut entry = self
             .buckets
-            .entry(identity.to_string())
+            .entry(identity.clone())
             .or_insert_with(BehaviorWindow::new);
-        entry.observe_and_assess(
-            identity.to_string(),
-            route,
-            kind,
-            client_ip,
-            now,
-            unix_now,
-            window,
-        )
+        entry.observe_and_assess(identity, route, kind, client_ip, now, unix_now, window)
     }
 
     fn maybe_cleanup(&self, unix_now: i64) {
@@ -720,19 +724,35 @@ fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
         .unwrap_or("unknown");
 
     if let Some(value) = cookie_value(request, "rwaf_fp") {
-        return Some(format!("fp:{value}"));
+        return Some(compact_component(
+            "identity",
+            &format!("fp:{value}"),
+            MAX_BEHAVIOR_KEY_LEN,
+        ));
     }
     if let Some(value) = request.get_header("x-browser-fingerprint-id") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
-            return Some(format!("fp:{trimmed}"));
+            return Some(compact_component(
+                "identity",
+                &format!("fp:{trimmed}"),
+                MAX_BEHAVIOR_KEY_LEN,
+            ));
         }
     }
     if let Some(value) = passive_fingerprint_id(request) {
-        return Some(format!("pfp:{value}"));
+        return Some(compact_component(
+            "identity",
+            &format!("pfp:{value}"),
+            MAX_BEHAVIOR_KEY_LEN,
+        ));
     }
     if let Some(value) = cookie_value(request, "rwaf_cc") {
-        return Some(format!("cookie:{value}"));
+        return Some(compact_component(
+            "identity",
+            &format!("cookie:{value}"),
+            MAX_BEHAVIOR_KEY_LEN,
+        ));
     }
     if identity_state == "trusted_cdn_unresolved" {
         return None;
@@ -746,7 +766,11 @@ fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .unwrap_or("-");
-    Some(format!("ipua:{ip}|{ua}"))
+    Some(compact_component(
+        "identity",
+        &format!("ipua:{ip}|{ua}"),
+        MAX_BEHAVIOR_KEY_LEN,
+    ))
 }
 
 fn passive_fingerprint_id(request: &UnifiedHttpRequest) -> Option<String> {
@@ -950,7 +974,11 @@ fn normalized_route_path(path: &str) -> String {
     if trimmed.is_empty() || trimmed == "/" {
         "/".to_string()
     } else {
-        trimmed.trim_end_matches('/').to_string()
+        compact_component(
+            "route",
+            trimmed.trim_end_matches('/'),
+            MAX_BEHAVIOR_ROUTE_LEN,
+        )
     }
 }
 
@@ -977,6 +1005,39 @@ fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn bounded_dashmap_key<T>(
+    map: &DashMap<String, T>,
+    key: String,
+    limit: usize,
+    namespace: &str,
+    overflow_shards: u64,
+) -> String {
+    if map.contains_key(&key) || map.len() < limit {
+        key
+    } else {
+        overflow_bucket_key(namespace, &key, overflow_shards)
+    }
+}
+
+fn compact_component(label: &str, value: &str, max_len: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= max_len {
+        return trimmed.to_string();
+    }
+    format!("{label}:{:016x}", stable_hash(trimmed))
+}
+
+fn overflow_bucket_key(namespace: &str, value: &str, overflow_shards: u64) -> String {
+    let shard = stable_hash(value) % overflow_shards.max(1);
+    format!("__overflow__:{namespace}:{shard:02x}")
+}
+
+fn stable_hash(value: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[cfg(test)]
@@ -1198,5 +1259,27 @@ mod tests {
         assert!(!profiles
             .iter()
             .any(|profile| profile.identity == "fp:stale"));
+    }
+
+    #[test]
+    fn request_identity_is_compacted_for_long_values() {
+        let mut req = request("GET", "/", "text/html");
+        req.add_header("x-browser-fingerprint-id".to_string(), "x".repeat(512));
+
+        let identity = request_identity(&req).expect("identity");
+
+        assert!(identity.len() <= MAX_BEHAVIOR_KEY_LEN);
+        assert!(identity.starts_with("identity:"));
+    }
+
+    #[test]
+    fn bounded_dashmap_key_overflows_when_limit_is_hit() {
+        let map = DashMap::new();
+        map.insert("first".to_string(), BehaviorWindow::new());
+        map.insert("second".to_string(), BehaviorWindow::new());
+
+        let key = bounded_dashmap_key(&map, "third".to_string(), 2, "behavior-test", 4);
+
+        assert!(key.starts_with("__overflow__:behavior-test:"));
     }
 }

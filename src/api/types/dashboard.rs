@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::{SecurityEventDecisionSummary, SecurityEventResponse};
+
 #[derive(Debug, Serialize)]
 pub struct TrafficMapNodeResponse {
     pub(crate) id: String,
@@ -46,4 +48,95 @@ pub struct TrafficMapResponse {
 #[derive(Debug, Deserialize, Default)]
 pub struct TrafficMapQueryParams {
     pub(crate) window_seconds: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct AiAuditSummaryQueryParams {
+    pub(crate) window_seconds: Option<u32>,
+    pub(crate) sample_limit: Option<u32>,
+    pub(crate) recent_limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditSummaryResponse {
+    pub(crate) generated_at: i64,
+    pub(crate) window_seconds: u32,
+    pub(crate) sampled_events: u32,
+    pub(crate) total_events: u64,
+    pub(crate) active_rules: u64,
+    pub(crate) current: AiAuditCurrentStateResponse,
+    pub(crate) counters: AiAuditCountersResponse,
+    pub(crate) identity_states: Vec<AiAuditCountItem>,
+    pub(crate) primary_signals: Vec<AiAuditCountItem>,
+    pub(crate) labels: Vec<AiAuditCountItem>,
+    pub(crate) top_source_ips: Vec<AiAuditCountItem>,
+    pub(crate) top_routes: Vec<AiAuditCountItem>,
+    pub(crate) top_hosts: Vec<AiAuditCountItem>,
+    pub(crate) recent_events: Vec<AiAuditEventSampleResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditCurrentStateResponse {
+    pub(crate) adaptive_system_pressure: String,
+    pub(crate) adaptive_reasons: Vec<String>,
+    pub(crate) l4_overload_level: String,
+    pub(crate) auto_tuning_controller_state: String,
+    pub(crate) auto_tuning_last_adjust_reason: Option<String>,
+    pub(crate) auto_tuning_last_adjust_diff: Vec<String>,
+    pub(crate) identity_pressure_percent: f64,
+    pub(crate) l7_friction_pressure_percent: f64,
+    pub(crate) slow_attack_pressure_percent: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditCountersResponse {
+    pub(crate) proxied_requests: u64,
+    pub(crate) blocked_packets: u64,
+    pub(crate) blocked_l4: u64,
+    pub(crate) blocked_l7: u64,
+    pub(crate) l7_cc_challenges: u64,
+    pub(crate) l7_cc_blocks: u64,
+    pub(crate) l7_cc_delays: u64,
+    pub(crate) l7_behavior_challenges: u64,
+    pub(crate) l7_behavior_blocks: u64,
+    pub(crate) l7_behavior_delays: u64,
+    pub(crate) trusted_proxy_permit_drops: u64,
+    pub(crate) trusted_proxy_l4_degrade_actions: u64,
+    pub(crate) slow_attack_hits: u64,
+    pub(crate) average_proxy_latency_micros: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditCountItem {
+    pub(crate) key: String,
+    pub(crate) count: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AiAuditEventSampleResponse {
+    pub(crate) id: i64,
+    pub(crate) created_at: i64,
+    pub(crate) layer: String,
+    pub(crate) action: String,
+    pub(crate) reason: String,
+    pub(crate) source_ip: String,
+    pub(crate) uri: Option<String>,
+    pub(crate) provider: Option<String>,
+    pub(crate) decision_summary: Option<SecurityEventDecisionSummary>,
+}
+
+impl From<SecurityEventResponse> for AiAuditEventSampleResponse {
+    fn from(value: SecurityEventResponse) -> Self {
+        Self {
+            id: value.id,
+            created_at: value.created_at,
+            layer: value.layer,
+            action: value.action,
+            reason: value.reason,
+            source_ip: value.source_ip,
+            uri: value.uri,
+            provider: value.provider,
+            decision_summary: value.decision_summary,
+        }
+    }
 }

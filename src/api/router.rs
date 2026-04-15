@@ -24,6 +24,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(system_handlers::traffic_map_handler),
         )
         .route(
+            "/dashboard/ai-audit-summary",
+            get(system_handlers::ai_audit_summary_handler),
+        )
+        .route(
             "/l4/config",
             get(settings_handlers::get_l4_config_handler)
                 .put(settings_handlers::update_l4_config_handler),

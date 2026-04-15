@@ -8,6 +8,7 @@ import type { RulesResponse } from '@/features/rules/types/rules'
 import type { ApiQueryValue } from '@/shared/types/common'
 import type { HealthResponse, MetricsResponse } from '@/shared/types/system'
 import type { SecurityEventItem } from '@/features/events/types/events'
+import type { SecurityEventDecisionSummary } from '@/features/events/types/events'
 
 export interface DashboardPayload {
   health: HealthResponse
@@ -26,6 +27,75 @@ export type EventMapScope = 'china' | 'global'
 
 export interface TrafficMapQuery extends Record<string, ApiQueryValue> {
   window_seconds?: number
+}
+
+export interface AiAuditSummaryQuery extends Record<string, ApiQueryValue> {
+  window_seconds?: number
+  sample_limit?: number
+  recent_limit?: number
+}
+
+export interface AiAuditCountItem {
+  key: string
+  count: number
+}
+
+export interface AiAuditEventSample {
+  id: number
+  created_at: number
+  layer: string
+  action: string
+  reason: string
+  source_ip: string
+  uri: string | null
+  provider: string | null
+  decision_summary: SecurityEventDecisionSummary | null
+}
+
+export interface AiAuditCurrentState {
+  adaptive_system_pressure: string
+  adaptive_reasons: string[]
+  l4_overload_level: string
+  auto_tuning_controller_state: string
+  auto_tuning_last_adjust_reason: string | null
+  auto_tuning_last_adjust_diff: string[]
+  identity_pressure_percent: number
+  l7_friction_pressure_percent: number
+  slow_attack_pressure_percent: number
+}
+
+export interface AiAuditCounters {
+  proxied_requests: number
+  blocked_packets: number
+  blocked_l4: number
+  blocked_l7: number
+  l7_cc_challenges: number
+  l7_cc_blocks: number
+  l7_cc_delays: number
+  l7_behavior_challenges: number
+  l7_behavior_blocks: number
+  l7_behavior_delays: number
+  trusted_proxy_permit_drops: number
+  trusted_proxy_l4_degrade_actions: number
+  slow_attack_hits: number
+  average_proxy_latency_micros: number
+}
+
+export interface AiAuditSummaryResponse {
+  generated_at: number
+  window_seconds: number
+  sampled_events: number
+  total_events: number
+  active_rules: number
+  current: AiAuditCurrentState
+  counters: AiAuditCounters
+  identity_states: AiAuditCountItem[]
+  primary_signals: AiAuditCountItem[]
+  labels: AiAuditCountItem[]
+  top_source_ips: AiAuditCountItem[]
+  top_routes: AiAuditCountItem[]
+  top_hosts: AiAuditCountItem[]
+  recent_events: AiAuditEventSample[]
 }
 
 export interface EventMapNode {

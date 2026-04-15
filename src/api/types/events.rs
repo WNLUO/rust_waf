@@ -105,7 +105,7 @@ pub struct BehaviorProfileResponse {
     pub(crate) blocked_reason: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SecurityEventResponse {
     pub(crate) id: i64,
     pub(crate) layer: String,
@@ -131,7 +131,7 @@ pub struct SecurityEventResponse {
     pub(crate) decision_summary: Option<SecurityEventDecisionSummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SecurityEventDecisionSummary {
     pub(crate) primary_signal: String,
     pub(crate) identity_state: Option<String>,

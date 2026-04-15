@@ -140,6 +140,7 @@ impl L7CcGuard {
             .map(|value| value == "true")
             .unwrap_or(false);
         let verified = self.has_valid_challenge_cookie(request, client_ip, &host, &config);
+        let interactive_session = is_interactive_session(request, &host, verified);
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(config.request_window_secs.max(1));
@@ -149,8 +150,12 @@ impl L7CcGuard {
         }
         let is_page_subresource = request_kind == RequestKind::StaticAsset
             && self.matches_page_load_window(request, client_ip, &host, &route_path, unix_now);
-        let weight_percent =
-            self.request_weight_percent(request_kind, is_page_subresource, &config);
+        let weight_percent = self.request_weight_percent(
+            request_kind,
+            is_page_subresource,
+            interactive_session,
+            &config,
+        );
 
         let ip_count = self.observe(
             &self.ip_buckets,
@@ -268,6 +273,10 @@ impl L7CcGuard {
         );
         request.add_metadata("l7.cc.challenge_verified".to_string(), verified.to_string());
         request.add_metadata(
+            "l7.cc.interactive_session".to_string(),
+            interactive_session.to_string(),
+        );
+        request.add_metadata(
             "l7.cc.client_identity_unresolved".to_string(),
             client_identity_unresolved.to_string(),
         );
@@ -278,13 +287,22 @@ impl L7CcGuard {
         // but it should not get a materially higher block threshold.
         let challenge_multiplier = if verified { 3 } else { 1 };
         let block_multiplier = 1;
-        let low_risk_subresource = request_kind == RequestKind::StaticAsset && is_page_subresource;
+        let interactive_host_ip_multiplier = if interactive_session { 4 } else { 1 };
+        let interactive_host_ip_block_multiplier = if interactive_session { 3 } else { 1 };
+        let low_risk_subresource = request_kind == RequestKind::StaticAsset
+            && (is_page_subresource || interactive_session);
 
         let route_block_threshold = config
             .route_block_threshold
             .saturating_mul(block_multiplier);
-        let host_block_threshold = config.host_block_threshold.saturating_mul(block_multiplier);
-        let ip_block_threshold = config.ip_block_threshold.saturating_mul(block_multiplier);
+        let host_block_threshold = config
+            .host_block_threshold
+            .saturating_mul(block_multiplier)
+            .saturating_mul(interactive_host_ip_block_multiplier);
+        let ip_block_threshold = config
+            .ip_block_threshold
+            .saturating_mul(block_multiplier)
+            .saturating_mul(interactive_host_ip_block_multiplier);
         let hot_path_block_threshold = config
             .hot_path_block_threshold
             .saturating_mul(block_multiplier);
@@ -348,10 +366,12 @@ impl L7CcGuard {
             .saturating_mul(challenge_multiplier);
         let host_challenge_threshold = config
             .host_challenge_threshold
-            .saturating_mul(challenge_multiplier);
+            .saturating_mul(challenge_multiplier)
+            .saturating_mul(interactive_host_ip_multiplier);
         let ip_challenge_threshold = config
             .ip_challenge_threshold
-            .saturating_mul(challenge_multiplier);
+            .saturating_mul(challenge_multiplier)
+            .saturating_mul(interactive_host_ip_multiplier);
         let hot_path_challenge_threshold = config
             .hot_path_challenge_threshold
             .saturating_mul(challenge_multiplier);
@@ -620,10 +640,19 @@ impl L7CcGuard {
         &self,
         kind: RequestKind,
         is_page_subresource: bool,
+        interactive_session: bool,
         config: &CcDefenseConfig,
     ) -> u8 {
         if is_page_subresource {
             return config.page_subresource_weight_percent;
+        }
+        if interactive_session {
+            return match kind {
+                RequestKind::StaticAsset => config.static_request_weight_percent.min(30),
+                RequestKind::ApiLike => API_REQUEST_WEIGHT_PERCENT.min(90),
+                RequestKind::Document => 80,
+                RequestKind::Other => 70,
+            };
         }
         match kind {
             RequestKind::ApiLike => API_REQUEST_WEIGHT_PERCENT,
@@ -749,6 +778,58 @@ fn challenge_action_name(mode: HtmlResponseMode) -> &'static str {
         HtmlResponseMode::HtmlChallenge => "challenge",
         HtmlResponseMode::TextOnly => "api_friction",
     }
+}
+
+fn is_interactive_session(
+    request: &UnifiedHttpRequest,
+    host: &str,
+    verified: bool,
+) -> bool {
+    let has_stable_identity = cookie_value(request, "rwaf_fp").is_some()
+        || request
+            .get_header("x-browser-fingerprint-id")
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false);
+    if !has_stable_identity {
+        return false;
+    }
+
+    let same_origin_referer = referer_host_path(request)
+        .map(|(referer_host, _)| referer_host.eq_ignore_ascii_case(host))
+        .unwrap_or(false);
+    let same_origin_origin = request
+        .get_header("origin")
+        .and_then(|value| extract_host_from_origin(value))
+        .map(|origin_host| origin_host.eq_ignore_ascii_case(host))
+        .unwrap_or(false);
+    let sec_fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let same_origin_fetch = matches!(sec_fetch_site.as_str(), "same-origin" | "same-site");
+    let x_requested_with = request
+        .get_header("x-requested-with")
+        .map(|value| value.eq_ignore_ascii_case("XMLHttpRequest"))
+        .unwrap_or(false);
+    let sec_fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let interactive_fetch = x_requested_with
+        || matches!(sec_fetch_mode.as_str(), "navigate" | "cors" | "same-origin");
+    let behavior_score_low = request
+        .get_metadata("l7.behavior.score")
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|score| score <= 10)
+        .unwrap_or(false);
+    let broad_navigation = request
+        .get_metadata("l7.behavior.flags")
+        .map(|value| value.split(',').any(|flag| flag.trim() == "broad_navigation_context"))
+        .unwrap_or(false);
+
+    interactive_fetch
+        && (same_origin_fetch || same_origin_referer || same_origin_origin)
+        && (verified || broad_navigation || behavior_score_low)
 }
 
 fn challenge_reason_verb(mode: HtmlResponseMode) -> &'static str {
@@ -1113,6 +1194,15 @@ fn referer_host_path(request: &UnifiedHttpRequest) -> Option<(String, String)> {
         .map(|value| value.path())
         .unwrap_or("/");
     Some((host, normalized_route_path(path)))
+}
+
+fn extract_host_from_origin(origin: &str) -> Option<String> {
+    let trimmed = origin.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let uri: http::Uri = trimmed.parse().ok()?;
+    Some(uri.host()?.to_ascii_lowercase())
 }
 
 fn page_window_key(client_ip: std::net::IpAddr, host: &str, document_path: &str) -> String {
@@ -1623,5 +1713,69 @@ mod tests {
         assert_eq!(cleanup_batch_for_size(4_096), 512);
         assert_eq!(cleanup_interval_for_size(16_384), 64);
         assert_eq!(cleanup_batch_for_size(16_384), 2_048);
+    }
+
+    #[tokio::test]
+    async fn interactive_same_origin_sessions_relax_host_and_ip_pressure() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 8,
+            route_block_threshold: 16,
+            host_challenge_threshold: 6,
+            host_block_threshold: 10,
+            ip_challenge_threshold: 6,
+            ip_block_threshold: 10,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+
+        for index in 0..7 {
+            let mut request = UnifiedHttpRequest::new(
+                HttpVersion::Http1_1,
+                if index % 2 == 0 { "GET" } else { "POST" }.to_string(),
+                format!("/console/route-{index}"),
+            );
+            request.set_client_ip("203.0.113.10".to_string());
+            request.add_header("host".to_string(), "example.com".to_string());
+            request.add_header("cookie".to_string(), "rwaf_fp=stablefp".to_string());
+            request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+            request.add_header(
+                "sec-fetch-mode".to_string(),
+                if index % 2 == 0 { "navigate" } else { "cors" }.to_string(),
+            );
+            request.add_header(
+                "referer".to_string(),
+                "https://example.com/console/home".to_string(),
+            );
+            if index % 2 == 0 {
+                request.add_header("accept".to_string(), "text/html".to_string());
+                request.add_metadata(
+                    "l7.behavior.flags".to_string(),
+                    "broad_navigation_context".to_string(),
+                );
+                request.add_metadata("l7.behavior.score".to_string(), "0".to_string());
+            } else {
+                request.add_header("accept".to_string(), "application/json".to_string());
+                request.add_header(
+                    "x-requested-with".to_string(),
+                    "XMLHttpRequest".to_string(),
+                );
+                request.add_metadata(
+                    "l7.behavior.flags".to_string(),
+                    "broad_navigation_context".to_string(),
+                );
+                request.add_metadata("l7.behavior.score".to_string(), "0".to_string());
+            }
+            let result = guard.inspect_request(&mut request).await;
+            assert!(
+                result.is_none(),
+                "interactive same-origin traffic should not trip host/ip pressure on iteration {index}"
+            );
+            assert_eq!(
+                request
+                    .get_metadata("l7.cc.interactive_session")
+                    .map(String::as_str),
+                Some("true")
+            );
+        }
     }
 }

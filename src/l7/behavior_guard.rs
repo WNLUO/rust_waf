@@ -1,6 +1,7 @@
 use crate::core::{CustomHttpResponse, InspectionLayer, InspectionResult};
 use crate::protocol::UnifiedHttpRequest;
 use dashmap::DashMap;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -588,14 +589,17 @@ fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
     if let Some(value) = cookie_value(request, "rwaf_fp") {
         return Some(format!("fp:{value}"));
     }
-    if let Some(value) = cookie_value(request, "rwaf_cc") {
-        return Some(format!("cookie:{value}"));
-    }
     if let Some(value) = request.get_header("x-browser-fingerprint-id") {
         let trimmed = value.trim();
         if !trimmed.is_empty() {
             return Some(format!("fp:{trimmed}"));
         }
+    }
+    if let Some(value) = passive_fingerprint_id(request) {
+        return Some(format!("pfp:{value}"));
+    }
+    if let Some(value) = cookie_value(request, "rwaf_cc") {
+        return Some(format!("cookie:{value}"));
     }
     let ip = request.client_ip.as_deref()?.trim();
     if ip.is_empty() {
@@ -607,6 +611,51 @@ fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
         .filter(|value| !value.is_empty())
         .unwrap_or("-");
     Some(format!("ipua:{ip}|{ua}"))
+}
+
+fn passive_fingerprint_id(request: &UnifiedHttpRequest) -> Option<String> {
+    let fields = [
+        request
+            .get_header("user-agent")
+            .map(String::as_str)
+            .unwrap_or(""),
+        request
+            .get_header("sec-ch-ua")
+            .map(String::as_str)
+            .unwrap_or(""),
+        request
+            .get_header("sec-ch-ua-mobile")
+            .map(String::as_str)
+            .unwrap_or(""),
+        request
+            .get_header("sec-ch-ua-platform")
+            .map(String::as_str)
+            .unwrap_or(""),
+        request
+            .get_header("accept-language")
+            .map(String::as_str)
+            .unwrap_or(""),
+        request
+            .get_header("accept-encoding")
+            .map(String::as_str)
+            .unwrap_or(""),
+        request
+            .get_header("tls-hash")
+            .map(String::as_str)
+            .unwrap_or(""),
+    ];
+    if fields.iter().all(|value| value.trim().is_empty()) {
+        return None;
+    }
+    let seed = fields.join("|");
+    let mut hasher = Sha256::new();
+    hasher.update(seed.as_bytes());
+    Some(
+        format!("{:x}", hasher.finalize())
+            .chars()
+            .take(24)
+            .collect(),
+    )
 }
 
 fn is_high_value_route(route: &str) -> bool {

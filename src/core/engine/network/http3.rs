@@ -257,7 +257,11 @@ async fn handle_http3_request(
             );
         }
         if let Some(response) = result.custom_response.as_ref() {
-            let response = resolve_runtime_custom_response(response);
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
             send_http3_response(
                 &mut stream,
                 response.status_code,
@@ -298,7 +302,11 @@ async fn handle_http3_request(
             );
         }
         if let Some(response) = result.custom_response.as_ref() {
-            let response = resolve_runtime_custom_response(response);
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
             send_http3_response(
                 &mut stream,
                 response.status_code,
@@ -338,7 +346,11 @@ async fn handle_http3_request(
             );
         }
         if let Some(response) = result.custom_response.as_ref() {
-            let response = resolve_runtime_custom_response(response);
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
             send_http3_response(
                 &mut stream,
                 response.status_code,
@@ -404,7 +416,11 @@ async fn handle_http3_request(
             metrics.record_block(inspection_result.layer.clone());
         }
         if let Some(response) = inspection_result.custom_response.as_ref() {
-            let response = resolve_runtime_custom_response(response);
+            let response =
+                crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                    context.as_ref(),
+                    &resolve_runtime_custom_response(response),
+                );
             send_http3_response(
                 &mut stream,
                 response.status_code,

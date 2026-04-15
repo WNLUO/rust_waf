@@ -217,6 +217,8 @@ fn build_provider_report(
     AiAuditReportResponse {
         report_id: None,
         generated_at: summary.generated_at,
+        runtime_pressure_level: summary.runtime_pressure_level.clone(),
+        degraded_reasons: summary.degraded_reasons.clone(),
         provider_used: provider_used.to_string(),
         fallback_used,
         analysis_mode: "analysis_only".to_string(),
@@ -914,6 +916,10 @@ mod tests {
             sampled_events: 2,
             total_events: 2,
             active_rules: 4,
+            runtime_pressure_level: "high".to_string(),
+            degraded_reasons: vec![
+                "management_ai_audit_sample_reduced_under_runtime_pressure".to_string()
+            ],
             current: AiAuditCurrentStateResponse {
                 adaptive_system_pressure: "elevated".to_string(),
                 adaptive_reasons: vec!["identity_resolution_pressure".to_string()],
@@ -1153,6 +1159,8 @@ mod tests {
             AiAuditReportResponse {
                 report_id: None,
                 generated_at: summary.generated_at,
+                runtime_pressure_level: summary.runtime_pressure_level.clone(),
+                degraded_reasons: summary.degraded_reasons.clone(),
                 provider_used: "local_rules".to_string(),
                 fallback_used: false,
                 analysis_mode: "analysis_only".to_string(),

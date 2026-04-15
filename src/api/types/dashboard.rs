@@ -35,6 +35,8 @@ pub struct TrafficMapResponse {
     pub(crate) scope: String,
     pub(crate) window_seconds: u32,
     pub(crate) generated_at: i64,
+    pub(crate) runtime_pressure_level: String,
+    pub(crate) degraded_reasons: Vec<String>,
     pub(crate) origin_node: TrafficMapNodeResponse,
     pub(crate) nodes: Vec<TrafficMapNodeResponse>,
     pub(crate) flows: Vec<TrafficMapFlowResponse>,
@@ -95,6 +97,10 @@ pub struct AiAuditSummaryResponse {
     #[serde(default)]
     pub(crate) active_rules: u64,
     #[serde(default)]
+    pub(crate) runtime_pressure_level: String,
+    #[serde(default)]
+    pub(crate) degraded_reasons: Vec<String>,
+    #[serde(default)]
     pub(crate) current: AiAuditCurrentStateResponse,
     #[serde(default)]
     pub(crate) counters: AiAuditCountersResponse,
@@ -154,6 +160,10 @@ pub struct AiAuditReportResponse {
     pub(crate) report_id: Option<i64>,
     #[serde(default)]
     pub(crate) generated_at: i64,
+    #[serde(default)]
+    pub(crate) runtime_pressure_level: String,
+    #[serde(default)]
+    pub(crate) degraded_reasons: Vec<String>,
     #[serde(default)]
     pub(crate) provider_used: String,
     #[serde(default)]

@@ -517,6 +517,10 @@ fn build_request_identity_details_with_header(
         "inspection_runtime": {
             "rule_inspection_mode": request.get_metadata("l7.rule_inspection_mode").cloned(),
             "cc_identity_state": request.get_metadata("l7.cc.identity_state").cloned(),
+            "runtime_pressure_level": request.get_metadata("runtime.pressure.level").cloned(),
+            "runtime_pressure_storage_queue_percent": request.get_metadata("runtime.pressure.storage_queue_percent").cloned(),
+            "runtime_pressure_drop_delay": request.get_metadata("runtime.pressure.drop_delay").cloned(),
+            "runtime_pressure_trim_event_persistence": request.get_metadata("runtime.pressure.trim_event_persistence").cloned(),
         }
     });
 

@@ -381,7 +381,11 @@ pub(crate) async fn handle_http1_connection(
                 );
             }
             if let Some(response) = result.custom_response.as_ref() {
-                let response = resolve_runtime_custom_response(response);
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
                 let body = body_for_request(&request, &response.body);
                 if let Some(tarpit) = response.tarpit.as_ref() {
                     http1_handler
@@ -475,7 +479,11 @@ pub(crate) async fn handle_http1_connection(
                 metrics.record_block(inspection_result.layer.clone());
             }
             if let Some(response) = inspection_result.custom_response.as_ref() {
-                let response = resolve_runtime_custom_response(response);
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
                 let body = body_for_request(&request, &response.body);
                 if let Some(tarpit) = response.tarpit.as_ref() {
                     http1_handler
@@ -603,7 +611,10 @@ pub(crate) async fn handle_http1_connection(
                                     request_dump.len(),
                                     true,
                                 );
-                                let response = resolve_runtime_custom_response(&response);
+                                let response = crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                                    context.as_ref(),
+                                    &resolve_runtime_custom_response(&response),
+                                );
                                 let body = body_for_request(&request, &response.body);
                                 let mut headers = response.headers.clone();
                                 apply_response_policies(

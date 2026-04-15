@@ -54,6 +54,21 @@ pub(crate) async fn maybe_delay_policy(
     }
 }
 
+pub(crate) fn soften_explicit_response_for_runtime(
+    context: &crate::core::WafContext,
+    response: &crate::core::CustomHttpResponse,
+) -> crate::core::CustomHttpResponse {
+    let mut resolved = response.clone();
+    if context.runtime_pressure_snapshot().drop_delay && resolved.tarpit.is_some() {
+        resolved.tarpit = None;
+        resolved.headers.push((
+            "x-rust-waf-runtime-degrade".to_string(),
+            "response_tarpit_disabled_under_runtime_pressure".to_string(),
+        ));
+    }
+    resolved
+}
+
 pub(crate) fn record_l7_cc_metrics(
     metrics: &crate::metrics::MetricsCollector,
     request: &crate::protocol::UnifiedHttpRequest,

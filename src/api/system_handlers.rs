@@ -1,6 +1,54 @@
 use super::*;
 use std::collections::BTreeMap;
 
+#[derive(Debug, Clone)]
+struct ManagementRuntimePolicy {
+    pressure_level: String,
+    window_divisor: u32,
+    sample_divisor: u32,
+    recent_divisor: u32,
+    force_local_rules: bool,
+}
+
+fn management_runtime_policy(context: &WafContext) -> ManagementRuntimePolicy {
+    let pressure = context.runtime_pressure_snapshot();
+    match pressure.level {
+        "attack" => ManagementRuntimePolicy {
+            pressure_level: pressure.level.to_string(),
+            window_divisor: 4,
+            sample_divisor: 4,
+            recent_divisor: 4,
+            force_local_rules: true,
+        },
+        "high" => ManagementRuntimePolicy {
+            pressure_level: pressure.level.to_string(),
+            window_divisor: 2,
+            sample_divisor: 2,
+            recent_divisor: 2,
+            force_local_rules: false,
+        },
+        _ => ManagementRuntimePolicy {
+            pressure_level: pressure.level.to_string(),
+            window_divisor: 1,
+            sample_divisor: 1,
+            recent_divisor: 1,
+            force_local_rules: false,
+        },
+    }
+}
+
+fn scaled_limit(value: u32, divisor: u32, min: u32) -> u32 {
+    if divisor <= 1 {
+        value.max(min)
+    } else {
+        value.saturating_div(divisor).max(min)
+    }
+}
+
+fn management_degraded_reason(enabled: bool, reason: &str) -> Vec<String> {
+    enabled.then(|| reason.to_string()).into_iter().collect()
+}
+
 pub(super) async fn health_handler(State(state): State<ApiState>) -> Json<HealthResponse> {
     let upstream = state.context.upstream_health_snapshot();
     Json(HealthResponse {
@@ -46,15 +94,20 @@ pub(super) async fn traffic_map_handler(
     State(state): State<ApiState>,
     Query(params): Query<TrafficMapQueryParams>,
 ) -> Json<TrafficMapResponse> {
-    let snapshot = state
-        .context
-        .traffic_map_snapshot(params.window_seconds.unwrap_or(60))
-        .await;
+    let policy = management_runtime_policy(state.context.as_ref());
+    let requested_window = params.window_seconds.unwrap_or(60);
+    let effective_window = scaled_limit(requested_window, policy.window_divisor, 10);
+    let snapshot = state.context.traffic_map_snapshot(effective_window).await;
 
     Json(TrafficMapResponse {
         scope: snapshot.scope,
         window_seconds: snapshot.window_seconds,
         generated_at: snapshot.generated_at,
+        runtime_pressure_level: policy.pressure_level,
+        degraded_reasons: management_degraded_reason(
+            effective_window != requested_window,
+            "management_traffic_map_window_reduced_under_runtime_pressure",
+        ),
         origin_node: TrafficMapNodeResponse {
             id: snapshot.origin_node.id,
             name: snapshot.origin_node.name,
@@ -150,6 +203,7 @@ pub(super) async fn run_ai_audit_report_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<AiAuditRunRequest>,
 ) -> ApiResult<Json<AiAuditReportResponse>> {
+    let runtime_policy = management_runtime_policy(state.context.as_ref());
     let params = AiAuditReportQueryParams {
         window_seconds: payload.window_seconds,
         sample_limit: payload.sample_limit,
@@ -158,7 +212,15 @@ pub(super) async fn run_ai_audit_report_handler(
         fallback_to_rules: payload.fallback_to_rules,
     };
     let config = state.context.config_snapshot();
-    let execution = crate::api::ai_audit::resolve_report_execution(&config, &params);
+    let mut execution = crate::api::ai_audit::resolve_report_execution(&config, &params);
+    if runtime_policy.force_local_rules
+        && execution.provider != crate::api::ai_audit::AiAuditProvider::LocalRules
+    {
+        execution.provider = crate::api::ai_audit::AiAuditProvider::LocalRules;
+        execution
+            .execution_notes
+            .push("runtime pressure forced ai audit into local_rules mode".to_string());
+    }
     let summary_query = crate::api::ai_audit::summary_query_from_report(&params);
     let summary = build_ai_audit_summary(
         &state,
@@ -169,6 +231,11 @@ pub(super) async fn run_ai_audit_report_handler(
     .await?;
     let mut report =
         crate::api::ai_audit::execute_report(execution, summary, build_ai_audit_report).await?;
+    if runtime_policy.force_local_rules {
+        report
+            .degraded_reasons
+            .push("management_ai_audit_forced_local_rules_under_runtime_pressure".to_string());
+    }
     if let Some(store) = state.context.sqlite_store.as_ref() {
         let persist_result = match serde_json::to_string(&report) {
             Ok(report_json) => store
@@ -341,15 +408,32 @@ async fn build_ai_audit_summary(
 ) -> ApiResult<AiAuditSummaryResponse> {
     let store = sqlite_store(&state)?;
     let config = state.context.config_snapshot();
+    let runtime_policy = management_runtime_policy(state.context.as_ref());
     let now = unix_timestamp();
-    let window_seconds = window_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
-    let sample_limit = sample_limit
+    let requested_window_seconds = window_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
+    let requested_sample_limit = sample_limit
         .unwrap_or(config.integrations.ai_audit.event_sample_limit)
         .clamp(20, 1000);
-    let recent_limit = recent_limit
+    let requested_recent_limit = recent_limit
         .unwrap_or(config.integrations.ai_audit.recent_event_limit)
         .clamp(0, 100);
+    let window_seconds = scaled_limit(requested_window_seconds, runtime_policy.window_divisor, 60);
+    let sample_limit = scaled_limit(requested_sample_limit, runtime_policy.sample_divisor, 20);
+    let recent_limit = scaled_limit(requested_recent_limit, runtime_policy.recent_divisor, 0);
     let created_from = now.saturating_sub(window_seconds as i64);
+    let mut degraded_reasons = Vec::new();
+    if window_seconds != requested_window_seconds {
+        degraded_reasons
+            .push("management_ai_audit_window_reduced_under_runtime_pressure".to_string());
+    }
+    if sample_limit != requested_sample_limit {
+        degraded_reasons
+            .push("management_ai_audit_sample_reduced_under_runtime_pressure".to_string());
+    }
+    if recent_limit != requested_recent_limit {
+        degraded_reasons
+            .push("management_ai_audit_recent_events_reduced_under_runtime_pressure".to_string());
+    }
 
     let result = store
         .list_security_events(&crate::storage::SecurityEventQuery {
@@ -438,6 +522,8 @@ async fn build_ai_audit_summary(
         sampled_events,
         total_events: result.total,
         active_rules: state.context.active_rule_count(),
+        runtime_pressure_level: runtime_policy.pressure_level,
+        degraded_reasons,
         current: AiAuditCurrentStateResponse {
             adaptive_system_pressure: adaptive.system_pressure,
             adaptive_reasons: adaptive.reasons,
@@ -1046,6 +1132,8 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
     AiAuditReportResponse {
         report_id: None,
         generated_at: summary.generated_at,
+        runtime_pressure_level: summary.runtime_pressure_level.clone(),
+        degraded_reasons: summary.degraded_reasons.clone(),
         provider_used: "local_rules".to_string(),
         fallback_used: false,
         analysis_mode: "analysis_only".to_string(),
@@ -1372,6 +1460,10 @@ mod tests {
             sampled_events: 10,
             total_events: 10,
             active_rules: 5,
+            runtime_pressure_level: "high".to_string(),
+            degraded_reasons: vec![
+                "management_ai_audit_sample_reduced_under_runtime_pressure".to_string()
+            ],
             current: AiAuditCurrentStateResponse {
                 adaptive_system_pressure: "elevated".to_string(),
                 adaptive_reasons: vec!["identity_resolution_pressure".to_string()],
@@ -1512,5 +1604,12 @@ mod tests {
             .suggested_local_rules
             .iter()
             .any(|item| item.key == "raise_post_safeline_friction"));
+    }
+
+    #[test]
+    fn scaled_limit_preserves_minimum_floor() {
+        assert_eq!(scaled_limit(100, 2, 20), 50);
+        assert_eq!(scaled_limit(30, 4, 20), 20);
+        assert_eq!(scaled_limit(0, 4, 0), 0);
     }
 }

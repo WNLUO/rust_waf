@@ -490,11 +490,14 @@ async fn collect_recent_blocked_ips(context: &WafContext) -> anyhow::Result<Bloc
 
 async fn collect_traffic_map(context: &WafContext) -> TrafficMapResponse {
     let snapshot = context.traffic_map_snapshot(60).await;
+    let pressure = context.runtime_pressure_snapshot();
 
     TrafficMapResponse {
         scope: snapshot.scope,
         window_seconds: snapshot.window_seconds,
         generated_at: snapshot.generated_at,
+        runtime_pressure_level: pressure.level.to_string(),
+        degraded_reasons: Vec::new(),
         origin_node: TrafficMapNodeResponse {
             id: snapshot.origin_node.id,
             name: snapshot.origin_node.name,

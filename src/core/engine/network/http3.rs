@@ -8,8 +8,8 @@ pub(crate) async fn handle_http3_quic_connection(
     context: Arc<WafContext>,
     incoming: QuinnIncoming,
     local_addr: SocketAddr,
-    setup_permit: OwnedSemaphorePermit,
-    connection_semaphore: Arc<Semaphore>,
+    _connection_permit: OwnedSemaphorePermit,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let connection = incoming.await?;
     let peer_addr = connection.remote_address();
@@ -68,22 +68,20 @@ pub(crate) async fn handle_http3_quic_connection(
     let mut h3_connection = h3::server::builder()
         .build(H3QuinnConnection::new(connection))
         .await?;
-    drop(setup_permit);
-
     loop {
         match h3_connection.accept().await {
             Ok(Some(resolver)) => {
                 let context = Arc::clone(&context);
                 let packet = packet.clone();
                 let http3_handler = Http3Handler::new(context.config_snapshot().http3_config);
-                let connection_semaphore = Arc::clone(&connection_semaphore);
+                let request_semaphore = Arc::clone(&request_semaphore);
                 tokio::spawn(async move {
                     if let Err(err) = handle_http3_request(
                         context,
                         packet,
                         http3_handler,
                         resolver,
-                        connection_semaphore,
+                        request_semaphore,
                     )
                     .await
                     {
@@ -112,7 +110,7 @@ async fn handle_http3_request(
     packet: PacketInfo,
     http3_handler: Http3Handler,
     resolver: h3::server::RequestResolver<H3QuinnConnection, Bytes>,
-    connection_semaphore: Arc<Semaphore>,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let config = context.config_snapshot();
     let peer_addr = std::net::SocketAddr::new(packet.source_ip, packet.source_port);
@@ -152,7 +150,7 @@ async fn handle_http3_request(
     apply_client_identity(context.as_ref(), peer_addr, &mut unified);
     let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
         context.as_ref(),
-        Arc::clone(&connection_semaphore),
+        Arc::clone(&request_semaphore),
         peer_addr,
         "HTTP/3 request",
     )

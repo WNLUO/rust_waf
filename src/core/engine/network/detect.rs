@@ -65,7 +65,8 @@ pub(crate) async fn detect_and_handle_protocol<S>(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
-    connection_semaphore: Arc<Semaphore>,
+    connection_permit: OwnedSemaphorePermit,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -107,7 +108,8 @@ where
                 peer_addr,
                 packet,
                 extra_metadata,
-                connection_semaphore,
+                connection_permit,
+                request_semaphore,
             )
             .await
         }
@@ -118,7 +120,8 @@ where
                 peer_addr,
                 packet,
                 extra_metadata,
-                connection_semaphore,
+                connection_permit,
+                request_semaphore,
             )
             .await
         }

@@ -4,8 +4,8 @@ pub(crate) async fn handle_connection(
     context: Arc<WafContext>,
     stream: TcpStream,
     peer_addr: std::net::SocketAddr,
-    permit: OwnedSemaphorePermit,
-    connection_semaphore: Arc<Semaphore>,
+    connection_permit: OwnedSemaphorePermit,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
@@ -53,7 +53,6 @@ pub(crate) async fn handle_connection(
     let (stream, mut metadata) =
         parse_proxy_protocol_stream(context.as_ref(), stream, peer_addr).await?;
     metadata.push(("network.connection_id".to_string(), connection_id));
-    drop(permit);
 
     match detect_and_handle_protocol(
         context,
@@ -61,7 +60,8 @@ pub(crate) async fn handle_connection(
         peer_addr,
         &packet,
         metadata,
-        connection_semaphore,
+        connection_permit,
+        request_semaphore,
     )
     .await
     {
@@ -80,6 +80,7 @@ pub(crate) async fn handle_tls_connection(
     peer_addr: std::net::SocketAddr,
     handshake_permit: OwnedSemaphorePermit,
     connection_semaphore: Arc<Semaphore>,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
@@ -244,6 +245,21 @@ pub(crate) async fn handle_tls_connection(
         }
     };
     drop(handshake_permit);
+    let Some(connection_permit) = crate::core::engine::runtime::acquire_permit_auto(
+        context.as_ref(),
+        Arc::clone(&connection_semaphore),
+        peer_addr,
+        "TLS post-handshake",
+    )
+    .await
+    else {
+        warn!(
+            "Dropping TLS connection from {} after handshake due to connection limit",
+            peer_addr
+        );
+        return Ok(());
+    };
+
     metadata.push(("transport".to_string(), "tls".to_string()));
     let alpn = tls_stream
         .get_ref()
@@ -311,7 +327,8 @@ pub(crate) async fn handle_tls_connection(
                 peer_addr,
                 &packet,
                 metadata,
-                Arc::clone(&connection_semaphore),
+                connection_permit,
+                Arc::clone(&request_semaphore),
             )
             .await
         }
@@ -322,7 +339,8 @@ pub(crate) async fn handle_tls_connection(
                 peer_addr,
                 &packet,
                 metadata,
-                Arc::clone(&connection_semaphore),
+                connection_permit,
+                Arc::clone(&request_semaphore),
             )
             .await
         }

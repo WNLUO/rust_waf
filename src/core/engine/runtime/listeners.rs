@@ -214,6 +214,7 @@ impl EntryListenerRuntime {
         &self,
         context: Arc<WafContext>,
         connection_semaphore: Arc<Semaphore>,
+        request_semaphore: Arc<Semaphore>,
     ) -> Result<()> {
         let config = context.config_snapshot();
         let tls_acceptor = build_tls_acceptor(context.as_ref())?;
@@ -243,6 +244,7 @@ impl EntryListenerRuntime {
                     addr,
                     Arc::clone(&context),
                     Arc::clone(&connection_semaphore),
+                    Arc::clone(&request_semaphore),
                 )
                 .await?,
             );
@@ -261,6 +263,7 @@ impl EntryListenerRuntime {
                             acceptor,
                             Arc::clone(&context),
                             Arc::clone(&connection_semaphore),
+                            Arc::clone(&request_semaphore),
                         )
                         .await?,
                     ),
@@ -277,6 +280,7 @@ impl EntryListenerRuntime {
                         acceptor,
                         Arc::clone(&context),
                         Arc::clone(&connection_semaphore),
+                        Arc::clone(&request_semaphore),
                     )
                     .await?,
                 ),
@@ -328,6 +332,7 @@ impl Http3ListenerRuntime {
         &self,
         context: Arc<WafContext>,
         connection_semaphore: Arc<Semaphore>,
+        request_semaphore: Arc<Semaphore>,
     ) -> Result<()> {
         let config = context.config_snapshot();
         let http3 = &config.http3_config;
@@ -356,7 +361,9 @@ impl Http3ListenerRuntime {
             shutdown_http3_listener(existing).await;
         }
 
-        let listener = spawn_http3_listener(http3, context.clone(), connection_semaphore).await?;
+        let listener =
+            spawn_http3_listener(http3, context.clone(), connection_semaphore, request_semaphore)
+                .await?;
         let listener_addr = listener.addr.clone();
         let mut guard = self.state.lock().await;
         guard.listener = Some(listener);
@@ -385,20 +392,30 @@ pub(crate) async fn validate_entry_listener_config(context: Arc<WafContext>) -> 
 
 pub(crate) async fn sync_entry_listener_runtime(
     context: Arc<WafContext>,
-    concurrency_limit: usize,
+    connection_limit: usize,
+    request_limit: usize,
 ) -> Result<()> {
     EntryListenerRuntime::global()
-        .sync(context, Arc::new(Semaphore::new(concurrency_limit.max(1))))
+        .sync(
+            context,
+            Arc::new(Semaphore::new(connection_limit.max(1))),
+            Arc::new(Semaphore::new(request_limit.max(1))),
+        )
         .await
 }
 
 #[cfg(feature = "http3")]
 pub(crate) async fn sync_http3_listener_runtime(
     context: Arc<WafContext>,
-    concurrency_limit: usize,
+    connection_limit: usize,
+    request_limit: usize,
 ) -> Result<()> {
     Http3ListenerRuntime::global()
-        .sync(context, Arc::new(Semaphore::new(concurrency_limit.max(1))))
+        .sync(
+            context,
+            Arc::new(Semaphore::new(connection_limit.max(1))),
+            Arc::new(Semaphore::new(request_limit.max(1))),
+        )
         .await
 }
 
@@ -415,6 +432,7 @@ async fn spawn_http_entry_listener(
     addr: &str,
     context: Arc<WafContext>,
     connection_semaphore: Arc<Semaphore>,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<RunningEntryListener> {
     let listener = TcpListener::bind(addr).await?;
     let addr_string = listener.local_addr()?.to_string();
@@ -439,14 +457,14 @@ async fn spawn_http_entry_listener(
                             )
                             .await {
                                 let ctx = Arc::clone(&context);
-                                let business_semaphore = Arc::clone(&connection_semaphore);
+                                let request_semaphore = Arc::clone(&request_semaphore);
                                 tokio::spawn(async move {
                                     if let Err(err) = handle_connection(
                                         ctx,
                                         stream,
                                         peer_addr,
                                         permit,
-                                        business_semaphore,
+                                        request_semaphore,
                                     )
                                     .await
                                     {
@@ -476,6 +494,7 @@ async fn spawn_https_entry_listener(
     tls_acceptor: TlsAcceptor,
     context: Arc<WafContext>,
     connection_semaphore: Arc<Semaphore>,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<RunningEntryListener> {
     let listener = TcpListener::bind(addr).await?;
     let addr_string = listener.local_addr()?.to_string();
@@ -508,7 +527,8 @@ async fn spawn_https_entry_listener(
                             .await {
                                 let ctx = Arc::clone(&context);
                                 let acceptor = tls_acceptor.clone();
-                                let business_semaphore = Arc::clone(&connection_semaphore);
+                                let connection_semaphore = Arc::clone(&connection_semaphore);
+                                let request_semaphore = Arc::clone(&request_semaphore);
                                 tokio::spawn(async move {
                                     if let Err(err) = handle_tls_connection(
                                         ctx,
@@ -516,7 +536,8 @@ async fn spawn_https_entry_listener(
                                         stream,
                                         peer_addr,
                                         handshake_permit,
-                                        business_semaphore,
+                                        connection_semaphore,
+                                        request_semaphore,
                                     )
                                     .await {
                                         if is_benign_tls_disconnect(&err) {
@@ -568,6 +589,7 @@ async fn spawn_http3_listener(
     config: &crate::config::Http3Config,
     context: Arc<WafContext>,
     connection_semaphore: Arc<Semaphore>,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<RunningHttp3Listener> {
     let endpoint = build_http3_endpoint(config)?
         .ok_or_else(|| anyhow::anyhow!("HTTP/3 listener was not started"))?;
@@ -596,7 +618,7 @@ async fn spawn_http3_listener(
                             )
                             .await {
                                 let ctx = Arc::clone(&context);
-                                let business_semaphore = Arc::clone(&connection_semaphore);
+                                let request_semaphore = Arc::clone(&request_semaphore);
                                 tokio::spawn(async move {
                                     if let Err(err) =
                                         handle_http3_quic_connection(
@@ -604,7 +626,7 @@ async fn spawn_http3_listener(
                                             incoming,
                                             remote_addr,
                                             setup_permit,
-                                            business_semaphore,
+                                            request_semaphore,
                                         )
                                         .await
                                     {

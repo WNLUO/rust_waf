@@ -5,7 +5,9 @@ pub struct WafEngine {
     context: Arc<WafContext>,
     _shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
+    connection_limit: usize,
     connection_semaphore: Arc<Semaphore>,
+    request_semaphore: Arc<Semaphore>,
 }
 
 impl WafEngine {
@@ -13,14 +15,17 @@ impl WafEngine {
         info!("Initializing WAF engine...");
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-        let concurrency_limit = config.max_concurrent_tasks.max(1);
+        let request_limit = config.max_concurrent_tasks.max(1);
+        let connection_limit = derive_connection_limit(request_limit);
         let context = Arc::new(WafContext::new(config).await?);
 
         Ok(Self {
             context,
             _shutdown_tx: shutdown_tx,
             shutdown_rx,
-            connection_semaphore: Arc::new(Semaphore::new(concurrency_limit)),
+            connection_limit,
+            connection_semaphore: Arc::new(Semaphore::new(connection_limit)),
+            request_semaphore: Arc::new(Semaphore::new(request_limit)),
         })
     }
 
@@ -119,7 +124,7 @@ impl WafEngine {
             info!("UDP inspection listener started on {}", addr);
             let context = Arc::clone(&self.context);
             let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-            let connection_semaphore = Arc::clone(&self.connection_semaphore);
+            let request_semaphore = Arc::clone(&self.request_semaphore);
 
             let task = tokio::spawn(async move {
                 let mut buffer = vec![0u8; 65_535];
@@ -132,7 +137,7 @@ impl WafEngine {
                         recv_result = socket.recv_from(&mut buffer) => {
                             match recv_result {
                                 Ok((bytes_read, peer_addr)) => {
-                                    match connection_semaphore.clone().try_acquire_owned() {
+                                    match request_semaphore.clone().try_acquire_owned() {
                                         Ok(permit) => {
                                             let ctx = Arc::clone(&context);
                                             let listener_socket = Arc::clone(&socket);
@@ -183,11 +188,13 @@ impl WafEngine {
             .sync(
                 Arc::clone(&self.context),
                 Arc::clone(&self.connection_semaphore),
+                Arc::clone(&self.request_semaphore),
             )
             .await?;
         #[cfg(feature = "http3")]
         super::sync_http3_listener_runtime(
             Arc::clone(&self.context),
+            self.connection_limit(),
             startup_config.max_concurrent_tasks,
         )
         .await?;
@@ -221,6 +228,10 @@ impl WafEngine {
                 }
             }
         }
+    }
+
+    fn connection_limit(&self) -> usize {
+        self.connection_limit
     }
 
     async fn run_maintenance(&self) {
@@ -530,6 +541,10 @@ impl WafEngine {
         );
         Ok(())
     }
+}
+
+fn derive_connection_limit(request_limit: usize) -> usize {
+    request_limit.saturating_mul(4).clamp(128, 4096)
 }
 
 fn ai_temp_policy_governance_mode(

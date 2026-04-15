@@ -115,6 +115,12 @@ async fn maybe_configure_http3_managed_certificate(
     #[cfg(feature = "http3")]
     crate::core::engine::sync_http3_listener_runtime(
         Arc::clone(&state.context),
+        state
+            .context
+            .config_snapshot()
+            .max_concurrent_tasks
+            .saturating_mul(4)
+            .clamp(128, 4096),
         state.context.config_snapshot().max_concurrent_tasks,
     )
     .await
@@ -158,6 +164,12 @@ async fn maybe_clear_http3_managed_certificate(
     #[cfg(feature = "http3")]
     crate::core::engine::sync_http3_listener_runtime(
         Arc::clone(&state.context),
+        state
+            .context
+            .config_snapshot()
+            .max_concurrent_tasks
+            .saturating_mul(4)
+            .clamp(128, 4096),
         state.context.config_snapshot().max_concurrent_tasks,
     )
     .await
@@ -265,6 +277,7 @@ pub(super) async fn update_global_entry_config_handler(
         .map_err(ApiError::internal)?;
     crate::core::engine::sync_entry_listener_runtime(
         Arc::clone(&state.context),
+        next.max_concurrent_tasks.saturating_mul(4).clamp(128, 4096),
         next.max_concurrent_tasks,
     )
     .await

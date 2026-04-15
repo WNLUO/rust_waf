@@ -7,7 +7,8 @@ pub(crate) async fn handle_http2_connection(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
-    connection_semaphore: Arc<Semaphore>,
+    _connection_permit: OwnedSemaphorePermit,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let config = context.config_snapshot();
     let http2_config = &config.l7_config.http2_config;
@@ -52,7 +53,7 @@ pub(crate) async fn handle_http2_connection(
                 let connection_id = connection_id_for_callback.clone();
                 let registered = Arc::clone(&registered);
                 let bucket_key = Arc::clone(&bucket_key_for_callback);
-                let connection_semaphore = Arc::clone(&connection_semaphore);
+                let request_semaphore = Arc::clone(&request_semaphore);
 
                 async move {
                     let config = context.config_snapshot();
@@ -109,7 +110,7 @@ pub(crate) async fn handle_http2_connection(
                     }
                     let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
                         context.as_ref(),
-                        Arc::clone(&connection_semaphore),
+                        Arc::clone(&request_semaphore),
                         peer_addr,
                         "HTTP/2 request",
                     )
@@ -835,12 +836,16 @@ mod tests {
         );
         let peer_addr: std::net::SocketAddr = "127.0.0.1:54322".parse().unwrap();
         let local_addr: std::net::SocketAddr = "127.0.0.1:660".parse().unwrap();
-        let connection_semaphore = Arc::new(Semaphore::new(0));
+        let request_semaphore = Arc::new(Semaphore::new(0));
+        let connection_permit = Arc::new(Semaphore::new(1))
+            .acquire_owned()
+            .await
+            .unwrap();
         let (client, server) = duplex(16 * 1024);
 
         let server_task = tokio::spawn({
             let context = Arc::clone(&context);
-            let connection_semaphore = Arc::clone(&connection_semaphore);
+            let request_semaphore = Arc::clone(&request_semaphore);
             async move {
                 let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
                 handle_http2_connection(
@@ -849,7 +854,8 @@ mod tests {
                     peer_addr,
                     &packet,
                     Vec::new(),
-                    connection_semaphore,
+                    connection_permit,
+                    request_semaphore,
                 )
                 .await
             }

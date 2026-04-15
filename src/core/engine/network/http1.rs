@@ -8,7 +8,8 @@ pub(crate) async fn handle_http1_connection(
     peer_addr: std::net::SocketAddr,
     packet: &PacketInfo,
     extra_metadata: Vec<(String, String)>,
-    connection_semaphore: Arc<Semaphore>,
+    _connection_permit: OwnedSemaphorePermit,
+    request_semaphore: Arc<Semaphore>,
 ) -> Result<()> {
     let config = context.config_snapshot();
     let http1_handler = Http1Handler::new();
@@ -126,7 +127,7 @@ pub(crate) async fn handle_http1_connection(
         }
         let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
             context.as_ref(),
-            Arc::clone(&connection_semaphore),
+            Arc::clone(&request_semaphore),
             peer_addr,
             "HTTP/1.1 request",
         )
@@ -931,7 +932,11 @@ mod tests {
         );
         let peer_addr: std::net::SocketAddr = "127.0.0.1:54321".parse().unwrap();
         let local_addr: std::net::SocketAddr = "127.0.0.1:660".parse().unwrap();
-        let connection_semaphore = Arc::new(Semaphore::new(0));
+        let request_semaphore = Arc::new(Semaphore::new(0));
+        let connection_permit = Arc::new(Semaphore::new(1))
+            .acquire_owned()
+            .await
+            .unwrap();
         let (mut client, server) = duplex(4096);
 
         let task = tokio::spawn({
@@ -944,7 +949,8 @@ mod tests {
                     peer_addr,
                     &packet,
                     Vec::new(),
-                    connection_semaphore,
+                    connection_permit,
+                    request_semaphore,
                 )
                 .await
             }

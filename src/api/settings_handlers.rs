@@ -113,6 +113,7 @@ pub(super) async fn update_l7_config_handler(
     #[cfg(feature = "http3")]
     crate::core::engine::sync_http3_listener_runtime(
         Arc::clone(&state.context),
+        next.max_concurrent_tasks.saturating_mul(4).clamp(128, 4096),
         next.max_concurrent_tasks,
     )
     .await
@@ -154,6 +155,7 @@ pub(super) async fn update_l7_compatibility_config_handler(
     #[cfg(feature = "http3")]
     crate::core::engine::sync_http3_listener_runtime(
         Arc::clone(&state.context),
+        next.max_concurrent_tasks.saturating_mul(4).clamp(128, 4096),
         next.max_concurrent_tasks,
     )
     .await
@@ -191,6 +193,7 @@ pub(super) async fn update_settings_handler(
     #[cfg(feature = "http3")]
     crate::core::engine::sync_http3_listener_runtime(
         Arc::clone(&state.context),
+        next.max_concurrent_tasks.saturating_mul(4).clamp(128, 4096),
         next.max_concurrent_tasks,
     )
     .await
@@ -233,6 +236,7 @@ pub(super) async fn update_global_settings_handler(
     #[cfg(feature = "http3")]
     crate::core::engine::sync_http3_listener_runtime(
         Arc::clone(&state.context),
+        next.max_concurrent_tasks.saturating_mul(4).clamp(128, 4096),
         next.max_concurrent_tasks,
     )
     .await

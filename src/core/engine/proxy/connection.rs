@@ -1,4 +1,5 @@
 use super::*;
+use dashmap::DashMap;
 use bytes::Bytes;
 use http::Request;
 use http_body_util::{BodyExt, Full};
@@ -66,6 +67,19 @@ pub(crate) fn resolve_runtime_custom_response(response: &CustomHttpResponse) -> 
 enum UpstreamTransport {
     Http1,
     Http2,
+}
+
+type Http2Sender = hyper_http2::SendRequest<Full<Bytes>>;
+
+#[derive(Debug)]
+struct PooledHttp2Connection {
+    sender: Http2Sender,
+}
+
+fn http2_pool() -> &'static DashMap<String, Arc<tokio::sync::Mutex<PooledHttp2Connection>>> {
+    static POOL: OnceLock<DashMap<String, Arc<tokio::sync::Mutex<PooledHttp2Connection>>>> =
+        OnceLock::new();
+    POOL.get_or_init(DashMap::new)
 }
 
 pub(crate) async fn proxy_http_request(
@@ -197,6 +211,73 @@ async fn proxy_http2_request(
         anyhow::bail!("Upstream HTTP/2 currently requires HTTPS upstreams");
     }
 
+    let pool_key = build_http2_pool_key(context, request, upstream)?;
+    let pooled = get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
+        .await?;
+    let upstream_request = build_http2_upstream_request(request, upstream)?;
+    let mut guard = pooled.lock().await;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(read_timeout_ms),
+        guard.sender.send_request(upstream_request),
+    )
+    .await;
+    match response {
+        Ok(Ok(response)) => {
+            let mapped = map_http2_upstream_response(response).await?;
+            context.set_upstream_health(true, None);
+            Ok(mapped)
+        }
+        Ok(Err(err)) => {
+            http2_pool().remove(&pool_key);
+            Err(err.into())
+        }
+        Err(_) => {
+            http2_pool().remove(&pool_key);
+            Err(anyhow::anyhow!("Upstream HTTP/2 request timed out"))
+        }
+    }
+}
+
+fn build_http2_pool_key(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> Result<String> {
+    let skip_verify = should_skip_upstream_tls_verification(context, upstream);
+    let server_name = resolve_upstream_tls_server_name(request, upstream)?
+        .unwrap_or_else(|| upstream.authority.clone());
+    Ok(format!(
+        "{}|skip_verify={}|sni={}",
+        upstream.authority, skip_verify, server_name
+    ))
+}
+
+async fn get_or_connect_http2_sender(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    pool_key: &str,
+    connect_timeout_ms: u64,
+) -> Result<Arc<tokio::sync::Mutex<PooledHttp2Connection>>> {
+    if let Some(existing) = http2_pool().get(pool_key) {
+        return Ok(existing.clone());
+    }
+
+    let sender = connect_http2_sender(context, request, upstream, connect_timeout_ms).await?;
+    let pooled = Arc::new(tokio::sync::Mutex::new(PooledHttp2Connection { sender }));
+    let pooled_ref = pooled.clone();
+    let entry = http2_pool()
+        .entry(pool_key.to_string())
+        .or_insert_with(|| pooled_ref);
+    Ok(entry.clone())
+}
+
+async fn connect_http2_sender(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    connect_timeout_ms: u64,
+) -> Result<Http2Sender> {
     let skip_verify = should_skip_upstream_tls_verification(context, upstream);
     let upstream_stream = tokio::time::timeout(
         std::time::Duration::from_millis(connect_timeout_ms),
@@ -214,7 +295,7 @@ async fn proxy_http2_request(
     .map_err(|_| anyhow::anyhow!("Upstream TLS handshake timed out"))??;
 
     let io = TokioIo::new(tls_stream);
-    let (mut sender, connection) = tokio::time::timeout(
+    let (sender, connection) = tokio::time::timeout(
         std::time::Duration::from_millis(connect_timeout_ms),
         hyper_http2::handshake(TokioExecutor::new(), io),
     )
@@ -225,17 +306,7 @@ async fn proxy_http2_request(
             debug!("Upstream HTTP/2 connection ended: {}", err);
         }
     });
-
-    let upstream_request = build_http2_upstream_request(request, upstream)?;
-    let response = tokio::time::timeout(
-        std::time::Duration::from_millis(read_timeout_ms),
-        sender.send_request(upstream_request),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("Upstream HTTP/2 request timed out"))??;
-    let mapped = map_http2_upstream_response(response).await?;
-    context.set_upstream_health(true, None);
-    Ok(mapped)
+    Ok(sender)
 }
 
 pub(crate) async fn proxy_http_request_with_session_affinity(

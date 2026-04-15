@@ -13,6 +13,7 @@ const props = defineProps<{
   formatLatency: (micros?: number) => string
   formatNumber: (value?: number) => string
   formatTimestamp: (timestamp?: number | null) => string
+  http1SecurityLabel: string
   http3StatusLabel: string
   http3StatusType: 'success' | 'warning' | 'error' | 'muted' | 'info'
   proxySuccessRate: string
@@ -23,6 +24,7 @@ const props = defineProps<{
   runtimeProfileLabel: string
   runtimeStatus: boolean
   stats: L7StatsPayload | null
+  upstreamProtocolLabel: string
   upstreamStatusText: string
   upstreamStatusType: 'success' | 'warning' | 'error' | 'muted' | 'info'
 }>()
@@ -380,6 +382,11 @@ function hotspotViewButtonClass(view: 'host' | 'route') {
             :text="`上游 ${upstreamStatusText}`"
             :type="upstreamStatusType"
           />
+          <StatusBadge :text="`协议 ${upstreamProtocolLabel}`" type="info" />
+          <StatusBadge
+            :text="http1SecurityLabel"
+            :type="configForm.upstream_http1_strict_mode ? 'success' : 'warning'"
+          />
           <StatusBadge :text="`失败模式 ${failureModeLabel}`" type="warning" />
           <StatusBadge
             :text="
@@ -394,6 +401,27 @@ function hotspotViewButtonClass(view: 'host' | 'route') {
         </div>
       </template>
       <div class="space-y-4">
+        <div class="grid gap-3 md:grid-cols-2">
+          <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
+            <p class="text-xs tracking-wide text-slate-500">上游地址</p>
+            <p class="mt-3 text-sm text-stone-800">
+              {{ configForm.upstream_endpoint || '未配置上游地址' }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
+            <p class="text-xs tracking-wide text-slate-500">H1 风险收紧</p>
+            <p class="mt-3 text-sm leading-7 text-stone-800">
+              {{
+                [
+                  configForm.reject_ambiguous_http1_requests ? '拒绝歧义长度' : '允许歧义长度',
+                  configForm.reject_http1_transfer_encoding_requests ? '拒绝请求 TE' : '允许请求 TE',
+                  configForm.reject_body_on_safe_http_methods ? '拒绝安全方法携带 body' : '允许安全方法携带 body',
+                  configForm.reject_expect_100_continue ? '拒绝 Expect: 100-continue' : '允许 Expect: 100-continue',
+                ].join('，')
+              }}
+            </p>
+          </div>
+        </div>
         <div>
           <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
             <p class="text-xs tracking-wide text-slate-500">可信代理网段</p>

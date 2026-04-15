@@ -126,6 +126,13 @@ export interface L7ConfigPayload {
   upstream_healthcheck_interval_secs: number
   upstream_healthcheck_timeout_ms: number
   upstream_failure_mode: 'fail_open' | 'fail_close' | string
+  upstream_protocol_policy: 'auto' | 'http1_only' | 'http2_preferred' | 'http2_only' | string
+  upstream_http1_strict_mode: boolean
+  upstream_http1_allow_connection_reuse: boolean
+  reject_ambiguous_http1_requests: boolean
+  reject_http1_transfer_encoding_requests: boolean
+  reject_body_on_safe_http_methods: boolean
+  reject_expect_100_continue: boolean
   bloom_filter_scale: number
   http2_enabled: boolean
   http2_max_concurrent_streams: number

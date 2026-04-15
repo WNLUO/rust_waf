@@ -13,6 +13,7 @@ const {
   configForm,
   error,
   failureModeLabel,
+  http1SecurityLabel,
   http3StatusLabel,
   http3StatusType,
   lastUpdated,
@@ -25,6 +26,7 @@ const {
   runtimeStatus,
   stats,
   successMessage,
+  upstreamProtocolLabel,
   upstreamStatusText,
   upstreamStatusType,
   refreshing,
@@ -95,6 +97,7 @@ const lastUpdatedLabel = computed(() => {
         :format-latency="formatLatency"
         :format-number="formatNumber"
         :format-timestamp="formatTimestamp"
+        :http1-security-label="http1SecurityLabel"
         :http3-status-label="http3StatusLabel"
         :http3-status-type="http3StatusType"
         :protocol-tags="protocolTags"
@@ -102,6 +105,7 @@ const lastUpdatedLabel = computed(() => {
         :runtime-profile-label="runtimeProfileLabel"
         :runtime-status="runtimeStatus"
         :stats="stats"
+        :upstream-protocol-label="upstreamProtocolLabel"
         :upstream-status-text="upstreamStatusText"
         :upstream-status-type="upstreamStatusType"
       />

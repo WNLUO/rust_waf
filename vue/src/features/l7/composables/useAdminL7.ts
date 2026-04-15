@@ -519,6 +519,23 @@ export function useAdminL7() {
   const failureModeLabel = computed(() =>
     configForm.upstream_failure_mode === 'fail_close' ? '故障关闭' : '故障放行',
   )
+  const upstreamProtocolLabel = computed(() => {
+    switch (configForm.upstream_protocol_policy) {
+      case 'http2_only':
+        return '仅 HTTP/2'
+      case 'http2_preferred':
+        return '优先 HTTP/2'
+      case 'http1_only':
+        return '仅 HTTP/1.1'
+      case 'auto':
+        return '自动选择'
+      default:
+        return configForm.upstream_protocol_policy || '未知'
+    }
+  })
+  const http1SecurityLabel = computed(() =>
+    configForm.upstream_http1_strict_mode ? 'H1 严格模式' : 'H1 兼容模式',
+  )
   const http3StatusLabel = computed(() => {
     const status = stats.value?.http3_status || 'unknown'
     if (status === 'running') return '运行中'
@@ -548,6 +565,17 @@ export function useAdminL7() {
         ? ('success' as const)
         : ('muted' as const),
     },
+    {
+      text: `上游 ${upstreamProtocolLabel.value}`,
+      type:
+        configForm.upstream_protocol_policy === 'http1_only'
+          ? ('warning' as const)
+          : ('info' as const),
+    },
+    {
+      text: http1SecurityLabel.value,
+      type: configForm.upstream_http1_strict_mode ? ('success' as const) : ('warning' as const),
+    },
   ])
 
   useAdminRealtimeTopic<L7StatsPayload>('l7_stats', (payload) => {
@@ -574,6 +602,7 @@ export function useAdminL7() {
     error,
     events,
     failureModeLabel,
+    http1SecurityLabel,
     http3StatusLabel,
     http3StatusType,
     l7Rules,
@@ -593,6 +622,7 @@ export function useAdminL7() {
     stats,
     successMessage,
     trustedProxyCidrsText,
+    upstreamProtocolLabel,
     upstreamStatusText,
     upstreamStatusType,
     refreshing,

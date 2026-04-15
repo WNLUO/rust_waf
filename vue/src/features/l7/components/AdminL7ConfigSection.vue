@@ -47,6 +47,13 @@ const healthcheckEnabled = fieldModel('upstream_healthcheck_enabled')
 const http3Enabled = fieldModel('http3_enabled')
 const runtimeProfile = fieldModel('runtime_profile')
 const failureMode = fieldModel('upstream_failure_mode')
+const upstreamProtocolPolicy = fieldModel('upstream_protocol_policy')
+const upstreamHttp1StrictMode = fieldModel('upstream_http1_strict_mode')
+const upstreamHttp1AllowConnectionReuse = fieldModel('upstream_http1_allow_connection_reuse')
+const rejectAmbiguousHttp1Requests = fieldModel('reject_ambiguous_http1_requests')
+const rejectHttp1TransferEncodingRequests = fieldModel('reject_http1_transfer_encoding_requests')
+const rejectBodyOnSafeHttpMethods = fieldModel('reject_body_on_safe_http_methods')
+const rejectExpect100Continue = fieldModel('reject_expect_100_continue')
 const maxRequestSize = fieldModel('max_request_size')
 const firstByteTimeout = fieldModel('first_byte_timeout_ms')
 const readIdleTimeout = fieldModel('read_idle_timeout_ms')
@@ -821,6 +828,70 @@ const safelineResponseBodySource = computed({
           <option value="fail_open">故障放行</option>
           <option value="fail_close">故障关闭</option>
         </select>
+        </label>
+        <label class="text-sm text-stone-700">
+        上游协议策略
+        <select
+          v-model="upstreamProtocolPolicy"
+          class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
+        >
+          <option value="http2_preferred">优先 HTTP/2</option>
+          <option value="http2_only">仅 HTTP/2</option>
+          <option value="auto">自动选择</option>
+          <option value="http1_only">仅 HTTP/1.1</option>
+        </select>
+        </label>
+      </div>
+
+      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>启用上游 HTTP/1 严格模式</span>
+          <input
+            v-model="upstreamHttp1StrictMode"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>允许上游 HTTP/1 连接复用</span>
+          <input
+            v-model="upstreamHttp1AllowConnectionReuse"
+            :disabled="form.upstream_http1_strict_mode"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>拒绝歧义 HTTP/1 请求</span>
+          <input
+            v-model="rejectAmbiguousHttp1Requests"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>拒绝请求 Transfer-Encoding</span>
+          <input
+            v-model="rejectHttp1TransferEncodingRequests"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>拒绝 GET/HEAD/OPTIONS 携带 body</span>
+          <input
+            v-model="rejectBodyOnSafeHttpMethods"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>拒绝 Expect: 100-continue</span>
+          <input
+            v-model="rejectExpect100Continue"
+            type="checkbox"
+            class="ui-switch"
+          />
         </label>
       </div>
     </div>

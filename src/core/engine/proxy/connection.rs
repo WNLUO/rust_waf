@@ -216,7 +216,7 @@ async fn proxy_http2_request(
         get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
             .await?;
     let upstream_request = build_http2_upstream_request(request, upstream)?;
-    log_http2_upstream_request(request, upstream, &upstream_request)?;
+    emit_http2_upstream_request_debug_event(context, request, upstream, &upstream_request)?;
     let mut guard = pooled.lock().await;
     let response = tokio::time::timeout(
         std::time::Duration::from_millis(read_timeout_ms),
@@ -225,17 +225,24 @@ async fn proxy_http2_request(
     .await;
     match response {
         Ok(Ok(response)) => {
-            log_http2_upstream_response(&response);
+            emit_http2_upstream_response_debug_event(context, request, &response);
             let mapped = map_http2_upstream_response(response).await?;
             context.set_upstream_health(true, None);
             Ok(mapped)
         }
         Ok(Err(err)) => {
             http2_pool().remove(&pool_key);
+            emit_http2_upstream_error_debug_event(context, request, "send_request", &err.to_string());
             Err(err.into())
         }
         Err(_) => {
             http2_pool().remove(&pool_key);
+            emit_http2_upstream_error_debug_event(
+                context,
+                request,
+                "timeout",
+                "Upstream HTTP/2 request timed out",
+            );
             Err(anyhow::anyhow!("Upstream HTTP/2 request timed out"))
         }
     }
@@ -500,7 +507,8 @@ fn build_http2_upstream_request(
         .map_err(Into::into)
 }
 
-fn log_http2_upstream_request(
+fn emit_http2_upstream_request_debug_event(
+    context: &WafContext,
     request: &UnifiedHttpRequest,
     upstream: &crate::core::gateway::UpstreamEndpoint,
     upstream_request: &Request<Full<Bytes>>,
@@ -514,27 +522,35 @@ fn log_http2_upstream_request(
             value
                 .to_str()
                 .ok()
-                .map(|value| format!("{}={}", name.as_str(), value))
+                .map(|value| serde_json::json!({ "name": name.as_str(), "value": value }))
         })
         .collect::<Vec<_>>();
-    debug!(
-        "HTTP/2 upstream request: method={} path={} uri={} upstream_authority={} host={} sni={} headers=[{}]",
-        upstream_request.method(),
-        request.uri,
-        upstream_request.uri(),
-        upstream.authority,
-        upstream_request
-            .headers()
-            .get(HOST)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("<missing>"),
-        sni,
-        forwarded_headers.join(", ")
+    crate::core::engine::policy::persist_upstream_http2_debug_event(
+        context,
+        request,
+        "request",
+        serde_json::json!({
+            "method": upstream_request.method().as_str(),
+            "path": request.uri,
+            "uri": upstream_request.uri().to_string(),
+            "upstream_authority": upstream.authority,
+            "host": upstream_request
+                .headers()
+                .get(HOST)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("<missing>"),
+            "sni": sni,
+            "headers": forwarded_headers,
+        }),
     );
     Ok(())
 }
 
-fn log_http2_upstream_response(response: &http::Response<hyper::body::Incoming>) {
+fn emit_http2_upstream_response_debug_event(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    response: &http::Response<hyper::body::Incoming>,
+) {
     let header_dump = response
         .headers()
         .iter()
@@ -542,13 +558,35 @@ fn log_http2_upstream_response(response: &http::Response<hyper::body::Incoming>)
             value
                 .to_str()
                 .ok()
-                .map(|value| format!("{}={}", name.as_str(), value))
+                .map(|value| serde_json::json!({ "name": name.as_str(), "value": value }))
         })
         .collect::<Vec<_>>();
-    debug!(
-        "HTTP/2 upstream response: status={} headers=[{}]",
-        response.status(),
-        header_dump.join(", ")
+    crate::core::engine::policy::persist_upstream_http2_debug_event(
+        context,
+        request,
+        "response",
+        serde_json::json!({
+            "status": response.status().as_u16(),
+            "reason": response.status().canonical_reason(),
+            "headers": header_dump,
+        }),
+    );
+}
+
+fn emit_http2_upstream_error_debug_event(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    stage: &str,
+    error: &str,
+) {
+    crate::core::engine::policy::persist_upstream_http2_debug_event(
+        context,
+        request,
+        "error",
+        serde_json::json!({
+            "stage": stage,
+            "error": error,
+        }),
     );
 }
 

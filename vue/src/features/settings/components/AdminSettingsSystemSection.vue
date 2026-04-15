@@ -482,7 +482,8 @@ function truncateCertificateName(name: string, maxLength = 18) {
             <p class="text-sm font-semibold text-stone-900">调试与诊断</p>
             <p class="mt-1 text-xs leading-5 text-slate-500">
               仅在排查真实 IP 透传、代理链路或请求身份识别问题时临时开启。
-              开启后每个到达 Rust 的 HTTP 请求都会额外写入一条身份调试事件。
+              开启后每个到达 Rust 的 HTTP 请求都会额外写入身份调试事件；使用上游 HTTP/2
+              代理时，也会同步记录上游请求、响应和错误诊断事件。
             </p>
           </div>
           <label class="inline-flex items-center gap-3">

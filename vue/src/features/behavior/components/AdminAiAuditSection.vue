@@ -289,7 +289,7 @@ async function loadSection(runReport = true) {
           window_seconds: windowSeconds.value,
         }),
       )
-    } else if (!report.value) {
+    } else {
       persistReportSnapshot(await fetchAiAuditReport())
     }
     await loadHistory()

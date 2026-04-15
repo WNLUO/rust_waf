@@ -484,6 +484,8 @@ fn normalize_model_output_value(value: &mut serde_json::Value) {
         return;
     };
 
+    normalize_scalar_string_field(object, "risk_level");
+    normalize_scalar_string_field(object, "headline");
     normalize_string_or_array_field(object, "executive_summary");
 
     if let Some(findings) = object
@@ -492,6 +494,10 @@ fn normalize_model_output_value(value: &mut serde_json::Value) {
     {
         for finding in findings {
             if let Some(finding_object) = finding.as_object_mut() {
+                normalize_scalar_string_field(finding_object, "key");
+                normalize_scalar_string_field(finding_object, "severity");
+                normalize_scalar_string_field(finding_object, "title");
+                normalize_scalar_string_field(finding_object, "detail");
                 normalize_string_or_array_field(finding_object, "evidence");
             }
         }
@@ -502,16 +508,23 @@ fn normalize_model_output_value(value: &mut serde_json::Value) {
     {
         for recommendation in recommendations {
             if let Some(recommendation_object) = recommendation.as_object_mut() {
+                normalize_scalar_string_field(recommendation_object, "key");
+                normalize_scalar_string_field(recommendation_object, "priority");
+                normalize_scalar_string_field(recommendation_object, "title");
+                normalize_scalar_string_field(recommendation_object, "action");
+                normalize_scalar_string_field(recommendation_object, "rationale");
                 if !recommendation_object.contains_key("action_type") {
                     recommendation_object.insert(
                         "action_type".to_string(),
                         serde_json::Value::String("observe".to_string()),
                     );
                 }
+                normalize_scalar_string_field(recommendation_object, "action_type");
                 if !recommendation_object.contains_key("rule_suggestion_key") {
                     recommendation_object
                         .insert("rule_suggestion_key".to_string(), serde_json::Value::Null);
                 }
+                normalize_optional_string_field(recommendation_object, "rule_suggestion_key");
             }
         }
     }
@@ -520,6 +533,28 @@ fn normalize_model_output_value(value: &mut serde_json::Value) {
             "suggested_local_rules".to_string(),
             serde_json::Value::Array(Vec::new()),
         );
+    }
+    if let Some(rules) = object
+        .get_mut("suggested_local_rules")
+        .and_then(|item| item.as_array_mut())
+    {
+        for rule in rules {
+            if let Some(rule_object) = rule.as_object_mut() {
+                normalize_scalar_string_field(rule_object, "key");
+                normalize_scalar_string_field(rule_object, "title");
+                normalize_scalar_string_field(rule_object, "policy_type");
+                normalize_scalar_string_field(rule_object, "layer");
+                normalize_scalar_string_field(rule_object, "scope_type");
+                normalize_scalar_string_field(rule_object, "scope_value");
+                normalize_scalar_string_field(rule_object, "target");
+                normalize_scalar_string_field(rule_object, "action");
+                normalize_scalar_string_field(rule_object, "operator");
+                normalize_scalar_string_field(rule_object, "suggested_value");
+                normalize_scalar_string_field(rule_object, "rationale");
+                normalize_u64_field(rule_object, "ttl_secs");
+                normalize_bool_field(rule_object, "auto_apply");
+            }
+        }
     }
 }
 
@@ -542,10 +577,20 @@ fn normalize_string_or_array_field(
             }
         }
         serde_json::Value::Array(items) => {
-            items.retain(|item| match item {
-                serde_json::Value::String(text) => !text.trim().is_empty(),
-                _ => true,
-            });
+            let normalized = items
+                .drain(..)
+                .filter_map(|item| match item {
+                    serde_json::Value::String(text) => {
+                        let trimmed = text.trim().to_string();
+                        (!trimmed.is_empty()).then(|| serde_json::Value::String(trimmed))
+                    }
+                    serde_json::Value::Null => None,
+                    other => Some(serde_json::Value::String(
+                        other.to_string().trim_matches('"').to_string(),
+                    )),
+                })
+                .collect::<Vec<_>>();
+            *items = normalized;
         }
         serde_json::Value::Null => {
             *value = serde_json::Value::Array(Vec::new());
@@ -554,6 +599,90 @@ fn normalize_string_or_array_field(
             *other = serde_json::Value::Array(vec![serde_json::Value::String(other.to_string())]);
         }
     }
+}
+
+fn normalize_scalar_string_field(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) {
+    let Some(value) = object.get_mut(key) else {
+        return;
+    };
+
+    match value {
+        serde_json::Value::String(text) => {
+            *text = text.trim().to_string();
+        }
+        serde_json::Value::Null => {
+            *value = serde_json::Value::String(String::new());
+        }
+        other => {
+            *other = serde_json::Value::String(other.to_string().trim_matches('"').to_string());
+        }
+    }
+}
+
+fn normalize_optional_string_field(
+    object: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) {
+    let Some(value) = object.get_mut(key) else {
+        return;
+    };
+
+    match value {
+        serde_json::Value::Null => {}
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                *value = serde_json::Value::Null;
+            } else {
+                *text = trimmed.to_string();
+            }
+        }
+        _ => {
+            let normalized = value.to_string().trim_matches('"').trim().to_string();
+            if normalized.is_empty() {
+                *value = serde_json::Value::Null;
+            } else {
+                *value = serde_json::Value::String(normalized);
+            }
+        }
+    }
+}
+
+fn normalize_u64_field(object: &mut serde_json::Map<String, serde_json::Value>, key: &str) {
+    let Some(value) = object.get_mut(key) else {
+        return;
+    };
+
+    let normalized = match value {
+        serde_json::Value::Number(number) => number.as_u64(),
+        serde_json::Value::String(text) => text.trim().parse::<u64>().ok(),
+        serde_json::Value::Bool(flag) => Some(u64::from(*flag)),
+        _ => None,
+    }
+    .unwrap_or(0);
+
+    *value = serde_json::Value::Number(serde_json::Number::from(normalized));
+}
+
+fn normalize_bool_field(object: &mut serde_json::Map<String, serde_json::Value>, key: &str) {
+    let Some(value) = object.get_mut(key) else {
+        return;
+    };
+
+    let normalized = match value {
+        serde_json::Value::Bool(flag) => *flag,
+        serde_json::Value::Number(number) => number.as_u64().map(|raw| raw != 0).unwrap_or(false),
+        serde_json::Value::String(text) => matches!(
+            text.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        _ => false,
+    };
+
+    *value = serde_json::Value::Bool(normalized);
 }
 
 fn provider_from_config(config: &AiAuditConfig) -> AiAuditProvider {
@@ -954,6 +1083,55 @@ mod tests {
             output.findings[0].evidence,
             vec!["one evidence line".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_model_output_normalizes_non_string_scalar_fields() {
+        let output = parse_model_output(
+            r#"{
+                "risk_level": 1,
+                "headline": true,
+                "executive_summary": ["ok"],
+                "findings": [{
+                    "key": 123,
+                    "severity": false,
+                    "title": 456,
+                    "detail": {"a":1},
+                    "evidence": [1, "x"]
+                }],
+                "recommendations": [{
+                    "key": 789,
+                    "priority": 2,
+                    "title": 3,
+                    "action": 4,
+                    "rationale": 5,
+                    "action_type": 0,
+                    "rule_suggestion_key": 6
+                }],
+                "suggested_local_rules": [{
+                    "key": 1,
+                    "title": 2,
+                    "policy_type": 3,
+                    "layer": 4,
+                    "scope_type": 5,
+                    "scope_value": 6,
+                    "target": 7,
+                    "action": 8,
+                    "operator": 9,
+                    "suggested_value": 10,
+                    "ttl_secs": "500",
+                    "auto_apply": 1,
+                    "rationale": 11
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(output.headline, "true");
+        assert_eq!(output.findings[0].key, "123");
+        assert_eq!(output.recommendations[0].rule_suggestion_key.as_deref(), Some("6"));
+        assert_eq!(output.suggested_local_rules[0].ttl_secs, 500);
+        assert!(output.suggested_local_rules[0].auto_apply);
     }
 
     #[tokio::test]

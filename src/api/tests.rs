@@ -90,6 +90,8 @@ fn test_build_metrics_response_with_sources() {
             fine_grained_buckets: 5,
             coarse_buckets: 3,
             peer_only_buckets: 1,
+            direct_idle_no_request_buckets: 2,
+            direct_idle_no_request_connections: 4,
             normal_buckets: 4,
             suspicious_buckets: 3,
             high_risk_buckets: 2,

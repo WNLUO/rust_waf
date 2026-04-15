@@ -497,9 +497,15 @@ impl WafContext {
     }
 
     pub async fn run_auto_tuning_tick(&self) -> Result<()> {
-        let Some(metrics) = self.metrics_snapshot() else {
+        let Some(mut metrics) = self.metrics_snapshot() else {
             return Ok(());
         };
+        if let Some(inspector) = self.l4_inspector().as_ref() {
+            let overview = inspector.get_statistics().behavior.overview;
+            metrics.l4_direct_idle_no_request_buckets = overview.direct_idle_no_request_buckets;
+            metrics.l4_direct_idle_no_request_connections =
+                overview.direct_idle_no_request_connections;
+        }
         let config = self.config_snapshot();
         let now = unix_timestamp();
 

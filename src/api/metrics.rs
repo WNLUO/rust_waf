@@ -14,6 +14,8 @@ pub(super) fn build_metrics_response(
         fine_grained_buckets: 0,
         coarse_buckets: 0,
         peer_only_buckets: 0,
+        direct_idle_no_request_buckets: 0,
+        direct_idle_no_request_connections: 0,
         normal_buckets: 0,
         suspicious_buckets: 0,
         high_risk_buckets: 0,

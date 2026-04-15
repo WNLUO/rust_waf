@@ -71,14 +71,16 @@ impl SlowAttackGuard {
 
     pub fn assess(&self, observation: SlowAttackObservation) -> SlowAttackAssessment {
         let config = self.config();
+        let window_secs = slow_attack_window_secs(&config, observation.kind);
+        let block_threshold = slow_attack_block_threshold(&config, observation.kind);
         let key = observation
             .client_ip
             .unwrap_or(observation.peer_ip)
             .to_string();
-        let event_count = self.observe(key, Duration::from_secs(config.event_window_secs.max(1)));
+        let event_count = self.observe(key, Duration::from_secs(window_secs));
         let block_ip = self.block_target_ip(&observation);
         let should_block_ip =
-            config.enabled && block_ip.is_some() && event_count >= config.max_events_per_window;
+            config.enabled && block_ip.is_some() && event_count >= block_threshold;
         let scope = observation
             .client_ip
             .map(|ip| format!("client_ip={ip}"))
@@ -172,6 +174,20 @@ impl SlowAttackGuard {
     }
 }
 
+fn slow_attack_window_secs(config: &SlowAttackDefenseConfig, kind: SlowAttackKind) -> u64 {
+    match kind {
+        SlowAttackKind::SlowTlsHandshake => config.event_window_secs.min(180).max(30),
+        _ => config.event_window_secs.max(1),
+    }
+}
+
+fn slow_attack_block_threshold(config: &SlowAttackDefenseConfig, kind: SlowAttackKind) -> u32 {
+    match kind {
+        SlowAttackKind::SlowTlsHandshake => config.max_events_per_window.min(3).max(1),
+        _ => config.max_events_per_window.max(1),
+    }
+}
+
 impl SlidingWindowCounter {
     fn new() -> Self {
         Self {
@@ -254,5 +270,29 @@ mod tests {
 
         assert!(assessment.should_block_ip);
         assert_eq!(assessment.block_ip, Some("203.0.113.15".parse().unwrap()));
+    }
+
+    #[test]
+    fn slow_tls_handshake_uses_tighter_thresholds() {
+        let guard = SlowAttackGuard::new(&SlowAttackDefenseConfig {
+            event_window_secs: 300,
+            max_events_per_window: 4,
+            ..SlowAttackDefenseConfig::default()
+        });
+
+        let make_observation = || SlowAttackObservation {
+            kind: SlowAttackKind::SlowTlsHandshake,
+            peer_ip: "203.0.113.20".parse().unwrap(),
+            client_ip: None,
+            trusted_proxy_peer: false,
+            identity_state: "direct_client",
+            client_identity_unresolved: false,
+            host: None,
+            detail: "listener=0.0.0.0:660 timeout_ms=3000".to_string(),
+        };
+
+        assert!(!guard.assess(make_observation()).should_block_ip);
+        assert!(!guard.assess(make_observation()).should_block_ip);
+        assert!(guard.assess(make_observation()).should_block_ip);
     }
 }

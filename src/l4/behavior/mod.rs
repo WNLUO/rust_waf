@@ -197,6 +197,8 @@ pub struct L4BehaviorOverview {
     pub fine_grained_buckets: u64,
     pub coarse_buckets: u64,
     pub peer_only_buckets: u64,
+    pub direct_idle_no_request_buckets: u64,
+    pub direct_idle_no_request_connections: u64,
     pub normal_buckets: u64,
     pub suspicious_buckets: u64,
     pub high_risk_buckets: u64,
@@ -479,5 +481,39 @@ mod tests {
         assert!(policy.prefer_early_close);
         assert!(policy.reject_new_connections);
         assert!(policy.suggested_delay_ms >= 60);
+    }
+
+    #[tokio::test]
+    async fn direct_client_idle_connections_without_requests_escalate_risk() {
+        let engine = L4BehaviorEngine::new(&L4Config::default());
+        engine.start();
+        let p = packet(44);
+
+        for idx in 0..4 {
+            let _ = engine.observe_connection_open(
+                format!("idle-{idx}"),
+                &PacketInfo {
+                    timestamp: idx,
+                    ..p.clone()
+                },
+                Some("idle.example"),
+                Some("h2"),
+                "tls",
+                "h2",
+                BucketPeerKind::DirectClient,
+            );
+        }
+
+        sleep(Duration::from_millis(20)).await;
+        let snapshot = engine.snapshot(0, 0);
+        let bucket = snapshot
+            .top_buckets
+            .into_iter()
+            .find(|item| item.peer_ip == p.source_ip.to_string())
+            .expect("bucket snapshot");
+
+        assert!(bucket.active_connections >= 4);
+        assert_eq!(bucket.total_requests, 0);
+        assert!(bucket.risk_score >= 10);
     }
 }

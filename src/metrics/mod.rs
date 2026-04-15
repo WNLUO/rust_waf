@@ -459,6 +459,8 @@ impl MetricsCollector {
                 ProxySegmentScope::HostRoute,
                 5,
             ),
+            l4_direct_idle_no_request_buckets: 0,
+            l4_direct_idle_no_request_connections: 0,
         }
     }
 
@@ -564,6 +566,8 @@ pub struct MetricsSnapshot {
     pub top_host_segments: Vec<ProxyTrafficSegmentSnapshot>,
     pub top_route_segments: Vec<ProxyTrafficSegmentSnapshot>,
     pub top_host_route_segments: Vec<ProxyTrafficSegmentSnapshot>,
+    pub l4_direct_idle_no_request_buckets: u64,
+    pub l4_direct_idle_no_request_connections: u64,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -41,6 +41,23 @@ pub(super) fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) 
     } else {
         0.0
     };
+    let idle_no_request_penalty = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
+        0.0
+    } else if bucket.total_requests == 0 && bucket.active_connections >= 4 {
+        24.0
+    } else if bucket.total_requests == 0
+        && bucket.active_connections >= 2
+        && bucket.avg_connection_lifetime_ms >= 10_000.0
+    {
+        28.0
+    } else if bucket.total_requests == 0
+        && bucket.active_connections >= 1
+        && bucket.avg_connection_lifetime_ms >= 5_000.0
+    {
+        16.0
+    } else {
+        0.0
+    };
     let authority_penalty = if bucket.peer_kind == BucketPeerKind::TrustedProxy {
         0.0
     } else if bucket.authority_unknown() {
@@ -68,6 +85,7 @@ pub(super) fn refresh_score_and_risk(bucket: &mut BucketRuntime, unix_now: i64) 
         + (recent_feedback * feedback_weight)
         + (active_connections * active_weight)
         + low_rpc_penalty
+        + idle_no_request_penalty
         + short_lifetime_penalty
         + authority_penalty
         + enforcement_feedback;

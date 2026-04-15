@@ -33,6 +33,7 @@ pub struct AutoTuningRuntimeSnapshot {
     pub last_observed_identity_resolution_pressure_percent: f64,
     pub last_observed_l7_friction_pressure_percent: f64,
     pub last_observed_slow_attack_pressure_percent: f64,
+    pub last_observed_direct_idle_no_request_connections: u64,
     pub recommendation: AutoTuningRecommendationSnapshot,
 }
 
@@ -68,6 +69,7 @@ pub struct AutoTuningControllerState {
     pub last_metrics: Option<MetricsSnapshot>,
     pub consecutive_handshake_high: u8,
     pub consecutive_identity_high: u8,
+    pub consecutive_slow_attack_high: u8,
     pub consecutive_budget_high: u8,
     pub consecutive_latency_high: u8,
     pub baseline_before_adjust: Option<Config>,
@@ -92,6 +94,7 @@ struct MetricDeltas {
     identity_resolution_pressure_percent: f64,
     l7_friction_pressure_percent: f64,
     slow_attack_pressure_percent: f64,
+    direct_idle_no_request_connections: u64,
     segments: Vec<TrafficSegmentDelta>,
 }
 
@@ -108,6 +111,7 @@ enum AutoTuningActionKind {
     Bootstrap,
     Handshake,
     Identity,
+    SlowAttack,
     Budget,
     Latency,
 }
@@ -154,6 +158,7 @@ pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
         last_observed_identity_resolution_pressure_percent: 0.0,
         last_observed_l7_friction_pressure_percent: 0.0,
         last_observed_slow_attack_pressure_percent: 0.0,
+        last_observed_direct_idle_no_request_connections: 0,
         recommendation,
     }
 }
@@ -209,6 +214,8 @@ pub fn run_control_step(
         deltas.identity_resolution_pressure_percent;
     runtime.last_observed_l7_friction_pressure_percent = deltas.l7_friction_pressure_percent;
     runtime.last_observed_slow_attack_pressure_percent = deltas.slow_attack_pressure_percent;
+    runtime.last_observed_direct_idle_no_request_connections =
+        deltas.direct_idle_no_request_connections;
     maybe_finalize_effect_evaluation(config, runtime, state, &deltas, now);
 
     if matches!(config.auto_tuning.mode, AutoTuningMode::Off) {
@@ -315,6 +322,8 @@ pub fn run_control_step(
         runtime.last_effect_evaluation = Some(rollback_effect_snapshot(state, &deltas, now));
 
         state.consecutive_handshake_high = 0;
+        state.consecutive_identity_high = 0;
+        state.consecutive_slow_attack_high = 0;
         state.consecutive_budget_high = 0;
         state.consecutive_latency_high = 0;
 
@@ -335,6 +344,8 @@ pub fn run_control_step(
 
     let action = if state.consecutive_handshake_high >= 3 {
         Some("handshake")
+    } else if state.consecutive_slow_attack_high >= 3 {
+        Some("slow_attack")
     } else if state.consecutive_identity_high >= 3 {
         Some("identity")
     } else if state.consecutive_budget_high >= 3 {
@@ -401,6 +412,12 @@ pub fn run_control_step(
             adjust_cc_ip_thresholds(&mut next, config, &mut diff, false);
             adjust_cc_delay_ms(&mut next, config, &mut diff, true);
         }
+        "slow_attack" => {
+            adjust_tls_handshake_timeout_ms(&mut next, config, &mut diff, false);
+            adjust_slow_attack_window(&mut next, config, &mut diff, false);
+            touched_l4 |= adjust_l4_budgets(&mut next, config, &mut diff, false);
+            touched_l4 |= adjust_l4_reject_thresholds(&mut next, config, &mut diff, false);
+        }
         "budget" => {
             if let Some(segment) = dominant_segment {
                 if matches!(segment.scope_type, "route" | "host_route") {
@@ -448,6 +465,7 @@ pub fn run_control_step(
 
     state.consecutive_handshake_high = 0;
     state.consecutive_identity_high = 0;
+    state.consecutive_slow_attack_high = 0;
     state.consecutive_budget_high = 0;
     state.consecutive_latency_high = 0;
     let cooldown_until = Some(now + config.auto_tuning.cooldown_secs as i64);
@@ -648,6 +666,15 @@ fn update_consecutive_counters(
     }
 
     if has_volume
+        && (deltas.slow_attack_pressure_percent >= 0.5
+            || deltas.direct_idle_no_request_connections >= 2)
+    {
+        state.consecutive_slow_attack_high = state.consecutive_slow_attack_high.saturating_add(1);
+    } else {
+        state.consecutive_slow_attack_high = 0;
+    }
+
+    if has_volume
         && (deltas.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent
             || hotspot_budget_pressure)
     {
@@ -831,6 +858,81 @@ fn adjust_cc_delay_ms(next: &mut Config, config: &Config, diff: &mut Vec<String>
     next.l7_config.cc_defense.delay_ms = after;
     diff.push(format!(
         "l7_config.cc_defense.delay_ms: {} -> {}",
+        before, after
+    ));
+}
+
+fn adjust_tls_handshake_timeout_ms(
+    next: &mut Config,
+    config: &Config,
+    diff: &mut Vec<String>,
+    increase: bool,
+) {
+    if is_pinned(config, "l7_config.tls_handshake_timeout_ms") {
+        return;
+    }
+    let before = next.l7_config.tls_handshake_timeout_ms;
+    let after = adjust_u64(
+        before,
+        config.auto_tuning.max_step_percent,
+        increase,
+        500,
+        60_000,
+    );
+    if before == after {
+        return;
+    }
+    next.l7_config.tls_handshake_timeout_ms = after;
+    diff.push(format!(
+        "l7_config.tls_handshake_timeout_ms: {} -> {}",
+        before, after
+    ));
+}
+
+fn adjust_slow_attack_window(
+    next: &mut Config,
+    config: &Config,
+    diff: &mut Vec<String>,
+    increase: bool,
+) {
+    if !is_pinned(
+        config,
+        "l7_config.slow_attack_defense.max_events_per_window",
+    ) {
+        let before = next.l7_config.slow_attack_defense.max_events_per_window;
+        let after = adjust_u32(
+            before,
+            config.auto_tuning.max_step_percent,
+            increase,
+            1,
+            1_000,
+        );
+        if before != after {
+            next.l7_config.slow_attack_defense.max_events_per_window = after;
+            diff.push(format!(
+                "l7_config.slow_attack_defense.max_events_per_window: {} -> {}",
+                before, after
+            ));
+        }
+    }
+
+    if is_pinned(config, "l7_config.slow_attack_defense.event_window_secs") {
+        return;
+    }
+    let before = next.l7_config.slow_attack_defense.event_window_secs;
+    let after = adjust_u64(
+        before,
+        config.auto_tuning.max_step_percent,
+        increase,
+        30,
+        86_400,
+    );
+    if before == after {
+        return;
+    }
+    next.l7_config.slow_attack_defense.event_window_secs = after;
+    diff.push(format!(
+        "l7_config.slow_attack_defense.event_window_secs: {} -> {}",
         before, after
     ));
 }
@@ -1196,6 +1298,7 @@ fn compute_deltas(previous: &MetricsSnapshot, current: &MetricsSnapshot) -> Metr
         identity_resolution_pressure_percent,
         l7_friction_pressure_percent,
         slow_attack_pressure_percent,
+        direct_idle_no_request_connections: current.l4_direct_idle_no_request_connections,
         segments: collect_segment_deltas(previous, current),
     }
 }
@@ -1334,6 +1437,26 @@ fn evaluate_effect_against_baseline(
                 )
                 + score_latency_delta(latency_delta)
         }
+        AutoTuningActionKind::SlowAttack => {
+            score_percent_delta(
+                current.slow_attack_pressure_percent
+                    - pending.baseline.slow_attack_pressure_percent,
+                tolerance_percent(pending.baseline.slow_attack_pressure_percent, 0.1),
+            ) * 2
+                + score_u64_delta(
+                    current.direct_idle_no_request_connections as i64
+                        - pending.baseline.direct_idle_no_request_connections as i64,
+                    1,
+                )
+                + score_percent_delta(
+                    handshake_delta,
+                    tolerance_percent(pending.baseline.handshake_timeout_rate_percent, 0.05),
+                )
+                + score_percent_delta(
+                    bucket_delta,
+                    tolerance_percent(pending.baseline.bucket_reject_rate_percent, 0.05),
+                )
+        }
         AutoTuningActionKind::Budget => {
             score_percent_delta(
                 bucket_delta,
@@ -1413,6 +1536,16 @@ fn score_latency_delta(delta_ms: i64) -> i8 {
     }
 }
 
+fn score_u64_delta(delta: i64, tolerance: i64) -> i8 {
+    if delta <= -tolerance {
+        1
+    } else if delta >= tolerance {
+        -1
+    } else {
+        0
+    }
+}
+
 fn tolerance_percent(baseline: f64, minimum: f64) -> f64 {
     (baseline.abs() * 0.1).max(minimum)
 }
@@ -1448,6 +1581,8 @@ fn action_kind_for_adjust_reason(reason: &str) -> AutoTuningActionKind {
         AutoTuningActionKind::Handshake
     } else if reason.starts_with("adjust_for_identity") {
         AutoTuningActionKind::Identity
+    } else if reason.starts_with("adjust_for_slow_attack") {
+        AutoTuningActionKind::SlowAttack
     } else if reason.starts_with("adjust_for_budget") {
         AutoTuningActionKind::Budget
     } else if reason.starts_with("adjust_for_latency") {
@@ -1464,6 +1599,7 @@ fn action_kind_label(action: AutoTuningActionKind) -> &'static str {
         AutoTuningActionKind::Bootstrap => "bootstrap",
         AutoTuningActionKind::Handshake => "handshake",
         AutoTuningActionKind::Identity => "identity",
+        AutoTuningActionKind::SlowAttack => "slow_attack",
         AutoTuningActionKind::Budget => "budget",
         AutoTuningActionKind::Latency => "latency",
     }
@@ -1480,6 +1616,8 @@ fn deltas_from_runtime(runtime: &AutoTuningRuntimeSnapshot) -> MetricDeltas {
             .last_observed_identity_resolution_pressure_percent,
         l7_friction_pressure_percent: runtime.last_observed_l7_friction_pressure_percent,
         slow_attack_pressure_percent: runtime.last_observed_slow_attack_pressure_percent,
+        direct_idle_no_request_connections: runtime
+            .last_observed_direct_idle_no_request_connections,
         segments: Vec::new(),
     }
 }
@@ -1687,6 +1825,7 @@ fn has_identity_resolution_pressure(config: &Config, deltas: &MetricDeltas) -> b
         || deltas.l7_friction_pressure_percent
             >= (config.auto_tuning.slo.bucket_reject_rate_percent * 2.0).max(8.0)
         || deltas.slow_attack_pressure_percent >= 0.5
+        || deltas.direct_idle_no_request_connections >= 2
 }
 
 fn has_hotspot_latency_pressure(config: &Config, deltas: &MetricDeltas) -> bool {
@@ -1743,6 +1882,14 @@ fn action_trigger_context(
                 deltas.identity_resolution_pressure_percent,
                 deltas.l7_friction_pressure_percent,
                 deltas.slow_attack_pressure_percent
+            ),
+        }),
+        "slow_attack" => Some(ActionTriggerContext {
+            reason_code: "adjust_for_slow_attack_pressure".to_string(),
+            detail: format!(
+                "triggered by slow-attack {:.2}% with {} idle zero-request direct connections",
+                deltas.slow_attack_pressure_percent,
+                deltas.direct_idle_no_request_connections
             ),
         }),
         "budget" => dominant_segment.map_or_else(
@@ -2410,6 +2557,79 @@ mod tests {
                         .l4_config
                         .behavior_normal_connection_budget_per_minute,
                     original_l4_budget
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn slow_attack_pressure_prefers_tightening_handshake_and_slow_attack_window() {
+        let mut config = Config::default();
+        config.auto_tuning.mode = AutoTuningMode::Active;
+        config.auto_tuning.runtime_adjust_enabled = true;
+        config.auto_tuning.control_interval_secs = 10;
+        config.auto_tuning.cooldown_secs = 30;
+
+        let original_handshake_timeout_ms = config.l7_config.tls_handshake_timeout_ms;
+        let original_event_window_secs = config.l7_config.slow_attack_defense.event_window_secs;
+        let original_max_events = config.l7_config.slow_attack_defense.max_events_per_window;
+
+        let mut runtime = super::build_runtime_snapshot(&config);
+        let mut state = AutoTuningControllerState::default();
+
+        let warmup = MetricsSnapshot {
+            proxied_requests: 100,
+            proxy_successes: 100,
+            proxy_latency_micros_total: 100_000_000,
+            ..MetricsSnapshot::default()
+        };
+        assert!(run_control_step(&config, &mut runtime, &mut state, &warmup, 100).is_none());
+        state.bootstrap_applied = true;
+
+        for (index, proxied_requests) in [140_u64, 180, 220].into_iter().enumerate() {
+            let metrics = MetricsSnapshot {
+                proxied_requests,
+                proxy_successes: proxied_requests,
+                proxy_latency_micros_total: proxied_requests * 1_000_000,
+                slow_attack_tls_handshake_hits: 1 + index as u64 * 2,
+                slow_attack_blocks: index as u64,
+                l4_direct_idle_no_request_connections: 3 + index as u64,
+                ..MetricsSnapshot::default()
+            };
+            let decision = run_control_step(
+                &config,
+                &mut runtime,
+                &mut state,
+                &metrics,
+                110 + index as i64 * 10,
+            );
+            if index < 2 {
+                assert!(decision.is_none());
+            } else {
+                let decision = decision.expect("third slow-attack window should adjust");
+                assert_eq!(
+                    runtime.last_adjust_reason.as_deref(),
+                    Some("adjust_for_slow_attack_pressure")
+                );
+                assert!(
+                    decision.next_config.l7_config.tls_handshake_timeout_ms
+                        < original_handshake_timeout_ms
+                );
+                assert!(
+                    decision
+                        .next_config
+                        .l7_config
+                        .slow_attack_defense
+                        .event_window_secs
+                        < original_event_window_secs
+                );
+                assert!(
+                    decision
+                        .next_config
+                        .l7_config
+                        .slow_attack_defense
+                        .max_events_per_window
+                        <= original_max_events
                 );
             }
         }

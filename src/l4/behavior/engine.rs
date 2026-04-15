@@ -238,6 +238,8 @@ impl L4BehaviorEngine {
         let mut fine_grained_buckets = 0u64;
         let mut coarse_buckets = 0u64;
         let mut peer_only_buckets = 0u64;
+        let mut direct_idle_no_request_buckets = 0u64;
+        let mut direct_idle_no_request_connections = 0u64;
         let mut suspicious_buckets = 0u64;
         let mut high_risk_buckets = 0u64;
         let mut safeline_feedback_hits = 0u64;
@@ -262,6 +264,13 @@ impl L4BehaviorEngine {
                     L4BucketRiskLevel::Normal => normal_buckets += 1,
                     L4BucketRiskLevel::Suspicious => suspicious_buckets += 1,
                     L4BucketRiskLevel::High => high_risk_buckets += 1,
+                }
+                if entry.key().peer_kind == BucketPeerKind::DirectClient
+                    && bucket.total_requests == 0
+                    && bucket.active_connections > 0
+                {
+                    direct_idle_no_request_buckets += 1;
+                    direct_idle_no_request_connections += u64::from(bucket.active_connections);
                 }
                 let policy = policy_from_runtime(bucket, overload_level.clone(), &tuning);
                 L4BucketSnapshot {
@@ -316,6 +325,8 @@ impl L4BehaviorEngine {
                 fine_grained_buckets,
                 coarse_buckets,
                 peer_only_buckets,
+                direct_idle_no_request_buckets,
+                direct_idle_no_request_connections,
                 normal_buckets,
                 suspicious_buckets,
                 high_risk_buckets,

@@ -452,6 +452,7 @@ mod tests {
             last_observed_identity_resolution_pressure_percent: 0.0,
             last_observed_l7_friction_pressure_percent: 0.0,
             last_observed_slow_attack_pressure_percent: 0.0,
+            last_observed_direct_idle_no_request_connections: 0,
             recommendation: AutoTuningRecommendationSnapshot {
                 l4_normal_connection_budget_per_minute: 960,
                 l4_suspicious_connection_budget_per_minute: 480,

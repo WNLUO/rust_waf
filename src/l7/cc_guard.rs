@@ -274,8 +274,10 @@ impl L7CcGuard {
 
         self.maybe_cleanup(unix_now, &config);
 
+        // A verified browser should avoid immediate re-challenge loops,
+        // but it should not get a materially higher block threshold.
         let challenge_multiplier = if verified { 3 } else { 1 };
-        let block_multiplier = if verified { 2 } else { 1 };
+        let block_multiplier = 1;
         let low_risk_subresource = request_kind == RequestKind::StaticAsset && is_page_subresource;
 
         let route_block_threshold = config

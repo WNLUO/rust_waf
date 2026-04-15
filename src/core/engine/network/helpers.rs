@@ -1,4 +1,11 @@
 pub(crate) async fn maybe_delay_request(request: &crate::protocol::UnifiedHttpRequest) {
+    if request
+        .get_metadata("runtime.pressure.drop_delay")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        return;
+    }
     let delay_ms = request
         .get_metadata("l4.suggested_delay_ms")
         .and_then(|value| value.parse::<u64>().ok())

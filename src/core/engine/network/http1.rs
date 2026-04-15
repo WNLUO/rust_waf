@@ -149,6 +149,7 @@ pub(crate) async fn handle_http1_connection(
             return Ok(());
         };
         prepare_request_for_routing(context.as_ref(), &mut request);
+        context.annotate_runtime_pressure(&mut request);
         let matched_site = resolve_gateway_site(context.as_ref(), &request);
         if let Some(site) = matched_site.as_ref() {
             apply_gateway_site_metadata(&mut request, site);

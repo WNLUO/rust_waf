@@ -110,6 +110,9 @@ pub(crate) fn persist_l4_inspection_event(
     packet: &PacketInfo,
     result: &InspectionResult,
 ) {
+    if should_skip_persisting_result_event(context, result, None) {
+        return;
+    }
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };
@@ -142,6 +145,9 @@ pub(crate) fn persist_http_inspection_event(
     request: &UnifiedHttpRequest,
     result: &InspectionResult,
 ) {
+    if should_skip_persisting_result_event(context, result, Some(request)) {
+        return;
+    }
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };
@@ -196,6 +202,9 @@ pub(crate) fn persist_http_identity_debug_event(
     {
         return;
     }
+    if should_trim_event_persistence(context, Some(request)) {
+        return;
+    }
 
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
@@ -238,6 +247,9 @@ pub(crate) fn persist_upstream_http2_debug_event(
         .console_settings
         .client_identity_debug_enabled
     {
+        return;
+    }
+    if should_trim_event_persistence(context, Some(request)) {
         return;
     }
 
@@ -336,6 +348,56 @@ pub(crate) fn persist_safeline_intercept_blocked_ip(
         blocked_at,
         blocked_at + block_duration_secs as i64,
     ));
+}
+
+fn should_skip_persisting_result_event(
+    context: &WafContext,
+    result: &InspectionResult,
+    request: Option<&UnifiedHttpRequest>,
+) -> bool {
+    if result.persist_blocked_ip || matches!(result.action, InspectionAction::Block) {
+        return false;
+    }
+
+    if matches!(result.action, InspectionAction::Alert) {
+        return should_trim_event_persistence(context, request);
+    }
+
+    if matches!(result.action, InspectionAction::Respond)
+        && should_trim_event_persistence(context, request)
+    {
+        return request
+            .and_then(|request| {
+                request
+                    .get_metadata("l7.cc.action")
+                    .or_else(|| request.get_metadata("l7.behavior.action"))
+                    .cloned()
+            })
+            .map(|action| {
+                action == "challenge"
+                    || action == "api_friction"
+                    || action.starts_with("delay:")
+                    || action.starts_with("skip_delay:")
+            })
+            .unwrap_or(true);
+    }
+
+    false
+}
+
+fn should_trim_event_persistence(
+    context: &WafContext,
+    request: Option<&UnifiedHttpRequest>,
+) -> bool {
+    if request
+        .and_then(|request| request.get_metadata("runtime.pressure.trim_event_persistence"))
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    context.runtime_pressure_snapshot().trim_event_persistence
 }
 
 pub(crate) fn enforce_runtime_http_block_if_needed(

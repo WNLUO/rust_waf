@@ -529,7 +529,7 @@ async fn test_sqlite_store_persists_fingerprint_profiles_and_behavior_history() 
 }
 
 #[tokio::test]
-async fn test_sqlite_store_uses_fallback_persistence_under_queue_pressure() {
+async fn test_sqlite_store_drops_low_priority_writes_under_queue_pressure() {
     let path = unique_test_db_path("queue_drops");
     let store = SqliteStore::new_with_queue_capacity(path, true, 1)
         .await
@@ -543,7 +543,11 @@ async fn test_sqlite_store_uses_fallback_persistence_under_queue_pressure() {
             provider_site_id: None,
             provider_site_name: None,
             provider_site_domain: None,
-            action: "block".to_string(),
+            action: if idx % 2 == 0 {
+                "respond".to_string()
+            } else {
+                "block".to_string()
+            },
             reason: "queue pressure".to_string(),
             details_json: None,
             source_ip: "127.0.0.1".to_string(),
@@ -573,11 +577,10 @@ async fn test_sqlite_store_uses_fallback_persistence_under_queue_pressure() {
     store.flush().await.unwrap();
     let summary = store.metrics_summary().await.unwrap();
     assert_eq!(summary.queue_capacity, 1);
-    assert_eq!(summary.dropped_security_events, 0);
-    assert_eq!(summary.dropped_blocked_ips, 0);
+    assert!(summary.dropped_security_events > 0);
+    assert!(summary.dropped_blocked_ips > 0);
     assert_eq!(summary.queue_depth, 0);
     assert!(summary.security_events > 0);
-    assert!(summary.blocked_ips > 0);
 }
 
 #[tokio::test]

@@ -77,6 +77,14 @@ pub struct WafContext {
     rule_version: AtomicI64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuntimePressureSnapshot {
+    pub level: &'static str,
+    pub storage_queue_usage_percent: u64,
+    pub drop_delay: bool,
+    pub trim_event_persistence: bool,
+}
+
 impl WafContext {
     pub async fn new(config: Config) -> Result<Self> {
         let l4_enabled =
@@ -237,6 +245,82 @@ impl WafContext {
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
         self.metrics.as_ref().map(MetricsCollector::get_stats)
+    }
+
+    pub fn runtime_pressure_snapshot(&self) -> RuntimePressureSnapshot {
+        let auto = self.auto_tuning_snapshot();
+        let storage_queue_usage_percent = self
+            .sqlite_store
+            .as_ref()
+            .map(|store| store.queue_usage_percent())
+            .unwrap_or(0);
+
+        let mut score = 0u8;
+        if storage_queue_usage_percent >= 75 {
+            score += 1;
+        }
+        if storage_queue_usage_percent >= 90 {
+            score += 2;
+        }
+        if auto.last_observed_avg_proxy_latency_ms >= 800 {
+            score += 2;
+        } else if auto.last_observed_avg_proxy_latency_ms >= 300 {
+            score += 1;
+        }
+        if auto.last_observed_identity_resolution_pressure_percent >= 5.0 {
+            score += 2;
+        } else if auto.last_observed_identity_resolution_pressure_percent >= 1.0 {
+            score += 1;
+        }
+        if auto.last_observed_l7_friction_pressure_percent >= 25.0 {
+            score += 2;
+        } else if auto.last_observed_l7_friction_pressure_percent >= 10.0 {
+            score += 1;
+        }
+        if auto.last_observed_slow_attack_pressure_percent >= 2.0 {
+            score += 2;
+        } else if auto.last_observed_slow_attack_pressure_percent >= 0.5 {
+            score += 1;
+        }
+
+        let level = match score {
+            0..=1 => "normal",
+            2..=3 => "elevated",
+            4..=5 => "high",
+            _ => "attack",
+        };
+
+        RuntimePressureSnapshot {
+            level,
+            storage_queue_usage_percent,
+            drop_delay: matches!(level, "high" | "attack"),
+            trim_event_persistence: storage_queue_usage_percent >= 75
+                || matches!(level, "high" | "attack"),
+        }
+    }
+
+    pub fn annotate_runtime_pressure(&self, request: &mut UnifiedHttpRequest) {
+        let pressure = self.runtime_pressure_snapshot();
+        request.add_metadata(
+            "runtime.pressure.level".to_string(),
+            pressure.level.to_string(),
+        );
+        request.add_metadata(
+            "runtime.pressure.storage_queue_percent".to_string(),
+            pressure.storage_queue_usage_percent.to_string(),
+        );
+        if pressure.drop_delay {
+            request.add_metadata(
+                "runtime.pressure.drop_delay".to_string(),
+                "true".to_string(),
+            );
+        }
+        if pressure.trim_event_persistence {
+            request.add_metadata(
+                "runtime.pressure.trim_event_persistence".to_string(),
+                "true".to_string(),
+            );
+        }
     }
 
     pub fn active_ai_temp_policies(&self) -> Vec<AiTempPolicyEntry> {

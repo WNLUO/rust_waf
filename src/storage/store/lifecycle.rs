@@ -1,4 +1,21 @@
 impl SqliteStore {
+    pub fn queue_depth(&self) -> u64 {
+        self.pending_writes.load(Ordering::Relaxed)
+    }
+
+    pub fn queue_capacity(&self) -> u64 {
+        self.queue_capacity as u64
+    }
+
+    pub fn queue_usage_percent(&self) -> u64 {
+        let capacity = self.queue_capacity();
+        if capacity == 0 {
+            0
+        } else {
+            self.queue_depth().saturating_mul(100) / capacity
+        }
+    }
+
     pub async fn new(path: String, auto_migrate: bool) -> Result<Self> {
         Self::new_with_queue_capacity(
             path,
@@ -119,27 +136,34 @@ impl SqliteStore {
     }
 
     pub fn enqueue_security_event(&self, event: SecurityEventRecord) {
-        let queue_depth = self.pending_writes.load(Ordering::Relaxed);
+        let queue_depth = self.queue_depth();
+        let queue_capacity = self.queue_capacity();
         let mut event = event;
-        if queue_depth >= (self.queue_capacity as u64).saturating_mul(3) / 4 {
-            if matches!(event.action.as_str(), "log" | "alert") {
+        let elevated_pressure = queue_depth >= queue_capacity.saturating_mul(3) / 4;
+        let critical_pressure = queue_depth >= queue_capacity.saturating_mul(9) / 10;
+        if elevated_pressure {
+            if should_drop_security_event_under_pressure(&event, critical_pressure) {
                 self.dropped_security_events.fetch_add(1, Ordering::Relaxed);
                 warn!(
-                    "Dropping low-priority security event under SQLite write pressure: action={}, queue_depth={}",
-                    event.action, queue_depth
+                    "Dropping security event under SQLite write pressure: action={}, queue_depth={}, critical={}",
+                    event.action, queue_depth, critical_pressure
                 );
                 return;
             }
             crate::storage::apply_write_pressure_detail_slimming(&mut event);
         }
         self.pending_writes.fetch_add(1, Ordering::Relaxed);
-        match self
-            .sender
-            .try_send(StorageCommand::SecurityEvent(event.clone()))
-        {
+        match self.sender.try_send(StorageCommand::SecurityEvent(event.clone())) {
             Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(StorageCommand::SecurityEvent(event)))
-            | Err(mpsc::error::TrySendError::Closed(StorageCommand::SecurityEvent(event))) => {
+            Err(mpsc::error::TrySendError::Full(StorageCommand::SecurityEvent(_event))) => {
+                self.dropped_security_events.fetch_add(1, Ordering::Relaxed);
+                finish_pending_write(&self.pending_writes, &self.pending_write_notify);
+                warn!(
+                    "Dropping security event because SQLite queue is full: queue_depth={}, queue_capacity={}",
+                    queue_depth, queue_capacity
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(StorageCommand::SecurityEvent(event))) => {
                 warn!(
                     "SQLite security event queue is unavailable, falling back to direct persistence"
                 );
@@ -171,14 +195,20 @@ impl SqliteStore {
     }
 
     pub fn enqueue_blocked_ip(&self, record: BlockedIpRecord) {
+        let queue_depth = self.queue_depth();
+        let queue_capacity = self.queue_capacity();
         self.pending_writes.fetch_add(1, Ordering::Relaxed);
-        match self
-            .sender
-            .try_send(StorageCommand::BlockedIp(record.clone()))
-        {
+        match self.sender.try_send(StorageCommand::BlockedIp(record.clone())) {
             Ok(()) => {}
-            Err(mpsc::error::TrySendError::Full(StorageCommand::BlockedIp(record)))
-            | Err(mpsc::error::TrySendError::Closed(StorageCommand::BlockedIp(record))) => {
+            Err(mpsc::error::TrySendError::Full(StorageCommand::BlockedIp(_record))) => {
+                self.dropped_blocked_ips.fetch_add(1, Ordering::Relaxed);
+                finish_pending_write(&self.pending_writes, &self.pending_write_notify);
+                warn!(
+                    "Dropping blocked IP persistence because SQLite queue is full: queue_depth={}, queue_capacity={}",
+                    queue_depth, queue_capacity
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(StorageCommand::BlockedIp(record))) => {
                 warn!("SQLite blocked IP queue is unavailable, falling back to direct persistence");
                 let pool = self.pool.clone();
                 let realtime_tx = self.realtime_tx.clone();
@@ -364,7 +394,7 @@ impl SqliteStore {
 
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn metrics_summary(&self) -> Result<StorageMetricsSummary> {
-        let queue_depth = self.pending_writes.load(Ordering::Relaxed);
+        let queue_depth = self.queue_depth();
         let rules: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rules")
             .fetch_one(&self.pool)
             .await?;
@@ -379,10 +409,21 @@ impl SqliteStore {
             latest_event_at: self.metrics_cache.latest_event_at(),
             rules: rules.max(0) as u64,
             latest_rule_update_at,
-            queue_capacity: self.queue_capacity as u64,
+            queue_capacity: self.queue_capacity(),
             queue_depth,
             dropped_security_events: self.dropped_security_events.load(Ordering::Relaxed),
             dropped_blocked_ips: self.dropped_blocked_ips.load(Ordering::Relaxed),
         })
     }
+}
+
+fn should_drop_security_event_under_pressure(
+    event: &SecurityEventRecord,
+    critical_pressure: bool,
+) -> bool {
+    if matches!(event.action.as_str(), "log" | "alert") {
+        return true;
+    }
+
+    critical_pressure && matches!(event.action.as_str(), "respond" | "allow")
 }

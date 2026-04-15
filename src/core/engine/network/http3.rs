@@ -169,6 +169,7 @@ async fn handle_http3_request(
         return Ok(());
     };
     prepare_request_for_routing(context.as_ref(), &mut unified);
+    context.annotate_runtime_pressure(&mut unified);
     let matched_site = resolve_gateway_site(context.as_ref(), &unified);
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);

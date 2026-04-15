@@ -486,6 +486,33 @@ impl L7CcGuard {
                         .saturating_mul(config.ip_challenge_threshold.max(1))
                         / 100)
         {
+            if should_drop_delay_under_pressure(request) {
+                if !verified && !low_risk_subresource && !client_identity_unresolved {
+                    let action = challenge_action_name(html_mode);
+                    let reason = format!(
+                        "l7 cc guard upgraded delay to {} under runtime pressure: kind={} ip={} host={} route={} hot_path={}",
+                        challenge_reason_verb(html_mode),
+                        request_kind.as_str(),
+                        ip_effective,
+                        host_effective,
+                        route_effective,
+                        hot_path_effective,
+                    );
+                    request.add_metadata("l7.cc.action".to_string(), action.to_string());
+                    return Some(InspectionResult::respond(
+                        InspectionLayer::L7,
+                        reason.clone(),
+                        self.build_challenge_response(
+                            request, client_ip, &host, &reason, html_mode, &config,
+                        ),
+                    ));
+                }
+                request.add_metadata(
+                    "l7.cc.action".to_string(),
+                    "skip_delay:runtime_pressure".to_string(),
+                );
+                return None;
+            }
             if client_identity_unresolved {
                 debug!(
                     "L7 CC downgraded unresolved trusted-proxy request to delay-only: client_ip={} host={} route={} delay_ms={} route_effective={} host_effective={} ip_effective={}",
@@ -505,6 +532,13 @@ impl L7CcGuard {
             tokio::time::sleep(Duration::from_millis(config.delay_ms)).await;
         }
         if extra_delay_ms > 0 {
+            if should_drop_delay_under_pressure(request) {
+                request.add_metadata(
+                    "l7.cc.action".to_string(),
+                    "skip_delay:runtime_pressure".to_string(),
+                );
+                return None;
+            }
             request.add_metadata(
                 "l7.cc.action".to_string(),
                 format!("delay:{}ms", extra_delay_ms),
@@ -1487,6 +1521,13 @@ fn stable_hash(value: &str) -> u64 {
     hasher.finish()
 }
 
+fn should_drop_delay_under_pressure(request: &UnifiedHttpRequest) -> bool {
+    request
+        .get_metadata("runtime.pressure.drop_delay")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1961,5 +2002,34 @@ mod tests {
                 Some("true")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn delay_is_upgraded_to_challenge_under_runtime_pressure() {
+        let config = CcDefenseConfig {
+            route_challenge_threshold: 100,
+            route_block_threshold: 200,
+            host_challenge_threshold: 100,
+            host_block_threshold: 200,
+            ip_challenge_threshold: 100,
+            ip_block_threshold: 200,
+            delay_threshold_percent: 1,
+            delay_ms: 150,
+            ..CcDefenseConfig::default()
+        };
+        let guard = L7CcGuard::new(&config);
+        let mut request = request("/hot");
+        request.add_metadata(
+            "runtime.pressure.drop_delay".to_string(),
+            "true".to_string(),
+        );
+
+        let result = guard.inspect_request(&mut request).await;
+
+        assert!(result.is_some());
+        assert_eq!(
+            request.get_metadata("l7.cc.action").map(String::as_str),
+            Some("challenge")
+        );
     }
 }

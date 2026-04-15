@@ -257,6 +257,24 @@ impl L7BehaviorGuard {
         }
 
         if assessment.score >= DELAY_SCORE {
+            if should_drop_delay_under_pressure(request) {
+                self.record_challenge(&assessment.identity, now, window);
+                request.add_metadata("l7.behavior.action".to_string(), "challenge".to_string());
+                let reason = format!(
+                    "l7 behavior guard upgraded delay to challenge under runtime pressure: score={} repeated_ratio={} document_repeated_ratio={} distinct_routes={} dominant_route={} flags={}",
+                    assessment.score,
+                    assessment.repeated_ratio_percent,
+                    assessment.document_repeated_ratio_percent,
+                    assessment.distinct_routes,
+                    assessment.dominant_route.as_deref().unwrap_or("*"),
+                    assessment.flags.join("|"),
+                );
+                return Some(InspectionResult::respond(
+                    InspectionLayer::L7,
+                    reason.clone(),
+                    build_behavior_response(request, 429, "系统繁忙，请稍后重试", &reason),
+                ));
+            }
             request.add_metadata(
                 "l7.behavior.action".to_string(),
                 format!("delay:{DELAY_MS}ms"),
@@ -1040,6 +1058,13 @@ fn stable_hash(value: &str) -> u64 {
     hasher.finish()
 }
 
+fn should_drop_delay_under_pressure(request: &UnifiedHttpRequest) -> bool {
+    request
+        .get_metadata("runtime.pressure.drop_delay")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1281,5 +1306,28 @@ mod tests {
         let key = bounded_dashmap_key(&map, "third".to_string(), 2, "behavior-test", 4);
 
         assert!(key.starts_with("__overflow__:behavior-test:"));
+    }
+
+    #[tokio::test]
+    async fn delay_is_upgraded_to_challenge_under_runtime_pressure() {
+        let guard = L7BehaviorGuard::new();
+        let mut request = request("GET", "/", "text/html");
+        request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        request.add_metadata("ai.behavior.force_watch".to_string(), "true".to_string());
+        request.add_metadata(
+            "runtime.pressure.drop_delay".to_string(),
+            "true".to_string(),
+        );
+
+        let result = guard.inspect_request(&mut request).await;
+
+        assert!(result.is_some());
+        assert_eq!(
+            request
+                .get_metadata("l7.behavior.action")
+                .map(String::as_str),
+            Some("challenge")
+        );
     }
 }

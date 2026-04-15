@@ -1,5 +1,4 @@
 use super::*;
-use crate::core::engine::network::helpers::should_hard_reject_l4_request_budget;
 use crate::core::engine::policy::persist_http_identity_debug_event;
 
 pub(crate) async fn handle_http2_connection(
@@ -149,15 +148,8 @@ pub(crate) async fn handle_http2_connection(
                         }
                         maybe_delay_request(&request).await;
                         if policy.reject_new_connections {
-                            if should_hard_reject_l4_request_budget(&request) {
-                                if let Some(metrics) = context.metrics.as_ref() {
-                                    metrics.record_l4_bucket_budget_rejection();
-                                }
-                                return Ok(Http2Response {
-                                    status_code: 429,
-                                    headers: vec![],
-                                    body: b"bucket request budget exceeded".to_vec(),
-                                });
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                metrics.record_l4_bucket_budget_rejection();
                             }
                             request.add_metadata("l4.force_close".to_string(), "true".to_string());
                             request.add_metadata(

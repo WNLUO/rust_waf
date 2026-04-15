@@ -1,5 +1,4 @@
 use super::*;
-use crate::core::engine::network::helpers::should_hard_reject_l4_request_budget;
 use crate::core::engine::policy::persist_http_identity_debug_event;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
@@ -176,22 +175,8 @@ pub(crate) async fn handle_http1_connection(
             }
             maybe_delay_request(&request).await;
             if policy.reject_new_connections {
-                if should_hard_reject_l4_request_budget(&request) {
-                    if let Some(metrics) = context.metrics.as_ref() {
-                        metrics.record_l4_bucket_budget_rejection();
-                    }
-                    http1_handler
-                        .write_response(
-                            &mut stream,
-                            429,
-                            "Too Many Requests",
-                            b"bucket request budget exceeded",
-                        )
-                        .await?;
-                    if let Some(bucket_key) = bucket_key.as_ref() {
-                        inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
-                    }
-                    return Ok(());
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_l4_bucket_budget_rejection();
                 }
                 request.add_metadata("l4.force_close".to_string(), "true".to_string());
                 request.add_metadata("proxy_connection_mode".to_string(), "close".to_string());

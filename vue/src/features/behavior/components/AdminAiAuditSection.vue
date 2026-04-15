@@ -44,6 +44,7 @@ const report = ref<AiAuditReportResponse | null>(null)
 const cachedReportAt = ref<number | null>(null)
 const reportHistory = ref<AiAuditReportHistoryItem[]>([])
 const historyTotal = ref(0)
+const compareReportId = ref<number | null>(null)
 const form = reactive<AiAuditSettingsPayload>(createDefaultAiAuditSettings())
 const windowSeconds = ref(900)
 const feedbackFilter = ref<
@@ -89,6 +90,71 @@ const cachedReportLabel = computed(() => {
   return `本地快照 ${formatTimestamp(cachedReportAt.value)}`
 })
 
+const compareReport = computed(() => {
+  if (!reportHistory.value.length) return null
+  if (compareReportId.value != null) {
+    return reportHistory.value.find((item) => item.id === compareReportId.value) ?? null
+  }
+  return (
+    reportHistory.value.find((item) => {
+      if (report.value?.report_id != null) {
+        return item.id !== report.value.report_id
+      }
+      return item.generated_at !== report.value?.generated_at
+    }) ?? null
+  )
+})
+
+const comparisonSummary = computed(() => {
+  if (!report.value || !compareReport.value) return null
+
+  const riskOrder: Record<string, number> = {
+    low: 0,
+    medium: 1,
+    high: 2,
+    critical: 3,
+  }
+  const currentRisk = riskOrder[report.value.risk_level] ?? 1
+  const baselineRisk = riskOrder[compareReport.value.risk_level] ?? 1
+  const riskDelta = currentRisk - baselineRisk
+  const findingsDelta = report.value.findings.length - compareReport.value.report.findings.length
+  const recommendationsDelta =
+    report.value.recommendations.length - compareReport.value.report.recommendations.length
+  const sampledEventsDelta =
+    report.value.summary.sampled_events - compareReport.value.report.summary.sampled_events
+
+  const currentKeys = new Set(report.value.findings.map((item) => item.key))
+  const baselineKeys = new Set(compareReport.value.report.findings.map((item) => item.key))
+  const newFindingTitles = report.value.findings
+    .filter((item) => !baselineKeys.has(item.key))
+    .map((item) => item.title)
+    .slice(0, 3)
+  const clearedFindingTitles = compareReport.value.report.findings
+    .filter((item) => !currentKeys.has(item.key))
+    .map((item) => item.title)
+    .slice(0, 3)
+
+  return {
+    baseline: compareReport.value,
+    riskDirection:
+      riskDelta > 0 ? 'up' : riskDelta < 0 ? 'down' : 'flat',
+    findingsDelta,
+    recommendationsDelta,
+    sampledEventsDelta,
+    identityPressureDelta:
+      report.value.summary.current.identity_pressure_percent -
+      compareReport.value.report.summary.current.identity_pressure_percent,
+    l7FrictionDelta:
+      report.value.summary.current.l7_friction_pressure_percent -
+      compareReport.value.report.summary.current.l7_friction_pressure_percent,
+    slowAttackDelta:
+      report.value.summary.current.slow_attack_pressure_percent -
+      compareReport.value.report.summary.current.slow_attack_pressure_percent,
+    newFindingTitles,
+    clearedFindingTitles,
+  }
+})
+
 function persistReportSnapshot(next: AiAuditReportResponse) {
   report.value = next
   if (typeof window === 'undefined') return
@@ -129,6 +195,12 @@ function assignHistory(payload: AiAuditReportsResponse) {
   historyTotal.value = payload.total
   for (const item of payload.reports) {
     feedbackNotes[item.id] = item.feedback_notes ?? ''
+  }
+  if (
+    compareReportId.value != null &&
+    !payload.reports.some((item) => item.id === compareReportId.value)
+  ) {
+    compareReportId.value = null
   }
 }
 
@@ -261,6 +333,17 @@ function downloadReportJson() {
   successMessage.value = 'AI 审计 JSON 已导出'
 }
 
+function useHistoryReport(item: AiAuditReportHistoryItem) {
+  persistReportSnapshot(item.report)
+  compareReportId.value = reportHistory.value.find((entry) => entry.id !== item.id)?.id ?? null
+  successMessage.value = `已切换到 ${formatTimestamp(item.generated_at)} 的审计报告`
+}
+
+function pinCompareReport(item: AiAuditReportHistoryItem) {
+  compareReportId.value = item.id
+  successMessage.value = `已将 ${formatTimestamp(item.generated_at)} 设为对比基线`
+}
+
 async function updateFeedback(
   reportId: number,
   feedbackStatus: 'confirmed' | 'false_positive' | 'follow_up',
@@ -351,9 +434,6 @@ onMounted(() => {
           <div class="flex items-start justify-between gap-3">
             <div>
               <p class="text-sm font-semibold text-slate-900">模型与 Provider 配置</p>
-              <p class="mt-1 text-xs leading-5 text-slate-500">
-                这里改的是全局 AI 审计默认配置。保存后，后端会优先按这里的 provider 走，再决定是否回退到本地规则。
-              </p>
             </div>
             <div class="rounded-2xl bg-white p-3 text-cyan-700 shadow-sm">
               <BrainCircuit :size="18" />
@@ -433,12 +513,6 @@ onMounted(() => {
               />
               provider 失败时自动回退到 local_rules
             </label>
-            <div
-              v-if="form.provider === 'xiaomi_mimo'"
-              class="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-800"
-            >
-              小米 MIMO 预设会优先使用 `api-key` 请求头，并在未填写地址时默认走 `https://api.xiaomimimo.com/v1`。
-            </div>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500">观察窗口（秒）</span>
               <input
@@ -520,6 +594,90 @@ onMounted(() => {
                 </p>
               </div>
             </div>
+
+            <div
+              v-if="comparisonSummary"
+              class="rounded-2xl border border-cyan-200 bg-[linear-gradient(135deg,rgba(236,254,255,0.98),rgba(248,250,252,0.96))] px-4 py-3"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <StatusBadge
+                  :type="comparisonSummary.riskDirection === 'up' ? 'error' : comparisonSummary.riskDirection === 'down' ? 'success' : 'muted'"
+                  :text="comparisonSummary.riskDirection === 'up' ? '风险较上次上升' : comparisonSummary.riskDirection === 'down' ? '风险较上次下降' : '风险等级与上次持平'"
+                />
+                <StatusBadge
+                  type="muted"
+                  :text="`对比基线 ${formatTimestamp(comparisonSummary.baseline.generated_at)}`"
+                />
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p class="text-xs text-slate-400">发现变化</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900">
+                    {{ comparisonSummary.findingsDelta >= 0 ? '+' : '' }}{{ comparisonSummary.findingsDelta }}
+                  </p>
+                </div>
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p class="text-xs text-slate-400">建议变化</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900">
+                    {{ comparisonSummary.recommendationsDelta >= 0 ? '+' : '' }}{{ comparisonSummary.recommendationsDelta }}
+                  </p>
+                </div>
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p class="text-xs text-slate-400">采样事件</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900">
+                    {{ comparisonSummary.sampledEventsDelta >= 0 ? '+' : '' }}{{ comparisonSummary.sampledEventsDelta }}
+                  </p>
+                </div>
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p class="text-xs text-slate-400">身份压力</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900">
+                    {{ comparisonSummary.identityPressureDelta >= 0 ? '+' : '' }}{{ formatNumber(comparisonSummary.identityPressureDelta) }}%
+                  </p>
+                </div>
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p class="text-xs text-slate-400">L7 摩擦</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900">
+                    {{ comparisonSummary.l7FrictionDelta >= 0 ? '+' : '' }}{{ formatNumber(comparisonSummary.l7FrictionDelta) }}%
+                  </p>
+                </div>
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-2">
+                  <p class="text-xs text-slate-400">慢攻压力</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-900">
+                    {{ comparisonSummary.slowAttackDelta >= 0 ? '+' : '' }}{{ formatNumber(comparisonSummary.slowAttackDelta) }}%
+                  </p>
+                </div>
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-3">
+                  <p class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                    新出现的发现
+                  </p>
+                  <ul v-if="comparisonSummary.newFindingTitles.length" class="mt-2 space-y-1 text-sm text-slate-700">
+                    <li
+                      v-for="item in comparisonSummary.newFindingTitles"
+                      :key="item"
+                    >
+                      {{ item }}
+                    </li>
+                  </ul>
+                  <p v-else class="mt-2 text-sm text-slate-500">没有新增 findings。</p>
+                </div>
+                <div class="rounded-xl border border-white/80 bg-white/80 px-3 py-3">
+                  <p class="text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
+                    已消失的发现
+                  </p>
+                  <ul v-if="comparisonSummary.clearedFindingTitles.length" class="mt-2 space-y-1 text-sm text-slate-700">
+                    <li
+                      v-for="item in comparisonSummary.clearedFindingTitles"
+                      :key="item"
+                    >
+                      {{ item }}
+                    </li>
+                  </ul>
+                  <p v-else class="mt-2 text-sm text-slate-500">没有消失的 findings。</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -540,7 +698,7 @@ onMounted(() => {
                 :key="finding.key"
                 class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
               >
-                <div class="flex flex-wrap items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                   <StatusBadge
                     :type="finding.severity === 'high' || finding.severity === 'critical' ? 'error' : finding.severity === 'medium' ? 'warning' : 'muted'"
                     :text="finding.severity"
@@ -691,6 +849,11 @@ onMounted(() => {
                     type="warning"
                     text="已走 fallback"
                   />
+                  <StatusBadge
+                    v-if="compareReportId === item.id"
+                    type="info"
+                    text="当前对比基线"
+                  />
                 </div>
                 <p class="text-sm font-semibold text-slate-900">{{ item.headline }}</p>
                 <p class="text-xs text-slate-500">
@@ -735,6 +898,20 @@ onMounted(() => {
                 placeholder="给这次 AI 审计补一条人工备注，例如为什么确认、为什么认为是误报。"
               />
               <div class="flex flex-wrap items-start gap-2">
+                <button
+                  type="button"
+                  class="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-medium text-cyan-700 transition hover:bg-cyan-100"
+                  @click="useHistoryReport(item)"
+                >
+                  查看这份报告
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+                  @click="pinCompareReport(item)"
+                >
+                  设为对比基线
+                </button>
                 <button
                   type="button"
                   class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"

@@ -323,6 +323,107 @@ async fn test_sqlite_store_persists_ai_audit_reports_and_feedback() {
 }
 
 #[tokio::test]
+async fn test_sqlite_store_metrics_cache_tracks_deletes() {
+    let path = unique_test_db_path("metrics_cache_deletes");
+    let store = SqliteStore::new(path, true).await.unwrap();
+    let now = unix_timestamp();
+
+    store.enqueue_security_event(SecurityEventRecord {
+        layer: "L7".to_string(),
+        provider: None,
+        provider_event_id: None,
+        provider_site_id: None,
+        provider_site_name: None,
+        provider_site_domain: None,
+        action: "block".to_string(),
+        reason: "newer event".to_string(),
+        details_json: None,
+        source_ip: "127.0.0.1".to_string(),
+        dest_ip: "127.0.0.1".to_string(),
+        source_port: 12345,
+        dest_port: 8080,
+        protocol: "TCP".to_string(),
+        http_method: Some("GET".to_string()),
+        uri: Some("/new".to_string()),
+        http_version: Some("HTTP/1.1".to_string()),
+        created_at: now,
+        handled: false,
+        handled_at: None,
+    });
+    store.enqueue_security_event(SecurityEventRecord {
+        layer: "L7".to_string(),
+        provider: None,
+        provider_event_id: None,
+        provider_site_id: None,
+        provider_site_name: None,
+        provider_site_domain: None,
+        action: "alert".to_string(),
+        reason: "older event".to_string(),
+        details_json: None,
+        source_ip: "127.0.0.2".to_string(),
+        dest_ip: "127.0.0.1".to_string(),
+        source_port: 12346,
+        dest_port: 8080,
+        protocol: "TCP".to_string(),
+        http_method: Some("GET".to_string()),
+        uri: Some("/old".to_string()),
+        http_version: Some("HTTP/1.1".to_string()),
+        created_at: now - 10,
+        handled: false,
+        handled_at: None,
+    });
+    store.enqueue_blocked_ip(BlockedIpRecord::new(
+        "198.51.100.1",
+        "test block 1",
+        now,
+        now + 60,
+    ));
+    store.enqueue_blocked_ip(BlockedIpRecord::new(
+        "198.51.100.2",
+        "test block 2",
+        now,
+        now - 1,
+    ));
+    store.flush().await.unwrap();
+
+    let summary = store.metrics_summary().await.unwrap();
+    assert_eq!(summary.security_events, 2);
+    assert_eq!(summary.blocked_ips, 2);
+    assert_eq!(summary.latest_event_at, Some(now));
+
+    let blocked = store
+        .list_blocked_ips(&BlockedIpQuery::default())
+        .await
+        .unwrap();
+    let active_block = blocked
+        .items
+        .iter()
+        .find(|item| item.ip == "198.51.100.1")
+        .unwrap();
+    assert!(store.delete_blocked_ip(active_block.id).await.unwrap());
+
+    let cleaned = store
+        .cleanup_expired_blocked_ips(&BlockedIpCleanupQuery {
+            source_scope: BlockedIpSourceScope::All,
+            provider: None,
+            blocked_from: None,
+            blocked_to: None,
+            expires_before: now,
+        })
+        .await
+        .unwrap();
+    assert_eq!(cleaned.len(), 1);
+
+    let purged = store.purge_old_security_events(now - 5).await.unwrap();
+    assert_eq!(purged, 1);
+
+    let summary = store.metrics_summary().await.unwrap();
+    assert_eq!(summary.security_events, 1);
+    assert_eq!(summary.blocked_ips, 0);
+    assert_eq!(summary.latest_event_at, Some(now));
+}
+
+#[tokio::test]
 async fn test_sqlite_store_persists_fingerprint_profiles_and_behavior_history() {
     let path = unique_test_db_path("behavior_history");
     let store = SqliteStore::new(path.clone(), true).await.unwrap();

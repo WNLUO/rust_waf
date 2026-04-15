@@ -1,7 +1,11 @@
 impl SqliteStore {
     pub async fn new(path: String, auto_migrate: bool) -> Result<Self> {
-        Self::new_with_queue_capacity(path, auto_migrate, crate::config::default_sqlite_queue_capacity())
-            .await
+        Self::new_with_queue_capacity(
+            path,
+            auto_migrate,
+            crate::config::default_sqlite_queue_capacity(),
+        )
+        .await
     }
 
     pub async fn new_with_queue_capacity(
@@ -64,12 +68,29 @@ impl SqliteStore {
         let queue_capacity = queue_capacity.max(1);
         let (sender, receiver) = mpsc::channel(queue_capacity);
         let (realtime_tx, _) = tokio::sync::broadcast::channel(256);
+        let cached_security_events: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM security_events")
+                .fetch_one(&pool)
+                .await?;
+        let cached_blocked_ips: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blocked_ips")
+            .fetch_one(&pool)
+            .await?;
+        let cached_latest_event_at: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(created_at) FROM security_events")
+                .fetch_one(&pool)
+                .await?;
+        let metrics_cache = Arc::new(StorageMetricsCache::new(
+            cached_security_events.max(0) as u64,
+            cached_blocked_ips.max(0) as u64,
+            cached_latest_event_at,
+        ));
         let pending_writes = Arc::new(AtomicU64::new(0));
         let pending_write_notify = Arc::new(Notify::new());
         let writer_handle = Arc::new(Mutex::new(Some(tokio::spawn(run_writer(
             pool.clone(),
             receiver,
             realtime_tx.clone(),
+            Arc::clone(&metrics_cache),
             Arc::clone(&pending_writes),
             Arc::clone(&pending_write_notify),
         )))));
@@ -86,6 +107,7 @@ impl SqliteStore {
             writer_handle,
             dropped_security_events,
             dropped_blocked_ips,
+            metrics_cache,
             realtime_tx,
         })
     }
@@ -111,7 +133,10 @@ impl SqliteStore {
             crate::storage::apply_write_pressure_detail_slimming(&mut event);
         }
         self.pending_writes.fetch_add(1, Ordering::Relaxed);
-        match self.sender.try_send(StorageCommand::SecurityEvent(event.clone())) {
+        match self
+            .sender
+            .try_send(StorageCommand::SecurityEvent(event.clone()))
+        {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(StorageCommand::SecurityEvent(event)))
             | Err(mpsc::error::TrySendError::Closed(StorageCommand::SecurityEvent(event))) => {
@@ -120,19 +145,19 @@ impl SqliteStore {
                 );
                 let pool = self.pool.clone();
                 let realtime_tx = self.realtime_tx.clone();
+                let metrics_cache = Arc::clone(&self.metrics_cache);
                 let pending_writes = Arc::clone(&self.pending_writes);
                 let pending_write_notify = Arc::clone(&self.pending_write_notify);
                 tokio::spawn(async move {
-                    match persist_security_event(&pool, event).await {
+                    match persist_security_event(&pool, event, Some(metrics_cache.as_ref())).await {
                         Ok(persisted) => {
-                            let _ = realtime_tx
-                                .send(crate::storage::StorageRealtimeEvent::SecurityEvent(
-                                    persisted,
-                                ));
+                            let _ = realtime_tx.send(
+                                crate::storage::StorageRealtimeEvent::SecurityEvent(persisted),
+                            );
                         }
                         Err(err) => {
-                        warn!("SQLite direct security event persistence failed: {}", err);
-                    }
+                            warn!("SQLite direct security event persistence failed: {}", err);
+                        }
                     }
                     finish_pending_write(&pending_writes, &pending_write_notify);
                 });
@@ -147,24 +172,25 @@ impl SqliteStore {
 
     pub fn enqueue_blocked_ip(&self, record: BlockedIpRecord) {
         self.pending_writes.fetch_add(1, Ordering::Relaxed);
-        match self.sender.try_send(StorageCommand::BlockedIp(record.clone())) {
+        match self
+            .sender
+            .try_send(StorageCommand::BlockedIp(record.clone()))
+        {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(StorageCommand::BlockedIp(record)))
             | Err(mpsc::error::TrySendError::Closed(StorageCommand::BlockedIp(record))) => {
-                warn!(
-                    "SQLite blocked IP queue is unavailable, falling back to direct persistence"
-                );
+                warn!("SQLite blocked IP queue is unavailable, falling back to direct persistence");
                 let pool = self.pool.clone();
                 let realtime_tx = self.realtime_tx.clone();
+                let metrics_cache = Arc::clone(&self.metrics_cache);
                 let pending_writes = Arc::clone(&self.pending_writes);
                 let pending_write_notify = Arc::clone(&self.pending_write_notify);
                 tokio::spawn(async move {
-                    match persist_blocked_ip(&pool, record).await {
+                    match persist_blocked_ip(&pool, record, Some(metrics_cache.as_ref())).await {
                         Ok(persisted) => {
-                            let _ = realtime_tx
-                                .send(crate::storage::StorageRealtimeEvent::BlockedIpUpsert(
-                                    persisted,
-                                ));
+                            let _ = realtime_tx.send(
+                                crate::storage::StorageRealtimeEvent::BlockedIpUpsert(persisted),
+                            );
                         }
                         Err(err) => {
                             warn!("SQLite direct blocked IP persistence failed: {}", err);
@@ -212,7 +238,9 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn subscribe_realtime(&self) -> tokio::sync::broadcast::Receiver<crate::storage::StorageRealtimeEvent> {
+    pub fn subscribe_realtime(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<crate::storage::StorageRealtimeEvent> {
         self.realtime_tx.subscribe()
     }
 
@@ -318,6 +346,14 @@ impl SqliteStore {
         .await?;
 
         tx.commit().await?;
+        if imported > 0 {
+            self.metrics_cache
+                .security_events
+                .fetch_add(imported as u64, Ordering::Relaxed);
+        }
+        if let Some(last_cursor) = last_cursor {
+            self.metrics_cache.update_latest_event_at(last_cursor);
+        }
 
         Ok(SafeLineImportResult {
             imported,
@@ -329,16 +365,6 @@ impl SqliteStore {
     #[cfg_attr(not(feature = "api"), allow(dead_code))]
     pub async fn metrics_summary(&self) -> Result<StorageMetricsSummary> {
         let queue_depth = self.pending_writes.load(Ordering::Relaxed);
-        let security_events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM security_events")
-            .fetch_one(&self.pool)
-            .await?;
-        let blocked_ips: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blocked_ips")
-            .fetch_one(&self.pool)
-            .await?;
-        let latest_event_at: Option<i64> =
-            sqlx::query_scalar("SELECT MAX(created_at) FROM security_events")
-                .fetch_one(&self.pool)
-                .await?;
         let rules: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM rules")
             .fetch_one(&self.pool)
             .await?;
@@ -348,9 +374,9 @@ impl SqliteStore {
                 .await?;
 
         Ok(StorageMetricsSummary {
-            security_events: security_events.max(0) as u64,
-            blocked_ips: blocked_ips.max(0) as u64,
-            latest_event_at,
+            security_events: self.metrics_cache.security_events(),
+            blocked_ips: self.metrics_cache.blocked_ips(),
+            latest_event_at: self.metrics_cache.latest_event_at(),
             rules: rules.max(0) as u64,
             latest_rule_update_at,
             queue_capacity: self.queue_capacity as u64,
@@ -359,5 +385,4 @@ impl SqliteStore {
             dropped_blocked_ips: self.dropped_blocked_ips.load(Ordering::Relaxed),
         })
     }
-
 }

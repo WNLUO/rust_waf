@@ -382,17 +382,22 @@ pub(super) async fn run_writer(
     pool: SqlitePool,
     mut receiver: mpsc::Receiver<StorageCommand>,
     realtime_tx: tokio::sync::broadcast::Sender<crate::storage::StorageRealtimeEvent>,
+    metrics_cache: Arc<crate::storage::StorageMetricsCache>,
     pending_writes: Arc<AtomicU64>,
     pending_write_notify: Arc<Notify>,
 ) {
     while let Some(command) = receiver.recv().await {
         let result = match command {
-            StorageCommand::SecurityEvent(event) => persist_security_event(&pool, event)
-                .await
-                .map(crate::storage::StorageRealtimeEvent::SecurityEvent),
-            StorageCommand::BlockedIp(record) => persist_blocked_ip(&pool, record)
-                .await
-                .map(crate::storage::StorageRealtimeEvent::BlockedIpUpsert),
+            StorageCommand::SecurityEvent(event) => {
+                persist_security_event(&pool, event, Some(metrics_cache.as_ref()))
+                    .await
+                    .map(crate::storage::StorageRealtimeEvent::SecurityEvent)
+            }
+            StorageCommand::BlockedIp(record) => {
+                persist_blocked_ip(&pool, record, Some(metrics_cache.as_ref()))
+                    .await
+                    .map(crate::storage::StorageRealtimeEvent::BlockedIpUpsert)
+            }
             StorageCommand::Flush { ack } => {
                 if let Err(err) = checkpoint_wal(&pool).await {
                     warn!("SQLite writer flush checkpoint failed: {}", err);
@@ -424,6 +429,7 @@ pub(super) async fn run_writer(
 pub(super) async fn persist_security_event(
     pool: &SqlitePool,
     mut event: SecurityEventRecord,
+    metrics_cache: Option<&crate::storage::StorageMetricsCache>,
 ) -> Result<crate::storage::SecurityEventEntry> {
     sanitize_security_event_record(&mut event);
     let result = sqlx::query(
@@ -483,12 +489,17 @@ pub(super) async fn persist_security_event(
         handled_at: event.handled_at,
     };
     persist_behavior_intelligence(pool, &persisted).await?;
+    if let Some(metrics_cache) = metrics_cache {
+        metrics_cache.increment_security_events();
+        metrics_cache.update_latest_event_at(persisted.created_at);
+    }
     Ok(persisted)
 }
 
 pub(super) async fn persist_blocked_ip(
     pool: &SqlitePool,
     record: BlockedIpRecord,
+    metrics_cache: Option<&crate::storage::StorageMetricsCache>,
 ) -> Result<crate::storage::BlockedIpEntry> {
     let result = sqlx::query(
         r#"
@@ -504,7 +515,7 @@ pub(super) async fn persist_blocked_ip(
     .bind(record.expires_at)
     .execute(pool)
     .await?;
-    Ok(crate::storage::BlockedIpEntry {
+    let persisted = crate::storage::BlockedIpEntry {
         id: result.last_insert_rowid(),
         provider: record.provider,
         provider_remote_id: record.provider_remote_id,
@@ -512,7 +523,11 @@ pub(super) async fn persist_blocked_ip(
         reason: record.reason,
         blocked_at: record.blocked_at,
         expires_at: record.expires_at,
-    })
+    };
+    if let Some(metrics_cache) = metrics_cache {
+        metrics_cache.increment_blocked_ips();
+    }
+    Ok(persisted)
 }
 
 pub(super) fn finish_pending_write(pending_writes: &AtomicU64, pending_write_notify: &Notify) {

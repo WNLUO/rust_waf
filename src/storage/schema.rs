@@ -32,6 +32,10 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON security_events(created_at);
         CREATE INDEX IF NOT EXISTS idx_security_events_source_ip
             ON security_events(source_ip);
+        CREATE INDEX IF NOT EXISTS idx_security_events_action_created_at
+            ON security_events(action, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_security_events_handled_created_at
+            ON security_events(handled, created_at DESC);
 
         CREATE TABLE IF NOT EXISTS blocked_ips (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +51,10 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON blocked_ips(ip);
         CREATE INDEX IF NOT EXISTS idx_blocked_ips_expires_at
             ON blocked_ips(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider_blocked_at
+            ON blocked_ips(provider, blocked_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider_ip_expires_at
+            ON blocked_ips(provider, ip, expires_at DESC);
 
         CREATE TABLE IF NOT EXISTS fingerprint_profiles (
             identity TEXT PRIMARY KEY,
@@ -474,6 +482,26 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider ON blocked_ips(provider)")
         .execute(pool)
         .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_security_events_action_created_at ON security_events(action, created_at DESC)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_security_events_handled_created_at ON security_events(handled, created_at DESC)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider_blocked_at ON blocked_ips(provider, blocked_at DESC)",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider_ip_expires_at ON blocked_ips(provider, ip, expires_at DESC)",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }

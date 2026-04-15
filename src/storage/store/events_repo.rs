@@ -275,6 +275,10 @@ impl SqliteStore {
             .bind(id)
             .execute(&self.pool)
             .await?;
+        if result.rows_affected() > 0 {
+            self.metrics_cache
+                .decrement_blocked_ips_by(result.rows_affected());
+        }
         Ok(result.rows_affected() > 0)
     }
 
@@ -347,6 +351,8 @@ impl SqliteStore {
             builder.push(")");
             builder.build().execute(&self.pool).await?;
         }
+        self.metrics_cache
+            .decrement_blocked_ips_by(items.len() as u64);
 
         Ok(items)
     }
@@ -356,6 +362,10 @@ impl SqliteStore {
             .bind(created_before)
             .execute(&self.pool)
             .await?;
+        if result.rows_affected() > 0 {
+            self.metrics_cache
+                .decrement_security_events_by(result.rows_affected());
+        }
         Ok(result.rows_affected())
     }
 

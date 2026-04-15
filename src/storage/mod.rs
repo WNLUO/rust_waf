@@ -20,7 +20,7 @@ use sqlx::SqlitePool;
 #[cfg(any(feature = "api", test))]
 use sqlx::{QueryBuilder, Sqlite};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify};
 use tokio::task::JoinHandle;
@@ -34,6 +34,75 @@ use self::query::{
 
 const SQLITE_STARTUP_BACKUP_RETENTION: usize = 5;
 const SQLITE_CORRUPT_BACKUP_RETENTION: usize = 5;
+const STORAGE_OPTION_NONE_SENTINEL: i64 = -1;
+
+#[derive(Debug, Default)]
+struct StorageMetricsCache {
+    security_events: AtomicU64,
+    blocked_ips: AtomicU64,
+    latest_event_at: AtomicI64,
+}
+
+impl StorageMetricsCache {
+    fn new(security_events: u64, blocked_ips: u64, latest_event_at: Option<i64>) -> Self {
+        Self {
+            security_events: AtomicU64::new(security_events),
+            blocked_ips: AtomicU64::new(blocked_ips),
+            latest_event_at: AtomicI64::new(
+                latest_event_at.unwrap_or(STORAGE_OPTION_NONE_SENTINEL),
+            ),
+        }
+    }
+
+    fn security_events(&self) -> u64 {
+        self.security_events.load(Ordering::Relaxed)
+    }
+
+    fn blocked_ips(&self) -> u64 {
+        self.blocked_ips.load(Ordering::Relaxed)
+    }
+
+    fn latest_event_at(&self) -> Option<i64> {
+        match self.latest_event_at.load(Ordering::Relaxed) {
+            STORAGE_OPTION_NONE_SENTINEL => None,
+            value => Some(value),
+        }
+    }
+
+    fn increment_security_events(&self) {
+        self.security_events.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn decrement_security_events_by(&self, count: u64) {
+        self.security_events.fetch_sub(count, Ordering::Relaxed);
+    }
+
+    fn update_latest_event_at(&self, created_at: i64) {
+        let mut current = self.latest_event_at.load(Ordering::Relaxed);
+        loop {
+            if current != STORAGE_OPTION_NONE_SENTINEL && current >= created_at {
+                break;
+            }
+            match self.latest_event_at.compare_exchange(
+                current,
+                created_at,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    fn increment_blocked_ips(&self) {
+        self.blocked_ips.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn decrement_blocked_ips_by(&self, count: u64) {
+        self.blocked_ips.fetch_sub(count, Ordering::Relaxed);
+    }
+}
 
 #[derive(Clone)]
 pub struct SqliteStore {
@@ -47,6 +116,7 @@ pub struct SqliteStore {
     writer_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     dropped_security_events: Arc<AtomicU64>,
     dropped_blocked_ips: Arc<AtomicU64>,
+    metrics_cache: Arc<StorageMetricsCache>,
     realtime_tx: broadcast::Sender<StorageRealtimeEvent>,
 }
 

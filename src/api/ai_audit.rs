@@ -408,6 +408,7 @@ fn build_system_prompt() -> String {
         "Do not include markdown fences or any extra commentary.",
         "This is an analysis-only task. Never claim that the model directly blocked traffic.",
         "Be conservative: avoid claiming certainty when the summary only supports a suspicion.",
+        "If data_quality.analysis_confidence is low, keep conclusions cautious and prefer manual review.",
     ]
     .join(" ")
 }
@@ -428,8 +429,13 @@ fn build_provider_input(
 ) -> serde_json::Value {
     serde_json::json!({
         "input_profile": build_input_profile(summary, include_raw_event_samples),
+        "runtime_pressure_level": summary.runtime_pressure_level,
+        "degraded_reasons": summary.degraded_reasons,
+        "data_quality": summary.data_quality,
         "current": summary.current,
         "counters": summary.counters,
+        "action_breakdown": summary.action_breakdown,
+        "provider_breakdown": summary.provider_breakdown,
         "identity_states": summary.identity_states,
         "primary_signals": summary.primary_signals,
         "labels": summary.labels,
@@ -437,6 +443,7 @@ fn build_provider_input(
         "top_routes": summary.top_routes,
         "top_hosts": summary.top_hosts,
         "safeline_correlation": summary.safeline_correlation,
+        "trend_windows": summary.trend_windows,
         "recent_policy_feedback": summary.recent_policy_feedback,
         "recent_events": if include_raw_event_samples {
             serde_json::to_value(&summary.recent_events).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
@@ -906,7 +913,8 @@ mod tests {
     use super::*;
     use crate::api::{
         AiAuditCountItem, AiAuditCountersResponse, AiAuditCurrentStateResponse,
-        AiAuditEventSampleResponse, AiAuditSafeLineCorrelationResponse,
+        AiAuditDataQualityResponse, AiAuditEventSampleResponse,
+        AiAuditSafeLineCorrelationResponse, AiAuditTrendWindowResponse,
     };
 
     fn sample_summary() -> AiAuditSummaryResponse {
@@ -920,6 +928,19 @@ mod tests {
             degraded_reasons: vec![
                 "management_ai_audit_sample_reduced_under_runtime_pressure".to_string()
             ],
+            data_quality: AiAuditDataQualityResponse {
+                persisted_security_events: 20,
+                dropped_security_events: 0,
+                sqlite_queue_depth: 2,
+                sqlite_queue_capacity: 128,
+                sqlite_queue_usage_percent: 1.6,
+                detail_slimming_active: false,
+                sample_coverage_ratio: 1.0,
+                persistence_coverage_ratio: 1.0,
+                raw_samples_included: false,
+                recent_events_count: 0,
+                analysis_confidence: "high".to_string(),
+            },
             current: AiAuditCurrentStateResponse {
                 adaptive_system_pressure: "elevated".to_string(),
                 adaptive_reasons: vec!["identity_resolution_pressure".to_string()],
@@ -949,6 +970,14 @@ mod tests {
                 slow_attack_hits: 0,
                 average_proxy_latency_micros: 500,
             },
+            action_breakdown: vec![AiAuditCountItem {
+                key: "challenge".to_string(),
+                count: 1,
+            }],
+            provider_breakdown: vec![AiAuditCountItem {
+                key: "local".to_string(),
+                count: 2,
+            }],
             identity_states: vec![AiAuditCountItem {
                 key: "trusted_cdn_forwarded".to_string(),
                 count: 2,
@@ -962,6 +991,19 @@ mod tests {
             top_routes: Vec::new(),
             top_hosts: Vec::new(),
             safeline_correlation: AiAuditSafeLineCorrelationResponse::default(),
+            trend_windows: vec![AiAuditTrendWindowResponse {
+                label: "last_5m".to_string(),
+                window_seconds: 300,
+                total_events: 2,
+                sampled_events: 2,
+                blocked_events: 1,
+                challenged_events: 1,
+                delayed_events: 0,
+                action_breakdown: Vec::new(),
+                top_source_ips: Vec::new(),
+                top_routes: Vec::new(),
+                top_hosts: Vec::new(),
+            }],
             recent_policy_feedback: Vec::new(),
             recent_events: Vec::<AiAuditEventSampleResponse>::new(),
         }

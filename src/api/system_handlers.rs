@@ -446,25 +446,11 @@ async fn build_ai_audit_summary(
         })
         .await
         .map_err(ApiError::internal)?;
+    let storage_summary = store.metrics_summary().await.map_err(ApiError::internal)?;
 
     let metrics = state.context.metrics_snapshot().unwrap_or_default();
     let auto = state.context.auto_tuning_snapshot();
     let adaptive = state.context.adaptive_protection_snapshot();
-
-    let mut identity_states = BTreeMap::new();
-    let mut primary_signals = BTreeMap::new();
-    let mut labels = BTreeMap::new();
-    let mut top_source_ips = BTreeMap::new();
-    let mut top_routes = BTreeMap::new();
-    let mut top_hosts = BTreeMap::new();
-    let mut safeline_hosts = BTreeMap::new();
-    let mut rust_hosts = BTreeMap::new();
-    let mut safeline_routes = BTreeMap::new();
-    let mut rust_routes = BTreeMap::new();
-    let mut safeline_source_ips = BTreeMap::new();
-    let mut rust_source_ips = BTreeMap::new();
-    let mut safeline_events = 0u64;
-    let mut rust_events = 0u64;
     let recent_policy_feedback = state
         .context
         .active_ai_temp_policies()
@@ -472,58 +458,35 @@ async fn build_ai_audit_summary(
         .take(6)
         .map(ai_audit_policy_feedback_from_entry)
         .collect::<Vec<_>>();
-
-    let sampled_events = result.items.len() as u32;
-    let mut recent_events = Vec::new();
-
-    for event in result.items.into_iter().map(SecurityEventResponse::from) {
-        let is_safeline = event.provider.as_deref() == Some("safeline");
-        if recent_events.len() < recent_limit as usize {
-            recent_events.push(AiAuditEventSampleResponse::from(event.clone()));
-        }
-        increment_map(&mut top_source_ips, &event.source_ip);
-        if is_safeline {
-            safeline_events += 1;
-            increment_map(&mut safeline_source_ips, &event.source_ip);
-        } else {
-            rust_events += 1;
-            increment_map(&mut rust_source_ips, &event.source_ip);
-        }
-        if let Some(uri) = event.uri.as_deref() {
-            increment_map(&mut top_routes, uri);
-            if is_safeline {
-                increment_map(&mut safeline_routes, uri);
-            } else {
-                increment_map(&mut rust_routes, uri);
-            }
-        }
-        if let Some(host) = ai_audit_event_host(&event) {
-            increment_map(&mut top_hosts, &host);
-            if is_safeline {
-                increment_map(&mut safeline_hosts, &host);
-            } else {
-                increment_map(&mut rust_hosts, &host);
-            }
-        }
-        if let Some(summary) = event.decision_summary.as_ref() {
-            if let Some(identity_state) = summary.identity_state.as_deref() {
-                increment_map(&mut identity_states, identity_state);
-            }
-            increment_map(&mut primary_signals, &summary.primary_signal);
-            for label in &summary.labels {
-                increment_map(&mut labels, label);
-            }
-        }
+    let events = result
+        .items
+        .into_iter()
+        .map(SecurityEventResponse::from)
+        .collect::<Vec<_>>();
+    let aggregate = summarize_audit_events(&events, recent_limit);
+    let trend_windows = build_audit_trend_windows(store, now, sample_limit).await?;
+    let data_quality = build_ai_audit_data_quality(
+        &storage_summary,
+        &aggregate,
+        result.total,
+        state.context.runtime_pressure_snapshot(),
+        config.integrations.ai_audit.include_raw_event_samples,
+    );
+    if data_quality.analysis_confidence == "low" {
+        degraded_reasons.push("management_ai_audit_low_confidence_input".to_string());
+    } else if data_quality.analysis_confidence == "medium" {
+        degraded_reasons.push("management_ai_audit_partially_degraded_input".to_string());
     }
 
     Ok(AiAuditSummaryResponse {
         generated_at: now,
         window_seconds,
-        sampled_events,
+        sampled_events: aggregate.sampled_events,
         total_events: result.total,
         active_rules: state.context.active_rule_count(),
         runtime_pressure_level: runtime_policy.pressure_level,
         degraded_reasons,
+        data_quality,
         current: AiAuditCurrentStateResponse {
             adaptive_system_pressure: adaptive.system_pressure,
             adaptive_reasons: adaptive.reasons,
@@ -557,32 +520,248 @@ async fn build_ai_audit_summary(
                 + metrics.slow_attack_blocks,
             average_proxy_latency_micros: metrics.average_proxy_latency_micros,
         },
-        identity_states: top_count_items(identity_states, 8),
-        primary_signals: top_count_items(primary_signals, 8),
-        labels: top_count_items(labels, 12),
-        top_source_ips: top_count_items(top_source_ips, 8),
-        top_routes: top_count_items(top_routes, 8),
-        top_hosts: top_count_items(top_hosts, 8),
+        action_breakdown: top_count_items(aggregate.action_breakdown, 8),
+        provider_breakdown: top_count_items(aggregate.provider_breakdown, 6),
+        identity_states: top_count_items(aggregate.identity_states, 8),
+        primary_signals: top_count_items(aggregate.primary_signals, 8),
+        labels: top_count_items(aggregate.labels, 12),
+        top_source_ips: top_count_items(aggregate.top_source_ips, 8),
+        top_routes: top_count_items(aggregate.top_routes, 8),
+        top_hosts: top_count_items(aggregate.top_hosts, 8),
         safeline_correlation: AiAuditSafeLineCorrelationResponse {
-            safeline_events,
-            rust_events,
-            rust_persistence_percent: rust_persistence_percent(safeline_events, rust_events),
-            safeline_top_hosts: top_count_items(safeline_hosts.clone(), 6),
-            rust_top_hosts: top_count_items(rust_hosts.clone(), 6),
-            overlap_hosts: overlap_count_items(&safeline_hosts, &rust_hosts, 6),
-            overlap_routes: overlap_count_items(&safeline_routes, &rust_routes, 6),
-            overlap_source_ips: overlap_count_items(&safeline_source_ips, &rust_source_ips, 6),
-            persistent_overlap_hosts: persistent_overlap_items(&safeline_hosts, &rust_hosts, 6),
-            persistent_overlap_routes: persistent_overlap_items(&safeline_routes, &rust_routes, 6),
+            safeline_events: aggregate.safeline_events,
+            rust_events: aggregate.rust_events,
+            rust_persistence_percent: rust_persistence_percent(
+                aggregate.safeline_events,
+                aggregate.rust_events,
+            ),
+            safeline_top_hosts: top_count_items(aggregate.safeline_hosts.clone(), 6),
+            rust_top_hosts: top_count_items(aggregate.rust_hosts.clone(), 6),
+            overlap_hosts: overlap_count_items(&aggregate.safeline_hosts, &aggregate.rust_hosts, 6),
+            overlap_routes: overlap_count_items(
+                &aggregate.safeline_routes,
+                &aggregate.rust_routes,
+                6,
+            ),
+            overlap_source_ips: overlap_count_items(
+                &aggregate.safeline_source_ips,
+                &aggregate.rust_source_ips,
+                6,
+            ),
+            persistent_overlap_hosts: persistent_overlap_items(
+                &aggregate.safeline_hosts,
+                &aggregate.rust_hosts,
+                6,
+            ),
+            persistent_overlap_routes: persistent_overlap_items(
+                &aggregate.safeline_routes,
+                &aggregate.rust_routes,
+                6,
+            ),
             persistent_overlap_source_ips: persistent_overlap_items(
-                &safeline_source_ips,
-                &rust_source_ips,
+                &aggregate.safeline_source_ips,
+                &aggregate.rust_source_ips,
                 6,
             ),
         },
+        trend_windows,
         recent_policy_feedback,
-        recent_events,
+        recent_events: aggregate.recent_events,
     })
+}
+
+#[derive(Debug, Default)]
+struct AuditEventAggregate {
+    sampled_events: u32,
+    recent_events: Vec<AiAuditEventSampleResponse>,
+    action_breakdown: BTreeMap<String, u64>,
+    provider_breakdown: BTreeMap<String, u64>,
+    identity_states: BTreeMap<String, u64>,
+    primary_signals: BTreeMap<String, u64>,
+    labels: BTreeMap<String, u64>,
+    top_source_ips: BTreeMap<String, u64>,
+    top_routes: BTreeMap<String, u64>,
+    top_hosts: BTreeMap<String, u64>,
+    safeline_hosts: BTreeMap<String, u64>,
+    rust_hosts: BTreeMap<String, u64>,
+    safeline_routes: BTreeMap<String, u64>,
+    rust_routes: BTreeMap<String, u64>,
+    safeline_source_ips: BTreeMap<String, u64>,
+    rust_source_ips: BTreeMap<String, u64>,
+    safeline_events: u64,
+    rust_events: u64,
+    blocked_events: u64,
+    challenged_events: u64,
+    delayed_events: u64,
+}
+
+fn summarize_audit_events(
+    events: &[SecurityEventResponse],
+    recent_limit: u32,
+) -> AuditEventAggregate {
+    let mut aggregate = AuditEventAggregate {
+        sampled_events: events.len() as u32,
+        ..AuditEventAggregate::default()
+    };
+
+    for event in events {
+        let is_safeline = event.provider.as_deref() == Some("safeline");
+        let event_sample = event.clone();
+        if aggregate.recent_events.len() < recent_limit as usize {
+            aggregate
+                .recent_events
+                .push(AiAuditEventSampleResponse::from(event_sample));
+        }
+        increment_map(&mut aggregate.action_breakdown, &event.action);
+        increment_map(
+            &mut aggregate.provider_breakdown,
+            event.provider.as_deref().unwrap_or("local"),
+        );
+        increment_map(&mut aggregate.top_source_ips, &event.source_ip);
+        match event.action.as_str() {
+            "block" | "respond" => aggregate.blocked_events += 1,
+            "challenge" => aggregate.challenged_events += 1,
+            "delay" => aggregate.delayed_events += 1,
+            _ => {}
+        }
+        if is_safeline {
+            aggregate.safeline_events += 1;
+            increment_map(&mut aggregate.safeline_source_ips, &event.source_ip);
+        } else {
+            aggregate.rust_events += 1;
+            increment_map(&mut aggregate.rust_source_ips, &event.source_ip);
+        }
+        if let Some(uri) = event.uri.as_deref() {
+            increment_map(&mut aggregate.top_routes, uri);
+            if is_safeline {
+                increment_map(&mut aggregate.safeline_routes, uri);
+            } else {
+                increment_map(&mut aggregate.rust_routes, uri);
+            }
+        }
+        if let Some(host) = ai_audit_event_host(event) {
+            increment_map(&mut aggregate.top_hosts, &host);
+            if is_safeline {
+                increment_map(&mut aggregate.safeline_hosts, &host);
+            } else {
+                increment_map(&mut aggregate.rust_hosts, &host);
+            }
+        }
+        if let Some(summary) = event.decision_summary.as_ref() {
+            if let Some(identity_state) = summary.identity_state.as_deref() {
+                increment_map(&mut aggregate.identity_states, identity_state);
+            }
+            increment_map(&mut aggregate.primary_signals, &summary.primary_signal);
+            for label in &summary.labels {
+                increment_map(&mut aggregate.labels, label);
+            }
+        }
+    }
+
+    aggregate
+}
+
+async fn build_audit_trend_windows(
+    store: &crate::storage::SqliteStore,
+    now: i64,
+    sample_limit: u32,
+) -> ApiResult<Vec<AiAuditTrendWindowResponse>> {
+    let windows = [
+        ("last_5m", 5 * 60u32),
+        ("last_15m", 15 * 60u32),
+        ("last_60m", 60 * 60u32),
+    ];
+    let mut items = Vec::with_capacity(windows.len());
+
+    for (label, seconds) in windows {
+        let result = store
+            .list_security_events(&crate::storage::SecurityEventQuery {
+                limit: sample_limit.min(120),
+                offset: 0,
+                created_from: Some(now.saturating_sub(seconds as i64)),
+                sort_by: crate::storage::EventSortField::CreatedAt,
+                sort_direction: crate::storage::SortDirection::Desc,
+                ..crate::storage::SecurityEventQuery::default()
+            })
+            .await
+            .map_err(ApiError::internal)?;
+        let events = result
+            .items
+            .into_iter()
+            .map(SecurityEventResponse::from)
+            .collect::<Vec<_>>();
+        let aggregate = summarize_audit_events(&events, 0);
+        items.push(AiAuditTrendWindowResponse {
+            label: label.to_string(),
+            window_seconds: seconds,
+            total_events: result.total,
+            sampled_events: aggregate.sampled_events,
+            blocked_events: aggregate.blocked_events,
+            challenged_events: aggregate.challenged_events,
+            delayed_events: aggregate.delayed_events,
+            action_breakdown: top_count_items(aggregate.action_breakdown, 6),
+            top_source_ips: top_count_items(aggregate.top_source_ips, 5),
+            top_routes: top_count_items(aggregate.top_routes, 5),
+            top_hosts: top_count_items(aggregate.top_hosts, 5),
+        });
+    }
+
+    Ok(items)
+}
+
+fn build_ai_audit_data_quality(
+    storage_summary: &crate::storage::StorageMetricsSummary,
+    aggregate: &AuditEventAggregate,
+    total_events: u64,
+    runtime_pressure: crate::core::RuntimePressureSnapshot,
+    raw_samples_included: bool,
+) -> AiAuditDataQualityResponse {
+    let sqlite_queue_usage_percent = if storage_summary.queue_capacity == 0 {
+        0.0
+    } else {
+        ((storage_summary.queue_depth as f64 / storage_summary.queue_capacity as f64) * 100.0)
+            .clamp(0.0, 100.0)
+    };
+    let sample_coverage_ratio = if total_events == 0 {
+        1.0
+    } else {
+        let sampled = aggregate.sampled_events as f64;
+        let total = total_events as f64;
+        (sampled / total).clamp(0.0, 1.0)
+    };
+    let persisted_plus_dropped =
+        storage_summary.security_events + storage_summary.dropped_security_events;
+    let persistence_coverage_ratio = if persisted_plus_dropped == 0 {
+        1.0
+    } else {
+        (storage_summary.security_events as f64 / persisted_plus_dropped as f64).clamp(0.0, 1.0)
+    };
+    let detail_slimming_active =
+        runtime_pressure.trim_event_persistence || sqlite_queue_usage_percent >= 75.0;
+    let analysis_confidence = if storage_summary.dropped_security_events > 0
+        || runtime_pressure.level == "attack"
+        || persistence_coverage_ratio < 0.95
+    {
+        "low"
+    } else if detail_slimming_active || runtime_pressure.level == "high" {
+        "medium"
+    } else {
+        "high"
+    };
+
+    AiAuditDataQualityResponse {
+        persisted_security_events: storage_summary.security_events,
+        dropped_security_events: storage_summary.dropped_security_events,
+        sqlite_queue_depth: storage_summary.queue_depth,
+        sqlite_queue_capacity: storage_summary.queue_capacity,
+        sqlite_queue_usage_percent,
+        detail_slimming_active,
+        sample_coverage_ratio,
+        persistence_coverage_ratio,
+        raw_samples_included,
+        recent_events_count: aggregate.recent_events.len() as u32,
+        analysis_confidence: analysis_confidence.to_string(),
+    }
 }
 
 fn increment_map(map: &mut BTreeMap<String, u64>, key: &str) {
@@ -698,6 +877,29 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
     let mut recommendations = Vec::new();
     let mut executive_summary = Vec::new();
     let mut suggested_local_rules = Vec::new();
+    let low_confidence_input = summary.data_quality.analysis_confidence == "low";
+    let medium_confidence_input = summary.data_quality.analysis_confidence == "medium";
+
+    if low_confidence_input {
+        executive_summary.push(format!(
+            "当前审计输入可信度偏低，事件持久化覆盖率约 {:.1}%，已丢弃 {} 条安全事件。",
+            summary.data_quality.persistence_coverage_ratio * 100.0,
+            summary.data_quality.dropped_security_events
+        ));
+        recommendations.push(AiAuditReportRecommendation {
+            key: "manual_review_due_to_degraded_input".to_string(),
+            priority: "high".to_string(),
+            title: "优先人工复核本次审计输入".to_string(),
+            action: "当前高压或写入降级已影响审计样本完整性，建议先复核 SQLite 队列压力、事件丢弃和热点对象，再决定是否临时加压。".to_string(),
+            rationale: "输入失真时继续自动收紧，容易把系统压力误判成攻击结论。".to_string(),
+            action_type: "investigate".to_string(),
+            rule_suggestion_key: None,
+        });
+    } else if medium_confidence_input {
+        executive_summary.push(format!(
+            "当前审计输入存在一定降级，事件详情可能已瘦身，建议对强结论保持谨慎。"
+        ));
+    }
 
     if !summary.safeline_correlation.overlap_hosts.is_empty()
         || !summary.safeline_correlation.overlap_routes.is_empty()
@@ -1115,6 +1317,12 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         });
     }
 
+    if low_confidence_input {
+        for rule in &mut suggested_local_rules {
+            rule.auto_apply = false;
+        }
+    }
+
     let risk_level = if findings.iter().any(|item| item.severity == "high") {
         "high"
     } else if findings.iter().any(|item| item.severity == "medium") {
@@ -1161,6 +1369,9 @@ async fn apply_ai_temp_policies_from_report(
     report: &AiAuditReportResponse,
     ai_config: &crate::config::AiAuditConfig,
 ) -> anyhow::Result<usize> {
+    if report.summary.data_quality.analysis_confidence == "low" {
+        return Ok(0);
+    }
     let now = unix_timestamp();
     let mut applied = 0usize;
     let active_count = store.list_active_ai_temp_policies(now).await?.len() as u32;
@@ -1464,6 +1675,19 @@ mod tests {
             degraded_reasons: vec![
                 "management_ai_audit_sample_reduced_under_runtime_pressure".to_string()
             ],
+            data_quality: AiAuditDataQualityResponse {
+                persisted_security_events: 100,
+                dropped_security_events: 0,
+                sqlite_queue_depth: 4,
+                sqlite_queue_capacity: 128,
+                sqlite_queue_usage_percent: 3.1,
+                detail_slimming_active: false,
+                sample_coverage_ratio: 1.0,
+                persistence_coverage_ratio: 1.0,
+                raw_samples_included: true,
+                recent_events_count: 0,
+                analysis_confidence: "high".to_string(),
+            },
             current: AiAuditCurrentStateResponse {
                 adaptive_system_pressure: "elevated".to_string(),
                 adaptive_reasons: vec!["identity_resolution_pressure".to_string()],
@@ -1495,6 +1719,14 @@ mod tests {
                 slow_attack_hits: 4,
                 average_proxy_latency_micros: 12_000,
             },
+            action_breakdown: vec![AiAuditCountItem {
+                key: "block".to_string(),
+                count: 4,
+            }],
+            provider_breakdown: vec![AiAuditCountItem {
+                key: "local".to_string(),
+                count: 10,
+            }],
             identity_states: vec![AiAuditCountItem {
                 key: "trusted_cdn_unresolved".to_string(),
                 count: 6,
@@ -1511,6 +1743,19 @@ mod tests {
             top_routes: Vec::new(),
             top_hosts: Vec::new(),
             safeline_correlation: AiAuditSafeLineCorrelationResponse::default(),
+            trend_windows: vec![AiAuditTrendWindowResponse {
+                label: "last_5m".to_string(),
+                window_seconds: 300,
+                total_events: 4,
+                sampled_events: 4,
+                blocked_events: 2,
+                challenged_events: 1,
+                delayed_events: 1,
+                action_breakdown: Vec::new(),
+                top_source_ips: Vec::new(),
+                top_routes: Vec::new(),
+                top_hosts: Vec::new(),
+            }],
             recent_policy_feedback: Vec::new(),
             recent_events: Vec::new(),
         }
@@ -1604,6 +1849,25 @@ mod tests {
             .suggested_local_rules
             .iter()
             .any(|item| item.key == "raise_post_safeline_friction"));
+    }
+
+    #[test]
+    fn ai_audit_report_disables_auto_apply_when_input_confidence_is_low() {
+        let mut summary = base_summary();
+        summary.data_quality.analysis_confidence = "low".to_string();
+        summary.data_quality.dropped_security_events = 8;
+        summary.safeline_correlation.overlap_routes = vec![AiAuditCountItem {
+            key: "/login".to_string(),
+            count: 3,
+        }];
+
+        let report = build_ai_audit_report(summary);
+
+        assert!(report
+            .recommendations
+            .iter()
+            .any(|item| item.key == "manual_review_due_to_degraded_input"));
+        assert!(report.suggested_local_rules.iter().all(|item| !item.auto_apply));
     }
 
     #[test]

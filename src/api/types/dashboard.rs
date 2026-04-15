@@ -101,9 +101,15 @@ pub struct AiAuditSummaryResponse {
     #[serde(default)]
     pub(crate) degraded_reasons: Vec<String>,
     #[serde(default)]
+    pub(crate) data_quality: AiAuditDataQualityResponse,
+    #[serde(default)]
     pub(crate) current: AiAuditCurrentStateResponse,
     #[serde(default)]
     pub(crate) counters: AiAuditCountersResponse,
+    #[serde(default)]
+    pub(crate) action_breakdown: Vec<AiAuditCountItem>,
+    #[serde(default)]
+    pub(crate) provider_breakdown: Vec<AiAuditCountItem>,
     #[serde(default)]
     pub(crate) identity_states: Vec<AiAuditCountItem>,
     #[serde(default)]
@@ -119,9 +125,63 @@ pub struct AiAuditSummaryResponse {
     #[serde(default)]
     pub(crate) safeline_correlation: AiAuditSafeLineCorrelationResponse,
     #[serde(default)]
+    pub(crate) trend_windows: Vec<AiAuditTrendWindowResponse>,
+    #[serde(default)]
     pub(crate) recent_policy_feedback: Vec<AiAuditPolicyFeedbackResponse>,
     #[serde(default)]
     pub(crate) recent_events: Vec<AiAuditEventSampleResponse>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiAuditDataQualityResponse {
+    #[serde(default)]
+    pub(crate) persisted_security_events: u64,
+    #[serde(default)]
+    pub(crate) dropped_security_events: u64,
+    #[serde(default)]
+    pub(crate) sqlite_queue_depth: u64,
+    #[serde(default)]
+    pub(crate) sqlite_queue_capacity: u64,
+    #[serde(default)]
+    pub(crate) sqlite_queue_usage_percent: f64,
+    #[serde(default)]
+    pub(crate) detail_slimming_active: bool,
+    #[serde(default)]
+    pub(crate) sample_coverage_ratio: f64,
+    #[serde(default)]
+    pub(crate) persistence_coverage_ratio: f64,
+    #[serde(default)]
+    pub(crate) raw_samples_included: bool,
+    #[serde(default)]
+    pub(crate) recent_events_count: u32,
+    #[serde(default)]
+    pub(crate) analysis_confidence: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiAuditTrendWindowResponse {
+    #[serde(default)]
+    pub(crate) label: String,
+    #[serde(default)]
+    pub(crate) window_seconds: u32,
+    #[serde(default)]
+    pub(crate) total_events: u64,
+    #[serde(default)]
+    pub(crate) sampled_events: u32,
+    #[serde(default)]
+    pub(crate) blocked_events: u64,
+    #[serde(default)]
+    pub(crate) challenged_events: u64,
+    #[serde(default)]
+    pub(crate) delayed_events: u64,
+    #[serde(default)]
+    pub(crate) action_breakdown: Vec<AiAuditCountItem>,
+    #[serde(default)]
+    pub(crate) top_source_ips: Vec<AiAuditCountItem>,
+    #[serde(default)]
+    pub(crate) top_routes: Vec<AiAuditCountItem>,
+    #[serde(default)]
+    pub(crate) top_hosts: Vec<AiAuditCountItem>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -441,15 +501,41 @@ pub struct AiAuditEventSampleResponse {
     #[serde(default)]
     pub(crate) source_ip: String,
     #[serde(default)]
+    pub(crate) host: Option<String>,
+    #[serde(default)]
+    pub(crate) site_domain: Option<String>,
+    #[serde(default)]
+    pub(crate) http_method: Option<String>,
+    #[serde(default)]
     pub(crate) uri: Option<String>,
     #[serde(default)]
     pub(crate) provider: Option<String>,
+    #[serde(default)]
+    pub(crate) provider_site_name: Option<String>,
+    #[serde(default)]
+    pub(crate) provider_site_domain: Option<String>,
+    #[serde(default)]
+    pub(crate) details_available: bool,
+    #[serde(default)]
+    pub(crate) details_slimmed: bool,
     #[serde(default)]
     pub(crate) decision_summary: Option<SecurityEventDecisionSummary>,
 }
 
 impl From<SecurityEventResponse> for AiAuditEventSampleResponse {
     fn from(value: SecurityEventResponse) -> Self {
+        let details_slimmed = value
+            .details_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .and_then(|details| {
+                details
+                    .get("storage_pressure")
+                    .and_then(|value| value.get("mode"))
+                    .and_then(|value| value.as_str())
+                    .map(|mode| mode == "slimmed")
+            })
+            .unwrap_or(false);
         Self {
             id: value.id,
             created_at: value.created_at,
@@ -457,8 +543,15 @@ impl From<SecurityEventResponse> for AiAuditEventSampleResponse {
             action: value.action,
             reason: value.reason,
             source_ip: value.source_ip,
+            host: value.provider_site_domain.clone(),
+            site_domain: value.provider_site_domain.clone(),
+            http_method: value.http_method,
             uri: value.uri,
             provider: value.provider,
+            provider_site_name: value.provider_site_name,
+            provider_site_domain: value.provider_site_domain,
+            details_available: value.details_json.is_some(),
+            details_slimmed,
             decision_summary: value.decision_summary,
         }
     }

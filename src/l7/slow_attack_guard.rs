@@ -31,6 +31,7 @@ pub struct SlowAttackObservation {
     pub peer_ip: IpAddr,
     pub client_ip: Option<IpAddr>,
     pub trusted_proxy_peer: bool,
+    pub identity_state: &'static str,
     pub client_identity_unresolved: bool,
     pub host: Option<String>,
     pub detail: String,
@@ -151,6 +152,12 @@ impl SlowAttackGuard {
     }
 
     fn block_target_ip(&self, observation: &SlowAttackObservation) -> Option<IpAddr> {
+        if matches!(observation.identity_state, "trusted_cdn_unresolved") {
+            return None;
+        }
+        if matches!(observation.identity_state, "spoofed_forward_header") {
+            return Some(observation.peer_ip);
+        }
         if observation.client_identity_unresolved {
             return None;
         }
@@ -217,6 +224,7 @@ mod tests {
             peer_ip: "203.0.113.10".parse().unwrap(),
             client_ip: None,
             trusted_proxy_peer: true,
+            identity_state: "trusted_cdn_unresolved",
             client_identity_unresolved: true,
             host: None,
             detail: "headers stalled".to_string(),
@@ -224,5 +232,27 @@ mod tests {
 
         assert!(!assessment.should_block_ip);
         assert!(assessment.block_ip.is_none());
+    }
+
+    #[test]
+    fn spoofed_forward_header_slow_attack_blocks_peer_ip() {
+        let guard = SlowAttackGuard::new(&SlowAttackDefenseConfig {
+            max_events_per_window: 1,
+            ..SlowAttackDefenseConfig::default()
+        });
+
+        let assessment = guard.assess(SlowAttackObservation {
+            kind: SlowAttackKind::SlowHeaders,
+            peer_ip: "203.0.113.15".parse().unwrap(),
+            client_ip: None,
+            trusted_proxy_peer: false,
+            identity_state: "spoofed_forward_header",
+            client_identity_unresolved: false,
+            host: None,
+            detail: "spoofed header slow attack".to_string(),
+        });
+
+        assert!(assessment.should_block_ip);
+        assert_eq!(assessment.block_ip, Some("203.0.113.15".parse().unwrap()));
     }
 }

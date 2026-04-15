@@ -1,6 +1,7 @@
 use super::policy::{
-    canonicalize_transport, default_policy, derive_overload_level, max_risk_level, overload_reason,
-    policy_from_runtime, policy_snapshot, resolve_request_bucket_ip, risk_label, transport_label,
+    apply_identity_state_policy, canonicalize_transport, default_policy, derive_overload_level,
+    max_risk_level, overload_reason, policy_from_runtime, policy_snapshot,
+    resolve_request_bucket_ip, risk_label, transport_label,
 };
 use super::runtime::{extend_queue, unix_timestamp, worker_loop};
 use super::*;
@@ -154,6 +155,7 @@ impl L4BehaviorEngine {
         let policy = self
             .policy_for_key(&key, overload_level.clone())
             .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
+        let policy = apply_identity_state_policy(policy, request, &overload_level, &tuning);
 
         let bytes = request.to_inspection_string().len() as u64;
         self.try_send(BehaviorEvent::RequestObserved {
@@ -177,6 +179,9 @@ impl L4BehaviorEngine {
             }
             .to_string(),
         );
+        if let Some(identity_state) = request.get_metadata("network.identity_state").cloned() {
+            request.add_metadata("l4.identity_state".to_string(), identity_state);
+        }
         if policy.disable_keepalive {
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
             request.add_metadata("proxy_connection_mode".to_string(), "close".to_string());

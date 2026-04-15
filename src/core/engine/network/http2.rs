@@ -646,6 +646,11 @@ async fn handle_http2_slow_attack_error(
             peer_ip: packet.source_ip,
             client_ip: None,
             trusted_proxy_peer,
+            identity_state: if trusted_proxy_peer {
+                "trusted_cdn_unresolved"
+            } else {
+                "direct_client"
+            },
             client_identity_unresolved: trusted_proxy_peer,
             host: None,
             detail,

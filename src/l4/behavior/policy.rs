@@ -226,6 +226,47 @@ pub(super) fn policy_from_runtime(
     }
 }
 
+pub(super) fn apply_identity_state_policy(
+    mut policy: L4AdaptivePolicy,
+    request: &UnifiedHttpRequest,
+    overload_level: &L4OverloadLevel,
+    tuning: &L4BehaviorTuning,
+) -> L4AdaptivePolicy {
+    match request
+        .get_metadata("network.identity_state")
+        .map(String::as_str)
+    {
+        Some("trusted_cdn_unresolved") => {
+            policy.disable_keepalive = true;
+            policy.prefer_early_close = true;
+            policy.suggested_delay_ms = policy.suggested_delay_ms.max(
+                tuning
+                    .soft_delay_ms
+                    .max(tuning.high_overload_delay_ms)
+                    .max(20),
+            );
+            if matches!(overload_level, L4OverloadLevel::Critical) {
+                policy.reject_new_connections = true;
+            }
+        }
+        Some("spoofed_forward_header") => {
+            policy.disable_keepalive = true;
+            policy.prefer_early_close = true;
+            policy.suggested_delay_ms = policy.suggested_delay_ms.max(
+                tuning
+                    .hard_delay_ms
+                    .max(tuning.critical_overload_delay_ms)
+                    .max(60),
+            );
+            policy.reject_new_connections = true;
+            policy.connection_budget_per_minute = policy.connection_budget_per_minute.min(5);
+        }
+        _ => {}
+    }
+
+    policy
+}
+
 pub(super) fn policy_snapshot(policy: &L4AdaptivePolicy) -> L4BucketPolicySnapshot {
     L4BucketPolicySnapshot {
         connection_budget_per_minute: policy.connection_budget_per_minute,

@@ -442,4 +442,42 @@ mod tests {
         assert!(policy.prefer_early_close);
         assert!(!policy.reject_new_connections);
     }
+
+    #[tokio::test]
+    async fn unresolved_cdn_identity_forces_degrade_without_immediate_reject() {
+        let engine = L4BehaviorEngine::new(&L4Config::default());
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.set_client_ip("198.51.100.10".to_string());
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+
+        let policy = engine.apply_request_policy(&packet(42), &mut request);
+
+        assert!(policy.disable_keepalive);
+        assert!(policy.prefer_early_close);
+        assert!(policy.suggested_delay_ms > 0);
+        assert!(!policy.reject_new_connections);
+    }
+
+    #[tokio::test]
+    async fn spoofed_forward_header_identity_is_rejected_aggressively() {
+        let engine = L4BehaviorEngine::new(&L4Config::default());
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        request.set_client_ip("198.51.100.10".to_string());
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "spoofed_forward_header".to_string(),
+        );
+
+        let policy = engine.apply_request_policy(&packet(43), &mut request);
+
+        assert!(policy.disable_keepalive);
+        assert!(policy.prefer_early_close);
+        assert!(policy.reject_new_connections);
+        assert!(policy.suggested_delay_ms >= 60);
+    }
 }

@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Notify};
 
+const MAX_EVENT_DETAILS_BYTES: usize = 4 * 1024;
+
 use super::{
     SqliteOpenErrorKind, SQLITE_CORRUPT_BACKUP_RETENTION, SQLITE_STARTUP_BACKUP_RETENTION,
 };
@@ -420,8 +422,9 @@ pub(super) async fn run_writer(
 
 pub(super) async fn persist_security_event(
     pool: &SqlitePool,
-    event: SecurityEventRecord,
+    mut event: SecurityEventRecord,
 ) -> Result<crate::storage::SecurityEventEntry> {
+    sanitize_security_event_record(&mut event);
     let result = sqlx::query(
         r#"
         INSERT INTO security_events (
@@ -516,6 +519,88 @@ pub(super) fn finish_pending_write(pending_writes: &AtomicU64, pending_write_not
     if previous <= 1 {
         pending_write_notify.notify_waiters();
     }
+}
+
+pub(crate) fn apply_write_pressure_detail_slimming(event: &mut SecurityEventRecord) {
+    if let Some(details_json) = event.details_json.as_mut() {
+        if let Ok(mut value) = serde_json::from_str::<Value>(details_json) {
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "storage_pressure".to_string(),
+                    serde_json::json!({
+                        "mode": "slimmed",
+                        "reason": "sqlite_queue_pressure",
+                    }),
+                );
+            }
+            *details_json = truncate_json_value(&value, MAX_EVENT_DETAILS_BYTES / 2);
+        } else if details_json.len() > MAX_EVENT_DETAILS_BYTES / 2 {
+            details_json.truncate(MAX_EVENT_DETAILS_BYTES / 2);
+            details_json.push_str("...");
+        }
+    }
+}
+
+fn sanitize_security_event_record(event: &mut SecurityEventRecord) {
+    let Some(details_json) = event.details_json.as_ref() else {
+        return;
+    };
+    let Ok(mut value) = serde_json::from_str::<Value>(details_json) else {
+        if details_json.len() > MAX_EVENT_DETAILS_BYTES {
+            event.details_json = Some(format!("{{\"truncated\":true,\"raw\":\"{}...\"}}", &details_json[..MAX_EVENT_DETAILS_BYTES.min(details_json.len())]));
+        }
+        return;
+    };
+    sanitize_json_value(&mut value);
+    event.details_json = Some(truncate_json_value(&value, MAX_EVENT_DETAILS_BYTES));
+}
+
+fn sanitize_json_value(value: &mut Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+
+    if let Some(client_identity) = object.get_mut("client_identity").and_then(Value::as_object_mut)
+    {
+        client_identity.remove("configured_real_ip_header_value");
+        if let Some(headers) = client_identity.get_mut("headers").and_then(Value::as_array_mut) {
+            headers.retain(|entry| {
+                entry
+                    .as_array()
+                    .and_then(|pair| pair.first())
+                    .and_then(Value::as_str)
+                    .is_some()
+            });
+        }
+    }
+
+    if let Some(server) = object.get_mut("server").and_then(Value::as_object_mut) {
+        server.remove("request_id");
+    }
+}
+
+fn truncate_json_value(value: &Value, max_bytes: usize) -> String {
+    let serialized = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
+    if serialized.len() <= max_bytes {
+        return serialized;
+    }
+
+    let mut object = match value {
+        Value::Object(map) => map.clone(),
+        _ => {
+            return serde_json::json!({
+                "truncated": true,
+                "summary": serialized.chars().take(max_bytes).collect::<String>(),
+            })
+            .to_string()
+        }
+    };
+    object.insert("truncated".to_string(), Value::Bool(true));
+    object.insert(
+        "summary".to_string(),
+        Value::String(serialized.chars().take(max_bytes.min(512)).collect()),
+    );
+    serde_json::to_string(&Value::Object(object)).unwrap_or_else(|_| "{\"truncated\":true}".to_string())
 }
 
 #[derive(Debug)]

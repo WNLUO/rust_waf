@@ -398,6 +398,48 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
         120_000,
         15_000,
     );
+    config.integrations.ai_audit.event_sample_limit = clamp_u64(
+        u64::from(config.integrations.ai_audit.event_sample_limit),
+        20,
+        500,
+        120,
+    ) as u32;
+    config.integrations.ai_audit.recent_event_limit = clamp_u64(
+        u64::from(config.integrations.ai_audit.recent_event_limit),
+        0,
+        50,
+        12,
+    ) as u32;
+    config.storage_policy.security_event_retention_days = clamp_u64(
+        config.storage_policy.security_event_retention_days,
+        1,
+        365,
+        14,
+    );
+    config.storage_policy.behavior_event_retention_days = clamp_u64(
+        config.storage_policy.behavior_event_retention_days,
+        1,
+        180,
+        7,
+    );
+    config.storage_policy.behavior_session_retention_days = clamp_u64(
+        config.storage_policy.behavior_session_retention_days,
+        1,
+        365,
+        14,
+    );
+    config.storage_policy.fingerprint_profile_retention_days = clamp_u64(
+        config.storage_policy.fingerprint_profile_retention_days,
+        1,
+        365,
+        30,
+    );
+    config.storage_policy.ai_audit_report_retention_days = clamp_u64(
+        config.storage_policy.ai_audit_report_retention_days,
+        1,
+        365,
+        30,
+    );
 
     config.admin_api_auth.bearer_token = config.admin_api_auth.bearer_token.trim().to_string();
     config.admin_api_auth.enabled =

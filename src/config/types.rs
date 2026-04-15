@@ -32,6 +32,8 @@ pub struct Config {
     pub sqlite_auto_migrate: bool,
     #[serde(default = "super::default_sqlite_queue_capacity")]
     pub sqlite_queue_capacity: usize,
+    #[serde(default)]
+    pub storage_policy: StoragePolicyConfig,
     #[serde(default, deserialize_with = "super::deserialize_boolish")]
     pub sqlite_rules_enabled: bool,
     #[serde(default)]
@@ -105,6 +107,20 @@ pub struct IntegrationsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoragePolicyConfig {
+    #[serde(default = "default_security_event_retention_days")]
+    pub security_event_retention_days: u64,
+    #[serde(default = "default_behavior_event_retention_days")]
+    pub behavior_event_retention_days: u64,
+    #[serde(default = "default_behavior_session_retention_days")]
+    pub behavior_session_retention_days: u64,
+    #[serde(default = "default_fingerprint_profile_retention_days")]
+    pub fingerprint_profile_retention_days: u64,
+    #[serde(default = "default_ai_audit_report_retention_days")]
+    pub ai_audit_report_retention_days: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiAuditConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -120,6 +136,12 @@ pub struct AiAuditConfig {
     pub timeout_ms: u64,
     #[serde(default = "default_ai_audit_fallback_to_rules")]
     pub fallback_to_rules: bool,
+    #[serde(default = "default_ai_audit_event_sample_limit")]
+    pub event_sample_limit: u32,
+    #[serde(default = "default_ai_audit_recent_event_limit")]
+    pub recent_event_limit: u32,
+    #[serde(default = "default_ai_audit_include_raw_event_samples")]
+    pub include_raw_event_samples: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -216,6 +238,38 @@ const fn default_ai_audit_fallback_to_rules() -> bool {
     true
 }
 
+const fn default_ai_audit_event_sample_limit() -> u32 {
+    120
+}
+
+const fn default_ai_audit_recent_event_limit() -> u32 {
+    12
+}
+
+const fn default_ai_audit_include_raw_event_samples() -> bool {
+    false
+}
+
+const fn default_security_event_retention_days() -> u64 {
+    14
+}
+
+const fn default_behavior_event_retention_days() -> u64 {
+    7
+}
+
+const fn default_behavior_session_retention_days() -> u64 {
+    14
+}
+
+const fn default_fingerprint_profile_retention_days() -> u64 {
+    30
+}
+
+const fn default_ai_audit_report_retention_days() -> u64 {
+    30
+}
+
 const fn default_adaptive_cdn_fronted() -> bool {
     true
 }
@@ -254,6 +308,18 @@ pub enum RuntimeProfile {
     Minimal,
     #[default]
     Standard,
+}
+
+impl Default for StoragePolicyConfig {
+    fn default() -> Self {
+        Self {
+            security_event_retention_days: default_security_event_retention_days(),
+            behavior_event_retention_days: default_behavior_event_retention_days(),
+            behavior_session_retention_days: default_behavior_session_retention_days(),
+            fingerprint_profile_retention_days: default_fingerprint_profile_retention_days(),
+            ai_audit_report_retention_days: default_ai_audit_report_retention_days(),
+        }
+    }
 }
 
 impl RuntimeProfile {

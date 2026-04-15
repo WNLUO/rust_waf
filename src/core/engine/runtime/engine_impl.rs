@@ -227,6 +227,78 @@ impl WafEngine {
             warn!("Failed to refresh rules from SQLite: {}", err);
         }
 
+        if let Some(store) = self.context.sqlite_store.as_ref() {
+            let storage_policy = self.context.config_snapshot().storage_policy;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let thresholds = [
+                (
+                    "security events",
+                    store
+                        .purge_old_security_events(
+                            now.saturating_sub(
+                                (storage_policy.security_event_retention_days * 24 * 3600) as i64,
+                            ),
+                        )
+                        .await,
+                ),
+                (
+                    "behavior events",
+                    store
+                        .purge_old_behavior_events(
+                            now.saturating_sub(
+                                (storage_policy.behavior_event_retention_days * 24 * 3600) as i64,
+                            ),
+                        )
+                        .await,
+                ),
+                (
+                    "behavior sessions",
+                    store
+                        .purge_old_behavior_sessions(
+                            now.saturating_sub(
+                                (storage_policy.behavior_session_retention_days * 24 * 3600)
+                                    as i64,
+                            ),
+                        )
+                        .await,
+                ),
+                (
+                    "fingerprint profiles",
+                    store
+                        .purge_old_fingerprint_profiles(
+                            now.saturating_sub(
+                                (storage_policy.fingerprint_profile_retention_days * 24 * 3600)
+                                    as i64,
+                            ),
+                        )
+                        .await,
+                ),
+                (
+                    "AI audit reports",
+                    store
+                        .purge_old_ai_audit_reports(
+                            now.saturating_sub(
+                                (storage_policy.ai_audit_report_retention_days * 24 * 3600)
+                                    as i64,
+                            ),
+                        )
+                        .await,
+                ),
+            ];
+            for (label, result) in thresholds {
+                match result {
+                    Ok(removed) if removed > 0 => {
+                        debug!("Maintenance purged {} stale {}", removed, label);
+                    }
+                    Ok(_) => {}
+                    Err(err) => warn!("Failed to purge stale {}: {}", label, err),
+                }
+            }
+        }
+
         if let Some(l4_inspector) = self.context.l4_inspector() {
             l4_inspector.maintenance_tick();
             if matches!(

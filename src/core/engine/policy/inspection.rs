@@ -389,13 +389,11 @@ fn build_request_identity_details_with_header(
     let source_header_value = if configured_header.trim().is_empty() {
         None
     } else {
-        request.get_header(&configured_header).cloned()
+        request
+            .get_header(&configured_header)
+            .map(|value| summarize_header_value(configured_header, value))
     };
-    let mut headers = request
-        .headers
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<Vec<_>>();
+    let mut headers = summarized_request_headers(request);
     headers.sort_by(|left, right| left.0.cmp(&right.0));
     let payload = json!({
         "client_identity": {
@@ -410,8 +408,8 @@ fn build_request_identity_details_with_header(
             "forward_header_valid": request.get_metadata("network.forward_header_valid").cloned().unwrap_or_else(|| "false".to_string()),
             "configured_real_ip_header": configured_header,
             "configured_real_ip_header_value": source_header_value,
-            "x_real_ip": request.get_header("x-real-ip").cloned(),
-            "x_forwarded_for": request.get_header("x-forwarded-for").cloned(),
+            "x_real_ip": request.get_header("x-real-ip").map(|value| summarize_header_value("x-real-ip", value)),
+            "x_forwarded_for": request.get_header("x-forwarded-for").map(|value| summarize_header_value("x-forwarded-for", value)),
             "http_version": request.version.to_string(),
             "headers": headers,
         },
@@ -456,4 +454,52 @@ fn build_request_identity_details_with_header(
     });
 
     serde_json::to_string_pretty(&payload).ok()
+}
+
+fn summarized_request_headers(request: &UnifiedHttpRequest) -> Vec<(String, String)> {
+    const ALLOWED_HEADERS: &[&str] = &[
+        "host",
+        "user-agent",
+        "accept",
+        "accept-language",
+        "accept-encoding",
+        "referer",
+        "origin",
+        "cache-control",
+        "content-type",
+        "content-length",
+        "x-forwarded-for",
+        "x-real-ip",
+        "cf-connecting-ip",
+        "x-request-id",
+    ];
+
+    request
+        .headers
+        .iter()
+        .filter_map(|(key, value)| {
+            ALLOWED_HEADERS
+                .iter()
+                .any(|candidate| key.eq_ignore_ascii_case(candidate))
+                .then(|| (key.clone(), summarize_header_value(key, value)))
+        })
+        .collect()
+}
+
+fn summarize_header_value(name: &str, value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if name.eq_ignore_ascii_case("cookie") || name.eq_ignore_ascii_case("authorization") {
+        return "[redacted]".to_string();
+    }
+
+    let normalized = trimmed.replace('\n', " ").replace('\r', " ");
+    if normalized.len() <= 160 {
+        normalized
+    } else {
+        format!("{}...", &normalized[..160])
+    }
 }

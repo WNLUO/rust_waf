@@ -97,6 +97,19 @@ impl SqliteStore {
     }
 
     pub fn enqueue_security_event(&self, event: SecurityEventRecord) {
+        let queue_depth = self.pending_writes.load(Ordering::Relaxed);
+        let mut event = event;
+        if queue_depth >= (self.queue_capacity as u64).saturating_mul(3) / 4 {
+            if matches!(event.action.as_str(), "log" | "alert") {
+                self.dropped_security_events.fetch_add(1, Ordering::Relaxed);
+                warn!(
+                    "Dropping low-priority security event under SQLite write pressure: action={}, queue_depth={}",
+                    event.action, queue_depth
+                );
+                return;
+            }
+            crate::storage::apply_write_pressure_detail_slimming(&mut event);
+        }
         self.pending_writes.fetch_add(1, Ordering::Relaxed);
         match self.sender.try_send(StorageCommand::SecurityEvent(event.clone())) {
             Ok(()) => {}

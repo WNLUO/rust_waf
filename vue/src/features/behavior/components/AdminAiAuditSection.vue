@@ -29,6 +29,9 @@ function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
     api_key: '',
     timeout_ms: 15000,
     fallback_to_rules: true,
+    event_sample_limit: 120,
+    recent_event_limit: 12,
+    include_raw_event_samples: false,
   }
 }
 

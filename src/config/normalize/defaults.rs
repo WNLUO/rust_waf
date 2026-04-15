@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::de::{self, Deserializer};
 use serde::Deserialize;
+use crate::config::types::StoragePolicyConfig;
 
 use super::super::*;
 
@@ -28,6 +29,7 @@ impl Default for Config {
             sqlite_path: default_sqlite_path(),
             sqlite_auto_migrate: default_sqlite_auto_migrate(),
             sqlite_queue_capacity: default_sqlite_queue_capacity(),
+            storage_policy: StoragePolicyConfig::default(),
             sqlite_rules_enabled: default_sqlite_rules_enabled(),
             max_concurrent_tasks: 0,
             console_settings: ConsoleSettings::default(),
@@ -116,6 +118,9 @@ impl Default for AiAuditConfig {
             api_key: String::new(),
             timeout_ms: 15_000,
             fallback_to_rules: true,
+            event_sample_limit: 120,
+            recent_event_limit: 12,
+            include_raw_event_samples: false,
         }
     }
 }

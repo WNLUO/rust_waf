@@ -505,6 +505,9 @@ impl AiAuditSettingsRequest {
             api_key: self.api_key,
             timeout_ms: self.timeout_ms,
             fallback_to_rules: self.fallback_to_rules,
+            event_sample_limit: self.event_sample_limit,
+            recent_event_limit: self.recent_event_limit,
+            include_raw_event_samples: self.include_raw_event_samples,
         })
     }
 }

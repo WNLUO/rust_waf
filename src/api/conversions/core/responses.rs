@@ -646,6 +646,9 @@ impl AiAuditSettingsResponse {
             api_key: config.api_key.clone(),
             timeout_ms: config.timeout_ms,
             fallback_to_rules: config.fallback_to_rules,
+            event_sample_limit: config.event_sample_limit,
+            recent_event_limit: config.recent_event_limit,
+            include_raw_event_samples: config.include_raw_event_samples,
         }
     }
 }

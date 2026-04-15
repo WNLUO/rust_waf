@@ -152,6 +152,9 @@ export interface AiAuditSettingsPayload {
   api_key: string
   timeout_ms: number
   fallback_to_rules: boolean
+  event_sample_limit: number
+  recent_event_limit: number
+  include_raw_event_samples: boolean
 }
 
 export interface GlobalSettingsPayload {

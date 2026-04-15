@@ -274,10 +274,15 @@ async fn build_ai_audit_summary(
     recent_limit: Option<u32>,
 ) -> ApiResult<AiAuditSummaryResponse> {
     let store = sqlite_store(&state)?;
+    let config = state.context.config_snapshot();
     let now = unix_timestamp();
     let window_seconds = window_seconds.unwrap_or(3600).clamp(60, 24 * 3600);
-    let sample_limit = sample_limit.unwrap_or(200).clamp(20, 1000);
-    let recent_limit = recent_limit.unwrap_or(20).clamp(5, 100);
+    let sample_limit = sample_limit
+        .unwrap_or(config.integrations.ai_audit.event_sample_limit)
+        .clamp(20, 1000);
+    let recent_limit = recent_limit
+        .unwrap_or(config.integrations.ai_audit.recent_event_limit)
+        .clamp(0, 100);
     let created_from = now.saturating_sub(window_seconds as i64);
 
     let result = store
@@ -406,6 +411,7 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
     let mut findings = Vec::new();
     let mut recommendations = Vec::new();
     let mut executive_summary = Vec::new();
+    let mut suggested_local_rules = Vec::new();
 
     if summary.current.identity_pressure_percent >= 5.0 {
         findings.push(AiAuditReportFinding {
@@ -439,6 +445,17 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
                 .to_string(),
             rationale: "身份解析不稳会让 L4/L7 自动化长期处在收紧模式，影响可用性和判定精度。"
                 .to_string(),
+            action_type: "investigate".to_string(),
+            rule_suggestion_key: Some("tighten_forward_identity_checks".to_string()),
+        });
+        suggested_local_rules.push(AiAuditSuggestedRuleResponse {
+            key: "tighten_forward_identity_checks".to_string(),
+            title: "收紧转发身份链路校验".to_string(),
+            layer: "l7".to_string(),
+            target: "trusted_proxy_identity".to_string(),
+            operator: "tighten".to_string(),
+            suggested_value: "prefer_verified_forward_chain".to_string(),
+            rationale: "当身份压力持续升高时，应优先减少未解析转发流量进入宽松路径。".to_string(),
         });
     }
 
@@ -463,6 +480,17 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             title: "排查热点主信号和标签".to_string(),
             action: "优先查看 primary_signals、labels、top_routes，确认是否存在单一路径或单类标签持续主导。".to_string(),
             rationale: "L7 摩擦升高通常意味着某类攻击或误伤模式已经形成稳定热点。".to_string(),
+            action_type: "investigate".to_string(),
+            rule_suggestion_key: Some("raise_hot_route_friction".to_string()),
+        });
+        suggested_local_rules.push(AiAuditSuggestedRuleResponse {
+            key: "raise_hot_route_friction".to_string(),
+            title: "提高热点路径摩擦".to_string(),
+            layer: "l7".to_string(),
+            target: "hot_route_threshold".to_string(),
+            operator: "decrease_threshold".to_string(),
+            suggested_value: "10%-20%".to_string(),
+            rationale: "当热点信号稳定占优时，应优先收紧热点路径的 challenge 和 block 阈值。".to_string(),
         });
     }
 
@@ -486,6 +514,17 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             title: "复核慢速攻击容忍窗口".to_string(),
             action: "结合 recent_events 和 top_source_ips，确认是否需要进一步收紧慢速攻击阈值或 keepalive 容忍度。".to_string(),
             rationale: "慢速攻击更容易拖垮连接资源，且在 CDN 场景下更需要结合身份态审计。".to_string(),
+            action_type: "tune_threshold".to_string(),
+            rule_suggestion_key: Some("tighten_slow_attack_window".to_string()),
+        });
+        suggested_local_rules.push(AiAuditSuggestedRuleResponse {
+            key: "tighten_slow_attack_window".to_string(),
+            title: "收紧慢速攻击窗口".to_string(),
+            layer: "l4".to_string(),
+            target: "slow_attack_window".to_string(),
+            operator: "decrease_threshold".to_string(),
+            suggested_value: "header/body timeout -10%".to_string(),
+            rationale: "慢头和慢体事件持续出现时，应降低容忍窗口并强化短连接降级。".to_string(),
         });
     }
 
@@ -515,6 +554,8 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             title: "复核请求级软化是否持续升高".to_string(),
             action: "关注 /admin/intelligence 的 AI 审计对比视图，确认软化次数是否持续放大，并结合热点路由与身份压力判断是否需要继续优化。".to_string(),
             rationale: "请求级软化说明系统在保护可用性，如果长期升高，通常意味着热点流量或身份链路仍有持续压力。".to_string(),
+            action_type: "observe".to_string(),
+            rule_suggestion_key: None,
         });
     }
 
@@ -548,6 +589,8 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
             title: "继续观察当前流量窗口".to_string(),
             action: "保持现有自动防护配置，并持续采样新的审计摘要。".to_string(),
             rationale: "当前未发现需要立即介入的强烈异常。".to_string(),
+            action_type: "observe".to_string(),
+            rule_suggestion_key: None,
         });
     }
 
@@ -570,12 +613,20 @@ fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditReportRespon
         generated_at: summary.generated_at,
         provider_used: "local_rules".to_string(),
         fallback_used: false,
+        analysis_mode: "analysis_only".to_string(),
         execution_notes: vec!["report generated by built-in local rules engine".to_string()],
         risk_level: risk_level.to_string(),
         headline,
         executive_summary,
+        input_profile: AiAuditInputProfileResponse {
+            source: "aggregated_summary".to_string(),
+            sampled_events: summary.sampled_events,
+            included_recent_events: summary.recent_events.len() as u32,
+            raw_samples_included: true,
+        },
         findings,
         recommendations,
+        suggested_local_rules,
         summary,
     }
 }

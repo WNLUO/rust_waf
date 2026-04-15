@@ -311,6 +311,38 @@ impl SqliteStore {
 
         Ok(items)
     }
+
+    pub async fn purge_old_security_events(&self, created_before: i64) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM security_events WHERE created_at < ?")
+            .bind(created_before)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn purge_old_behavior_events(&self, created_before: i64) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM behavior_events WHERE created_at < ?")
+            .bind(created_before)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn purge_old_behavior_sessions(&self, last_seen_before: i64) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM behavior_sessions WHERE last_seen_at < ?")
+            .bind(last_seen_before)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn purge_old_fingerprint_profiles(&self, last_seen_before: i64) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM fingerprint_profiles WHERE last_seen_at < ?")
+            .bind(last_seen_before)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 fn security_event_matches_derived_filters(

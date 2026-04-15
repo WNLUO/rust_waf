@@ -111,4 +111,12 @@ impl SqliteStore {
 
         Ok(result.rows_affected() > 0)
     }
+
+    pub async fn purge_old_ai_audit_reports(&self, generated_before: i64) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM ai_audit_reports WHERE generated_at < ?")
+            .bind(generated_before)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected())
+    }
 }

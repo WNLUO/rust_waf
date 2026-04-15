@@ -1,7 +1,8 @@
 use super::{
-    AiAuditReportFinding, AiAuditReportHistoryItem, AiAuditReportQueryParams,
-    AiAuditReportRecommendation, AiAuditReportResponse, AiAuditSummaryQueryParams,
-    AiAuditSummaryResponse, ApiError, ApiResult,
+    AiAuditInputProfileResponse, AiAuditReportFinding, AiAuditReportHistoryItem,
+    AiAuditReportQueryParams, AiAuditReportRecommendation, AiAuditReportResponse,
+    AiAuditSuggestedRuleResponse, AiAuditSummaryQueryParams, AiAuditSummaryResponse, ApiError,
+    ApiResult,
 };
 use crate::config::{AiAuditConfig, AiAuditProviderConfig, Config};
 use crate::storage::AiAuditReportEntry;
@@ -45,6 +46,7 @@ pub(super) struct AiAuditExecutionSettings {
     pub(super) base_url: Option<String>,
     pub(super) api_key: Option<String>,
     pub(super) timeout_ms: u64,
+    pub(super) include_raw_event_samples: bool,
     pub(super) execution_notes: Vec<String>,
 }
 
@@ -92,6 +94,7 @@ pub(super) fn resolve_report_execution(
         base_url: non_empty(&ai_config.base_url),
         api_key: non_empty(&ai_config.api_key),
         timeout_ms: ai_config.timeout_ms,
+        include_raw_event_samples: ai_config.include_raw_event_samples,
         execution_notes,
     }
 }
@@ -117,6 +120,7 @@ pub(super) async fn execute_report(
             let mut report = local_rules_builder(summary);
             report.provider_used = AiAuditProvider::LocalRules.label().to_string();
             report.fallback_used = false;
+            report.analysis_mode = "analysis_only".to_string();
             report.execution_notes.extend(execution.execution_notes);
             Ok(report)
         }
@@ -128,6 +132,7 @@ pub(super) async fn execute_report(
                 AiAuditProvider::StubModel.label().to_string()
             };
             report.fallback_used = execution.fallback_to_rules;
+            report.analysis_mode = "analysis_only".to_string();
             report.execution_notes.extend(execution.execution_notes);
             if execution.fallback_to_rules {
                 report.execution_notes.push(
@@ -156,6 +161,7 @@ pub(super) async fn execute_report(
                     let mut report = local_rules_builder(fallback_report);
                     report.provider_used = AiAuditProvider::LocalRules.label().to_string();
                     report.fallback_used = true;
+                    report.analysis_mode = "analysis_only".to_string();
                     report.execution_notes.extend(execution.execution_notes);
                     report.execution_notes.push(format!(
                         "openai_compatible provider failed; fell back to local_rules: {}",
@@ -182,6 +188,7 @@ pub(super) async fn execute_report(
                 let mut report = local_rules_builder(fallback_report);
                 report.provider_used = AiAuditProvider::LocalRules.label().to_string();
                 report.fallback_used = true;
+                report.analysis_mode = "analysis_only".to_string();
                 report.execution_notes.extend(execution.execution_notes);
                 report.execution_notes.push(format!(
                     "xiaomi_mimo provider failed; fell back to local_rules: {}",
@@ -212,10 +219,12 @@ fn build_provider_report(
         generated_at: summary.generated_at,
         provider_used: provider_used.to_string(),
         fallback_used,
+        analysis_mode: "analysis_only".to_string(),
         execution_notes,
         risk_level: normalize_risk_level(&output.risk_level),
         headline: non_empty(&output.headline).unwrap_or_else(|| "AI 审计已完成".to_string()),
         executive_summary: output.executive_summary,
+        input_profile: build_input_profile(&summary, execution.include_raw_event_samples),
         findings: output
             .findings
             .into_iter()
@@ -235,6 +244,21 @@ fn build_provider_report(
                 priority: normalize_priority(&item.priority),
                 title: item.title,
                 action: item.action,
+                rationale: item.rationale,
+                action_type: normalize_action_type(&item.action_type),
+                rule_suggestion_key: item.rule_suggestion_key,
+            })
+            .collect(),
+        suggested_local_rules: output
+            .suggested_local_rules
+            .into_iter()
+            .map(|item| AiAuditSuggestedRuleResponse {
+                key: item.key,
+                title: item.title,
+                layer: normalize_rule_layer(&item.layer),
+                target: item.target,
+                operator: item.operator,
+                suggested_value: item.suggested_value,
                 rationale: item.rationale,
             })
             .collect(),
@@ -275,7 +299,7 @@ async fn call_openai_compatible_report(
             },
             OpenAiCompatibleMessage {
                 role: "user".to_string(),
-                content: build_user_prompt(summary)?,
+                content: build_user_prompt(summary, execution.include_raw_event_samples)?,
             },
         ],
         temperature: 0.1,
@@ -336,7 +360,7 @@ async fn call_xiaomi_mimo_report(
             },
             OpenAiCompatibleMessage {
                 role: "user".to_string(),
-                content: build_user_prompt(summary)?,
+                content: build_user_prompt(summary, execution.include_raw_event_samples)?,
             },
         ],
         temperature: 0.1,
@@ -366,21 +390,66 @@ fn build_system_prompt() -> String {
     [
         "You are an application security audit assistant.",
         "Return only a JSON object with the keys:",
-        "risk_level, headline, executive_summary, findings, recommendations.",
+        "risk_level, headline, executive_summary, findings, recommendations, suggested_local_rules.",
         "risk_level must be one of: low, medium, high, critical.",
         "findings items must contain: key, severity, title, detail, evidence.",
-        "recommendations items must contain: key, priority, title, action, rationale.",
+        "recommendations items must contain: key, priority, title, action, rationale, action_type, rule_suggestion_key.",
+        "action_type must be one of: observe, tune_threshold, add_rule, investigate.",
+        "suggested_local_rules items must contain: key, title, layer, target, operator, suggested_value, rationale.",
+        "layer must be one of: l4, l7.",
         "Do not include markdown fences or any extra commentary.",
+        "This is an analysis-only task. Never claim that the model directly blocked traffic.",
         "Be conservative: avoid claiming certainty when the summary only supports a suspicion.",
     ]
     .join(" ")
 }
 
-fn build_user_prompt(summary: &AiAuditSummaryResponse) -> anyhow::Result<String> {
+fn build_user_prompt(
+    summary: &AiAuditSummaryResponse,
+    include_raw_event_samples: bool,
+) -> anyhow::Result<String> {
     Ok(format!(
         "Analyze the following WAF audit summary and produce the required JSON object.\nSummary JSON:\n{}",
-        serde_json::to_string(summary)?
+        serde_json::to_string(&build_provider_input(summary, include_raw_event_samples))?
     ))
+}
+
+fn build_provider_input(
+    summary: &AiAuditSummaryResponse,
+    include_raw_event_samples: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "input_profile": build_input_profile(summary, include_raw_event_samples),
+        "current": summary.current,
+        "counters": summary.counters,
+        "identity_states": summary.identity_states,
+        "primary_signals": summary.primary_signals,
+        "labels": summary.labels,
+        "top_source_ips": summary.top_source_ips,
+        "top_routes": summary.top_routes,
+        "top_hosts": summary.top_hosts,
+        "recent_events": if include_raw_event_samples {
+            serde_json::to_value(&summary.recent_events).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
+        } else {
+            serde_json::Value::Array(Vec::new())
+        },
+    })
+}
+
+fn build_input_profile(
+    summary: &AiAuditSummaryResponse,
+    raw_samples_included: bool,
+) -> AiAuditInputProfileResponse {
+    AiAuditInputProfileResponse {
+        source: "aggregated_summary".to_string(),
+        sampled_events: summary.sampled_events,
+        included_recent_events: if raw_samples_included {
+            summary.recent_events.len() as u32
+        } else {
+            0
+        },
+        raw_samples_included,
+    }
 }
 
 fn extract_choice_content(payload: &OpenAiCompatibleChatResponse) -> anyhow::Result<String> {
@@ -417,6 +486,31 @@ fn normalize_model_output_value(value: &mut serde_json::Value) {
                 normalize_string_or_array_field(finding_object, "evidence");
             }
         }
+    }
+    if let Some(recommendations) = object
+        .get_mut("recommendations")
+        .and_then(|item| item.as_array_mut())
+    {
+        for recommendation in recommendations {
+            if let Some(recommendation_object) = recommendation.as_object_mut() {
+                if !recommendation_object.contains_key("action_type") {
+                    recommendation_object.insert(
+                        "action_type".to_string(),
+                        serde_json::Value::String("observe".to_string()),
+                    );
+                }
+                if !recommendation_object.contains_key("rule_suggestion_key") {
+                    recommendation_object
+                        .insert("rule_suggestion_key".to_string(), serde_json::Value::Null);
+                }
+            }
+        }
+    }
+    if !object.contains_key("suggested_local_rules") {
+        object.insert(
+            "suggested_local_rules".to_string(),
+            serde_json::Value::Array(Vec::new()),
+        );
     }
 }
 
@@ -466,6 +560,22 @@ fn normalize_risk_level(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
         "low" | "medium" | "high" | "critical" => value.trim().to_ascii_lowercase(),
         _ => "medium".to_string(),
+    }
+}
+
+fn normalize_action_type(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "observe" | "tune_threshold" | "add_rule" | "investigate" => {
+            value.trim().to_ascii_lowercase()
+        }
+        _ => "observe".to_string(),
+    }
+}
+
+fn normalize_rule_layer(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "l4" | "l7" => value.trim().to_ascii_lowercase(),
+        _ => "l7".to_string(),
     }
 }
 
@@ -587,6 +697,8 @@ struct AiAuditModelOutput {
     findings: Vec<AiAuditModelFinding>,
     #[serde(default)]
     recommendations: Vec<AiAuditModelRecommendation>,
+    #[serde(default)]
+    suggested_local_rules: Vec<AiAuditModelSuggestedRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -605,6 +717,21 @@ struct AiAuditModelRecommendation {
     priority: String,
     title: String,
     action: String,
+    rationale: String,
+    #[serde(default)]
+    action_type: String,
+    #[serde(default)]
+    rule_suggestion_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AiAuditModelSuggestedRule {
+    key: String,
+    title: String,
+    layer: String,
+    target: String,
+    operator: String,
+    suggested_value: String,
     rationale: String,
 }
 
@@ -679,6 +806,9 @@ mod tests {
             api_key: "secret".to_string(),
             timeout_ms: 9_000,
             fallback_to_rules: false,
+            event_sample_limit: 64,
+            recent_event_limit: 8,
+            include_raw_event_samples: false,
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());
@@ -704,6 +834,9 @@ mod tests {
             api_key: "secret".to_string(),
             timeout_ms: 8_000,
             fallback_to_rules: true,
+            event_sample_limit: 64,
+            recent_event_limit: 8,
+            include_raw_event_samples: false,
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());
@@ -779,6 +912,7 @@ mod tests {
             base_url: Some("https://audit.example.com/v1".to_string()),
             api_key: None,
             timeout_ms: 2_000,
+            include_raw_event_samples: false,
             execution_notes: vec!["configured model: gpt-audit".to_string()],
         };
         let report = execute_report(execution, sample_summary(), |summary| {
@@ -787,12 +921,20 @@ mod tests {
                 generated_at: summary.generated_at,
                 provider_used: "local_rules".to_string(),
                 fallback_used: false,
+                analysis_mode: "analysis_only".to_string(),
                 execution_notes: vec!["local report".to_string()],
                 risk_level: "low".to_string(),
                 headline: "fallback".to_string(),
                 executive_summary: vec![],
+                input_profile: AiAuditInputProfileResponse {
+                    source: "aggregated_summary".to_string(),
+                    sampled_events: summary.sampled_events,
+                    included_recent_events: 0,
+                    raw_samples_included: false,
+                },
                 findings: vec![],
                 recommendations: vec![],
+                suggested_local_rules: vec![],
                 summary,
             }
         })

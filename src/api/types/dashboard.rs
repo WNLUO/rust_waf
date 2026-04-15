@@ -106,12 +106,15 @@ pub struct AiAuditReportResponse {
     pub(crate) generated_at: i64,
     pub(crate) provider_used: String,
     pub(crate) fallback_used: bool,
+    pub(crate) analysis_mode: String,
     pub(crate) execution_notes: Vec<String>,
     pub(crate) risk_level: String,
     pub(crate) headline: String,
     pub(crate) executive_summary: Vec<String>,
+    pub(crate) input_profile: AiAuditInputProfileResponse,
     pub(crate) findings: Vec<AiAuditReportFinding>,
     pub(crate) recommendations: Vec<AiAuditReportRecommendation>,
+    pub(crate) suggested_local_rules: Vec<AiAuditSuggestedRuleResponse>,
     pub(crate) summary: AiAuditSummaryResponse,
 }
 
@@ -171,6 +174,27 @@ pub struct AiAuditReportRecommendation {
     pub(crate) priority: String,
     pub(crate) title: String,
     pub(crate) action: String,
+    pub(crate) rationale: String,
+    pub(crate) action_type: String,
+    pub(crate) rule_suggestion_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAuditInputProfileResponse {
+    pub(crate) source: String,
+    pub(crate) sampled_events: u32,
+    pub(crate) included_recent_events: u32,
+    pub(crate) raw_samples_included: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAuditSuggestedRuleResponse {
+    pub(crate) key: String,
+    pub(crate) title: String,
+    pub(crate) layer: String,
+    pub(crate) target: String,
+    pub(crate) operator: String,
+    pub(crate) suggested_value: String,
     pub(crate) rationale: String,
 }
 

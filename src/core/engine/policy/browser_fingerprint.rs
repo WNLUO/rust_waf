@@ -119,7 +119,7 @@ fn handle_browser_fingerprint_report(
         }),
     );
 
-    let details_json = match serde_json::to_string_pretty(&payload) {
+    let details_json = match serde_json::to_string_pretty(&summarize_fingerprint_payload(&payload)) {
         Ok(serialized) => serialized,
         Err(err) => {
             return json_http_response(
@@ -222,6 +222,37 @@ fn derive_browser_fingerprint_id(payload: &serde_json::Value) -> String {
         .chars()
         .take(24)
         .collect()
+}
+
+fn summarize_fingerprint_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let fonts = payload
+        .get("fonts")
+        .and_then(|value| value.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+    let plugins = payload
+        .get("plugins")
+        .and_then(|value| value.as_array())
+        .map(|items| items.len())
+        .unwrap_or(0);
+
+    serde_json::json!({
+        "fingerprintId": payload.get("fingerprintId").cloned(),
+        "user_agent": payload.get("ua").cloned().or_else(|| payload.get("userAgent").cloned()),
+        "lang": payload.get("lang").cloned(),
+        "langs": payload.get("langs").cloned(),
+        "platform": payload.get("platform").cloned(),
+        "mobile": payload.get("mobile").cloned(),
+        "memory": payload.get("memory").cloned(),
+        "cores": payload.get("cores").cloned(),
+        "screen": payload.get("screen").cloned(),
+        "viewport": payload.get("viewport").cloned(),
+        "timezone": payload.get("timezone").cloned(),
+        "touch": payload.get("touch").cloned(),
+        "fonts_count": fonts,
+        "plugins_count": plugins,
+        "server": payload.get("server").cloned(),
+    })
 }
 
 fn json_http_response(

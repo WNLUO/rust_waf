@@ -4,6 +4,7 @@ import { BrainCircuit, RefreshCw, Save, Sparkles } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import {
+  fetchAiAutoAuditStatus,
   deleteAiTempPolicy,
   fetchAiAuditReport,
   fetchAiAuditReports,
@@ -21,6 +22,7 @@ import type {
   AiAuditReportResponse,
   AiAuditReportHistoryItem,
   AiAuditReportsResponse,
+  AiAutoAuditStatus,
   GlobalSettingsPayload,
   AiAuditSettingsPayload,
   AiTempPolicyItem,
@@ -71,6 +73,7 @@ const cachedReportAt = ref<number | null>(null)
 const reportHistory = ref<AiAuditReportHistoryItem[]>([])
 const historyTotal = ref(0)
 const activePolicies = ref<AiTempPolicyItem[]>([])
+const autoAuditStatus = ref<AiAutoAuditStatus | null>(null)
 const compareReportId = ref<number | null>(null)
 const form = reactive<AiAuditSettingsPayload>(createDefaultAiAuditSettings())
 const windowSeconds = ref(900)
@@ -115,6 +118,17 @@ const providerStatusText = computed(() => {
 const cachedReportLabel = computed(() => {
   if (!cachedReportAt.value) return '当前没有本地快照'
   return `本地快照 ${formatTimestamp(cachedReportAt.value)}`
+})
+
+const autoAuditStatusText = computed(() => {
+  if (!autoAuditStatus.value?.enabled) return '自动审计未启用'
+  if (autoAuditStatus.value.last_completed_at) {
+    return `最近完成于 ${formatTimestamp(autoAuditStatus.value.last_completed_at)}`
+  }
+  if (autoAuditStatus.value.last_run_at) {
+    return `最近触发于 ${formatTimestamp(autoAuditStatus.value.last_run_at)}`
+  }
+  return '自动审计已启用，尚未触发'
 })
 
 const compareReport = computed(() => {
@@ -301,6 +315,7 @@ async function loadSection(runReport = true) {
     }
     await loadHistory()
     await loadPolicies()
+    await loadAutoAuditStatus()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载 AI 审计失败'
   } finally {
@@ -321,6 +336,7 @@ async function runAudit() {
     )
     await loadHistory()
     await loadPolicies()
+    await loadAutoAuditStatus()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '执行 AI 审计失败'
   } finally {
@@ -340,6 +356,10 @@ async function loadHistory() {
   } finally {
     historyLoading.value = false
   }
+}
+
+async function loadAutoAuditStatus() {
+  autoAuditStatus.value = await fetchAiAutoAuditStatus()
 }
 
 async function loadPolicies() {

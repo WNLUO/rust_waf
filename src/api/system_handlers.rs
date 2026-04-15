@@ -199,6 +199,31 @@ pub(super) async fn ai_audit_report_handler(
     Ok(Json(report))
 }
 
+pub(super) async fn ai_auto_audit_status_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<AiAutoAuditStatusResponse>> {
+    let config = state.context.config_snapshot();
+    let runtime = state.context.ai_auto_audit_runtime_snapshot().await;
+    Ok(Json(AiAutoAuditStatusResponse {
+        enabled: config.integrations.ai_audit.auto_audit_enabled,
+        interval_secs: config.integrations.ai_audit.auto_audit_interval_secs,
+        cooldown_secs: config.integrations.ai_audit.auto_audit_cooldown_secs,
+        on_pressure_high: config.integrations.ai_audit.auto_audit_on_pressure_high,
+        on_attack_mode: config.integrations.ai_audit.auto_audit_on_attack_mode,
+        on_hotspot_shift: config.integrations.ai_audit.auto_audit_on_hotspot_shift,
+        force_local_rules_under_attack: config
+            .integrations
+            .ai_audit
+            .auto_audit_force_local_rules_under_attack,
+        last_run_at: runtime.last_run_at,
+        last_completed_at: runtime.last_completed_at,
+        last_trigger_signature: runtime.last_trigger_signature,
+        last_observed_signature: runtime.last_observed_signature,
+        last_trigger_reason: runtime.last_trigger_reason,
+        last_report_id: runtime.last_report_id,
+    }))
+}
+
 pub(super) async fn run_ai_audit_report_handler(
     State(state): State<ApiState>,
     ExtractJson(payload): ExtractJson<AiAuditRunRequest>,

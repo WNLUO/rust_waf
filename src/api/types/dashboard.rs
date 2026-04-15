@@ -258,6 +258,23 @@ pub struct AiAuditReportsResponse {
     pub(crate) reports: Vec<AiAuditReportHistoryItem>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AiAutoAuditStatusResponse {
+    pub(crate) enabled: bool,
+    pub(crate) interval_secs: u64,
+    pub(crate) cooldown_secs: u64,
+    pub(crate) on_pressure_high: bool,
+    pub(crate) on_attack_mode: bool,
+    pub(crate) on_hotspot_shift: bool,
+    pub(crate) force_local_rules_under_attack: bool,
+    pub(crate) last_run_at: Option<i64>,
+    pub(crate) last_completed_at: Option<i64>,
+    pub(crate) last_trigger_signature: Option<String>,
+    pub(crate) last_observed_signature: Option<String>,
+    pub(crate) last_trigger_reason: Option<String>,
+    pub(crate) last_report_id: Option<i64>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct AiTempPoliciesResponse {
     pub(crate) total: u32,
@@ -336,6 +353,8 @@ pub struct AiAuditReportHistoryItem {
     pub(crate) feedback_status: Option<String>,
     pub(crate) feedback_notes: Option<String>,
     pub(crate) feedback_updated_at: Option<i64>,
+    pub(crate) auto_generated: bool,
+    pub(crate) auto_trigger_reason: Option<String>,
     pub(crate) report: AiAuditReportResponse,
 }
 

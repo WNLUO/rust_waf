@@ -789,6 +789,10 @@ pub(super) fn history_item_from_entry(
 ) -> anyhow::Result<AiAuditReportHistoryItem> {
     let mut report = serde_json::from_str::<AiAuditReportResponse>(&entry.report_json)?;
     report.report_id = Some(entry.id);
+    let auto_trigger_reason = report.execution_notes.iter().find_map(|note| {
+        note.strip_prefix("auto audit trigger reason: ")
+            .map(|value| value.trim().to_string())
+    });
     Ok(AiAuditReportHistoryItem {
         id: entry.id,
         generated_at: entry.generated_at,
@@ -799,6 +803,8 @@ pub(super) fn history_item_from_entry(
         feedback_status: entry.feedback_status,
         feedback_notes: entry.feedback_notes,
         feedback_updated_at: entry.feedback_updated_at,
+        auto_generated: auto_trigger_reason.is_some(),
+        auto_trigger_reason,
         report,
     })
 }

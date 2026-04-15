@@ -61,9 +61,44 @@ export interface AiAuditEventSample {
   action: string
   reason: string
   source_ip: string
+  host: string | null
+  site_domain: string | null
+  http_method: string | null
   uri: string | null
   provider: string | null
+  provider_site_name: string | null
+  provider_site_domain: string | null
+  details_available: boolean
+  details_slimmed: boolean
   decision_summary: SecurityEventDecisionSummary | null
+}
+
+export interface AiAuditDataQuality {
+  persisted_security_events: number
+  dropped_security_events: number
+  sqlite_queue_depth: number
+  sqlite_queue_capacity: number
+  sqlite_queue_usage_percent: number
+  detail_slimming_active: boolean
+  sample_coverage_ratio: number
+  persistence_coverage_ratio: number
+  raw_samples_included: boolean
+  recent_events_count: number
+  analysis_confidence: string
+}
+
+export interface AiAuditTrendWindow {
+  label: string
+  window_seconds: number
+  total_events: number
+  sampled_events: number
+  blocked_events: number
+  challenged_events: number
+  delayed_events: number
+  action_breakdown: AiAuditCountItem[]
+  top_source_ips: AiAuditCountItem[]
+  top_routes: AiAuditCountItem[]
+  top_hosts: AiAuditCountItem[]
 }
 
 export interface AiAuditCurrentState {
@@ -103,8 +138,13 @@ export interface AiAuditSummaryResponse {
   sampled_events: number
   total_events: number
   active_rules: number
+  runtime_pressure_level: string
+  degraded_reasons: string[]
+  data_quality: AiAuditDataQuality
   current: AiAuditCurrentState
   counters: AiAuditCounters
+  action_breakdown: AiAuditCountItem[]
+  provider_breakdown: AiAuditCountItem[]
   identity_states: AiAuditCountItem[]
   primary_signals: AiAuditCountItem[]
   labels: AiAuditCountItem[]
@@ -112,6 +152,7 @@ export interface AiAuditSummaryResponse {
   top_routes: AiAuditCountItem[]
   top_hosts: AiAuditCountItem[]
   safeline_correlation: AiAuditSafeLineCorrelation
+  trend_windows: AiAuditTrendWindow[]
   recent_policy_feedback: AiAuditPolicyFeedback[]
   recent_events: AiAuditEventSample[]
 }
@@ -189,6 +230,8 @@ export interface AiAuditSuggestedRule {
 export interface AiAuditReportResponse {
   report_id?: number | null
   generated_at: number
+  runtime_pressure_level: string
+  degraded_reasons: string[]
   provider_used: string
   fallback_used: boolean
   analysis_mode: string
@@ -213,6 +256,8 @@ export interface AiAuditReportHistoryItem {
   feedback_status: string | null
   feedback_notes: string | null
   feedback_updated_at: number | null
+  auto_generated: boolean
+  auto_trigger_reason: string | null
   report: AiAuditReportResponse
 }
 
@@ -221,6 +266,22 @@ export interface AiAuditReportsResponse {
   limit: number
   offset: number
   reports: AiAuditReportHistoryItem[]
+}
+
+export interface AiAutoAuditStatus {
+  enabled: boolean
+  interval_secs: number
+  cooldown_secs: number
+  on_pressure_high: boolean
+  on_attack_mode: boolean
+  on_hotspot_shift: boolean
+  force_local_rules_under_attack: boolean
+  last_run_at: number | null
+  last_completed_at: number | null
+  last_trigger_signature: string | null
+  last_observed_signature: string | null
+  last_trigger_reason: string | null
+  last_report_id: number | null
 }
 
 export interface AiTempPolicyItem {

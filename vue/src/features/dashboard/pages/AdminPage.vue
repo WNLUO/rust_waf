@@ -145,6 +145,30 @@ const runtimePressureType = computed(() => {
   if (pressure === 'elevated') return 'info' as const
   return 'success' as const
 })
+const storageInsights = computed(
+  () =>
+    dashboard.value?.metrics.storage_attack_insights ?? {
+      active_bucket_count: 0,
+      active_event_count: 0,
+      long_tail_bucket_count: 0,
+      long_tail_event_count: 0,
+      hotspot_sources: [],
+    },
+)
+const storageDegradedReasons = computed(
+  () => dashboard.value?.metrics.storage_degraded_reasons ?? [],
+)
+const storageInsightType = computed(() => {
+  if ((storageInsights.value.long_tail_event_count || 0) > 0) return 'warning' as const
+  if ((storageInsights.value.active_bucket_count || 0) > 0) return 'info' as const
+  return 'muted' as const
+})
+const formatShortTime = (unix: number) =>
+  new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(unix * 1000))
 
 const calcAutoState = (observed: number, target: number) => {
   if (!Number.isFinite(observed) || !Number.isFinite(target) || target <= 0) {
@@ -512,6 +536,78 @@ onMounted(() => {
                       ? '当前会裁剪低价值事件持久化，优先保证主链吞吐。'
                       : '当前处于常态观测模式，未触发运行时降级。'
                 }}
+              </p>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs text-slate-500">存储退化洞察</p>
+                <StatusBadge
+                  :text="
+                    storageInsights.active_bucket_count > 0
+                      ? `热点 ${formatNumber(storageInsights.hotspot_sources.length)}`
+                      : '未激活'
+                  "
+                  :type="storageInsightType"
+                />
+              </div>
+              <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p class="text-xs text-slate-500">聚合桶 / 聚合事件</p>
+                  <p class="mt-1 text-lg font-semibold text-stone-900">
+                    {{ formatNumber(storageInsights.active_bucket_count) }} /
+                    {{ formatNumber(storageInsights.active_event_count) }}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500">长尾桶 / 长尾事件</p>
+                  <p class="mt-1 text-lg font-semibold text-stone-900">
+                    {{ formatNumber(storageInsights.long_tail_bucket_count) }} /
+                    {{ formatNumber(storageInsights.long_tail_event_count) }}
+                  </p>
+                </div>
+              </div>
+              <div
+                v-if="storageDegradedReasons.length"
+                class="mt-3 flex flex-wrap gap-2"
+              >
+                <span
+                  v-for="reason in storageDegradedReasons"
+                  :key="reason"
+                  class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] text-amber-700"
+                >
+                  {{ reason }}
+                </span>
+              </div>
+              <div
+                v-if="storageInsights.hotspot_sources.length"
+                class="mt-3 space-y-2"
+              >
+                <div
+                  v-for="hotspot in storageInsights.hotspot_sources"
+                  :key="`${hotspot.source_ip}-${hotspot.action}-${hotspot.route}-${hotspot.time_window_start}`"
+                  class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <p class="font-medium text-stone-900">
+                      {{ hotspot.source_ip }}
+                    </p>
+                    <p class="text-xs text-slate-500">
+                      {{ formatNumber(hotspot.count) }} 次
+                    </p>
+                  </div>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ hotspot.action }} · {{ hotspot.route || '无路由' }} ·
+                    {{ formatShortTime(hotspot.time_window_start) }} -
+                    {{ formatShortTime(hotspot.time_window_end) }}
+                  </p>
+                </div>
+              </div>
+              <p
+                v-else
+                class="mt-3 text-xs leading-5 text-slate-500"
+              >
+                当前没有活跃的热点聚合，低价值事件仍以常态方式记录。
               </p>
             </div>
 

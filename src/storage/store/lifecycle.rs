@@ -314,6 +314,50 @@ impl SqliteStore {
         Ok(flushed)
     }
 
+    pub fn aggregation_insight_summary(&self) -> StorageAggregationInsightSummary {
+        let guard = self
+            .aggregated_security_events
+            .lock()
+            .expect("aggregated_security_events lock poisoned");
+        let active_bucket_count = guard.len() as u64;
+        let active_event_count = guard.values().map(|bucket| bucket.count).sum::<u64>();
+        let mut hotspot_sources = guard
+            .values()
+            .filter(|bucket| !bucket.long_tail)
+            .map(|bucket| StorageAggregationHotspot {
+                source_ip: bucket.source_ip.clone(),
+                action: bucket.action.clone(),
+                route: bucket.uri.clone(),
+                count: bucket.count,
+                time_window_start: bucket.time_window_start,
+                time_window_end: bucket.time_window_end,
+            })
+            .collect::<Vec<_>>();
+        hotspot_sources.sort_by(|left, right| {
+            right
+                .count
+                .cmp(&left.count)
+                .then_with(|| right.time_window_end.cmp(&left.time_window_end))
+                .then_with(|| left.source_ip.cmp(&right.source_ip))
+        });
+        hotspot_sources.truncate(5);
+
+        let long_tail_bucket_count = guard.values().filter(|bucket| bucket.long_tail).count() as u64;
+        let long_tail_event_count = guard
+            .values()
+            .filter(|bucket| bucket.long_tail)
+            .map(|bucket| bucket.count)
+            .sum::<u64>();
+
+        StorageAggregationInsightSummary {
+            active_bucket_count,
+            active_event_count,
+            hotspot_sources,
+            long_tail_bucket_count,
+            long_tail_event_count,
+        }
+    }
+
     pub fn subscribe_realtime(
         &self,
     ) -> tokio::sync::broadcast::Receiver<crate::storage::StorageRealtimeEvent> {

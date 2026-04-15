@@ -60,6 +60,25 @@ export interface MetricsResponse {
   runtime_pressure_drop_delay: boolean
   runtime_pressure_trim_event_persistence: boolean
   runtime_pressure_storage_queue_percent: number
+  storage_degraded_reasons: string[]
+  storage_attack_insights: StorageAttackInsights
+}
+
+export interface StorageAttackInsights {
+  active_bucket_count: number
+  active_event_count: number
+  long_tail_bucket_count: number
+  long_tail_event_count: number
+  hotspot_sources: StorageAttackHotspot[]
+}
+
+export interface StorageAttackHotspot {
+  source_ip: string
+  action: string
+  route: string | null
+  count: number
+  time_window_start: number
+  time_window_end: number
 }
 
 export interface AdaptiveProtectionL4RuntimePayload {

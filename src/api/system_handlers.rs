@@ -77,11 +77,17 @@ pub(super) async fn metrics_handler(State(state): State<ApiState>) -> Json<Metri
     } else {
         None
     };
+    let aggregation_insights = state
+        .context
+        .sqlite_store
+        .as_ref()
+        .map(|store| store.aggregation_insight_summary());
 
     Json(build_metrics_response(
         metrics,
         state.context.active_rule_count(),
         storage_summary,
+        aggregation_insights,
         state
             .context
             .l4_inspector()

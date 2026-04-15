@@ -26,6 +26,7 @@ fn test_build_metrics_response_without_sources() {
         0,
         None,
         None,
+        None,
         crate::core::RuntimePressureSnapshot {
             level: "normal",
             storage_queue_usage_percent: 0,
@@ -49,6 +50,8 @@ fn test_build_metrics_response_without_sources() {
     assert!(!response.runtime_pressure_drop_delay);
     assert!(!response.runtime_pressure_trim_event_persistence);
     assert_eq!(response.runtime_pressure_storage_queue_percent, 0);
+    assert!(response.storage_degraded_reasons.is_empty());
+    assert_eq!(response.storage_attack_insights.active_bucket_count, 0);
 }
 
 #[test]
@@ -99,6 +102,20 @@ fn test_build_metrics_response_with_sources() {
             queue_depth: 6,
             dropped_security_events: 3,
             dropped_blocked_ips: 1,
+        }),
+        Some(crate::storage::StorageAggregationInsightSummary {
+            active_bucket_count: 4,
+            active_event_count: 22,
+            long_tail_bucket_count: 1,
+            long_tail_event_count: 9,
+            hotspot_sources: vec![crate::storage::StorageAggregationHotspot {
+                source_ip: "203.0.113.8".to_string(),
+                action: "alert".to_string(),
+                route: Some("/login".to_string()),
+                count: 7,
+                time_window_start: 120,
+                time_window_end: 125,
+            }],
         }),
         Some(crate::l4::behavior::L4BehaviorOverview {
             bucket_count: 9,
@@ -170,6 +187,22 @@ fn test_build_metrics_response_with_sources() {
     assert!(response.runtime_pressure_drop_delay);
     assert!(response.runtime_pressure_trim_event_persistence);
     assert_eq!(response.runtime_pressure_storage_queue_percent, 81);
+    assert!(response
+        .storage_degraded_reasons
+        .contains(&"storage_low_value_event_persistence_trimmed".to_string()));
+    assert!(response
+        .storage_degraded_reasons
+        .contains(&"storage_security_events_dropped_under_pressure".to_string()));
+    assert!(response
+        .storage_degraded_reasons
+        .contains(&"storage_long_tail_sources_merged".to_string()));
+    assert_eq!(response.storage_attack_insights.active_bucket_count, 4);
+    assert_eq!(response.storage_attack_insights.long_tail_event_count, 9);
+    assert_eq!(response.storage_attack_insights.hotspot_sources.len(), 1);
+    assert_eq!(
+        response.storage_attack_insights.hotspot_sources[0].source_ip,
+        "203.0.113.8"
+    );
 }
 
 #[test]

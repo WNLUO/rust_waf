@@ -324,6 +324,10 @@ fn collect_metrics(
         context.active_rule_count(),
         storage_summary,
         context
+            .sqlite_store
+            .as_ref()
+            .map(|store| store.aggregation_insight_summary()),
+        context
             .l4_inspector()
             .map(|inspector| inspector.get_statistics().behavior.overview),
         context.runtime_pressure_snapshot(),

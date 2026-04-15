@@ -1,16 +1,20 @@
-use super::types::MetricsResponse;
+use super::types::{
+    MetricsResponse, StorageAttackHotspotResponse, StorageAttackInsightsResponse,
+};
 use crate::core::RuntimePressureSnapshot;
 
 pub(super) fn build_metrics_response(
     metrics: Option<crate::metrics::MetricsSnapshot>,
     active_rules: u64,
     storage_summary: Option<crate::storage::StorageMetricsSummary>,
+    aggregation_insights: Option<crate::storage::StorageAggregationInsightSummary>,
     l4_behavior: Option<crate::l4::behavior::L4BehaviorOverview>,
     runtime_pressure: RuntimePressureSnapshot,
 ) -> MetricsResponse {
     let snapshot = metrics.unwrap_or_default();
     let sqlite_enabled = storage_summary.is_some();
     let storage_summary = storage_summary.unwrap_or_default();
+    let aggregation_insights = aggregation_insights.unwrap_or_default();
     let l4_behavior = l4_behavior.unwrap_or(crate::l4::behavior::L4BehaviorOverview {
         bucket_count: 0,
         fine_grained_buckets: 0,
@@ -27,6 +31,11 @@ pub(super) fn build_metrics_response(
         overload_level: crate::l4::behavior::L4OverloadLevel::Normal,
         overload_reason: None,
     });
+    let storage_degraded_reasons = build_storage_degraded_reasons(
+        &storage_summary,
+        &aggregation_insights,
+        &runtime_pressure,
+    );
 
     MetricsResponse {
         total_packets: snapshot.total_packets,
@@ -87,5 +96,45 @@ pub(super) fn build_metrics_response(
         runtime_pressure_drop_delay: runtime_pressure.drop_delay,
         runtime_pressure_trim_event_persistence: runtime_pressure.trim_event_persistence,
         runtime_pressure_storage_queue_percent: runtime_pressure.storage_queue_usage_percent,
+        storage_degraded_reasons,
+        storage_attack_insights: StorageAttackInsightsResponse {
+            active_bucket_count: aggregation_insights.active_bucket_count,
+            active_event_count: aggregation_insights.active_event_count,
+            long_tail_bucket_count: aggregation_insights.long_tail_bucket_count,
+            long_tail_event_count: aggregation_insights.long_tail_event_count,
+            hotspot_sources: aggregation_insights
+                .hotspot_sources
+                .into_iter()
+                .map(|item| StorageAttackHotspotResponse {
+                    source_ip: item.source_ip,
+                    action: item.action,
+                    route: item.route,
+                    count: item.count,
+                    time_window_start: item.time_window_start,
+                    time_window_end: item.time_window_end,
+                })
+                .collect(),
+        },
     }
+}
+
+fn build_storage_degraded_reasons(
+    storage_summary: &crate::storage::StorageMetricsSummary,
+    aggregation_insights: &crate::storage::StorageAggregationInsightSummary,
+    runtime_pressure: &RuntimePressureSnapshot,
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if runtime_pressure.trim_event_persistence {
+        reasons.push("storage_low_value_event_persistence_trimmed".to_string());
+    }
+    if storage_summary.dropped_security_events > 0 {
+        reasons.push("storage_security_events_dropped_under_pressure".to_string());
+    }
+    if aggregation_insights.long_tail_event_count > 0 {
+        reasons.push("storage_long_tail_sources_merged".to_string());
+    }
+    if aggregation_insights.active_bucket_count > 0 {
+        reasons.push("storage_hotspot_aggregation_active".to_string());
+    }
+    reasons
 }

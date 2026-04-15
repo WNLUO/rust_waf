@@ -743,6 +743,14 @@ async fn test_sqlite_store_preserves_hotspots_and_merges_long_tail_sources() {
         });
     }
 
+    let insight = store.aggregation_insight_summary();
+    assert!(insight.active_bucket_count >= 2);
+    assert!(insight.long_tail_event_count > 0);
+    assert!(insight
+        .hotspot_sources
+        .iter()
+        .any(|item| item.source_ip == "203.0.113.99"));
+
     store.flush().await.unwrap();
 
     let aggregated = store

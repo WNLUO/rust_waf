@@ -16,6 +16,25 @@ pub struct StorageMetricsSummary {
     pub dropped_blocked_ips: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct StorageAggregationHotspot {
+    pub source_ip: String,
+    pub action: String,
+    pub route: Option<String>,
+    pub count: u64,
+    pub time_window_start: i64,
+    pub time_window_end: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StorageAggregationInsightSummary {
+    pub active_bucket_count: u64,
+    pub active_event_count: u64,
+    pub hotspot_sources: Vec<StorageAggregationHotspot>,
+    pub long_tail_bucket_count: u64,
+    pub long_tail_event_count: u64,
+}
+
 #[cfg(any(feature = "api", test))]
 #[derive(Debug, Clone, Default)]
 pub struct SecurityEventQuery {

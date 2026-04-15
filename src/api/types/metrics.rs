@@ -56,6 +56,27 @@ pub struct MetricsResponse {
     pub(crate) runtime_pressure_drop_delay: bool,
     pub(crate) runtime_pressure_trim_event_persistence: bool,
     pub(crate) runtime_pressure_storage_queue_percent: u64,
+    pub(crate) storage_degraded_reasons: Vec<String>,
+    pub(crate) storage_attack_insights: StorageAttackInsightsResponse,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct StorageAttackInsightsResponse {
+    pub(crate) active_bucket_count: u64,
+    pub(crate) active_event_count: u64,
+    pub(crate) long_tail_bucket_count: u64,
+    pub(crate) long_tail_event_count: u64,
+    pub(crate) hotspot_sources: Vec<StorageAttackHotspotResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StorageAttackHotspotResponse {
+    pub(crate) source_ip: String,
+    pub(crate) action: String,
+    pub(crate) route: Option<String>,
+    pub(crate) count: u64,
+    pub(crate) time_window_start: i64,
+    pub(crate) time_window_end: i64,
 }
 
 #[derive(Debug, Serialize)]

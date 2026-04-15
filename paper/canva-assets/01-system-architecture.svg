@@ -44,23 +44,23 @@
   <text x="972" y="292" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">SQLite 配置</text>
   <text x="972" y="332" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则 / 覆盖配置</text>
   <text x="972" y="372" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">security_events</text>
-  <text x="972" y="412" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">blocked_ips</text>
-  <text x="972" y="452" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点 / 证书 / 同步链路</text>
-  <text x="972" y="520" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责统一审计、</text>
-  <text x="972" y="548" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">配置保存与</text>
-  <text x="972" y="576" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">诱导事件落库</text>
+  <text x="972" y="412" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">行为画像 / 指纹档案</text>
+  <text x="972" y="452" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">AI 审计 / 临时策略</text>
+  <text x="972" y="492" fill="#69348A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点 / 证书 / 同步链路</text>
+  <text x="972" y="548" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责统一审计、画像沉淀</text>
+  <text x="972" y="576" fill="#7F5A98" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">策略保存与联动状态落库</text>
 
   <rect x="1234" y="190" width="250" height="520" rx="24" fill="#FDECEE" stroke="#E39AA2" stroke-width="2"/>
   <text x="1266" y="246" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">管理控制层</text>
   <text x="1266" y="292" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Axum API</text>
   <text x="1266" y="332" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Vue 控制台</text>
-  <text x="1266" y="372" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">系统设置 / 站点 / 证书</text>
-  <text x="1266" y="412" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则中心 / 动作中心</text>
-  <text x="1266" y="452" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L4 / L7 管理</text>
-  <text x="1266" y="492" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">联动同步链路</text>
-  <text x="1266" y="560" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责配置操作、</text>
-  <text x="1266" y="588" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">自动化接管总览与</text>
-  <text x="1266" y="616" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">分层运维协同</text>
+  <text x="1266" y="372" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">总览 / 流量地图</text>
+  <text x="1266" y="412" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">系统设置 / 站点 / 证书</text>
+  <text x="1266" y="452" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则中心 / 动作中心</text>
+  <text x="1266" y="492" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">行为观测 / AI 审计</text>
+  <text x="1266" y="532" fill="#8A3744" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L4 / L7 管理</text>
+  <text x="1266" y="584" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责配置操作、实时观测</text>
+  <text x="1266" y="612" fill="#99616A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">自动化接管总览与运维协同</text>
 
   <path d="M308 450H352" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
   <path d="M612 450H656" stroke="#8E8173" stroke-width="6" stroke-linecap="round"/>
@@ -73,5 +73,5 @@
 
   <rect x="88" y="736" width="1396" height="96" rx="18" fill="#F1E7DA"/>
   <text x="120" y="780" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">答辩时可配合一句话说明：系统以 Rust 引擎作为数据面核心，前置 L4 粗筛，</text>
-  <text x="120" y="812" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">后接 L7 统一规则裁决，再通过 SQLite、Axum 和 Vue 完成运维闭环。</text>
+  <text x="120" y="812" fill="#5C4C3D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">后接 L7 统一规则裁决，并通过 SQLite、Axum 和 Vue 把观测、审计与运维联动串成闭环。</text>
 </svg>

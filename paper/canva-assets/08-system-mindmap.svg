@@ -50,12 +50,12 @@
   <rect x="1272" y="338" width="238" height="352" rx="24" fill="#FDECEE" stroke="#E19CA5" stroke-width="2"/>
   <text x="1304" y="390" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">控制与数据层</text>
   <text x="1304" y="434" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">管理 API</text>
-  <text x="1304" y="470" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">系统设置 / 证书管理</text>
-  <text x="1304" y="506" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则中心 / 动作中心</text>
-  <text x="1304" y="542" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L4 / L7 管理</text>
-  <text x="1304" y="578" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">事件审计 / 联动同步</text>
-  <text x="1304" y="630" fill="#9B636B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责分层运维、</text>
-  <text x="1304" y="658" fill="#9B636B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">自动化接管总览与落库</text>
+  <text x="1304" y="470" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">总览 / 流量地图</text>
+  <text x="1304" y="506" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">系统设置 / 证书管理</text>
+  <text x="1304" y="542" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">行为观测 / 智能档案</text>
+  <text x="1304" y="578" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">AI 审计 / 联动同步</text>
+  <text x="1304" y="630" fill="#9B636B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责分层运维、实时观测</text>
+  <text x="1304" y="658" fill="#9B636B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">自动化接管总览与审计落库</text>
 
   <path d="M800 292V340" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
   <path d="M800 292C800 318 219 318 219 372" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
@@ -81,5 +81,5 @@
 
   <rect x="88" y="760" width="1424" height="128" rx="22" fill="#F1E7DA"/>
   <text x="122" y="808" fill="#5A4C3E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">讲解时可概括为：前端流量先进入多协议接入层，由 L4 进行快速粗筛，再交给 L7 统一请求抽象与规则裁决，</text>
-  <text x="122" y="842" fill="#5A4C3E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">随后配合网关治理、SQLite 审计落库和 Vue 控制台，形成“检测、转发、配置、联动、展示”一体化闭环。</text>
+  <text x="122" y="842" fill="#5A4C3E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">随后配合网关治理、SQLite 审计落库和 Vue 控制台，形成“检测、治理、观测、联动、展示”一体化闭环。</text>
 </svg>

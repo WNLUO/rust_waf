@@ -148,6 +148,16 @@ pub struct AiAuditConfig {
     pub temp_policy_ttl_secs: u64,
     #[serde(default = "default_ai_audit_temp_block_ttl_secs")]
     pub temp_block_ttl_secs: u64,
+    #[serde(default = "default_ai_audit_auto_apply_min_confidence")]
+    pub auto_apply_min_confidence: u32,
+    #[serde(default = "default_ai_audit_max_active_temp_policies")]
+    pub max_active_temp_policies: u32,
+    #[serde(default = "default_ai_audit_allow_auto_temp_block")]
+    pub allow_auto_temp_block: bool,
+    #[serde(default = "default_ai_audit_allow_auto_extend_effective_policies")]
+    pub allow_auto_extend_effective_policies: bool,
+    #[serde(default = "default_ai_audit_auto_revoke_warmup_secs")]
+    pub auto_revoke_warmup_secs: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -266,6 +276,26 @@ const fn default_ai_audit_temp_policy_ttl_secs() -> u64 {
 
 const fn default_ai_audit_temp_block_ttl_secs() -> u64 {
     30 * 60
+}
+
+const fn default_ai_audit_auto_apply_min_confidence() -> u32 {
+    70
+}
+
+const fn default_ai_audit_max_active_temp_policies() -> u32 {
+    24
+}
+
+const fn default_ai_audit_allow_auto_temp_block() -> bool {
+    true
+}
+
+const fn default_ai_audit_allow_auto_extend_effective_policies() -> bool {
+    true
+}
+
+const fn default_ai_audit_auto_revoke_warmup_secs() -> u64 {
+    5 * 60
 }
 
 const fn default_security_event_retention_days() -> u64 {

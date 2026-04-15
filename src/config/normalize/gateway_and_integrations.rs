@@ -422,6 +422,24 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
         24 * 3600,
         30 * 60,
     );
+    config.integrations.ai_audit.auto_apply_min_confidence = clamp_u64(
+        config.integrations.ai_audit.auto_apply_min_confidence as u64,
+        0,
+        100,
+        70,
+    ) as u32;
+    config.integrations.ai_audit.max_active_temp_policies = clamp_u64(
+        config.integrations.ai_audit.max_active_temp_policies as u64,
+        1,
+        256,
+        24,
+    ) as u32;
+    config.integrations.ai_audit.auto_revoke_warmup_secs = clamp_u64(
+        config.integrations.ai_audit.auto_revoke_warmup_secs,
+        60,
+        24 * 3600,
+        5 * 60,
+    );
     config.storage_policy.security_event_retention_days = clamp_u64(
         config.storage_policy.security_event_retention_days,
         1,

@@ -197,8 +197,7 @@ pub(super) async fn run_ai_audit_report_handler(
                 store,
                 report.report_id,
                 &report,
-                config.integrations.ai_audit.temp_policy_ttl_secs,
-                config.integrations.ai_audit.temp_block_ttl_secs,
+                &config.integrations.ai_audit,
             )
             .await
             {
@@ -1071,19 +1070,37 @@ async fn apply_ai_temp_policies_from_report(
     store: &crate::storage::SqliteStore,
     report_id: Option<i64>,
     report: &AiAuditReportResponse,
-    default_ttl_secs: u64,
-    default_block_ttl_secs: u64,
+    ai_config: &crate::config::AiAuditConfig,
 ) -> anyhow::Result<usize> {
     let now = unix_timestamp();
     let mut applied = 0usize;
+    let active_count = store.list_active_ai_temp_policies(now).await?.len() as u32;
+    let confidence = match report.risk_level.as_str() {
+        "critical" => 95,
+        "high" => 85,
+        "medium" => 70,
+        _ => 55,
+    };
+    if active_count >= ai_config.max_active_temp_policies {
+        return Ok(0);
+    }
     for item in &report.suggested_local_rules {
         if !item.auto_apply {
             continue;
         }
+        if confidence < ai_config.auto_apply_min_confidence as i64 {
+            continue;
+        }
+        if item.action == "add_temp_block" && !ai_config.allow_auto_temp_block {
+            continue;
+        }
+        if (active_count + applied as u32) >= ai_config.max_active_temp_policies {
+            break;
+        }
         let ttl_secs = if item.action == "add_temp_block" {
-            item.ttl_secs.max(default_block_ttl_secs)
+            item.ttl_secs.max(ai_config.temp_block_ttl_secs)
         } else {
-            item.ttl_secs.max(default_ttl_secs)
+            item.ttl_secs.max(ai_config.temp_policy_ttl_secs)
         };
         store
             .upsert_ai_temp_policy(&crate::storage::AiTempPolicyUpsert {
@@ -1098,12 +1115,7 @@ async fn apply_ai_temp_policies_from_report(
                 operator: item.operator.clone(),
                 suggested_value: item.suggested_value.clone(),
                 rationale: item.rationale.clone(),
-                confidence: match report.risk_level.as_str() {
-                    "critical" => 95,
-                    "high" => 85,
-                    "medium" => 70,
-                    _ => 55,
-                },
+                confidence,
                 auto_applied: true,
                 expires_at: now.saturating_add(ttl_secs as i64),
                 effect_stats: Some(crate::storage::AiTempPolicyEffectStats {

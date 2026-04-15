@@ -351,6 +351,7 @@ impl WafEngine {
             .context
             .auto_tuning_snapshot()
             .last_observed_l7_friction_pressure_percent;
+        let ai_config = self.context.config_snapshot().integrations.ai_audit;
         let policies = store.list_active_ai_temp_policies(now).await?;
 
         for policy in policies {
@@ -377,8 +378,10 @@ impl WafEngine {
                 identity_improved,
             );
 
-            let should_revoke =
-                age_secs >= 300 && governance_mode == "cold" && !effect.auto_revoked;
+            let should_revoke = ai_config.auto_apply_temp_policies
+                && age_secs >= ai_config.auto_revoke_warmup_secs as i64
+                && governance_mode == "cold"
+                && !effect.auto_revoked;
             if should_revoke {
                 effect.auto_revoked = true;
                 effect.auto_revoke_reason =
@@ -389,7 +392,8 @@ impl WafEngine {
                 continue;
             }
 
-            let should_extend = ttl_remaining <= 300
+            let should_extend = ai_config.allow_auto_extend_effective_policies
+                && ttl_remaining <= 300
                 && governance_mode == "effective"
                 && effect.auto_extensions < 2;
             if should_extend {

@@ -41,6 +41,11 @@ function createDefaultAiAuditSettings(): AiAuditSettingsPayload {
     auto_apply_temp_policies: true,
     temp_policy_ttl_secs: 900,
     temp_block_ttl_secs: 1800,
+    auto_apply_min_confidence: 70,
+    max_active_temp_policies: 24,
+    allow_auto_temp_block: true,
+    allow_auto_extend_effective_policies: true,
+    auto_revoke_warmup_secs: 300,
   }
 }
 
@@ -644,6 +649,43 @@ onMounted(() => {
                 step="60"
               />
             </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >最低自动执行置信度</span
+              >
+              <input
+                v-model.number="form.auto_apply_min_confidence"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="0"
+                max="100"
+                step="5"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >最大活跃临时策略数</span
+              >
+              <input
+                v-model.number="form.max_active_temp_policies"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="1"
+                step="1"
+              />
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs font-medium text-slate-500"
+                >冷启动撤销热身（秒）</span
+              >
+              <input
+                v-model.number="form.auto_revoke_warmup_secs"
+                class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
+                type="number"
+                min="60"
+                step="60"
+              />
+            </label>
           </div>
 
           <div class="mt-3 flex flex-wrap gap-3">
@@ -676,6 +718,26 @@ onMounted(() => {
                 class="h-4 w-4 accent-cyan-600"
               />
               向模型附带近期事件样本
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.allow_auto_temp_block"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              允许自动执行 temp block
+            </label>
+            <label
+              class="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+            >
+              <input
+                v-model="form.allow_auto_extend_effective_policies"
+                type="checkbox"
+                class="h-4 w-4 accent-cyan-600"
+              />
+              允许自动续期有效策略
             </label>
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500"

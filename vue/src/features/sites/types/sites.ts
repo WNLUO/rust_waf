@@ -154,6 +154,11 @@ export interface AiAuditSettingsPayload {
   auto_apply_temp_policies: boolean
   temp_policy_ttl_secs: number
   temp_block_ttl_secs: number
+  auto_apply_min_confidence: number
+  max_active_temp_policies: number
+  allow_auto_temp_block: boolean
+  allow_auto_extend_effective_policies: boolean
+  auto_revoke_warmup_secs: number
 }
 
 export interface GlobalSettingsPayload {

@@ -849,6 +849,11 @@ mod tests {
             auto_apply_temp_policies: true,
             temp_policy_ttl_secs: 900,
             temp_block_ttl_secs: 1800,
+            auto_apply_min_confidence: 70,
+            max_active_temp_policies: 24,
+            allow_auto_temp_block: true,
+            allow_auto_extend_effective_policies: true,
+            auto_revoke_warmup_secs: 300,
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());
@@ -880,6 +885,11 @@ mod tests {
             auto_apply_temp_policies: true,
             temp_policy_ttl_secs: 900,
             temp_block_ttl_secs: 1800,
+            auto_apply_min_confidence: 70,
+            max_active_temp_policies: 24,
+            allow_auto_temp_block: true,
+            allow_auto_extend_effective_policies: true,
+            auto_revoke_warmup_secs: 300,
         };
 
         let execution = resolve_report_execution(&config, &AiAuditReportQueryParams::default());

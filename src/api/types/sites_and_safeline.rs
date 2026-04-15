@@ -164,6 +164,11 @@ pub struct AiAuditSettingsResponse {
     pub(crate) auto_apply_temp_policies: bool,
     pub(crate) temp_policy_ttl_secs: u64,
     pub(crate) temp_block_ttl_secs: u64,
+    pub(crate) auto_apply_min_confidence: u32,
+    pub(crate) max_active_temp_policies: u32,
+    pub(crate) allow_auto_temp_block: bool,
+    pub(crate) allow_auto_extend_effective_policies: bool,
+    pub(crate) auto_revoke_warmup_secs: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -187,6 +192,16 @@ pub struct AiAuditSettingsRequest {
     pub(crate) temp_policy_ttl_secs: u64,
     #[serde(default)]
     pub(crate) temp_block_ttl_secs: u64,
+    #[serde(default)]
+    pub(crate) auto_apply_min_confidence: u32,
+    #[serde(default)]
+    pub(crate) max_active_temp_policies: u32,
+    #[serde(default)]
+    pub(crate) allow_auto_temp_block: bool,
+    #[serde(default)]
+    pub(crate) allow_auto_extend_effective_policies: bool,
+    #[serde(default)]
+    pub(crate) auto_revoke_warmup_secs: u64,
 }
 
 #[derive(Debug, Serialize)]

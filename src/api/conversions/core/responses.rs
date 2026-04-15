@@ -652,6 +652,11 @@ impl AiAuditSettingsResponse {
             auto_apply_temp_policies: config.auto_apply_temp_policies,
             temp_policy_ttl_secs: config.temp_policy_ttl_secs,
             temp_block_ttl_secs: config.temp_block_ttl_secs,
+            auto_apply_min_confidence: config.auto_apply_min_confidence,
+            max_active_temp_policies: config.max_active_temp_policies,
+            allow_auto_temp_block: config.allow_auto_temp_block,
+            allow_auto_extend_effective_policies: config.allow_auto_extend_effective_policies,
+            auto_revoke_warmup_secs: config.auto_revoke_warmup_secs,
         }
     }
 }

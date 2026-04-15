@@ -1,6 +1,9 @@
 impl SqliteStore {
     pub async fn upsert_ai_temp_policy(&self, policy: &AiTempPolicyUpsert) -> Result<i64> {
         let now = unix_timestamp();
+        let effect_json = serde_json::to_string(policy.effect_stats.as_ref().unwrap_or(
+            &crate::storage::AiTempPolicyEffectStats::default(),
+        ))?;
         let result = sqlx::query(
             r#"
             INSERT INTO ai_temp_policies (
@@ -8,7 +11,7 @@ impl SqliteStore {
                 policy_type, layer, scope_type, scope_value, action, operator, suggested_value,
                 rationale, confidence, auto_applied, hit_count, last_hit_at, effect_json
             )
-            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, '{}')
+            VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
             ON CONFLICT(policy_key, scope_type, scope_value, status) DO UPDATE SET
                 updated_at = excluded.updated_at,
                 expires_at = excluded.expires_at,
@@ -21,7 +24,11 @@ impl SqliteStore {
                 suggested_value = excluded.suggested_value,
                 rationale = excluded.rationale,
                 confidence = excluded.confidence,
-                auto_applied = excluded.auto_applied
+                auto_applied = excluded.auto_applied,
+                effect_json = CASE
+                    WHEN ai_temp_policies.effect_json = '{}' THEN excluded.effect_json
+                    ELSE ai_temp_policies.effect_json
+                END
             "#
         )
         .bind(now)
@@ -40,6 +47,7 @@ impl SqliteStore {
         .bind(&policy.rationale)
         .bind(policy.confidence)
         .bind(policy.auto_applied)
+        .bind(effect_json)
         .execute(&self.pool)
         .await?;
 

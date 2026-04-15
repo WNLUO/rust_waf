@@ -148,6 +148,12 @@ pub struct AiTempPolicyEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AiTempPolicyEffectStats {
     #[serde(default)]
+    pub baseline_l7_friction_percent: Option<f64>,
+    #[serde(default)]
+    pub baseline_identity_pressure_percent: Option<f64>,
+    #[serde(default)]
+    pub baseline_rust_persistence_percent: Option<f64>,
+    #[serde(default)]
     pub total_hits: i64,
     #[serde(default)]
     pub first_hit_at: Option<i64>,
@@ -195,6 +201,7 @@ pub struct AiTempPolicyUpsert {
     pub confidence: i64,
     pub auto_applied: bool,
     pub expires_at: i64,
+    pub effect_stats: Option<AiTempPolicyEffectStats>,
 }
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]

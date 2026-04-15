@@ -154,6 +154,9 @@ pub struct AiTempPoliciesResponse {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AiTempPolicyEffectResponse {
+    pub(crate) baseline_l7_friction_percent: Option<f64>,
+    pub(crate) baseline_identity_pressure_percent: Option<f64>,
+    pub(crate) baseline_rust_persistence_percent: Option<f64>,
     pub(crate) total_hits: i64,
     pub(crate) first_hit_at: Option<i64>,
     pub(crate) last_hit_at: Option<i64>,
@@ -164,6 +167,16 @@ pub struct AiTempPolicyEffectResponse {
     pub(crate) action_hits: std::collections::BTreeMap<String, i64>,
     pub(crate) match_modes: std::collections::BTreeMap<String, i64>,
     pub(crate) scope_hits: std::collections::BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AiTempPolicyEffectivenessResponse {
+    pub(crate) current_l7_friction_percent: f64,
+    pub(crate) current_identity_pressure_percent: f64,
+    pub(crate) current_rust_persistence_percent: f64,
+    pub(crate) l7_friction_delta: Option<f64>,
+    pub(crate) identity_pressure_delta: Option<f64>,
+    pub(crate) rust_persistence_delta: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,6 +200,7 @@ pub struct AiTempPolicyResponse {
     pub(crate) hit_count: i64,
     pub(crate) last_hit_at: Option<i64>,
     pub(crate) effect: AiTempPolicyEffectResponse,
+    pub(crate) effectiveness: AiTempPolicyEffectivenessResponse,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -227,9 +227,13 @@ export interface AiTempPolicyItem {
   hit_count: number
   last_hit_at: number | null
   effect: AiTempPolicyEffect
+  effectiveness: AiTempPolicyEffectiveness
 }
 
 export interface AiTempPolicyEffect {
+  baseline_l7_friction_percent: number | null
+  baseline_identity_pressure_percent: number | null
+  baseline_rust_persistence_percent: number | null
   total_hits: number
   first_hit_at: number | null
   last_hit_at: number | null
@@ -240,6 +244,15 @@ export interface AiTempPolicyEffect {
   action_hits: Record<string, number>
   match_modes: Record<string, number>
   scope_hits: Record<string, number>
+}
+
+export interface AiTempPolicyEffectiveness {
+  current_l7_friction_percent: number
+  current_identity_pressure_percent: number
+  current_rust_persistence_percent: number
+  l7_friction_delta: number | null
+  identity_pressure_delta: number | null
+  rust_persistence_delta: number | null
 }
 
 export interface AiTempPoliciesResponse {

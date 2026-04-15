@@ -247,6 +247,12 @@ function formatCountItems(
     .join(' · ')
 }
 
+function formatDelta(value: number | null, suffix = '%') {
+  if (value == null) return '暂无基线'
+  const sign = value > 0 ? '+' : ''
+  return `${sign}${formatNumber(value)}${suffix}`
+}
+
 watch(
   () => form.provider,
   (provider, previous) => {
@@ -1352,6 +1358,83 @@ onMounted(() => {
                         <p class="mt-1 text-[11px] text-slate-500">
                           动作
                           {{ formatPolicyEffectMap(policy.effect.action_hits) }}
+                        </p>
+                      </div>
+                    </div>
+                    <div class="mt-2 grid gap-2 md:grid-cols-3">
+                      <div
+                        class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
+                      >
+                        <p
+                          class="text-[11px] uppercase tracking-[0.14em] text-slate-400"
+                        >
+                          L7 摩擦
+                        </p>
+                        <p class="mt-1 text-xs text-slate-600">
+                          当前
+                          {{
+                            formatNumber(
+                              policy.effectiveness.current_l7_friction_percent,
+                            )
+                          }}%
+                        </p>
+                        <p class="mt-1 text-[11px] text-slate-500">
+                          变化
+                          {{
+                            formatDelta(policy.effectiveness.l7_friction_delta)
+                          }}
+                        </p>
+                      </div>
+                      <div
+                        class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
+                      >
+                        <p
+                          class="text-[11px] uppercase tracking-[0.14em] text-slate-400"
+                        >
+                          身份压力
+                        </p>
+                        <p class="mt-1 text-xs text-slate-600">
+                          当前
+                          {{
+                            formatNumber(
+                              policy.effectiveness
+                                .current_identity_pressure_percent,
+                            )
+                          }}%
+                        </p>
+                        <p class="mt-1 text-[11px] text-slate-500">
+                          变化
+                          {{
+                            formatDelta(
+                              policy.effectiveness.identity_pressure_delta,
+                            )
+                          }}
+                        </p>
+                      </div>
+                      <div
+                        class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
+                      >
+                        <p
+                          class="text-[11px] uppercase tracking-[0.14em] text-slate-400"
+                        >
+                          雷池后持续压力
+                        </p>
+                        <p class="mt-1 text-xs text-slate-600">
+                          当前
+                          {{
+                            formatNumber(
+                              policy.effectiveness
+                                .current_rust_persistence_percent,
+                            )
+                          }}%
+                        </p>
+                        <p class="mt-1 text-[11px] text-slate-500">
+                          变化
+                          {{
+                            formatDelta(
+                              policy.effectiveness.rust_persistence_delta,
+                            )
+                          }}
                         </p>
                       </div>
                     </div>

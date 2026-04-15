@@ -256,9 +256,13 @@ pub(super) async fn list_ai_temp_policies_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<AiTempPoliciesResponse>> {
     let items = state.context.active_ai_temp_policies();
+    let summary = build_ai_audit_summary(&state, Some(900), Some(120), Some(0)).await?;
     Ok(Json(AiTempPoliciesResponse {
         total: items.len() as u32,
-        policies: items.into_iter().map(AiTempPolicyResponse::from).collect(),
+        policies: items
+            .into_iter()
+            .map(|item| ai_temp_policy_response_from_entry(item, &summary))
+            .collect(),
     }))
 }
 
@@ -1093,6 +1097,18 @@ async fn apply_ai_temp_policies_from_report(
                 },
                 auto_applied: true,
                 expires_at: now.saturating_add(ttl_secs as i64),
+                effect_stats: Some(crate::storage::AiTempPolicyEffectStats {
+                    baseline_l7_friction_percent: Some(
+                        report.summary.current.l7_friction_pressure_percent,
+                    ),
+                    baseline_identity_pressure_percent: Some(
+                        report.summary.current.identity_pressure_percent,
+                    ),
+                    baseline_rust_persistence_percent: Some(
+                        report.summary.safeline_correlation.rust_persistence_percent,
+                    ),
+                    ..crate::storage::AiTempPolicyEffectStats::default()
+                }),
             })
             .await?;
         applied += 1;
@@ -1100,43 +1116,61 @@ async fn apply_ai_temp_policies_from_report(
     Ok(applied)
 }
 
-impl From<crate::storage::AiTempPolicyEntry> for AiTempPolicyResponse {
-    fn from(value: crate::storage::AiTempPolicyEntry) -> Self {
-        let effect =
-            serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&value.effect_json)
-                .unwrap_or_default();
-        Self {
-            id: value.id,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            expires_at: value.expires_at,
-            policy_key: value.policy_key,
-            title: value.title,
-            policy_type: value.policy_type,
-            layer: value.layer,
-            scope_type: value.scope_type,
-            scope_value: value.scope_value,
-            action: value.action,
-            operator: value.operator,
-            suggested_value: value.suggested_value,
-            rationale: value.rationale,
-            confidence: value.confidence,
-            auto_applied: value.auto_applied,
-            hit_count: value.hit_count,
-            last_hit_at: value.last_hit_at,
-            effect: AiTempPolicyEffectResponse {
-                total_hits: effect.total_hits,
-                first_hit_at: effect.first_hit_at,
-                last_hit_at: effect.last_hit_at,
-                last_scope_type: effect.last_scope_type,
-                last_scope_value: effect.last_scope_value,
-                last_matched_value: effect.last_matched_value,
-                last_match_mode: effect.last_match_mode,
-                action_hits: effect.action_hits,
-                match_modes: effect.match_modes,
-                scope_hits: effect.scope_hits,
-            },
-        }
+fn ai_temp_policy_response_from_entry(
+    value: crate::storage::AiTempPolicyEntry,
+    summary: &AiAuditSummaryResponse,
+) -> AiTempPolicyResponse {
+    let effect =
+        serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&value.effect_json)
+            .unwrap_or_default();
+    AiTempPolicyResponse {
+        id: value.id,
+        created_at: value.created_at,
+        updated_at: value.updated_at,
+        expires_at: value.expires_at,
+        policy_key: value.policy_key,
+        title: value.title,
+        policy_type: value.policy_type,
+        layer: value.layer,
+        scope_type: value.scope_type,
+        scope_value: value.scope_value,
+        action: value.action,
+        operator: value.operator,
+        suggested_value: value.suggested_value,
+        rationale: value.rationale,
+        confidence: value.confidence,
+        auto_applied: value.auto_applied,
+        hit_count: value.hit_count,
+        last_hit_at: value.last_hit_at,
+        effect: AiTempPolicyEffectResponse {
+            baseline_l7_friction_percent: effect.baseline_l7_friction_percent,
+            baseline_identity_pressure_percent: effect.baseline_identity_pressure_percent,
+            baseline_rust_persistence_percent: effect.baseline_rust_persistence_percent,
+            total_hits: effect.total_hits,
+            first_hit_at: effect.first_hit_at,
+            last_hit_at: effect.last_hit_at,
+            last_scope_type: effect.last_scope_type,
+            last_scope_value: effect.last_scope_value,
+            last_matched_value: effect.last_matched_value,
+            last_match_mode: effect.last_match_mode,
+            action_hits: effect.action_hits,
+            match_modes: effect.match_modes,
+            scope_hits: effect.scope_hits,
+        },
+        effectiveness: AiTempPolicyEffectivenessResponse {
+            current_l7_friction_percent: summary.current.l7_friction_pressure_percent,
+            current_identity_pressure_percent: summary.current.identity_pressure_percent,
+            current_rust_persistence_percent: summary.safeline_correlation.rust_persistence_percent,
+            l7_friction_delta: effect
+                .baseline_l7_friction_percent
+                .map(|value| summary.current.l7_friction_pressure_percent - value),
+            identity_pressure_delta: effect
+                .baseline_identity_pressure_percent
+                .map(|value| summary.current.identity_pressure_percent - value),
+            rust_persistence_delta: effect
+                .baseline_rust_persistence_percent
+                .map(|value| summary.safeline_correlation.rust_persistence_percent - value),
+        },
     }
 }
 

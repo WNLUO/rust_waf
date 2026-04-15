@@ -556,6 +556,10 @@ fn assess_samples(
         .front()
         .map(|first| now.duration_since(first.at).as_secs())
         .unwrap_or(0);
+    let broad_navigation_context = total >= 24
+        && distinct_routes >= 16
+        && repeated_ratio_percent <= 15
+        && non_document_requests >= document_requests.saturating_mul(6);
 
     let mut score = 0u32;
     let mut flags = Vec::new();
@@ -588,14 +592,16 @@ fn assess_samples(
         score += 15;
         flags.push("focused_document_loop");
     }
-    if document_requests >= 3
+    if !broad_navigation_context
+        && document_requests >= 3
         && document_repeated_ratio_percent >= 100
         && non_document_requests >= 24
         && session_span_secs <= 30
     {
         score += 60;
         flags.push("document_reload_burst");
-    } else if document_requests >= 2
+    } else if !broad_navigation_context
+        && document_requests >= 2
         && document_repeated_ratio_percent >= 100
         && non_document_requests >= 12
         && session_span_secs <= 20
@@ -607,10 +613,16 @@ fn assess_samples(
         score += 15;
         flags.push("api_route_bias");
     }
-    if api_requests >= 4 && api_repeated_ratio_percent >= 85 {
+    if api_requests >= 4
+        && api_repeated_ratio_percent >= 85
+        && (!broad_navigation_context || distinct_routes <= 8)
+    {
         score += 35;
         flags.push("focused_api_burst");
-    } else if api_requests >= 3 && api_repeated_ratio_percent >= 70 {
+    } else if api_requests >= 3
+        && api_repeated_ratio_percent >= 70
+        && (!broad_navigation_context || distinct_routes <= 6)
+    {
         score += 20;
         flags.push("focused_api_loop");
     }
@@ -645,6 +657,10 @@ fn assess_samples(
             score += 10;
             flags.push("low_jitter");
         }
+    }
+    if broad_navigation_context {
+        score = score.saturating_sub(25);
+        flags.push("broad_navigation_context");
     }
 
     BehaviorAssessment {
@@ -854,8 +870,6 @@ fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
     }
 
     if path.starts_with("/api/")
-        || path.contains("/wp-json/")
-        || path.contains("/admin-ajax.php")
         || accept.contains("application/json")
         || content_type.contains("application/json")
         || x_requested_with == "xmlhttprequest"
@@ -1032,28 +1046,89 @@ mod tests {
         let guard = L7BehaviorGuard::new();
         let mut last = None;
 
-        for cycle in 0..3 {
+        for _cycle in 0..4 {
             let mut doc = request("GET", "/article.html", "text/html");
             doc.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
             doc.add_metadata("l7.cc.route".to_string(), "/article.html".to_string());
             last = guard.inspect_request(&mut doc).await;
 
-            for asset in 0..18 {
-                let mut static_request =
-                    request("GET", &format!("/static/{cycle}-{asset}.js"), "*/*");
+            for asset in 0..12 {
+                let mut static_request = request("GET", &format!("/static/{asset}.js"), "*/*");
                 static_request.add_metadata(
                     "l7.cc.request_kind".to_string(),
                     "static".to_string(),
                 );
                 static_request.add_metadata(
                     "l7.cc.route".to_string(),
-                    format!("/static/{cycle}-{asset}.js"),
+                    format!("/static/{asset}.js"),
                 );
                 let _ = guard.inspect_request(&mut static_request).await;
             }
         }
 
         assert!(last.is_some());
+    }
+
+    #[tokio::test]
+    async fn broad_navigation_with_many_assets_stays_below_challenge() {
+        let guard = L7BehaviorGuard::new();
+
+        for page in 0..3 {
+            let mut doc = request("GET", "/wp-admin/edit-tags.php?taxonomy=category", "text/html");
+            doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+            doc.add_metadata(
+                "l7.cc.request_kind".to_string(),
+                "document".to_string(),
+            );
+            doc.add_metadata(
+                "l7.cc.route".to_string(),
+                "/wp-admin/edit-tags.php".to_string(),
+            );
+            assert!(guard.inspect_request(&mut doc).await.is_none());
+
+            for asset in 0..32 {
+                let mut req = request(
+                    "GET",
+                    &format!("/wp-admin/load-{page}-{asset}.css"),
+                    "*/*",
+                );
+                req.add_header("sec-fetch-dest".to_string(), "style".to_string());
+                req.add_metadata("l7.cc.request_kind".to_string(), "static".to_string());
+                req.add_metadata(
+                    "l7.cc.route".to_string(),
+                    format!("/wp-admin/load-{page}-{asset}.css"),
+                );
+                assert!(guard.inspect_request(&mut req).await.is_none());
+            }
+
+            let mut api = request("POST", "/admin/async/state", "application/json");
+            api.add_header(
+                "content-type".to_string(),
+                "application/json; charset=utf-8".to_string(),
+            );
+            api.add_header(
+                "x-requested-with".to_string(),
+                "XMLHttpRequest".to_string(),
+            );
+            api.add_metadata("l7.cc.request_kind".to_string(), "api".to_string());
+            api.add_metadata(
+                "l7.cc.route".to_string(),
+                "/admin/async/state".to_string(),
+            );
+            assert!(guard.inspect_request(&mut api).await.is_none());
+        }
+
+        let mut summary = request("GET", "/wp-admin/tools.php", "text/html");
+        summary.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        summary.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        summary.add_metadata("l7.cc.route".to_string(), "/wp-admin/tools.php".to_string());
+        let _ = guard.inspect_request(&mut summary).await;
+
+        let score = summary
+            .get_metadata("l7.behavior.score")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_default();
+        assert!(score < CHALLENGE_SCORE, "unexpected score {score}");
     }
 
     #[tokio::test]

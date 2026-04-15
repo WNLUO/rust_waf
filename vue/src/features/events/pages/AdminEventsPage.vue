@@ -365,6 +365,13 @@ const parseEventDetails = (event: SecurityEventItem) => {
   try {
     return JSON.parse(event.details_json) as {
       client_identity?: Record<string, unknown>
+      connect_target?: string
+      host?: string
+      sni?: string
+      status?: number
+      reason?: string | null
+      stage?: string
+      error?: string
     }
   } catch {
     return null
@@ -375,11 +382,21 @@ const hasClientIdentityDebug = (event: SecurityEventItem) =>
   Boolean(parseEventDetails(event)?.client_identity) &&
   event.layer.toLowerCase() === 'l7'
 
+const hasUpstreamHttp2Debug = (event: SecurityEventItem) =>
+  event.reason.startsWith('upstream http2 debug (') &&
+  event.layer.toLowerCase() === 'l7'
+
 const openClientIdentityDebug = (event: SecurityEventItem) => {
   const details = parseEventDetails(event)
   const payload = details?.client_identity ?? details
   if (!payload) return
   openPreview('客户端身份调试', JSON.stringify(payload, null, 2))
+}
+
+const openUpstreamHttp2Debug = (event: SecurityEventItem) => {
+  const details = parseEventDetails(event)
+  if (!details) return
+  openPreview('上游 HTTP/2 调试', JSON.stringify(details, null, 2))
 }
 
 const siteOptions = computed(() => {
@@ -674,6 +691,14 @@ watch(currentPage, () => {
                       @click="openClientIdentityDebug(event)"
                     >
                       身份调试
+                    </button>
+                    <button
+                      v-if="hasUpstreamHttp2Debug(event)"
+                      class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-emerald-200 bg-emerald-50 px-2 text-xs text-emerald-700 hover:bg-emerald-100"
+                      title="查看上游 HTTP/2 调试"
+                      @click="openUpstreamHttp2Debug(event)"
+                    >
+                      上游调试
                     </button>
                   </div>
                 </td>

@@ -500,6 +500,9 @@ fn build_http2_upstream_request(
         builder = builder.header(key.as_str(), value.as_str());
     }
 
+    // In HTTP/2 the request authority is already carried by the URI/:authority.
+    // Re-injecting a plain `Host` header here caused the local Tengine upstream
+    // to reject otherwise valid requests with 400 Bad Request.
     builder
         .body(Full::new(Bytes::from(request.body.clone())))
         .map_err(Into::into)
@@ -592,6 +595,9 @@ fn effective_http2_upstream_authority(
     request: &UnifiedHttpRequest,
     upstream: &crate::core::gateway::UpstreamEndpoint,
 ) -> String {
+    // `upstream.authority` is only the connect target (for example 127.0.0.1:880).
+    // The business host seen by the upstream virtual host must still come from the
+    // original request host/authority so that SNI and routing stay on wnluo.com.
     request
         .get_header("host")
         .cloned()
@@ -714,6 +720,9 @@ fn resolve_upstream_tls_server_name(
         return Ok(None);
     }
 
+    // Even when we connect to a loopback upstream like 127.0.0.1:880, the TLS
+    // identity should prefer the original request host so virtual-hosted
+    // upstreams keep seeing wnluo.com instead of the local connect target.
     if let Some(hostname) = crate::core::engine::policy::request_hostname(request) {
         return Ok(Some(hostname));
     }

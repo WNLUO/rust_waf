@@ -76,17 +76,22 @@ impl Http2Handler {
     }
 
     /// 驱动一个 HTTP/2 连接，并把每个请求转换成 UnifiedHttpRequest 交给回调处理。
-    pub async fn serve_connection<H, Fut>(
+    pub async fn serve_connection<H, Fut, E, Eut>(
         &self,
         stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
         client_ip: String,
         listener_port: u16,
         max_size: usize,
+        read_idle_timeout_ms: u64,
+        body_min_bytes_per_sec: u32,
         handler: H,
+        error_handler: E,
     ) -> Result<(), ProtocolError>
     where
         H: Fn(UnifiedHttpRequest) -> Fut + Clone + Send + 'static,
         Fut: Future<Output = Result<Http2Response, ProtocolError>> + Send + 'static,
+        E: Fn(ProtocolError) -> Eut + Clone + Send + 'static,
+        Eut: Future<Output = Result<Http2Response, ProtocolError>> + Send + 'static,
     {
         let io = TokioIo::new(stream);
         let mut builder = http2::Builder::new(TokioExecutor::new());
@@ -104,13 +109,23 @@ impl Http2Handler {
 
         let service = service_fn(move |request: Request<Incoming>| {
             let handler = handler.clone();
+            let error_handler = error_handler.clone();
             let client_ip = client_ip.clone();
             async move {
                 let is_head_request = request.method() == http::Method::HEAD;
-                let unified =
-                    Http2Handler::request_to_unified(request, &client_ip, listener_port, max_size)
-                        .await?;
-                let response = handler(unified).await?;
+                let response = match Http2Handler::request_to_unified(
+                    request,
+                    &client_ip,
+                    listener_port,
+                    max_size,
+                    read_idle_timeout_ms,
+                    body_min_bytes_per_sec,
+                )
+                .await
+                {
+                    Ok(unified) => handler(unified).await?,
+                    Err(err) => error_handler(err).await?,
+                };
                 Ok::<_, ProtocolError>(Http2Handler::build_response(response, is_head_request))
             }
         });
@@ -126,18 +141,18 @@ impl Http2Handler {
         client_ip: &str,
         listener_port: u16,
         max_size: usize,
+        read_idle_timeout_ms: u64,
+        body_min_bytes_per_sec: u32,
     ) -> Result<UnifiedHttpRequest, ProtocolError>
     where
-        B: Body + Send + 'static,
+        B: Body + Send + Unpin + 'static,
         B::Data: Buf,
         B::Error: std::fmt::Display,
     {
         let (parts, body) = request.into_parts();
-        let body = body
-            .collect()
-            .await
-            .map_err(|err| ProtocolError::ParseError(format!("HTTP/2 body read failed: {}", err)))?
-            .to_bytes();
+        let body =
+            read_http2_request_body(body, max_size, read_idle_timeout_ms, body_min_bytes_per_sec)
+                .await?;
 
         if body.len() > max_size {
             return Err(ProtocolError::ParseError(format!(
@@ -245,6 +260,60 @@ impl Http2Handler {
                 .expect("fallback HTTP/2 response must be valid")
         })
     }
+}
+
+async fn read_http2_request_body<B>(
+    mut body: B,
+    max_size: usize,
+    read_idle_timeout_ms: u64,
+    body_min_bytes_per_sec: u32,
+) -> Result<Bytes, ProtocolError>
+where
+    B: Body + Send + Unpin + 'static,
+    B::Data: Buf,
+    B::Error: std::fmt::Display,
+{
+    let mut collected = Vec::new();
+    let started_at = std::time::Instant::now();
+
+    while let Some(frame) = tokio::time::timeout(
+        std::time::Duration::from_millis(read_idle_timeout_ms),
+        body.frame(),
+    )
+    .await
+    .map_err(|_| ProtocolError::SlowBody {
+        bytes_read: collected.len(),
+        expected_bytes: collected.len().max(1),
+        elapsed_ms: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+    })? {
+        let frame = frame.map_err(|err| {
+            ProtocolError::ParseError(format!("HTTP/2 body read failed: {}", err))
+        })?;
+        if let Ok(mut data) = frame.into_data() {
+            let remaining = data.remaining();
+            if collected.len() + remaining > max_size {
+                return Err(ProtocolError::ParseError(format!(
+                    "HTTP/2 request body exceeded limit: {} > {}",
+                    collected.len() + remaining,
+                    max_size
+                )));
+            }
+            collected.extend_from_slice(data.copy_to_bytes(remaining).as_ref());
+            if body_min_bytes_per_sec > 0
+                && started_at.elapsed() >= std::time::Duration::from_secs(1)
+                && (collected.len() as f64 / started_at.elapsed().as_secs_f64())
+                    < body_min_bytes_per_sec as f64
+            {
+                return Err(ProtocolError::SlowBody {
+                    bytes_read: collected.len(),
+                    expected_bytes: collected.len().max(1),
+                    elapsed_ms: started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+                });
+            }
+        }
+    }
+
+    Ok(Bytes::from(collected))
 }
 
 impl Default for Http2Handler {
@@ -391,7 +460,7 @@ mod tests {
             .body(Full::new(Bytes::from_static(br#"{"ok":true}"#)))
             .unwrap();
 
-        let unified = Http2Handler::request_to_unified(request, "127.0.0.1", 8443, 1024)
+        let unified = Http2Handler::request_to_unified(request, "127.0.0.1", 8443, 1024, 5_000, 16)
             .await
             .unwrap();
 

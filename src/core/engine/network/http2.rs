@@ -19,6 +19,8 @@ pub(crate) async fn handle_http2_connection(
 
     let packet = packet.clone();
     let context_for_service = Arc::clone(&context);
+    let context_for_error = Arc::clone(&context);
+    let packet_for_error = packet.clone();
     let peer_ip = peer_addr.ip().to_string();
     let max_request_size = config.l7_config.max_request_size;
     let request_metadata = extra_metadata.clone();
@@ -41,6 +43,8 @@ pub(crate) async fn handle_http2_connection(
             peer_ip,
             packet.dest_port,
             max_request_size,
+            config.l7_config.read_idle_timeout_ms,
+            config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
             move |request| {
                 let context = Arc::clone(&context_for_service);
                 let packet = packet.clone();
@@ -517,6 +521,17 @@ pub(crate) async fn handle_http2_connection(
                     })
                 }
             },
+            {
+                let context = Arc::clone(&context_for_error);
+                let packet = packet_for_error.clone();
+                move |err| {
+                    let context = Arc::clone(&context);
+                    let packet = packet.clone();
+                    async move {
+                        handle_http2_slow_attack_error(context.as_ref(), &packet, err).await
+                    }
+                }
+            },
         )
         .await?;
 
@@ -531,6 +546,151 @@ pub(crate) async fn handle_http2_connection(
     }
 
     Ok(())
+}
+
+async fn handle_http2_slow_attack_error(
+    context: &WafContext,
+    packet: &PacketInfo,
+    err: crate::protocol::ProtocolError,
+) -> Result<Http2Response, crate::protocol::ProtocolError> {
+    let (kind, detail) = match err {
+        crate::protocol::ProtocolError::SlowBody {
+            bytes_read,
+            expected_bytes,
+            elapsed_ms,
+        } => (
+            crate::l7::SlowAttackKind::SlowBody,
+            format!(
+                "http2 bytes_read={bytes_read} expected_bytes={expected_bytes} elapsed_ms={elapsed_ms}"
+            ),
+        ),
+        crate::protocol::ProtocolError::IdleTimeout { elapsed_ms } => (
+            crate::l7::SlowAttackKind::IdleConnection,
+            format!("http2 elapsed_ms={elapsed_ms}"),
+        ),
+        crate::protocol::ProtocolError::SlowHeader {
+            bytes_read,
+            elapsed_ms,
+        } => (
+            crate::l7::SlowAttackKind::SlowHeaders,
+            format!("http2 bytes_read={bytes_read} elapsed_ms={elapsed_ms}"),
+        ),
+        other => return Err(other),
+    };
+
+    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context, packet.source_ip);
+    let assessment = context
+        .slow_attack_guard()
+        .assess(crate::l7::SlowAttackObservation {
+            kind,
+            peer_ip: packet.source_ip,
+            client_ip: None,
+            trusted_proxy_peer,
+            client_identity_unresolved: trusted_proxy_peer,
+            host: None,
+            detail,
+        });
+    if let Some(metrics) = context.metrics.as_ref() {
+        match kind {
+            crate::l7::SlowAttackKind::IdleConnection => metrics.record_slow_attack_idle_timeout(),
+            crate::l7::SlowAttackKind::SlowHeaders => metrics.record_slow_attack_header_timeout(),
+            crate::l7::SlowAttackKind::SlowBody => metrics.record_slow_attack_body_timeout(),
+            crate::l7::SlowAttackKind::SlowTlsHandshake => {
+                metrics.record_slow_attack_tls_handshake()
+            }
+        }
+        if assessment.should_block_ip {
+            metrics.record_slow_attack_block();
+        }
+        metrics.record_block(crate::core::InspectionLayer::L7);
+    }
+
+    persist_http2_slow_attack_event(context, packet, kind, &assessment);
+    if let Some(inspector) = context.l4_inspector() {
+        let slow_request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http2_0,
+            "SLOW".to_string(),
+            format!("/slow-attack/{}", kind.as_str()),
+        );
+        inspector.record_l7_feedback(
+            &packet,
+            &slow_request,
+            crate::l4::behavior::FeedbackSource::SlowAttack,
+        );
+    }
+
+    if assessment.should_block_ip {
+        if let Some(ip) = assessment.block_ip {
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.block_ip(
+                    &ip,
+                    &assessment.reason,
+                    std::time::Duration::from_secs(assessment.block_duration_secs),
+                );
+            }
+            if let Some(store) = context.sqlite_store.as_ref() {
+                let blocked_at = current_unix_timestamp();
+                store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+                    ip.to_string(),
+                    assessment.reason.clone(),
+                    blocked_at,
+                    blocked_at + assessment.block_duration_secs as i64,
+                ));
+            }
+        }
+    }
+
+    let response = context
+        .slow_attack_guard()
+        .build_response(&assessment, kind);
+    Ok(Http2Response {
+        status_code: response.status_code,
+        headers: response.headers,
+        body: response.body,
+    })
+}
+
+fn persist_http2_slow_attack_event(
+    context: &WafContext,
+    packet: &PacketInfo,
+    kind: crate::l7::SlowAttackKind,
+    assessment: &crate::l7::slow_attack_guard::SlowAttackAssessment,
+) {
+    let Some(store) = context.sqlite_store.as_ref() else {
+        return;
+    };
+    let mut event = crate::storage::SecurityEventRecord::now(
+        "L7",
+        if assessment.should_block_ip {
+            "block"
+        } else {
+            "respond"
+        },
+        assessment.reason.clone(),
+        assessment.block_ip.unwrap_or(packet.source_ip).to_string(),
+        packet.dest_ip.to_string(),
+        packet.source_port,
+        packet.dest_port,
+        format!("{:?}", packet.protocol),
+    );
+    event.http_version = Some("HTTP/2.0".to_string());
+    event.details_json = serde_json::to_string_pretty(&serde_json::json!({
+        "slow_attack": {
+            "kind": kind.as_str(),
+            "event_count": assessment.event_count,
+            "block_ip": assessment.block_ip.map(|ip| ip.to_string()),
+            "peer_ip": packet.source_ip.to_string(),
+        }
+    }))
+    .ok();
+    store.enqueue_security_event(event);
+}
+
+fn current_unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]

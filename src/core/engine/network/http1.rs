@@ -695,6 +695,19 @@ async fn handle_slow_attack_error(
     }
 
     persist_http1_slow_attack_event(context, packet, peer_addr, kind, &assessment);
+    if let Some(inspector) = context.l4_inspector() {
+        let mut slow_request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "SLOW".to_string(),
+            format!("/slow-attack/{}", kind.as_str()),
+        );
+        slow_request.set_client_ip(packet.source_ip.to_string());
+        inspector.record_l7_feedback(
+            packet,
+            &slow_request,
+            crate::l4::behavior::FeedbackSource::SlowAttack,
+        );
+    }
 
     if assessment.should_block_ip {
         if let Some(ip) = assessment.block_ip {

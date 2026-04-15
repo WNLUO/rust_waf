@@ -26,7 +26,7 @@ pub use gateway::{
 };
 pub use http3::Http3Config;
 pub use l4::L4Config;
-pub use l7::L7Config;
+pub use l7::{L7Config, UpstreamProtocolPolicy};
 
 impl Config {
     pub fn effective_trusted_proxy_cidrs(&self) -> Vec<String> {

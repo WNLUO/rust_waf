@@ -14,18 +14,20 @@ fn build_verified_upstream_tls_connector() -> Result<TlsConnector> {
     crate::tls::ensure_rustls_crypto_provider();
     let mut root_store = rustls::RootCertStore::empty();
     root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let config = RustlsClientConfig::builder()
+    let mut config = RustlsClientConfig::builder()
         .with_root_certificates(root_store)
         .with_no_client_auth();
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(TlsConnector::from(Arc::new(config)))
 }
 
 fn build_insecure_upstream_tls_connector() -> TlsConnector {
     crate::tls::ensure_rustls_crypto_provider();
-    let config = RustlsClientConfig::builder()
+    let mut config = RustlsClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(NoCertificateVerification))
         .with_no_client_auth();
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     TlsConnector::from(Arc::new(config))
 }
 

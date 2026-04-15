@@ -75,6 +75,32 @@ pub(super) fn parse_upstream_failure_mode(
     }
 }
 
+pub(super) fn upstream_protocol_policy_label(
+    policy: crate::config::UpstreamProtocolPolicy,
+) -> &'static str {
+    match policy {
+        crate::config::UpstreamProtocolPolicy::Auto => "auto",
+        crate::config::UpstreamProtocolPolicy::Http1Only => "http1_only",
+        crate::config::UpstreamProtocolPolicy::Http2Preferred => "http2_preferred",
+        crate::config::UpstreamProtocolPolicy::Http2Only => "http2_only",
+    }
+}
+
+pub(super) fn parse_upstream_protocol_policy(
+    value: &str,
+) -> Result<crate::config::UpstreamProtocolPolicy, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Ok(crate::config::UpstreamProtocolPolicy::Auto),
+        "http1_only" => Ok(crate::config::UpstreamProtocolPolicy::Http1Only),
+        "http2_preferred" => Ok(crate::config::UpstreamProtocolPolicy::Http2Preferred),
+        "http2_only" => Ok(crate::config::UpstreamProtocolPolicy::Http2Only),
+        other => Err(format!(
+            "上游协议策略仅支持 auto、http1_only、http2_preferred、http2_only，收到 '{}'",
+            other
+        )),
+    }
+}
+
 pub(super) fn safeline_intercept_action_label(
     action: crate::config::l7::SafeLineInterceptAction,
 ) -> &'static str {

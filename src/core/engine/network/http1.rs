@@ -386,7 +386,10 @@ pub(crate) async fn handle_http1_connection(
                     metrics.record_proxy_attempt_with_labels(proxy_traffic_kind(&request), &labels);
                 }
                 let proxy_started_at = Instant::now();
-                let proxy_result = if config.gateway_config.enable_ntlm {
+                let proxy_result = if config.gateway_config.enable_ntlm
+                    && config.l7_config.upstream_http1_allow_connection_reuse
+                    && !config.l7_config.upstream_http1_strict_mode
+                {
                     proxy_http_request_with_session_affinity(
                         context.as_ref(),
                         &request,

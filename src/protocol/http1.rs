@@ -145,6 +145,9 @@ impl Http1Handler {
 
         // 解析头部
         let mut headers_complete = false;
+        let mut content_length_count = 0usize;
+        let mut has_transfer_encoding = false;
+        let mut has_expect_100_continue = false;
         for line in lines {
             if line.is_empty() {
                 headers_complete = true;
@@ -152,9 +155,35 @@ impl Http1Handler {
             }
 
             if let Some((key, value)) = line.split_once(':') {
-                unified_request.add_header(key.trim().to_string(), value.trim().to_string());
+                let normalized_key = key.trim().to_ascii_lowercase();
+                let trimmed_value = value.trim().to_string();
+                if normalized_key == "content-length" {
+                    content_length_count += 1;
+                }
+                if normalized_key == "transfer-encoding" {
+                    has_transfer_encoding = true;
+                }
+                if normalized_key == "expect"
+                    && trimmed_value.eq_ignore_ascii_case("100-continue")
+                {
+                    has_expect_100_continue = true;
+                }
+                unified_request.add_header(normalized_key, trimmed_value);
             }
         }
+
+        unified_request.add_metadata(
+            "http1.content_length_count".to_string(),
+            content_length_count.to_string(),
+        );
+        unified_request.add_metadata(
+            "http1.has_transfer_encoding".to_string(),
+            has_transfer_encoding.to_string(),
+        );
+        unified_request.add_metadata(
+            "http1.has_expect_100_continue".to_string(),
+            has_expect_100_continue.to_string(),
+        );
 
         // 提取请求体
         if headers_complete {

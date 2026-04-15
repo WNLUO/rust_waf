@@ -3,7 +3,7 @@ use super::helpers::{
     auto_tuning_mode_label, display_https_listen_port, safeline_intercept_action_label,
     safeline_intercept_match_mode_label, source_ip_strategy_label,
     trusted_cdn_sync_interval_unit_label, trusted_cdn_sync_status_label,
-    upstream_failure_mode_label,
+    upstream_failure_mode_label, upstream_protocol_policy_label,
 };
 use super::*;
 
@@ -246,6 +246,22 @@ impl L7ConfigResponse {
                 config.l7_config.upstream_failure_mode,
             )
             .to_string(),
+            upstream_protocol_policy: upstream_protocol_policy_label(
+                config.l7_config.upstream_protocol_policy,
+            )
+            .to_string(),
+            upstream_http1_strict_mode: config.l7_config.upstream_http1_strict_mode,
+            upstream_http1_allow_connection_reuse: config
+                .l7_config
+                .upstream_http1_allow_connection_reuse,
+            reject_ambiguous_http1_requests: config.l7_config.reject_ambiguous_http1_requests,
+            reject_http1_transfer_encoding_requests: config
+                .l7_config
+                .reject_http1_transfer_encoding_requests,
+            reject_body_on_safe_http_methods: config
+                .l7_config
+                .reject_body_on_safe_http_methods,
+            reject_expect_100_continue: config.l7_config.reject_expect_100_continue,
             bloom_filter_scale: config.l7_config.bloom_filter_scale,
             http2_enabled: config.l7_config.http2_config.enabled,
             http2_max_concurrent_streams: config.l7_config.http2_config.max_concurrent_streams,

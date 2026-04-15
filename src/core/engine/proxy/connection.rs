@@ -1,4 +1,10 @@
 use super::*;
+use bytes::Bytes;
+use http::Request;
+use http_body_util::{BodyExt, Full};
+use hyper::client::conn::http2 as hyper_http2;
+use hyper::header::{CONNECTION, CONTENT_LENGTH, HOST, TRANSFER_ENCODING};
+use hyper_util::rt::{TokioExecutor, TokioIo};
 
 #[allow(dead_code)]
 async fn forward_http1_request<W>(
@@ -56,6 +62,12 @@ pub(crate) fn resolve_runtime_custom_response(response: &CustomHttpResponse) -> 
     resolved
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpstreamTransport {
+    Http1,
+    Http2,
+}
+
 pub(crate) async fn proxy_http_request(
     context: &WafContext,
     request: &UnifiedHttpRequest,
@@ -65,7 +77,77 @@ pub(crate) async fn proxy_http_request(
     read_timeout_ms: u64,
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
-    let skip_verify = should_skip_upstream_tls_verification(context, &upstream);
+    match select_upstream_transport(context, request, &upstream)? {
+        UpstreamTransport::Http1 => {
+            proxy_http1_request_strict(
+                context,
+                request,
+                &upstream,
+                connect_timeout_ms,
+                write_timeout_ms,
+                read_timeout_ms,
+            )
+            .await
+        }
+        UpstreamTransport::Http2 => {
+            proxy_http2_request(
+                context,
+                request,
+                &upstream,
+                connect_timeout_ms,
+                read_timeout_ms,
+            )
+            .await
+        }
+    }
+}
+
+fn select_upstream_transport(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> Result<UpstreamTransport> {
+    let policy = context.config_snapshot().l7_config.upstream_protocol_policy;
+    let supports_http2 = matches!(upstream.scheme, UpstreamScheme::Https);
+    match policy {
+        crate::config::UpstreamProtocolPolicy::Http1Only => Ok(UpstreamTransport::Http1),
+        crate::config::UpstreamProtocolPolicy::Http2Only => {
+            if supports_http2 {
+                Ok(UpstreamTransport::Http2)
+            } else {
+                Err(anyhow::anyhow!(
+                    "Upstream HTTP/2 required, but upstream does not support negotiated TLS HTTP/2: {}",
+                    upstream
+                ))
+            }
+        }
+        crate::config::UpstreamProtocolPolicy::Http2Preferred => {
+            if supports_http2 {
+                Ok(UpstreamTransport::Http2)
+            } else {
+                Ok(UpstreamTransport::Http1)
+            }
+        }
+        crate::config::UpstreamProtocolPolicy::Auto => {
+            if supports_http2 && !matches!(request.version, HttpVersion::Http1_0) {
+                Ok(UpstreamTransport::Http2)
+            } else {
+                Ok(UpstreamTransport::Http1)
+            }
+        }
+    }
+}
+
+async fn proxy_http1_request_strict(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    connect_timeout_ms: u64,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
+) -> Result<UpstreamHttpResponse> {
+    enforce_http1_request_safety(context, request)?;
+    let skip_verify = should_skip_upstream_tls_verification(context, upstream);
     if matches!(upstream.scheme, UpstreamScheme::Http) {
         let upstream_stream = tokio::time::timeout(
             std::time::Duration::from_millis(connect_timeout_ms),
@@ -90,7 +172,7 @@ pub(crate) async fn proxy_http_request(
     )
     .await
     .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
-    let server_name = build_upstream_tls_server_name(request, &upstream)?;
+    let server_name = build_upstream_tls_server_name(request, upstream)?;
     let tls_connector = build_upstream_tls_connector(skip_verify)?;
     let tls_stream = tokio::time::timeout(
         std::time::Duration::from_millis(connect_timeout_ms),
@@ -104,6 +186,58 @@ pub(crate) async fn proxy_http_request(
     Ok(parsed)
 }
 
+async fn proxy_http2_request(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    connect_timeout_ms: u64,
+    read_timeout_ms: u64,
+) -> Result<UpstreamHttpResponse> {
+    if !matches!(upstream.scheme, UpstreamScheme::Https) {
+        anyhow::bail!("Upstream HTTP/2 currently requires HTTPS upstreams");
+    }
+
+    let skip_verify = should_skip_upstream_tls_verification(context, upstream);
+    let upstream_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        TcpStream::connect(upstream.authority.as_str()),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream connect timed out"))??;
+    let server_name = build_upstream_tls_server_name(request, upstream)?;
+    let tls_connector = build_upstream_tls_connector(skip_verify)?;
+    let tls_stream = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        tls_connector.connect(server_name, upstream_stream),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream TLS handshake timed out"))??;
+
+    let io = TokioIo::new(tls_stream);
+    let (mut sender, connection) = tokio::time::timeout(
+        std::time::Duration::from_millis(connect_timeout_ms),
+        hyper_http2::handshake(TokioExecutor::new(), io),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream HTTP/2 handshake timed out"))??;
+    tokio::spawn(async move {
+        if let Err(err) = connection.await {
+            debug!("Upstream HTTP/2 connection ended: {}", err);
+        }
+    });
+
+    let upstream_request = build_http2_upstream_request(request, upstream)?;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(read_timeout_ms),
+        sender.send_request(upstream_request),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("Upstream HTTP/2 request timed out"))??;
+    let mapped = map_http2_upstream_response(response).await?;
+    context.set_upstream_health(true, None);
+    Ok(mapped)
+}
+
 pub(crate) async fn proxy_http_request_with_session_affinity(
     context: &WafContext,
     request: &UnifiedHttpRequest,
@@ -114,6 +248,28 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
     reusable_connection: &mut Option<UpstreamClientConnection>,
 ) -> Result<UpstreamHttpResponse> {
     let upstream = parse_upstream_endpoint(upstream_addr)?;
+    if context.config_snapshot().l7_config.upstream_http1_strict_mode
+        || !context
+            .config_snapshot()
+            .l7_config
+            .upstream_http1_allow_connection_reuse
+        || !matches!(
+            select_upstream_transport(context, request, &upstream)?,
+            UpstreamTransport::Http1
+        )
+    {
+        return proxy_http_request(
+            context,
+            request,
+            upstream_addr,
+            connect_timeout_ms,
+            write_timeout_ms,
+            read_timeout_ms,
+        )
+        .await;
+    }
+
+    enforce_http1_request_safety(context, request)?;
     let skip_verify = should_skip_upstream_tls_verification(context, &upstream);
     let effective_tls_server_name = if matches!(upstream.scheme, UpstreamScheme::Https) {
         resolve_upstream_tls_server_name(request, &upstream)?
@@ -180,6 +336,122 @@ pub(crate) async fn proxy_http_request_with_session_affinity(
             Err(err)
         }
     }
+}
+
+fn enforce_http1_request_safety(context: &WafContext, request: &UnifiedHttpRequest) -> Result<()> {
+    let config = &context.config_snapshot().l7_config;
+    if !config.upstream_http1_strict_mode {
+        return Ok(());
+    }
+
+    let content_length_count = request
+        .get_metadata("http1.content_length_count")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or_else(|| usize::from(request.get_header("content-length").is_some()));
+    let has_transfer_encoding = request
+        .get_metadata("http1.has_transfer_encoding")
+        .map(|value| value == "true")
+        .unwrap_or_else(|| request.get_header("transfer-encoding").is_some());
+    let has_expect_100_continue = request
+        .get_metadata("http1.has_expect_100_continue")
+        .map(|value| value == "true")
+        .unwrap_or_else(|| {
+            request
+                .get_header("expect")
+                .map(|value| value.eq_ignore_ascii_case("100-continue"))
+                .unwrap_or(false)
+        });
+
+    if config.reject_ambiguous_http1_requests && content_length_count > 1 {
+        anyhow::bail!("rejected ambiguous HTTP/1 request: multiple Content-Length headers");
+    }
+    if config.reject_http1_transfer_encoding_requests && has_transfer_encoding {
+        anyhow::bail!("rejected HTTP/1 request carrying Transfer-Encoding");
+    }
+    if config.reject_ambiguous_http1_requests && has_transfer_encoding && content_length_count > 0 {
+        anyhow::bail!("rejected ambiguous HTTP/1 request: both Content-Length and Transfer-Encoding present");
+    }
+    if config.reject_expect_100_continue && has_expect_100_continue {
+        anyhow::bail!("rejected HTTP/1 request carrying Expect: 100-continue");
+    }
+    if config.reject_body_on_safe_http_methods
+        && !request.body.is_empty()
+        && matches!(request.method.as_str(), "GET" | "HEAD" | "OPTIONS")
+    {
+        anyhow::bail!(
+            "rejected HTTP/1 request carrying a body on safe method {}",
+            request.method
+        );
+    }
+
+    Ok(())
+}
+
+fn build_http2_upstream_request(
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+) -> Result<Request<Full<Bytes>>> {
+    let uri = format!(
+        "https://{}{}",
+        upstream.authority,
+        normalize_http2_upstream_path(&request.uri)
+    );
+    let mut builder = Request::builder().method(request.method.as_str()).uri(uri);
+
+    for (key, value) in &request.headers {
+        if key.eq_ignore_ascii_case(CONNECTION.as_str())
+            || key.eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
+            || key.starts_with(':')
+        {
+            continue;
+        }
+        if key.eq_ignore_ascii_case(CONTENT_LENGTH.as_str()) {
+            continue;
+        }
+        builder = builder.header(key.as_str(), value.as_str());
+    }
+
+    if request.get_header("host").is_none() {
+        if let Some(authority) = request.metadata.get("authority") {
+            builder = builder.header(HOST, authority.as_str());
+        }
+    }
+
+    builder.body(Full::new(Bytes::from(request.body.clone()))).map_err(Into::into)
+}
+
+fn normalize_http2_upstream_path(path: &str) -> String {
+    if path.is_empty() {
+        "/".to_string()
+    } else if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{}", path)
+    }
+}
+
+async fn map_http2_upstream_response(
+    response: http::Response<hyper::body::Incoming>,
+) -> Result<UpstreamHttpResponse> {
+    let (parts, body) = response.into_parts();
+    let body = body.collect().await?.to_bytes().to_vec();
+    let headers = parts
+        .headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (name.as_str().to_string(), value.to_string()))
+        })
+        .collect::<Vec<_>>();
+
+    Ok(UpstreamHttpResponse {
+        status_code: parts.status.as_u16(),
+        status_text: parts.status.canonical_reason().map(ToOwned::to_owned),
+        headers,
+        body,
+    })
 }
 
 async fn connect_upstream_client(
@@ -269,6 +541,7 @@ fn resolve_upstream_tls_server_name(
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
+    use crate::config::{Config, L7Config, UpstreamProtocolPolicy};
 
     fn https_upstream(authority: &str) -> crate::core::gateway::UpstreamEndpoint {
         crate::core::gateway::UpstreamEndpoint {
@@ -326,6 +599,62 @@ mod tests {
                 .unwrap();
 
         assert_eq!(resolved.as_deref(), Some("origin.example.com"));
+    }
+
+    async fn test_context(l7_config: L7Config) -> WafContext {
+        WafContext::new(Config {
+            sqlite_enabled: false,
+            metrics_enabled: false,
+            l7_config,
+            ..Config::default()
+        })
+        .await
+        .expect("context should build")
+    }
+
+    #[tokio::test]
+    async fn strict_http1_validation_rejects_multiple_content_length() {
+        let context = test_context(L7Config::default()).await;
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "POST".to_string(), "/".to_string());
+        request.add_header("content-length".to_string(), "5".to_string());
+        request.add_metadata("http1.content_length_count".to_string(), "2".to_string());
+
+        let result = enforce_http1_request_safety(&context, &request);
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn upstream_selection_prefers_http2_for_https_when_enabled() {
+        let mut l7_config = L7Config::default();
+        l7_config.upstream_protocol_policy = UpstreamProtocolPolicy::Http2Preferred;
+        let context = test_context(l7_config).await;
+        let request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+
+        let selected = select_upstream_transport(&context, &request, &https_upstream("up.example:443"))
+            .expect("selection should succeed");
+
+        assert_eq!(selected, UpstreamTransport::Http2);
+    }
+
+    #[tokio::test]
+    async fn upstream_selection_falls_back_to_http1_for_plain_http() {
+        let mut l7_config = L7Config::default();
+        l7_config.upstream_protocol_policy = UpstreamProtocolPolicy::Http2Preferred;
+        let context = test_context(l7_config).await;
+        let request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        let upstream = crate::core::gateway::UpstreamEndpoint {
+            scheme: UpstreamScheme::Http,
+            authority: "127.0.0.1:8080".to_string(),
+        };
+
+        let selected =
+            select_upstream_transport(&context, &request, &upstream).expect("selection should succeed");
+
+        assert_eq!(selected, UpstreamTransport::Http1);
     }
 }
 

@@ -181,6 +181,10 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .hard_hot_path_block_multiplier
         .clamp(1, 20);
 
+    if config.l7_config.upstream_http1_strict_mode {
+        config.l7_config.upstream_http1_allow_connection_reuse = false;
+    }
+
     config.l7_config.safeline_intercept.max_body_bytes = clamp_or_default(
         config.l7_config.safeline_intercept.max_body_bytes,
         32 * 1024,

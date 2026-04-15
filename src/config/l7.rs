@@ -55,6 +55,20 @@ pub struct L7Config {
     pub upstream_healthcheck_timeout_ms: u64,
     #[serde(default)]
     pub upstream_failure_mode: UpstreamFailureMode,
+    #[serde(default)]
+    pub upstream_protocol_policy: UpstreamProtocolPolicy,
+    #[serde(default = "default_upstream_http1_strict_mode")]
+    pub upstream_http1_strict_mode: bool,
+    #[serde(default = "default_upstream_http1_allow_connection_reuse")]
+    pub upstream_http1_allow_connection_reuse: bool,
+    #[serde(default = "default_reject_ambiguous_http1_requests")]
+    pub reject_ambiguous_http1_requests: bool,
+    #[serde(default = "default_reject_http1_transfer_encoding_requests")]
+    pub reject_http1_transfer_encoding_requests: bool,
+    #[serde(default = "default_reject_body_on_safe_http_methods")]
+    pub reject_body_on_safe_http_methods: bool,
+    #[serde(default = "default_reject_expect_100_continue")]
+    pub reject_expect_100_continue: bool,
     #[serde(default = "default_bloom_filter_scale")]
     pub bloom_filter_scale: f64,
     #[serde(default)]
@@ -151,6 +165,16 @@ pub enum UpstreamFailureMode {
     FailClose,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum UpstreamProtocolPolicy {
+    #[default]
+    Http2Preferred,
+    Auto,
+    Http1Only,
+    Http2Only,
+}
+
 pub fn default_real_ip_headers() -> Vec<String> {
     vec![
         "cf-connecting-ip".to_string(),
@@ -197,6 +221,30 @@ const fn default_upstream_healthcheck_interval_secs() -> u64 {
 
 const fn default_upstream_healthcheck_timeout_ms() -> u64 {
     1_000
+}
+
+const fn default_upstream_http1_strict_mode() -> bool {
+    true
+}
+
+const fn default_upstream_http1_allow_connection_reuse() -> bool {
+    false
+}
+
+const fn default_reject_ambiguous_http1_requests() -> bool {
+    true
+}
+
+const fn default_reject_http1_transfer_encoding_requests() -> bool {
+    true
+}
+
+const fn default_reject_body_on_safe_http_methods() -> bool {
+    true
+}
+
+const fn default_reject_expect_100_continue() -> bool {
+    true
 }
 
 const fn default_bloom_filter_scale() -> f64 {
@@ -377,6 +425,15 @@ impl Default for L7Config {
             upstream_healthcheck_interval_secs: default_upstream_healthcheck_interval_secs(),
             upstream_healthcheck_timeout_ms: default_upstream_healthcheck_timeout_ms(),
             upstream_failure_mode: UpstreamFailureMode::default(),
+            upstream_protocol_policy: UpstreamProtocolPolicy::default(),
+            upstream_http1_strict_mode: default_upstream_http1_strict_mode(),
+            upstream_http1_allow_connection_reuse:
+                default_upstream_http1_allow_connection_reuse(),
+            reject_ambiguous_http1_requests: default_reject_ambiguous_http1_requests(),
+            reject_http1_transfer_encoding_requests:
+                default_reject_http1_transfer_encoding_requests(),
+            reject_body_on_safe_http_methods: default_reject_body_on_safe_http_methods(),
+            reject_expect_100_continue: default_reject_expect_100_continue(),
             bloom_filter_scale: default_bloom_filter_scale(),
             cc_defense: CcDefenseConfig::default(),
             safeline_intercept: SafeLineInterceptConfig::default(),

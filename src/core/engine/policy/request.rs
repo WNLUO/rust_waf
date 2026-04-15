@@ -86,7 +86,14 @@ pub(crate) async fn inspect_blocked_client_ip(
 
 pub(crate) fn prepare_request_for_routing(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
-    if context.config_snapshot().gateway_config.enable_ntlm && request_looks_like_ntlm(request) {
+    if context.config_snapshot().gateway_config.enable_ntlm
+        && context
+            .config_snapshot()
+            .l7_config
+            .upstream_http1_allow_connection_reuse
+        && !context.config_snapshot().l7_config.upstream_http1_strict_mode
+        && request_looks_like_ntlm(request)
+    {
         request.add_metadata(
             "proxy_connection_mode".to_string(),
             "keep-alive".to_string(),

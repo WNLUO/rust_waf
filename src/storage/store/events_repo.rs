@@ -1,4 +1,52 @@
 impl SqliteStore {
+    #[cfg(any(feature = "api", test))]
+    pub async fn list_fingerprint_profiles(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<FingerprintProfileEntry>> {
+        let limit = normalized_limit(limit).min(500);
+        let items = sqlx::query_as::<_, FingerprintProfileEntry>(
+            r#"
+            SELECT identity, identity_kind, source_ip, first_seen_at, last_seen_at,
+                   first_site_domain, last_site_domain, first_user_agent, last_user_agent,
+                   total_security_events, total_behavior_events, total_challenges, total_blocks,
+                   latest_score, max_score, latest_action, reputation_score, notes
+            FROM fingerprint_profiles
+            ORDER BY last_seen_at DESC, max_score DESC, total_behavior_events DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(items)
+    }
+
+    #[cfg(any(feature = "api", test))]
+    pub async fn list_behavior_sessions(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<BehaviorSessionEntry>> {
+        let limit = normalized_limit(limit).min(500);
+        let items = sqlx::query_as::<_, BehaviorSessionEntry>(
+            r#"
+            SELECT session_key, identity, source_ip, site_domain, opened_at, last_seen_at,
+                   event_count, challenge_count, block_count, latest_action, latest_uri,
+                   latest_reason, dominant_route, focused_document_route, focused_api_route,
+                   distinct_routes, repeated_ratio, document_repeated_ratio, api_repeated_ratio,
+                   document_requests, api_requests, non_document_requests, interval_jitter_ms,
+                   session_span_secs, flags_json
+            FROM behavior_sessions
+            ORDER BY last_seen_at DESC, block_count DESC, challenge_count DESC, event_count DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(items)
+    }
+
     pub async fn latest_rules_version(&self) -> Result<i64> {
         let latest_version: Option<i64> = sqlx::query_scalar("SELECT MAX(updated_at) FROM rules")
             .fetch_one(&self.pool)

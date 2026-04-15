@@ -62,6 +62,14 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(events_handlers::list_behavior_profiles_handler),
         )
         .route(
+            "/intelligence/fingerprints",
+            get(events_handlers::list_fingerprint_profiles_handler),
+        )
+        .route(
+            "/intelligence/sessions",
+            get(events_handlers::list_behavior_sessions_handler),
+        )
+        .route(
             "/events/:id",
             patch(events_handlers::update_security_event_handler),
         )

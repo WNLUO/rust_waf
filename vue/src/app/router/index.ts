@@ -20,6 +20,8 @@ const AdminEventsPage = () =>
   import('@/features/events/pages/AdminEventsPage.vue')
 const AdminBehaviorPage = () =>
   import('@/features/behavior/pages/AdminBehaviorPage.vue')
+const AdminIntelligencePage = () =>
+  import('@/features/behavior/pages/AdminIntelligencePage.vue')
 const AdminBlockedPage = () =>
   import('@/features/blocked/pages/AdminBlockedPage.vue')
 const AdminSettingsPage = () =>
@@ -97,6 +99,11 @@ const router = createRouter({
       path: '/admin/behavior',
       name: 'admin-behavior',
       component: AdminBehaviorPage,
+    },
+    {
+      path: '/admin/intelligence',
+      name: 'admin-intelligence',
+      component: AdminIntelligencePage,
     },
     {
       path: '/admin/blocked',

@@ -7,7 +7,9 @@ import type {
   BlockedIpsQuery,
   BlockedIpsResponse,
   BehaviorProfilesResponse,
+  BehaviorSessionsResponse,
   EventsQuery,
+  FingerprintProfilesResponse,
   SecurityEventsResponse,
   WriteStatusResponse,
 } from '@/shared/types'
@@ -25,6 +27,14 @@ export function fetchSecurityEvents(query?: EventsQuery) {
 
 export function fetchBehaviorProfiles() {
   return apiRequest<BehaviorProfilesResponse>('/behavior/profiles')
+}
+
+export function fetchFingerprintProfiles() {
+  return apiRequest<FingerprintProfilesResponse>('/intelligence/fingerprints')
+}
+
+export function fetchBehaviorSessions() {
+  return apiRequest<BehaviorSessionsResponse>('/intelligence/sessions')
 }
 
 export function fetchBlockedIps(query?: BlockedIpsQuery) {

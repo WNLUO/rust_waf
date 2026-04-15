@@ -15,6 +15,69 @@ pub struct BehaviorProfilesResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct FingerprintProfilesResponse {
+    pub(crate) total: u64,
+    pub(crate) profiles: Vec<FingerprintProfileResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FingerprintProfileResponse {
+    pub(crate) identity: String,
+    pub(crate) identity_kind: String,
+    pub(crate) source_ip: Option<String>,
+    pub(crate) first_seen_at: i64,
+    pub(crate) last_seen_at: i64,
+    pub(crate) first_site_domain: Option<String>,
+    pub(crate) last_site_domain: Option<String>,
+    pub(crate) first_user_agent: Option<String>,
+    pub(crate) last_user_agent: Option<String>,
+    pub(crate) total_security_events: i64,
+    pub(crate) total_behavior_events: i64,
+    pub(crate) total_challenges: i64,
+    pub(crate) total_blocks: i64,
+    pub(crate) latest_score: Option<i64>,
+    pub(crate) max_score: i64,
+    pub(crate) latest_action: Option<String>,
+    pub(crate) reputation_score: i64,
+    pub(crate) notes: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BehaviorSessionsResponse {
+    pub(crate) total: u64,
+    pub(crate) sessions: Vec<BehaviorSessionResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BehaviorSessionResponse {
+    pub(crate) session_key: String,
+    pub(crate) identity: String,
+    pub(crate) source_ip: Option<String>,
+    pub(crate) site_domain: Option<String>,
+    pub(crate) opened_at: i64,
+    pub(crate) last_seen_at: i64,
+    pub(crate) event_count: i64,
+    pub(crate) challenge_count: i64,
+    pub(crate) block_count: i64,
+    pub(crate) latest_action: Option<String>,
+    pub(crate) latest_uri: Option<String>,
+    pub(crate) latest_reason: Option<String>,
+    pub(crate) dominant_route: Option<String>,
+    pub(crate) focused_document_route: Option<String>,
+    pub(crate) focused_api_route: Option<String>,
+    pub(crate) distinct_routes: i64,
+    pub(crate) repeated_ratio: i64,
+    pub(crate) document_repeated_ratio: i64,
+    pub(crate) api_repeated_ratio: i64,
+    pub(crate) document_requests: i64,
+    pub(crate) api_requests: i64,
+    pub(crate) non_document_requests: i64,
+    pub(crate) interval_jitter_ms: Option<i64>,
+    pub(crate) session_span_secs: i64,
+    pub(crate) flags: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct BehaviorProfileResponse {
     pub(crate) identity: String,
     pub(crate) source_ip: Option<String>,

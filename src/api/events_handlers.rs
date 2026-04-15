@@ -52,6 +52,40 @@ pub(super) async fn list_behavior_profiles_handler(
     }))
 }
 
+pub(super) async fn list_fingerprint_profiles_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<FingerprintProfilesResponse>> {
+    let store = sqlite_store(&state)?;
+    let profiles = store
+        .list_fingerprint_profiles(200)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(FingerprintProfilesResponse {
+        total: profiles.len() as u64,
+        profiles: profiles
+            .into_iter()
+            .map(FingerprintProfileResponse::from)
+            .collect(),
+    }))
+}
+
+pub(super) async fn list_behavior_sessions_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<BehaviorSessionsResponse>> {
+    let store = sqlite_store(&state)?;
+    let sessions = store
+        .list_behavior_sessions(200)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(BehaviorSessionsResponse {
+        total: sessions.len() as u64,
+        sessions: sessions
+            .into_iter()
+            .map(BehaviorSessionResponse::from)
+            .collect(),
+    }))
+}
+
 pub(super) async fn update_security_event_handler(
     State(state): State<ApiState>,
     Path(id): Path<i64>,

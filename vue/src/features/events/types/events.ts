@@ -63,6 +63,65 @@ export interface BehaviorProfilesResponse {
   profiles: BehaviorProfileItem[]
 }
 
+export interface FingerprintProfileItem {
+  identity: string
+  identity_kind: string
+  source_ip: string | null
+  first_seen_at: number
+  last_seen_at: number
+  first_site_domain: string | null
+  last_site_domain: string | null
+  first_user_agent: string | null
+  last_user_agent: string | null
+  total_security_events: number
+  total_behavior_events: number
+  total_challenges: number
+  total_blocks: number
+  latest_score: number | null
+  max_score: number
+  latest_action: string | null
+  reputation_score: number
+  notes: string
+}
+
+export interface FingerprintProfilesResponse {
+  total: number
+  profiles: FingerprintProfileItem[]
+}
+
+export interface BehaviorSessionItem {
+  session_key: string
+  identity: string
+  source_ip: string | null
+  site_domain: string | null
+  opened_at: number
+  last_seen_at: number
+  event_count: number
+  challenge_count: number
+  block_count: number
+  latest_action: string | null
+  latest_uri: string | null
+  latest_reason: string | null
+  dominant_route: string | null
+  focused_document_route: string | null
+  focused_api_route: string | null
+  distinct_routes: number
+  repeated_ratio: number
+  document_repeated_ratio: number
+  api_repeated_ratio: number
+  document_requests: number
+  api_requests: number
+  non_document_requests: number
+  interval_jitter_ms: number | null
+  session_span_secs: number
+  flags: string[]
+}
+
+export interface BehaviorSessionsResponse {
+  total: number
+  sessions: BehaviorSessionItem[]
+}
+
 export interface EventsQuery extends Record<string, ApiQueryValue> {
   limit?: number
   offset?: number

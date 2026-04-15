@@ -217,6 +217,63 @@ impl From<crate::l7::behavior_guard::BehaviorProfileSnapshot> for BehaviorProfil
     }
 }
 
+impl From<crate::storage::FingerprintProfileEntry> for FingerprintProfileResponse {
+    fn from(value: crate::storage::FingerprintProfileEntry) -> Self {
+        Self {
+            identity: value.identity,
+            identity_kind: value.identity_kind,
+            source_ip: value.source_ip,
+            first_seen_at: value.first_seen_at,
+            last_seen_at: value.last_seen_at,
+            first_site_domain: value.first_site_domain,
+            last_site_domain: value.last_site_domain,
+            first_user_agent: value.first_user_agent,
+            last_user_agent: value.last_user_agent,
+            total_security_events: value.total_security_events,
+            total_behavior_events: value.total_behavior_events,
+            total_challenges: value.total_challenges,
+            total_blocks: value.total_blocks,
+            latest_score: value.latest_score,
+            max_score: value.max_score,
+            latest_action: value.latest_action,
+            reputation_score: value.reputation_score,
+            notes: value.notes,
+        }
+    }
+}
+
+impl From<crate::storage::BehaviorSessionEntry> for BehaviorSessionResponse {
+    fn from(value: crate::storage::BehaviorSessionEntry) -> Self {
+        Self {
+            session_key: value.session_key,
+            identity: value.identity,
+            source_ip: value.source_ip,
+            site_domain: value.site_domain,
+            opened_at: value.opened_at,
+            last_seen_at: value.last_seen_at,
+            event_count: value.event_count,
+            challenge_count: value.challenge_count,
+            block_count: value.block_count,
+            latest_action: value.latest_action,
+            latest_uri: value.latest_uri,
+            latest_reason: value.latest_reason,
+            dominant_route: value.dominant_route,
+            focused_document_route: value.focused_document_route,
+            focused_api_route: value.focused_api_route,
+            distinct_routes: value.distinct_routes,
+            repeated_ratio: value.repeated_ratio,
+            document_repeated_ratio: value.document_repeated_ratio,
+            api_repeated_ratio: value.api_repeated_ratio,
+            document_requests: value.document_requests,
+            api_requests: value.api_requests,
+            non_document_requests: value.non_document_requests,
+            interval_jitter_ms: value.interval_jitter_ms,
+            session_span_secs: value.session_span_secs,
+            flags: serde_json::from_str::<Vec<String>>(&value.flags_json).unwrap_or_default(),
+        }
+    }
+}
+
 impl From<crate::storage::BlockedIpEntry> for BlockedIpResponse {
     fn from(entry: crate::storage::BlockedIpEntry) -> Self {
         Self {

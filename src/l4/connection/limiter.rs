@@ -1,9 +1,9 @@
 use crate::config::L4Config;
+use dashmap::DashMap;
 use log::{info, warn};
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 pub const RATE_LIMIT_BLOCK_DURATION_SECS: u64 = 30;
 
@@ -16,22 +16,22 @@ pub enum RateLimitDecision {
 
 pub struct ConnectionLimiter {
     config: L4Config,
-    blocked_ips: Mutex<HashMap<IpAddr, BlockedIp>>,
-    request_counters: Mutex<HashMap<IpAddr, RateLimitEntry>>,
+    blocked_ips: DashMap<IpAddr, BlockedIp>,
+    request_counters: DashMap<IpAddr, RateLimitEntry>,
     total_blocked: AtomicU64,
     total_rate_limit_hits: AtomicU64,
 }
 
 #[derive(Debug, Clone)]
 struct BlockedIp {
-    blocked_at: std::time::Instant,
-    block_duration: std::time::Duration,
+    blocked_at: Instant,
+    block_duration: Duration,
     reason: String,
 }
 
 #[derive(Debug, Clone)]
 struct RateLimitEntry {
-    window_started: std::time::Instant,
+    window_started: Instant,
     count: usize,
 }
 
@@ -43,8 +43,8 @@ impl ConnectionLimiter {
         );
         Self {
             config,
-            blocked_ips: Mutex::new(HashMap::new()),
-            request_counters: Mutex::new(HashMap::new()),
+            blocked_ips: DashMap::new(),
+            request_counters: DashMap::new(),
             total_blocked: AtomicU64::new(0),
             total_rate_limit_hits: AtomicU64::new(0),
         }
@@ -56,64 +56,58 @@ impl ConnectionLimiter {
     }
 
     pub fn check(&self, ip: &IpAddr) -> RateLimitDecision {
-        // Check if IP is blocked
         if self.is_blocked(ip) {
             warn!("Connection rejected - IP {} is blocked", ip);
             return RateLimitDecision::Rejected;
         }
 
-        let mut request_counters = self
-            .request_counters
-            .lock()
-            .expect("request_counters mutex poisoned");
-        let now = std::time::Instant::now();
-        let entry = request_counters.entry(*ip).or_insert(RateLimitEntry {
-            window_started: now,
-            count: 0,
-        });
+        let now = Instant::now();
+        {
+            let mut entry = self.request_counters.entry(*ip).or_insert(RateLimitEntry {
+                window_started: now,
+                count: 0,
+            });
 
-        if now.duration_since(entry.window_started) >= std::time::Duration::from_secs(1) {
-            entry.window_started = now;
-            entry.count = 0;
+            if now.duration_since(entry.window_started) >= Duration::from_secs(1) {
+                entry.window_started = now;
+                entry.count = 0;
+            }
+
+            if entry.count < self.config.connection_rate_limit {
+                entry.count += 1;
+                return RateLimitDecision::Allowed;
+            }
         }
 
-        if entry.count >= self.config.connection_rate_limit {
-            self.total_rate_limit_hits.fetch_add(1, Ordering::Relaxed);
-            drop(request_counters);
-            let newly_blocked = self.block_ip(
-                ip,
-                "rate limit exceeded",
-                std::time::Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
-            );
-            warn!(
-                "Connection rejected - IP {} exceeded rate limit {}",
-                ip, self.config.connection_rate_limit
-            );
-            return if newly_blocked {
-                RateLimitDecision::RejectedAndBlocked
-            } else {
-                RateLimitDecision::Rejected
-            };
+        self.total_rate_limit_hits.fetch_add(1, Ordering::Relaxed);
+        let newly_blocked = self.block_ip(
+            ip,
+            "rate limit exceeded",
+            Duration::from_secs(RATE_LIMIT_BLOCK_DURATION_SECS),
+        );
+        warn!(
+            "Connection rejected - IP {} exceeded rate limit {}",
+            ip, self.config.connection_rate_limit
+        );
+        if newly_blocked {
+            RateLimitDecision::RejectedAndBlocked
+        } else {
+            RateLimitDecision::Rejected
         }
-
-        entry.count += 1;
-        RateLimitDecision::Allowed
     }
 
     pub fn is_blocked(&self, ip: &IpAddr) -> bool {
-        let blocked_ips = self.blocked_ips.lock().expect("blocked_ips mutex poisoned");
-        if let Some(blocked) = blocked_ips.get(ip) {
-            let elapsed = blocked.blocked_at.elapsed();
-            if elapsed < blocked.block_duration {
-                return true;
-            }
+        if let Some(blocked) = self.blocked_ips.get(ip) {
+            return blocked.blocked_at.elapsed() < blocked.block_duration;
         }
+        self.blocked_ips.remove(ip);
         false
     }
 
-    pub fn block_ip(&self, ip: &IpAddr, reason: &str, duration: std::time::Duration) -> bool {
-        let mut blocked_ips = self.blocked_ips.lock().expect("blocked_ips mutex poisoned");
-        if blocked_ips.len() >= self.config.max_blocked_ips {
+    pub fn block_ip(&self, ip: &IpAddr, reason: &str, duration: Duration) -> bool {
+        if self.blocked_ips.len() >= self.config.max_blocked_ips
+            && !self.blocked_ips.contains_key(ip)
+        {
             warn!(
                 "Blocked IP table is full (limit: {}), skipping new block for {}",
                 self.config.max_blocked_ips, ip
@@ -121,11 +115,12 @@ impl ConnectionLimiter {
             return false;
         }
 
-        let inserted = blocked_ips
+        let inserted = self
+            .blocked_ips
             .insert(
                 *ip,
                 BlockedIp {
-                    blocked_at: std::time::Instant::now(),
+                    blocked_at: Instant::now(),
                     block_duration: duration,
                     reason: reason.to_string(),
                 },
@@ -137,48 +132,57 @@ impl ConnectionLimiter {
     }
 
     pub fn unblock_ip(&self, ip: &IpAddr) -> bool {
-        let mut blocked_ips = self.blocked_ips.lock().expect("blocked_ips mutex poisoned");
-        let removed = blocked_ips.remove(ip).is_some();
-        drop(blocked_ips);
-
+        let removed = self.blocked_ips.remove(ip).is_some();
         if removed {
-            let mut request_counters = self
-                .request_counters
-                .lock()
-                .expect("request_counters mutex poisoned");
-            request_counters.remove(ip);
+            self.request_counters.remove(ip);
         }
 
         removed
     }
 
     pub fn cleanup_expired(&self) {
-        let ttl = std::time::Duration::from_secs(self.config.state_ttl_secs);
-        let mut blocked_ips = self.blocked_ips.lock().expect("blocked_ips mutex poisoned");
-        blocked_ips.retain(|ip, blocked| {
-            let keep = blocked.blocked_at.elapsed() < blocked.block_duration
-                && blocked.blocked_at.elapsed() < ttl;
-            if !keep {
-                info!("Unblocked expired IP {} ({})", ip, blocked.reason);
-            }
-            keep
-        });
+        let ttl = Duration::from_secs(self.config.state_ttl_secs);
+        let expired_blocked = self
+            .blocked_ips
+            .iter()
+            .filter_map(|entry| {
+                let blocked = entry.value();
+                let elapsed = blocked.blocked_at.elapsed();
+                (elapsed >= blocked.block_duration || elapsed >= ttl)
+                    .then(|| (*entry.key(), blocked.reason.clone()))
+            })
+            .collect::<Vec<_>>();
+        for (ip, reason) in expired_blocked {
+            self.blocked_ips.remove(&ip);
+            info!("Unblocked expired IP {} ({})", ip, reason);
+        }
 
-        let mut request_counters = self
+        let stale_counters = self
             .request_counters
-            .lock()
-            .expect("request_counters mutex poisoned");
-        request_counters.retain(|_, entry| entry.window_started.elapsed() < ttl);
+            .iter()
+            .filter_map(|entry| {
+                (entry.value().window_started.elapsed() >= ttl).then(|| *entry.key())
+            })
+            .collect::<Vec<_>>();
+        for ip in stale_counters {
+            self.request_counters.remove(&ip);
+        }
     }
 
     pub fn get_blocked_count(&self) -> u64 {
-        let ttl = std::time::Duration::from_secs(self.config.state_ttl_secs);
-        let mut blocked_ips = self.blocked_ips.lock().expect("blocked_ips mutex poisoned");
-        blocked_ips.retain(|_, blocked| {
-            let elapsed = blocked.blocked_at.elapsed();
-            elapsed < blocked.block_duration && elapsed < ttl
-        });
-        blocked_ips.len() as u64
+        let ttl = Duration::from_secs(self.config.state_ttl_secs);
+        let expired = self
+            .blocked_ips
+            .iter()
+            .filter_map(|entry| {
+                let elapsed = entry.value().blocked_at.elapsed();
+                (elapsed >= entry.value().block_duration || elapsed >= ttl).then(|| *entry.key())
+            })
+            .collect::<Vec<_>>();
+        for ip in expired {
+            self.blocked_ips.remove(&ip);
+        }
+        self.blocked_ips.len() as u64
     }
 
     pub fn get_rate_limit_hits(&self) -> u64 {

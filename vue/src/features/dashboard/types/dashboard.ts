@@ -234,6 +234,10 @@ export interface AiTempPolicyEffect {
   baseline_l7_friction_percent: number | null
   baseline_identity_pressure_percent: number | null
   baseline_rust_persistence_percent: number | null
+  auto_extensions: number
+  auto_revoked: boolean
+  auto_revoke_reason: string | null
+  last_effectiveness_check_at: number | null
   total_hits: number
   first_hit_at: number | null
   last_hit_at: number | null

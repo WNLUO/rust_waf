@@ -93,6 +93,42 @@ impl SqliteStore {
         Ok(result.rows_affected() > 0)
     }
 
+    pub async fn revoke_ai_temp_policy_with_effect(
+        &self,
+        id: i64,
+        effect: &crate::storage::AiTempPolicyEffectStats,
+        now: i64,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE ai_temp_policies SET status = 'revoked', updated_at = ?, effect_json = ? WHERE id = ? AND status = 'active'",
+        )
+        .bind(now)
+        .bind(serde_json::to_string(effect)?)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn extend_ai_temp_policy_expiry_with_effect(
+        &self,
+        id: i64,
+        expires_at: i64,
+        effect: &crate::storage::AiTempPolicyEffectStats,
+        now: i64,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE ai_temp_policies SET expires_at = ?, updated_at = ?, effect_json = ? WHERE id = ? AND status = 'active'",
+        )
+        .bind(expires_at)
+        .bind(now)
+        .bind(serde_json::to_string(effect)?)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn record_ai_temp_policy_hit(
         &self,
         hit: &crate::storage::AiTempPolicyHitRecord,

@@ -1318,6 +1318,20 @@ onMounted(() => {
                     <p class="mt-1 text-sm text-slate-700">
                       {{ policy.rationale }}
                     </p>
+                    <p class="mt-1 text-[11px] text-slate-500">
+                      自动治理
+                      {{
+                        policy.effect.auto_revoked
+                          ? `已撤销(${policy.effect.auto_revoke_reason || 'unknown'})`
+                          : `已续期 ${formatNumber(policy.effect.auto_extensions)} 次`
+                      }}
+                      ·
+                      {{
+                        policy.effect.last_effectiveness_check_at
+                          ? `最近评估 ${formatTimestamp(policy.effect.last_effectiveness_check_at)}`
+                          : '尚未评估'
+                      }}
+                    </p>
                     <div class="mt-3 grid gap-2 md:grid-cols-2">
                       <div
                         class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"

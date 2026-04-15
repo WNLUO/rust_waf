@@ -154,6 +154,14 @@ pub struct AiTempPolicyEffectStats {
     #[serde(default)]
     pub baseline_rust_persistence_percent: Option<f64>,
     #[serde(default)]
+    pub auto_extensions: i64,
+    #[serde(default)]
+    pub auto_revoked: bool,
+    #[serde(default)]
+    pub auto_revoke_reason: Option<String>,
+    #[serde(default)]
+    pub last_effectiveness_check_at: Option<i64>,
+    #[serde(default)]
     pub total_hits: i64,
     #[serde(default)]
     pub first_hit_at: Option<i64>,

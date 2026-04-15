@@ -293,6 +293,10 @@ impl WafEngine {
                     Err(err) => warn!("Failed to purge stale {}: {}", label, err),
                 }
             }
+
+            if let Err(err) = self.auto_govern_ai_temp_policies(store.as_ref(), now).await {
+                warn!("Failed to auto-govern AI temp policies: {}", err);
+            }
         }
 
         if let Err(err) = self.context.refresh_ai_temp_policies().await {
@@ -332,5 +336,85 @@ impl WafEngine {
                 }
             }
         }
+    }
+
+    async fn auto_govern_ai_temp_policies(
+        &self,
+        store: &crate::storage::SqliteStore,
+        now: i64,
+    ) -> Result<()> {
+        let current_identity = self
+            .context
+            .auto_tuning_snapshot()
+            .last_observed_identity_resolution_pressure_percent;
+        let current_l7 = self
+            .context
+            .auto_tuning_snapshot()
+            .last_observed_l7_friction_pressure_percent;
+        let policies = store.list_active_ai_temp_policies(now).await?;
+
+        for policy in policies {
+            let mut effect = serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(
+                &policy.effect_json,
+            )
+            .unwrap_or_default();
+            effect.last_effectiveness_check_at = Some(now);
+
+            let age_secs = now.saturating_sub(policy.created_at);
+            let ttl_remaining = policy.expires_at.saturating_sub(now);
+            let l7_improved = effect
+                .baseline_l7_friction_percent
+                .map(|baseline| current_l7 <= baseline - 3.0)
+                .unwrap_or(false);
+            let identity_improved = effect
+                .baseline_identity_pressure_percent
+                .map(|baseline| current_identity <= baseline - 1.5)
+                .unwrap_or(false);
+
+            let should_revoke = age_secs >= 300 && policy.hit_count == 0 && !effect.auto_revoked;
+            if should_revoke {
+                effect.auto_revoked = true;
+                effect.auto_revoke_reason = Some("no_hits_after_warmup".to_string());
+                let _ = store
+                    .revoke_ai_temp_policy_with_effect(policy.id, &effect, now)
+                    .await?;
+                continue;
+            }
+
+            let should_extend = ttl_remaining <= 300
+                && policy.hit_count >= 3
+                && (l7_improved || identity_improved)
+                && effect.auto_extensions < 2;
+            if should_extend {
+                effect.auto_extensions += 1;
+                let extension_secs = if policy.action == "add_temp_block" {
+                    300
+                } else {
+                    600
+                };
+                let _ = store
+                    .extend_ai_temp_policy_expiry_with_effect(
+                        policy.id,
+                        policy.expires_at.saturating_add(extension_secs),
+                        &effect,
+                        now,
+                    )
+                    .await?;
+                continue;
+            }
+
+            if effect.last_effectiveness_check_at == Some(now) {
+                let _ = store
+                    .extend_ai_temp_policy_expiry_with_effect(
+                        policy.id,
+                        policy.expires_at,
+                        &effect,
+                        now,
+                    )
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 }

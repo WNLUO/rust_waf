@@ -427,12 +427,16 @@ fn build_request_identity_details_with_header(
             "score": request.get_metadata("l7.behavior.score").cloned(),
             "identity": request.get_metadata("l7.behavior.identity").cloned(),
             "dominant_route": request.get_metadata("l7.behavior.dominant_route").cloned(),
+            "focused_document_route": request.get_metadata("l7.behavior.focused_document_route").cloned(),
             "distinct_routes": request.get_metadata("l7.behavior.distinct_routes").cloned(),
             "repeated_ratio": request.get_metadata("l7.behavior.repeated_ratio").cloned(),
+            "document_repeated_ratio": request.get_metadata("l7.behavior.document_repeated_ratio").cloned(),
             "interval_jitter_ms": request.get_metadata("l7.behavior.interval_jitter_ms").cloned(),
             "document_requests": request.get_metadata("l7.behavior.document_requests").cloned(),
             "non_document_requests": request.get_metadata("l7.behavior.non_document_requests").cloned(),
             "challenge_count_window": request.get_metadata("l7.behavior.challenge_count_window").cloned(),
+            "session_span_secs": request.get_metadata("l7.behavior.session_span_secs").cloned(),
+            "flags": request.get_metadata("l7.behavior.flags").cloned(),
         }
     });
 

@@ -1,4 +1,6 @@
 use super::*;
+const FINGERPRINT_COOKIE_NAME: &str = "rwaf_fp";
+const FINGERPRINT_COOKIE_MAX_AGE_SECS: u64 = 30 * 24 * 3600;
 
 pub(crate) fn try_handle_browser_fingerprint_report(
     context: &WafContext,
@@ -167,7 +169,7 @@ fn handle_browser_fingerprint_report(
     event.details_json = Some(details_json);
     store.enqueue_security_event(event);
 
-    json_http_response(
+    let mut response = json_http_response(
         202,
         serde_json::json!({
             "success": true,
@@ -175,7 +177,18 @@ fn handle_browser_fingerprint_report(
             "fingerprint_id": provider_event_id,
         }),
         &[],
-    )
+    );
+    response.headers.push((
+        "set-cookie".to_string(),
+        format!(
+            "{FINGERPRINT_COOKIE_NAME}={}; Path=/; Max-Age={FINGERPRINT_COOKIE_MAX_AGE_SECS}; HttpOnly; SameSite=Lax",
+            provider_event_id
+        ),
+    ));
+    response
+        .headers
+        .push(("x-browser-fingerprint-id".to_string(), provider_event_id));
+    response
 }
 
 fn build_browser_fingerprint_reason(

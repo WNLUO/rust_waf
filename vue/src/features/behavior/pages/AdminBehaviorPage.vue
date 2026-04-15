@@ -26,12 +26,16 @@ interface BehaviorDetails {
   score: number
   identity: string | null
   dominant_route: string | null
+  focused_document_route: string | null
   distinct_routes: number
   repeated_ratio: number
+  document_repeated_ratio: number
   interval_jitter_ms: number | null
   document_requests: number
   non_document_requests: number
   challenge_count_window: number
+  session_span_secs: number
+  flags: string[]
 }
 
 interface BehaviorEventView {
@@ -47,10 +51,13 @@ interface BehaviorEventView {
   dominantRoute: string
   distinctRoutes: number
   repeatedRatio: number
+  documentRepeatedRatio: number
   intervalJitterMs: number | null
   documentRequests: number
   nonDocumentRequests: number
   challengeCountWindow: number
+  sessionSpanSecs: number
+  flags: string[]
 }
 
 interface BehaviorProfileView {
@@ -67,11 +74,15 @@ interface BehaviorProfileView {
   maxScore: number
   avgScore: number
   maxRepeatedRatio: number
+  maxDocumentRepeatedRatio: number
   distinctRoutes: number
   intervalJitterMs: number | null
   documentRequests: number
   nonDocumentRequests: number
   challengeCountWindow: number
+  focusedDocumentRoute: string
+  sessionSpanSecs: number
+  flags: string[]
 }
 
 const MAX_EVENTS = 120
@@ -137,12 +148,26 @@ function parseBehaviorDetails(event: SecurityEventItem): BehaviorDetails | null 
         typeof details.dominant_route === 'string' && details.dominant_route.trim()
           ? details.dominant_route.trim()
           : null,
+      focused_document_route:
+        typeof details.focused_document_route === 'string' &&
+        details.focused_document_route.trim()
+          ? details.focused_document_route.trim()
+          : null,
       distinct_routes: parseInteger(details.distinct_routes),
       repeated_ratio: parseInteger(details.repeated_ratio),
+      document_repeated_ratio: parseInteger(details.document_repeated_ratio),
       interval_jitter_ms: parseNullableInteger(details.interval_jitter_ms),
       document_requests: parseInteger(details.document_requests),
       non_document_requests: parseInteger(details.non_document_requests),
       challenge_count_window: parseInteger(details.challenge_count_window),
+      session_span_secs: parseInteger(details.session_span_secs),
+      flags:
+        typeof details.flags === 'string' && details.flags.trim()
+          ? details.flags
+              .split(',')
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : [],
     }
   } catch {
     return null
@@ -174,10 +199,13 @@ function toBehaviorEvent(event: SecurityEventItem): BehaviorEventView | null {
     dominantRoute: details.dominant_route || '-',
     distinctRoutes: details.distinct_routes,
     repeatedRatio: details.repeated_ratio,
+    documentRepeatedRatio: details.document_repeated_ratio,
     intervalJitterMs: details.interval_jitter_ms,
     documentRequests: details.document_requests,
     nonDocumentRequests: details.non_document_requests,
     challengeCountWindow: details.challenge_count_window,
+    sessionSpanSecs: details.session_span_secs,
+    flags: details.flags,
   }
 }
 
@@ -198,7 +226,11 @@ const profiles = computed<BehaviorProfileView[]>(() => {
       const blockCount = events.filter((item) => item.action === 'block').length
       const scoreTotal = events.reduce((sum, item) => sum + item.score, 0)
       const maxRepeatedRatio = Math.max(...events.map((item) => item.repeatedRatio))
+      const maxDocumentRepeatedRatio = Math.max(
+        ...events.map((item) => item.documentRepeatedRatio),
+      )
       const maxScore = Math.max(...events.map((item) => item.score))
+      const flags = Array.from(new Set(events.flatMap((item) => item.flags)))
 
       return {
         key,
@@ -214,11 +246,15 @@ const profiles = computed<BehaviorProfileView[]>(() => {
         maxScore,
         avgScore: Number((scoreTotal / events.length).toFixed(1)),
         maxRepeatedRatio,
+        maxDocumentRepeatedRatio,
         distinctRoutes: latest.distinctRoutes,
         intervalJitterMs: latest.intervalJitterMs,
         documentRequests: latest.documentRequests,
         nonDocumentRequests: latest.nonDocumentRequests,
         challengeCountWindow: latest.challengeCountWindow,
+        focusedDocumentRoute: latest.dominantRoute,
+        sessionSpanSecs: latest.sessionSpanSecs,
+        flags,
       }
     })
     .sort((left, right) => {
@@ -524,10 +560,16 @@ onMounted(() => {
                       {{ formatNumber(profile.challengeCount) }} / {{ formatNumber(profile.blockCount) }}
                     </div>
                   </div>
+                    <div>
+                      <div class="text-xs text-slate-400">重复率峰值</div>
+                      <div class="mt-1 font-semibold text-slate-900">
+                        {{ formatNumber(profile.maxRepeatedRatio) }}%
+                      </div>
+                    </div>
                   <div>
-                    <div class="text-xs text-slate-400">重复率峰值</div>
+                    <div class="text-xs text-slate-400">页面重载率</div>
                     <div class="mt-1 font-semibold text-slate-900">
-                      {{ formatNumber(profile.maxRepeatedRatio) }}%
+                      {{ formatNumber(profile.maxDocumentRepeatedRatio) }}%
                     </div>
                   </div>
                   <div>
@@ -584,6 +626,10 @@ onMounted(() => {
                   重复率峰值
                   <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.maxRepeatedRatio) }}%</span>
                 </div>
+                <div class="mt-2 text-sm text-slate-600">
+                  页面重载率
+                  <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.maxDocumentRepeatedRatio) }}%</span>
+                </div>
               </div>
 
               <div class="rounded-2xl bg-slate-50 p-4">
@@ -602,6 +648,23 @@ onMounted(() => {
                     {{ selectedProfile.intervalJitterMs === null ? '未采样' : `${formatNumber(selectedProfile.intervalJitterMs)} ms` }}
                   </span>
                 </div>
+                <div class="mt-2 text-sm text-slate-600">
+                  会话跨度
+                  <span class="font-semibold text-slate-900">{{ formatNumber(selectedProfile.sessionSpanSecs) }} s</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedProfile.flags.length" class="rounded-2xl bg-amber-50/70 p-4">
+              <div class="text-xs uppercase tracking-[0.18em] text-amber-700">命中标签</div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <span
+                  v-for="flag in selectedProfile.flags"
+                  :key="flag"
+                  class="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-medium text-amber-800"
+                >
+                  {{ flag }}
+                </span>
               </div>
             </div>
 
@@ -632,7 +695,7 @@ onMounted(() => {
                     {{ event.method }} {{ event.uri }}
                   </div>
                   <div class="text-xs text-slate-500">
-                    dominant {{ event.dominantRoute }} · repeat {{ formatNumber(event.repeatedRatio) }}% · routes {{ formatNumber(event.distinctRoutes) }}
+                    dominant {{ event.dominantRoute }} · repeat {{ formatNumber(event.repeatedRatio) }}% · doc-repeat {{ formatNumber(event.documentRepeatedRatio) }}% · routes {{ formatNumber(event.distinctRoutes) }}
                   </div>
                 </div>
               </div>

@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const BEHAVIOR_WINDOW_SECS: u64 = 120;
-const MAX_SAMPLES_PER_IDENTITY: usize = 48;
+const BEHAVIOR_WINDOW_SECS: u64 = 300;
+const MAX_SAMPLES_PER_IDENTITY: usize = 96;
 const CLEANUP_EVERY_REQUESTS: u64 = 512;
 const CHALLENGE_SCORE: u32 = 60;
 const BLOCK_SCORE: u32 = 90;
@@ -51,10 +51,14 @@ struct BehaviorAssessment {
     dominant_route: Option<String>,
     distinct_routes: usize,
     repeated_ratio_percent: u32,
+    document_repeated_ratio_percent: u32,
+    focused_document_route: Option<String>,
     jitter_ms: Option<u64>,
     document_requests: usize,
     non_document_requests: usize,
     recent_challenges: usize,
+    session_span_secs: u64,
+    flags: Vec<&'static str>,
 }
 
 impl L7BehaviorGuard {
@@ -99,6 +103,10 @@ impl L7BehaviorGuard {
             assessment.repeated_ratio_percent.to_string(),
         );
         request.add_metadata(
+            "l7.behavior.document_repeated_ratio".to_string(),
+            assessment.document_repeated_ratio_percent.to_string(),
+        );
+        request.add_metadata(
             "l7.behavior.document_requests".to_string(),
             assessment.document_requests.to_string(),
         );
@@ -110,8 +118,21 @@ impl L7BehaviorGuard {
             "l7.behavior.challenge_count_window".to_string(),
             assessment.recent_challenges.to_string(),
         );
+        request.add_metadata(
+            "l7.behavior.session_span_secs".to_string(),
+            assessment.session_span_secs.to_string(),
+        );
+        if !assessment.flags.is_empty() {
+            request.add_metadata("l7.behavior.flags".to_string(), assessment.flags.join(","));
+        }
         if let Some(route) = assessment.dominant_route.as_ref() {
             request.add_metadata("l7.behavior.dominant_route".to_string(), route.clone());
+        }
+        if let Some(route) = assessment.focused_document_route.as_ref() {
+            request.add_metadata(
+                "l7.behavior.focused_document_route".to_string(),
+                route.clone(),
+            );
         }
         if let Some(jitter_ms) = assessment.jitter_ms {
             request.add_metadata(
@@ -130,12 +151,14 @@ impl L7BehaviorGuard {
             self.record_block(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "block".to_string());
             let reason = format!(
-                "l7 behavior guard blocked suspicious session: score={} repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={}",
+                "l7 behavior guard blocked suspicious session: score={} repeated_ratio={} document_repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={} flags={}",
                 assessment.score,
                 assessment.repeated_ratio_percent,
+                assessment.document_repeated_ratio_percent,
                 assessment.distinct_routes,
                 assessment.dominant_route.as_deref().unwrap_or("*"),
                 assessment.recent_challenges,
+                assessment.flags.join("|"),
             );
             return Some(InspectionResult::respond_and_persist_ip(
                 InspectionLayer::L7,
@@ -148,12 +171,14 @@ impl L7BehaviorGuard {
             self.record_challenge(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "challenge".to_string());
             let reason = format!(
-                "l7 behavior guard challenged suspicious session: score={} repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={}",
+                "l7 behavior guard challenged suspicious session: score={} repeated_ratio={} document_repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={} flags={}",
                 assessment.score,
                 assessment.repeated_ratio_percent,
+                assessment.document_repeated_ratio_percent,
                 assessment.distinct_routes,
                 assessment.dominant_route.as_deref().unwrap_or("*"),
                 assessment.recent_challenges,
+                assessment.flags.join("|"),
             );
             return Some(InspectionResult::respond(
                 InspectionLayer::L7,
@@ -259,12 +284,20 @@ impl BehaviorWindow {
         let recent_challenges = self.recent_challenges(now, window);
 
         let mut route_counts: HashMap<&str, usize> = HashMap::new();
+        let mut document_route_counts: HashMap<&str, usize> = HashMap::new();
+        let mut api_requests = 0usize;
         let mut document_requests = 0usize;
         let mut non_document_requests = 0usize;
         for sample in samples.iter() {
             *route_counts.entry(sample.route.as_str()).or_insert(0) += 1;
             if matches!(sample.kind, RequestKind::Document) {
                 document_requests += 1;
+                *document_route_counts
+                    .entry(sample.route.as_str())
+                    .or_insert(0) += 1;
+            } else if matches!(sample.kind, RequestKind::Api) {
+                api_requests += 1;
+                non_document_requests += 1;
             } else {
                 non_document_requests += 1;
             }
@@ -278,29 +311,78 @@ impl BehaviorWindow {
         let repeated_ratio_percent = ((dominant.1 * 100) / total) as u32;
         let distinct_routes = route_counts.len();
         let jitter_ms = interval_jitter_ms(&samples);
+        let document_dominant = document_route_counts
+            .iter()
+            .max_by_key(|(_, count)| **count)
+            .map(|(route, count)| ((*route).to_string(), *count));
+        let document_repeated_ratio_percent = if document_requests == 0 {
+            0
+        } else {
+            document_dominant
+                .as_ref()
+                .map(|(_, count)| ((*count * 100) / document_requests) as u32)
+                .unwrap_or(0)
+        };
+        let session_span_secs = samples
+            .front()
+            .map(|first| now.duration_since(first.at).as_secs())
+            .unwrap_or(0);
 
         let mut score = 0u32;
+        let mut flags = Vec::new();
         if total >= 8 && repeated_ratio_percent >= 85 {
-            score += 45;
+            score += 35;
+            flags.push("repeated_route_burst");
         } else if total >= 6 && repeated_ratio_percent >= 70 {
-            score += 25;
+            score += 20;
+            flags.push("repeated_route_bias");
         }
         if total >= 10 && distinct_routes <= 2 {
             score += 20;
+            flags.push("low_route_diversity");
+        } else if total >= 8 && distinct_routes <= 3 {
+            score += 10;
+            flags.push("narrow_navigation");
         }
         if document_requests >= 4 && non_document_requests == 0 {
-            score += 25;
-        } else if document_requests >= 3 && non_document_requests <= 1 {
+            score += 20;
+            flags.push("document_without_followups");
+        } else if document_requests >= 5
+            && non_document_requests.saturating_mul(2) < document_requests
+        {
             score += 10;
+            flags.push("document_heavy");
         }
-        if matches!(kind, RequestKind::Api) && total >= 6 && distinct_routes <= 2 {
+        if document_requests >= 5 && document_repeated_ratio_percent >= 80 {
+            score += 30;
+            flags.push("focused_document_reload");
+        } else if document_requests >= 4 && document_repeated_ratio_percent >= 65 {
             score += 15;
+            flags.push("focused_document_loop");
+        }
+        if api_requests >= 5 && distinct_routes <= 2 {
+            score += 15;
+            flags.push("api_route_bias");
+        }
+        if is_high_value_route(dominant.0.as_str()) && dominant.1 >= 4 {
+            score += 15;
+            flags.push("high_value_route_bias");
+        }
+        if total >= 8
+            && session_span_secs >= 90
+            && repeated_ratio_percent >= 70
+            && distinct_routes <= 2
+        {
+            score += 20;
+            flags.push("low_and_slow");
         }
         if let Some(jitter_ms) = jitter_ms {
             if total >= 6 && jitter_ms <= 250 {
-                score += 25;
+                score += 20;
+                flags.push("mechanical_intervals");
             } else if total >= 6 && jitter_ms <= 500 {
                 score += 10;
+                flags.push("low_jitter");
             }
         }
 
@@ -310,10 +392,14 @@ impl BehaviorWindow {
             dominant_route: Some(dominant.0),
             distinct_routes,
             repeated_ratio_percent,
+            document_repeated_ratio_percent,
+            focused_document_route: document_dominant.map(|(route, _)| route),
             jitter_ms,
             document_requests,
             non_document_requests,
             recent_challenges,
+            session_span_secs,
+            flags,
         }
     }
 
@@ -390,6 +476,9 @@ fn interval_jitter_ms(samples: &VecDeque<RequestSample>) -> Option<u64> {
 }
 
 fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
+    if let Some(value) = cookie_value(request, "rwaf_fp") {
+        return Some(format!("fp:{value}"));
+    }
     if let Some(value) = cookie_value(request, "rwaf_cc") {
         return Some(format!("cookie:{value}"));
     }
@@ -409,6 +498,34 @@ fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
         .filter(|value| !value.is_empty())
         .unwrap_or("-");
     Some(format!("ipua:{ip}|{ua}"))
+}
+
+fn is_high_value_route(route: &str) -> bool {
+    let route = route.to_ascii_lowercase();
+    [
+        "/login",
+        "/signin",
+        "/signup",
+        "/register",
+        "/auth",
+        "/search",
+        "/query",
+        "/captcha",
+        "/verify",
+        "/otp",
+        "/checkout",
+        "/order",
+        "/pay",
+        "/submit",
+        "/detail",
+        "/product",
+        "/item",
+        "/cart",
+        "/user",
+        "/account",
+    ]
+    .iter()
+    .any(|segment| route.contains(segment))
 }
 
 fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
@@ -561,6 +678,27 @@ mod tests {
                 .unwrap_or_default()
                 < CHALLENGE_SCORE
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_document_refreshes_with_sparse_assets_trigger_challenge() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+        for index in 0..8 {
+            let mut doc = request("GET", "/", "text/html");
+            doc.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            doc.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            last = guard.inspect_request(&mut doc).await;
+
+            if index % 2 == 0 {
+                let mut favicon = request("GET", "/favicon.ico", "*/*");
+                favicon.add_metadata("l7.cc.request_kind".to_string(), "static".to_string());
+                favicon.add_metadata("l7.cc.route".to_string(), "/favicon.ico".to_string());
+                let _ = guard.inspect_request(&mut favicon).await;
+            }
+        }
+
+        assert!(last.is_some());
     }
 
     #[tokio::test]

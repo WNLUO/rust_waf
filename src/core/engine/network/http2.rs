@@ -43,10 +43,7 @@ pub(crate) async fn handle_http2_connection(
             stream,
             peer_ip,
             packet.dest_port,
-            max_request_size,
-            config.l7_config.read_idle_timeout_ms,
-            config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
-            move |request| {
+            move |request, body| {
                 let context = Arc::clone(&context_for_service);
                 let packet = packet.clone();
                 let request_metadata = request_metadata.clone();
@@ -58,6 +55,7 @@ pub(crate) async fn handle_http2_connection(
                 async move {
                     let config = context.config_snapshot();
                     let mut request = request;
+                    let mut body = Some(body);
                     apply_client_identity(context.as_ref(), peer_addr, &mut request);
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);
@@ -189,6 +187,84 @@ pub(crate) async fn handle_http2_connection(
                             body: body_for_request(&request, result.reason.as_bytes()),
                         });
                     }
+
+                    let early_rule_payload = request.to_lightweight_inspection_string();
+                    let early_inspection_result = inspect_application_layers(
+                        context.as_ref(),
+                        &packet,
+                        &request,
+                        &early_rule_payload,
+                    );
+                    if early_inspection_result.blocked {
+                        if early_inspection_result.should_persist_event() {
+                            persist_http_inspection_event(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &early_inspection_result,
+                            );
+                        }
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(early_inspection_result.layer.clone());
+                        }
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
+                        if let Some(response) = early_inspection_result.custom_response.as_ref() {
+                            let response = resolve_runtime_custom_response(response);
+                            let body = body_for_request(&request, &response.body);
+                            let mut headers = response.headers.clone();
+                            apply_response_policies(
+                                context.as_ref(),
+                                &mut headers,
+                                response.status_code,
+                            );
+                            return Ok(Http2Response {
+                                status_code: response.status_code,
+                                headers,
+                                body,
+                            });
+                        }
+                        return Ok(Http2Response {
+                            status_code: 403,
+                            headers: vec![],
+                            body: body_for_request(
+                                &request,
+                                format!("blocked: {}", early_inspection_result.reason).as_bytes(),
+                            ),
+                        });
+                    }
+
+                    let request_body = match Http2Handler::read_request_body(
+                        body.take().expect("http2 request body missing"),
+                        max_request_size,
+                        config.l7_config.read_idle_timeout_ms,
+                        config.l7_config.slow_attack_defense.body_min_bytes_per_sec,
+                    )
+                    .await
+                    {
+                        Ok(body) => body,
+                        Err(err)
+                            if matches!(
+                                err,
+                                crate::protocol::ProtocolError::SlowBody { .. }
+                                    | crate::protocol::ProtocolError::IdleTimeout { .. }
+                            ) =>
+                        {
+                            return handle_http2_slow_attack_error(
+                                context.as_ref(),
+                                &packet,
+                                err,
+                            )
+                            .await;
+                        }
+                        Err(err) => return Err(err),
+                    };
+                    request.body = request_body.to_vec();
 
                     if let Some(response) = try_handle_browser_fingerprint_report(
                         context.as_ref(),

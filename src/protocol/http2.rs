@@ -81,14 +81,11 @@ impl Http2Handler {
         stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
         client_ip: String,
         listener_port: u16,
-        max_size: usize,
-        read_idle_timeout_ms: u64,
-        body_min_bytes_per_sec: u32,
         handler: H,
         error_handler: E,
     ) -> Result<(), ProtocolError>
     where
-        H: Fn(UnifiedHttpRequest) -> Fut + Clone + Send + 'static,
+        H: Fn(UnifiedHttpRequest, Incoming) -> Fut + Clone + Send + 'static,
         Fut: Future<Output = Result<Http2Response, ProtocolError>> + Send + 'static,
         E: Fn(ProtocolError) -> Eut + Clone + Send + 'static,
         Eut: Future<Output = Result<Http2Response, ProtocolError>> + Send + 'static,
@@ -113,17 +110,12 @@ impl Http2Handler {
             let client_ip = client_ip.clone();
             async move {
                 let is_head_request = request.method() == http::Method::HEAD;
-                let response = match Http2Handler::request_to_unified(
+                let response = match Http2Handler::request_head_to_unified(
                     request,
                     &client_ip,
                     listener_port,
-                    max_size,
-                    read_idle_timeout_ms,
-                    body_min_bytes_per_sec,
-                )
-                .await
-                {
-                    Ok(unified) => handler(unified).await?,
+                ) {
+                    Ok((unified, body)) => handler(unified, body).await?,
                     Err(err) => error_handler(err).await?,
                 };
                 Ok::<_, ProtocolError>(Http2Handler::build_response(response, is_head_request))
@@ -136,6 +128,31 @@ impl Http2Handler {
             .map_err(|err| ProtocolError::ParseError(format!("HTTP/2 connection error: {:?}", err)))
     }
 
+    fn request_head_to_unified(
+        request: Request<Incoming>,
+        client_ip: &str,
+        listener_port: u16,
+    ) -> Result<(UnifiedHttpRequest, Incoming), ProtocolError> {
+        let (parts, body) = request.into_parts();
+        let unified = Self::request_parts_to_unified(parts, client_ip, listener_port)?;
+        Ok((unified, body))
+    }
+
+    pub async fn read_request_body<B>(
+        body: B,
+        max_size: usize,
+        read_idle_timeout_ms: u64,
+        body_min_bytes_per_sec: u32,
+    ) -> Result<Bytes, ProtocolError>
+    where
+        B: Body + Send + Unpin + 'static,
+        B::Data: Buf,
+        B::Error: std::fmt::Display,
+    {
+        read_http2_request_body(body, max_size, read_idle_timeout_ms, body_min_bytes_per_sec).await
+    }
+
+    #[allow(dead_code)]
     async fn request_to_unified<B>(
         request: Request<B>,
         client_ip: &str,
@@ -151,9 +168,13 @@ impl Http2Handler {
     {
         let (parts, body) = request.into_parts();
         let mut unified = Self::request_parts_to_unified(parts, client_ip, listener_port)?;
-        let body =
-            read_http2_request_body(body, max_size, read_idle_timeout_ms, body_min_bytes_per_sec)
-                .await?;
+        let body = Self::read_request_body(
+            body,
+            max_size,
+            read_idle_timeout_ms,
+            body_min_bytes_per_sec,
+        )
+        .await?;
         unified.body = body.to_vec();
 
         Ok(unified)

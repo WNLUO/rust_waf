@@ -765,7 +765,8 @@ mod tests {
         request.add_header("host".to_string(), "wnluo.com:660".to_string());
 
         let resolved =
-            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
+            resolve_upstream_tls_server_name(&request, &https_upstream("origin.example.com:880"))
+                .unwrap();
 
         assert_eq!(resolved.as_deref(), Some("wnluo.com"));
     }
@@ -801,7 +802,8 @@ mod tests {
         request.add_header("host".to_string(), "api.wnluo.com".to_string());
 
         let resolved =
-            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
+            resolve_upstream_tls_server_name(&request, &https_upstream("origin.example.com:880"))
+                .unwrap();
 
         assert_eq!(resolved.as_deref(), Some("api.wnluo.com"));
     }
@@ -816,7 +818,8 @@ mod tests {
         );
 
         let resolved =
-            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
+            resolve_upstream_tls_server_name(&request, &https_upstream("origin.example.com:880"))
+                .unwrap();
 
         assert_eq!(resolved.as_deref(), Some("portal.example.com"));
     }

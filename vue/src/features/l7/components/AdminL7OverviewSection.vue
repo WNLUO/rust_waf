@@ -283,6 +283,42 @@ function hotspotViewButtonClass(view: 'host' | 'route') {
     />
   </section>
 
+  <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+    <MetricWidget
+      label="慢速空闲超时"
+      :value="formatNumber(stats?.slow_attack_idle_timeouts || 0)"
+      hint="idle keep-alive 或请求流长期无进展后被回收"
+      :icon="TimerReset"
+    />
+    <MetricWidget
+      label="慢速 Header 命中"
+      :value="formatNumber(stats?.slow_attack_header_timeouts || 0)"
+      hint="请求头读取速率过低或长时间不完整"
+      :icon="Activity"
+      trend="up"
+    />
+    <MetricWidget
+      label="慢速 Body 命中"
+      :value="formatNumber(stats?.slow_attack_body_timeouts || 0)"
+      hint="请求体持续低速上传或长时间无进展"
+      :icon="Shield"
+      trend="up"
+    />
+    <MetricWidget
+      label="慢 TLS 握手"
+      :value="formatNumber(stats?.slow_attack_tls_handshake_hits || 0)"
+      hint="TLS 握手阶段被归类为慢速占连"
+      :icon="TimerReset"
+    />
+    <MetricWidget
+      label="慢速攻击封禁"
+      :value="formatNumber(stats?.slow_attack_blocks || 0)"
+      :hint="`窗口 ${formatNumber(configForm.slow_attack_defense.max_events_per_window)} 次后升级封禁 ${formatNumber(configForm.slow_attack_defense.block_duration_secs)}s`"
+      :icon="Shield"
+      trend="up"
+    />
+  </section>
+
   <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
     <MetricWidget
       label="CC 挑战次数"

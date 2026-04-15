@@ -69,6 +69,9 @@ export function useAdminL7() {
       ...payload,
       trusted_proxy_cidrs: [...payload.trusted_proxy_cidrs],
       listen_addrs: [...payload.listen_addrs],
+      slow_attack_defense: {
+        ...payload.slow_attack_defense,
+      },
       safeline_intercept: {
         ...payload.safeline_intercept,
         response_template: {

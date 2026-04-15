@@ -216,6 +216,7 @@ async fn proxy_http2_request(
         get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
             .await?;
     let upstream_request = build_http2_upstream_request(request, upstream)?;
+    log_http2_upstream_request(request, upstream, &upstream_request)?;
     let mut guard = pooled.lock().await;
     let response = tokio::time::timeout(
         std::time::Duration::from_millis(read_timeout_ms),
@@ -224,6 +225,7 @@ async fn proxy_http2_request(
     .await;
     match response {
         Ok(Ok(response)) => {
+            log_http2_upstream_response(&response);
             let mapped = map_http2_upstream_response(response).await?;
             context.set_upstream_health(true, None);
             Ok(mapped)
@@ -498,6 +500,58 @@ fn build_http2_upstream_request(
         .map_err(Into::into)
 }
 
+fn log_http2_upstream_request(
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    upstream_request: &Request<Full<Bytes>>,
+) -> Result<()> {
+    let sni = resolve_upstream_tls_server_name(request, upstream)?
+        .unwrap_or_else(|| "<none>".to_string());
+    let forwarded_headers = upstream_request
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| format!("{}={}", name.as_str(), value))
+        })
+        .collect::<Vec<_>>();
+    debug!(
+        "HTTP/2 upstream request: method={} path={} uri={} upstream_authority={} host={} sni={} headers=[{}]",
+        upstream_request.method(),
+        request.uri,
+        upstream_request.uri(),
+        upstream.authority,
+        upstream_request
+            .headers()
+            .get(HOST)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("<missing>"),
+        sni,
+        forwarded_headers.join(", ")
+    );
+    Ok(())
+}
+
+fn log_http2_upstream_response(response: &http::Response<hyper::body::Incoming>) {
+    let header_dump = response
+        .headers()
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| format!("{}={}", name.as_str(), value))
+        })
+        .collect::<Vec<_>>();
+    debug!(
+        "HTTP/2 upstream response: status={} headers=[{}]",
+        response.status(),
+        header_dump.join(", ")
+    );
+}
+
 fn effective_http2_upstream_authority(
     request: &UnifiedHttpRequest,
     upstream: &crate::core::gateway::UpstreamEndpoint,
@@ -766,7 +820,8 @@ mod tests {
             UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
         request.add_header("host".to_string(), "wnluo.com".to_string());
 
-        let authority = effective_http2_upstream_authority(&request, &https_upstream("127.0.0.1:880"));
+        let authority =
+            effective_http2_upstream_authority(&request, &https_upstream("127.0.0.1:880"));
 
         assert_eq!(authority, "wnluo.com");
     }
@@ -777,7 +832,10 @@ mod tests {
             UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
         request.add_header("host".to_string(), "wnluo.com".to_string());
         request.add_header("eo-log-uuid".to_string(), "trace".to_string());
-        request.add_header("cdn-loop".to_string(), "TencentEdgeOne; loops=2".to_string());
+        request.add_header(
+            "cdn-loop".to_string(),
+            "TencentEdgeOne; loops=2".to_string(),
+        );
         request.add_header("via".to_string(), "ens-cache".to_string());
         request.add_header("x-cdn-real-ip".to_string(), "1.2.3.4".to_string());
         request.add_header("x-forwarded-for".to_string(), "1.2.3.4".to_string());

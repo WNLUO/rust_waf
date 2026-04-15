@@ -43,8 +43,8 @@ const peerKindType = (peerKind: L4BucketItem['peer_kind']) => {
   return 'muted'
 }
 
-const hasL7Signals = (bucket: L4BucketItem) =>
-  bucket.l7_block_hits > 0 || bucket.safeline_hits > 0
+const hasDefenseSignals = (bucket: L4BucketItem) =>
+  bucket.l7_block_hits > 0 || bucket.safeline_hits > 0 || bucket.slow_attack_hits > 0
 </script>
 
 <template>
@@ -58,7 +58,7 @@ const hasL7Signals = (bucket: L4BucketItem) =>
     <MetricWidget
       label="雷池反馈命中"
       :value="formatNumber(behaviorOverview.safeline_feedback_hits)"
-      :hint="`L7 拦截反馈 ${formatNumber(behaviorOverview.l7_feedback_hits)}`"
+      :hint="`L7 拦截反馈 ${formatNumber(behaviorOverview.l7_feedback_hits)}，慢速攻击命中请看分桶联动`"
       :icon="Shield"
       trend="up"
     />
@@ -178,11 +178,17 @@ const hasL7Signals = (bucket: L4BucketItem) =>
               </div>
             </td>
             <td class="px-4 py-3 align-top">
-              <div v-if="hasL7Signals(bucket)" class="flex flex-wrap gap-1.5 text-xs">
+              <div v-if="hasDefenseSignals(bucket)" class="flex flex-wrap gap-1.5 text-xs">
                 <span
                   class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-medium text-amber-700"
                 >
                   L7 拦截 {{ formatNumber(bucket.l7_block_hits) }}
+                </span>
+                <span
+                  v-if="bucket.slow_attack_hits > 0"
+                  class="inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 font-medium text-rose-700"
+                >
+                  慢速攻击 {{ formatNumber(bucket.slow_attack_hits) }}
                 </span>
                 <span
                   class="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 font-medium text-cyan-700"

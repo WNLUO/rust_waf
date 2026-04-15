@@ -576,6 +576,56 @@ const ccHardHotPathBlockMultiplier = computed({
     updateCcDefense({ hard_hot_path_block_multiplier: value }),
 })
 
+function updateSlowAttackDefense(
+  patch: Partial<L7ConfigForm['slow_attack_defense']>,
+) {
+  updateForm('slow_attack_defense', {
+    ...props.form.slow_attack_defense,
+    ...patch,
+  })
+}
+
+const slowAttackDefenseEnabled = computed({
+  get: () => props.form.slow_attack_defense.enabled,
+  set: (value: boolean) => updateSlowAttackDefense({ enabled: value }),
+})
+
+const slowAttackHeaderMinRate = computed({
+  get: () => props.form.slow_attack_defense.header_min_bytes_per_sec,
+  set: (value: number) =>
+    updateSlowAttackDefense({ header_min_bytes_per_sec: value }),
+})
+
+const slowAttackBodyMinRate = computed({
+  get: () => props.form.slow_attack_defense.body_min_bytes_per_sec,
+  set: (value: number) =>
+    updateSlowAttackDefense({ body_min_bytes_per_sec: value }),
+})
+
+const slowAttackIdleKeepaliveTimeout = computed({
+  get: () => props.form.slow_attack_defense.idle_keepalive_timeout_ms,
+  set: (value: number) =>
+    updateSlowAttackDefense({ idle_keepalive_timeout_ms: value }),
+})
+
+const slowAttackEventWindow = computed({
+  get: () => props.form.slow_attack_defense.event_window_secs,
+  set: (value: number) =>
+    updateSlowAttackDefense({ event_window_secs: value }),
+})
+
+const slowAttackMaxEvents = computed({
+  get: () => props.form.slow_attack_defense.max_events_per_window,
+  set: (value: number) =>
+    updateSlowAttackDefense({ max_events_per_window: value }),
+})
+
+const slowAttackBlockDuration = computed({
+  get: () => props.form.slow_attack_defense.block_duration_secs,
+  set: (value: number) =>
+    updateSlowAttackDefense({ block_duration_secs: value }),
+})
+
 function updateSafelineIntercept(
   patch: Partial<L7ConfigForm['safeline_intercept']>,
 ) {
@@ -891,6 +941,84 @@ const safelineResponseBodySource = computed({
             v-model="rejectExpect100Continue"
             type="checkbox"
             class="ui-switch"
+          />
+        </label>
+      </div>
+    </div>
+
+    <div class="mt-4 border-t border-slate-200 pt-4">
+      <div
+        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+      >
+        <div>
+          <p class="text-sm tracking-wider text-blue-700">慢速攻击防护（独立运行项）</p>
+          <p class="mt-1 text-xs leading-5 text-slate-500">
+            覆盖慢速 header、慢速 body 和 idle keep-alive 占坑，命中后自动断连、记事件，并在窗口内升级封禁。
+          </p>
+        </div>
+        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
+          <span>启用慢速攻击防护</span>
+          <input
+            v-model="slowAttackDefenseEnabled"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
+      </div>
+
+      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <label class="text-sm text-stone-700">
+          Header 最低速率(B/s)
+          <input
+            v-model.number="slowAttackHeaderMinRate"
+            type="number"
+            min="1"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          Body 最低速率(B/s)
+          <input
+            v-model.number="slowAttackBodyMinRate"
+            type="number"
+            min="1"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          Keep-Alive 空闲超时(ms)
+          <input
+            v-model.number="slowAttackIdleKeepaliveTimeout"
+            type="number"
+            min="100"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          统计窗口(s)
+          <input
+            v-model.number="slowAttackEventWindow"
+            type="number"
+            min="10"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          窗口升级阈值
+          <input
+            v-model.number="slowAttackMaxEvents"
+            type="number"
+            min="1"
+            :class="numberInputClass"
+          />
+        </label>
+        <label class="text-sm text-stone-700">
+          升级封禁时长(s)
+          <input
+            v-model.number="slowAttackBlockDuration"
+            type="number"
+            min="30"
+            :class="numberInputClass"
           />
         </label>
       </div>

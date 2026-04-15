@@ -299,8 +299,8 @@ pub struct L7AdvancedCompatibilityResponse {
 #[derive(Debug, Clone, Serialize)]
 pub struct SlowAttackDefenseConfigResponse {
     pub(crate) enabled: bool,
-    pub(crate) header_min_bytes_per_sec: u64,
-    pub(crate) body_min_bytes_per_sec: u64,
+    pub(crate) header_min_bytes_per_sec: u32,
+    pub(crate) body_min_bytes_per_sec: u32,
     pub(crate) idle_keepalive_timeout_ms: u64,
     pub(crate) event_window_secs: u64,
     pub(crate) max_events_per_window: u32,
@@ -395,8 +395,8 @@ pub struct L7ConfigUpdateRequest {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SlowAttackDefenseConfigRequest {
     pub(crate) enabled: bool,
-    pub(crate) header_min_bytes_per_sec: u64,
-    pub(crate) body_min_bytes_per_sec: u64,
+    pub(crate) header_min_bytes_per_sec: u32,
+    pub(crate) body_min_bytes_per_sec: u32,
     pub(crate) idle_keepalive_timeout_ms: u64,
     pub(crate) event_window_secs: u64,
     pub(crate) max_events_per_window: u32,

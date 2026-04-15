@@ -6,7 +6,6 @@ use http_body_util::{BodyExt, Full};
 use hyper::client::conn::http2 as hyper_http2;
 use hyper::header::{CONNECTION, CONTENT_LENGTH, HOST, TRANSFER_ENCODING};
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use std::net::IpAddr;
 
 #[allow(dead_code)]
 async fn forward_http1_request<W>(
@@ -534,7 +533,7 @@ fn emit_http2_upstream_request_debug_event(
             "method": upstream_request.method().as_str(),
             "path": request.uri,
             "uri": upstream_request.uri().to_string(),
-            "upstream_authority": upstream.authority,
+            "connect_target": upstream.authority,
             "host": upstream_request
                 .headers()
                 .get(HOST)
@@ -717,16 +716,6 @@ fn resolve_upstream_tls_server_name(
         return Ok(None);
     }
 
-    let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
-    let upstream_host = authority_uri.host().map(ToOwned::to_owned);
-
-    if upstream_host
-        .as_deref()
-        .is_some_and(should_prefer_upstream_tls_server_name)
-    {
-        return Ok(upstream_host);
-    }
-
     if let Some(hostname) = crate::core::engine::policy::request_hostname(request) {
         return Ok(Some(hostname));
     }
@@ -738,11 +727,8 @@ fn resolve_upstream_tls_server_name(
         return Ok(Some(primary_hostname));
     }
 
-    Ok(upstream_host)
-}
-
-fn should_prefer_upstream_tls_server_name(host: &str) -> bool {
-    host.eq_ignore_ascii_case("localhost") || host.parse::<IpAddr>().is_ok()
+    let authority_uri = format!("https://{}", upstream.authority).parse::<http::Uri>()?;
+    Ok(authority_uri.host().map(ToOwned::to_owned))
 }
 
 #[cfg(test)]
@@ -769,30 +755,6 @@ mod tests {
                 .unwrap();
 
         assert_eq!(resolved.as_deref(), Some("wnluo.com"));
-    }
-
-    #[test]
-    fn upstream_tls_server_name_prefers_loopback_upstream_host() {
-        let mut request =
-            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
-        request.add_header("host".to_string(), "wnluo.com".to_string());
-
-        let resolved =
-            resolve_upstream_tls_server_name(&request, &https_upstream("127.0.0.1:880")).unwrap();
-
-        assert_eq!(resolved.as_deref(), Some("127.0.0.1"));
-    }
-
-    #[test]
-    fn upstream_tls_server_name_prefers_localhost_upstream_host() {
-        let mut request =
-            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
-        request.add_header("host".to_string(), "wnluo.com".to_string());
-
-        let resolved =
-            resolve_upstream_tls_server_name(&request, &https_upstream("localhost:880")).unwrap();
-
-        assert_eq!(resolved.as_deref(), Some("localhost"));
     }
 
     #[test]

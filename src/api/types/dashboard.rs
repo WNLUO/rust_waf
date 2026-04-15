@@ -171,6 +171,7 @@ pub struct AiTempPolicyEffectResponse {
     pub(crate) action_hits: std::collections::BTreeMap<String, i64>,
     pub(crate) match_modes: std::collections::BTreeMap<String, i64>,
     pub(crate) scope_hits: std::collections::BTreeMap<String, i64>,
+    pub(crate) matched_value_hits: std::collections::BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -184,6 +185,8 @@ pub struct AiTempPolicyEffectivenessResponse {
     pub(crate) action_status: String,
     pub(crate) action_reason: String,
     pub(crate) governance_hint: String,
+    pub(crate) primary_object: Option<String>,
+    pub(crate) primary_object_hits: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

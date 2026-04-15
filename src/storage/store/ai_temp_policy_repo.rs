@@ -159,6 +159,10 @@ impl SqliteStore {
         *effect.action_hits.entry(hit.action.clone()).or_insert(0) += 1;
         *effect.match_modes.entry(hit.match_mode.clone()).or_insert(0) += 1;
         *effect.scope_hits.entry(hit.scope_type.clone()).or_insert(0) += 1;
+        *effect
+            .matched_value_hits
+            .entry(hit.matched_value.clone())
+            .or_insert(0) += 1;
 
         let result = sqlx::query(
             r#"

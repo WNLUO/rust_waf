@@ -181,6 +181,8 @@ pub struct AiTempPolicyEffectStats {
     pub match_modes: std::collections::BTreeMap<String, i64>,
     #[serde(default)]
     pub scope_hits: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub matched_value_hits: std::collections::BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone)]

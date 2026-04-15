@@ -248,6 +248,7 @@ export interface AiTempPolicyEffect {
   action_hits: Record<string, number>
   match_modes: Record<string, number>
   scope_hits: Record<string, number>
+  matched_value_hits: Record<string, number>
 }
 
 export interface AiTempPolicyEffectiveness {
@@ -260,6 +261,8 @@ export interface AiTempPolicyEffectiveness {
   action_status: string
   action_reason: string
   governance_hint: string
+  primary_object: string | null
+  primary_object_hits: number
 }
 
 export interface AiTempPoliciesResponse {

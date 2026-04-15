@@ -1139,6 +1139,7 @@ fn ai_temp_policy_response_from_entry(
         identity_pressure_delta,
         rust_persistence_delta,
     );
+    let (primary_object, primary_object_hits) = top_effect_object(&effect);
 
     AiTempPolicyResponse {
         id: value.id,
@@ -1177,6 +1178,7 @@ fn ai_temp_policy_response_from_entry(
             action_hits: effect.action_hits,
             match_modes: effect.match_modes,
             scope_hits: effect.scope_hits,
+            matched_value_hits: effect.matched_value_hits,
         },
         effectiveness: AiTempPolicyEffectivenessResponse {
             current_l7_friction_percent: summary.current.l7_friction_pressure_percent,
@@ -1188,8 +1190,19 @@ fn ai_temp_policy_response_from_entry(
             action_status,
             action_reason,
             governance_hint,
+            primary_object,
+            primary_object_hits,
         },
     }
+}
+
+fn top_effect_object(effect: &crate::storage::AiTempPolicyEffectStats) -> (Option<String>, i64) {
+    effect
+        .matched_value_hits
+        .iter()
+        .max_by(|left, right| left.1.cmp(right.1).then_with(|| right.0.cmp(left.0)))
+        .map(|(key, value)| (Some(key.clone()), *value))
+        .unwrap_or((effect.last_matched_value.clone(), 0))
 }
 
 fn classify_ai_temp_policy_action(

@@ -1336,6 +1336,14 @@ onMounted(() => {
                       动作评估 {{ policy.effectiveness.action_status }} ·
                       {{ policy.effectiveness.action_reason }}
                     </p>
+                    <p class="mt-1 text-[11px] text-slate-500">
+                      主要作用对象
+                      {{
+                        policy.effectiveness.primary_object
+                          ? `${policy.effectiveness.primary_object} · ${formatNumber(policy.effectiveness.primary_object_hits)} 次`
+                          : '暂无'
+                      }}
+                    </p>
                     <div class="mt-3 grid gap-2 md:grid-cols-2">
                       <div
                         class="rounded-xl border border-slate-200 bg-white/80 px-3 py-2"
@@ -1376,6 +1384,14 @@ onMounted(() => {
                         <p class="mt-1 text-[11px] text-slate-500">
                           动作
                           {{ formatPolicyEffectMap(policy.effect.action_hits) }}
+                        </p>
+                        <p class="mt-1 text-[11px] text-slate-500">
+                          对象
+                          {{
+                            formatPolicyEffectMap(
+                              policy.effect.matched_value_hits,
+                            )
+                          }}
                         </p>
                       </div>
                     </div>

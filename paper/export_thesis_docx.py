@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--picture-layout",
         choices=["top-bottom", "inline"],
-        default="top-bottom",
-        help="DOCX picture layout. top-bottom maps to Word's 上下型环绕.",
+        default="inline",
+        help="DOCX picture layout. inline keeps figures fixed in the text flow.",
     )
     parser.add_argument(
         "--figure-caption-position",
@@ -294,11 +294,6 @@ def add_title_page(doc: Document, *, title: str, en_title: str) -> None:
 
     p = doc.add_paragraph()
     set_paragraph_common(p, indent=False, center=True)
-    run = p.add_run(en_title)
-    set_run_font(run, size=14, east_asia="楷体_GB2312")
-
-    p = doc.add_paragraph()
-    set_paragraph_common(p, indent=False, center=True)
     run = p.add_run("作者：________________")
     set_run_font(run, size=14, east_asia="楷体_GB2312")
 
@@ -398,9 +393,14 @@ def resolve_image(src: str, *, html_path: Path, build_dir: Path) -> Path | None:
     return rendered
 
 
-def add_picture(doc: Document, path: Path, width_cm: float, *, layout: str = "top-bottom") -> None:
+def add_picture(doc: Document, path: Path, width_cm: float, *, layout: str = "inline") -> None:
     p = doc.add_paragraph()
-    set_paragraph_common(p, indent=False, center=True, line_pt=1 if layout == "top-bottom" else 12)
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.first_line_indent = None
+    p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    p.paragraph_format.line_spacing = 1.0
+    p.paragraph_format.space_before = Pt(3)
+    p.paragraph_format.space_after = Pt(3)
     p.paragraph_format.keep_with_next = True
     run = p.add_run()
     final_width = fitting_image_width_cm(path, max_width_cm=width_cm, max_height_cm=13.2)

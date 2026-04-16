@@ -1,0 +1,47 @@
+<svg width="1800" height="900" viewBox="0 0 1800 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9CA3AF" />
+    </marker>
+  </defs>
+  
+  <rect width="1800" height="900" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1704" height="804" rx="30" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="120" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="42" font-weight="700">本文系统定位与研究问题示意</text>
+
+  <!-- 传统规则型 WAF -->
+  <rect x="100" y="180" width="500" height="320" rx="28" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="350" y="260" text-anchor="middle" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">传统规则型 WAF</text>
+  <text x="140" y="330" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 以 HTTP/1.1 文本请求匹配为主</text>
+  <text x="140" y="380" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 偏重规则引擎与拦截能力</text>
+  <text x="140" y="430" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 多依赖既有 Web 服务器生态</text>
+  <text x="140" y="480" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 控制面与观测能力常需额外补齐</text>
+
+  <!-- 本文系统 -->
+  <rect x="650" y="180" width="500" height="320" rx="30" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="900" y="260" text-anchor="middle" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">本文系统</text>
+  <text x="690" y="330" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 多协议轻量级安全网关</text>
+  <text x="690" y="380" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• L4 快速治理 + L7 精细检测</text>
+  <text x="690" y="430" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 统一抽象覆盖 HTTP/1.1、2、3</text>
+  <text x="690" y="480" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 形成观测闭环，兼顾研究与运营</text>
+
+  <!-- 云 WAF / 商业网关 -->
+  <rect x="1200" y="180" width="500" height="320" rx="28" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="1450" y="260" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">云 WAF / 商业网关</text>
+  <text x="1240" y="330" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 业务功能通常更完整</text>
+  <text x="1240" y="380" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 控制面成熟但平台耦合度较高</text>
+  <text x="1240" y="430" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 实现细节对使用者不可见</text>
+  <text x="1240" y="480" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 适合生产托管，不利于源码分析</text>
+
+  <!-- 对比关系连线 -->
+  <path d="M 600 340 L 640 340" stroke="#9CA3AF" stroke-width="4" marker-end="url(#arrow-blue)"/>
+  <path d="M 1150 340 L 1190 340" stroke="#9CA3AF" stroke-width="4" marker-end="url(#arrow-blue)"/>
+
+  <!-- 研究问题 -->
+  <rect x="100" y="550" width="1600" height="250" rx="24" fill="#F3F4F6" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="900" y="620" text-anchor="middle" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">本文重点回答的四个研究问题</text>
+  <text x="160" y="680" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="26">1. 如何在不依赖大型外部平台的前提下构建可本地独立部署的 WAF 系统</text>
+  <text x="160" y="730" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="26">2. 如何通过统一请求抽象收敛 HTTP/1.1、HTTP/2、HTTP/3 的检测差异</text>
+  <text x="1000" y="680" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="26">3. 如何让 L4 低开销治理与 L7 高语义检测形成互补</text>
+  <text x="1000" y="730" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="26">4. 如何把事件、联动与观测整合为可解释的工程闭环</text>
+</svg>

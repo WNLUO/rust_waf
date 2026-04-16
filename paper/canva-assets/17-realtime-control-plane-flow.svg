@@ -1,0 +1,45 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">实时推送与控制面数据流示意</text>
+
+  <rect x="110" y="180" width="360" height="200" rx="24" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="150" y="244" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">数据面与后台任务</text>
+  <text x="150" y="290" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">请求处理链路</text>
+  <text x="150" y="324" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">健康检查 / SafeLine / 联动</text>
+
+  <rect x="110" y="440" width="360" height="180" rx="24" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="150" y="504" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">SQLite / 事件源</text>
+  <text x="150" y="550" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">安全事件 / 阻断记录</text>
+  <text x="150" y="584" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">流量增量与运行摘要</text>
+
+  <rect x="610" y="180" width="380" height="480" rx="28" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="650" y="246" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">实时聚合与桥接层</text>
+  <text x="650" y="304" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">sampler 周期采样</text>
+  <text x="650" y="338" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">storage bridge 事件桥接</text>
+  <text x="650" y="372" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">traffic bridge 流量桥接</text>
+  <text x="650" y="406" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">压力下采样与数据修复</text>
+  <text x="650" y="464" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">输出 Topic 订阅：</text>
+  <text x="650" y="496" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">metrics / l4_stats / l7_stats</text>
+  <text x="650" y="528" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">recent_events / blocked_ips</text>
+  <text x="650" y="560" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">traffic_map / traffic_delta</text>
+
+  <rect x="1130" y="200" width="360" height="200" rx="24" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="1170" y="264" fill="#4C1D95" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">Axum 实时接口</text>
+  <text x="1170" y="310" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">POST /ws/admin-ticket</text>
+  <text x="1170" y="344" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">GET /ws/admin?ticket=...</text>
+
+  <rect x="1130" y="450" width="360" height="180" rx="24" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+  <text x="1170" y="514" fill="#7F1D1D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">Vue 控制台订阅端</text>
+  <text x="1170" y="560" fill="#991B1B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">总览 / 事件 / 封禁 / 流量地图</text>
+  <text x="1170" y="594" fill="#991B1B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">按 Topic 分发并自动重连</text>
+
+  <path d="M470 280H610" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M470 530H610" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M990 280H1130" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1310 400V450" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M595 280L579 268V292L595 280Z" fill="#9CA3AF"/>
+  <path d="M595 530L579 518V542L595 530Z" fill="#9CA3AF"/>
+  <path d="M1115 280L1099 268V292L1115 280Z" fill="#9CA3AF"/>
+  <path d="M1310 435L1298 417H1322L1310 435Z" fill="#9CA3AF"/>
+</svg>

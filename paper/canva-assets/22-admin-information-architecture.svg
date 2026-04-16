@@ -1,0 +1,39 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">管理端信息架构总览</text>
+
+  <rect x="640" y="180" width="320" height="110" rx="22" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="800" y="246" text-anchor="middle" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">控制台总览</text>
+
+  <rect x="120" y="380" width="260" height="120" rx="22" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="250" y="452" text-anchor="middle" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">L4 / L7 管理</text>
+
+  <rect x="430" y="380" width="260" height="120" rx="22" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="560" y="452" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">规则 / 动作</text>
+
+  <rect x="740" y="380" width="260" height="120" rx="22" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="870" y="452" text-anchor="middle" fill="#4C1D95" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">系统设置</text>
+
+  <rect x="1050" y="380" width="260" height="120" rx="22" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+  <text x="1180" y="452" text-anchor="middle" fill="#7F1D1D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">站点 / 证书</text>
+
+  <rect x="1360" y="380" width="150" height="120" rx="22" fill="#F0F9FF" stroke="#0EA5E9" stroke-width="2"/>
+  <text x="1435" y="434" text-anchor="middle" fill="#0C4A6E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="700">外部联动</text>
+  <text x="1435" y="464" text-anchor="middle" fill="#075985" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">SafeLine 同步</text>
+
+  <rect x="410" y="580" width="320" height="100" rx="24" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="2"/>
+  <text x="570" y="630" text-anchor="middle" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">事件 / 行为观测</text>
+  <text x="570" y="664" text-anchor="middle" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">记录封禁、会话、流量地图</text>
+
+  <rect x="860" y="580" width="330" height="100" rx="24" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="2"/>
+  <text x="1025" y="630" text-anchor="middle" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">智能档案 / AI 审计</text>
+  <text x="1025" y="664" text-anchor="middle" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">画像沉淀、辅助决策、临时策略</text>
+
+  <path d="M800 290V380" stroke="#9CA3AF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M800 290C800 320 250 320 250 380" stroke="#9CA3AF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M800 290C800 320 560 320 560 380" stroke="#9CA3AF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M800 290C800 320 1180 320 1180 380" stroke="#9CA3AF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M800 500C800 540 570 540 570 580" stroke="#9CA3AF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M800 500C800 540 1025 540 1025 580" stroke="#9CA3AF" stroke-width="4" stroke-linecap="round"/>
+</svg>

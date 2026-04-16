@@ -1,0 +1,38 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">SafeLine 联动与数据同步拓扑</text>
+
+  <rect x="120" y="180" width="420" height="430" rx="28" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="168" y="246" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">本地 Rust WAF</text>
+  <text x="168" y="308" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">本地站点与证书管理</text>
+  <text x="168" y="346" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">同步链路与站点映射</text>
+  <text x="168" y="384" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">安全事件与封禁库</text>
+  <text x="168" y="442" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">负责本地治理、事件沉淀</text>
+  <text x="168" y="474" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">以及与外部平台的同步维护</text>
+
+  <rect x="1060" y="180" width="420" height="430" rx="28" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="1108" y="246" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">SafeLine 平台</text>
+  <text x="1108" y="308" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">远端站点清单</text>
+  <text x="1108" y="346" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">远端证书目录</text>
+  <text x="1108" y="384" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">事件与封禁同步接口</text>
+  <text x="1108" y="442" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">远端提供资源与分析能力，</text>
+  <text x="1108" y="474" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">本地按需拉取、推送与回流</text>
+
+  <rect x="630" y="220" width="340" height="150" rx="24" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="800" y="284" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">站点 / 证书同步</text>
+  <text x="800" y="328" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">缓存拉取、导入、本地推送</text>
+
+  <rect x="630" y="440" width="340" height="150" rx="24" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="800" y="504" text-anchor="middle" fill="#4C1D95" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">事件 / 封禁回流</text>
+  <text x="800" y="548" text-anchor="middle" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">同步游标、去重、执行状态</text>
+
+  <path d="M540 305H630" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M970 305H1060" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M540 515H630" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M970 515H1060" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M615 305L599 293V317L615 305Z" fill="#9CA3AF"/>
+  <path d="M1045 305L1029 293V317L1045 305Z" fill="#9CA3AF"/>
+  <path d="M615 515L599 503V527L615 515Z" fill="#9CA3AF"/>
+  <path d="M1045 515L1029 503V527L1045 515Z" fill="#9CA3AF"/>
+</svg>

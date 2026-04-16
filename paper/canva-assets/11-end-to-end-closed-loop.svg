@@ -1,0 +1,71 @@
+<svg width="2000" height="900" viewBox="0 0 2000 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9CA3AF" />
+    </marker>
+  </defs>
+
+  <rect width="2000" height="900" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1904" height="804" rx="30" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="120" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="42" font-weight="700">典型恶意请求的端到端防护闭环</text>
+
+  <!-- 顶部五个节点，从左到右形成流水线 -->
+  <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
+    <!-- Node 1: 入口接入 -->
+    <rect x="80" y="180" width="300" height="200" rx="24" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="230" y="270" text-anchor="middle" fill="#1E3A8A" font-size="34" font-weight="700">1. 入口接入</text>
+    <text x="230" y="320" text-anchor="middle" fill="#1E40AF" font-size="24">监听器接收连接与请求</text>
+
+    <!-- Node 2: L4 治理 -->
+    <rect x="460" y="180" width="300" height="200" rx="24" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="610" y="270" text-anchor="middle" fill="#14532D" font-size="34" font-weight="700">2. L4 治理</text>
+    <text x="610" y="320" text-anchor="middle" fill="#166534" font-size="24">限流 / 黑名单 / 连接分桶</text>
+
+    <!-- Node 3: L7 预检与裁决 -->
+    <rect x="840" y="180" width="300" height="200" rx="24" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+    <text x="990" y="270" text-anchor="middle" fill="#78350F" font-size="34" font-weight="700">3. L7 预检与裁决</text>
+    <text x="990" y="320" text-anchor="middle" fill="#92400E" font-size="24">行为检测 / CC / 规则匹配</text>
+
+    <!-- Node 4: 响应执行 -->
+    <rect x="1220" y="180" width="300" height="200" rx="24" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+    <text x="1370" y="270" text-anchor="middle" fill="#4C1D95" font-size="34" font-weight="700">4. 响应执行</text>
+    <text x="1370" y="320" text-anchor="middle" fill="#5B21B6" font-size="24">动作模板返回 / 透传 / 丢弃</text>
+
+    <!-- Node 5: 审计沉淀 -->
+    <rect x="1600" y="180" width="300" height="200" rx="24" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+    <text x="1750" y="270" text-anchor="middle" fill="#7F1D1D" font-size="34" font-weight="700">5. 审计沉淀</text>
+    <text x="1750" y="320" text-anchor="middle" fill="#991B1B" font-size="24">安全事件 / 画像落库</text>
+
+    <!-- 底部四个节点，从右到左，形成回环 -->
+    <!-- Node 6: 控制面回看 -->
+    <rect x="1420" y="550" width="360" height="180" rx="26" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="2"/>
+    <text x="1600" y="620" text-anchor="middle" fill="#111827" font-size="34" font-weight="700">6. 控制面回看</text>
+    <text x="1600" y="670" text-anchor="middle" fill="#374151" font-size="24">面板观测 / AI 审计 / 临时策略</text>
+
+    <!-- Node 7: 外部联动 -->
+    <rect x="850" y="550" width="400" height="180" rx="26" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="1050" y="620" text-anchor="middle" fill="#14532D" font-size="34" font-weight="700">7. 外部联动</text>
+    <text x="1050" y="670" text-anchor="middle" fill="#166534" font-size="24">外部平台同步与执行反馈</text>
+
+    <!-- Node 8: 系统可解释收益 -->
+    <rect x="220" y="550" width="460" height="180" rx="26" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+    <text x="450" y="620" text-anchor="middle" fill="#78350F" font-size="34" font-weight="700">核心闭环价值</text>
+    <text x="450" y="670" text-anchor="middle" fill="#92400E" font-size="24">不仅拦截攻击，更沉淀溯源画像</text>
+  </g>
+
+  <!-- 上排从左往右流水线连线 -->
+  <path d="M 380 280 L 460 280" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+  <path d="M 760 280 L 840 280" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+  <path d="M 1140 280 L 1220 280" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+  <path d="M 1520 280 L 1600 280" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+
+  <!-- 节点 5 往下 到 节点 6 -->
+  <path d="M 1750 380 V 465 H 1600 V 550" fill="none" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+
+  <!-- 下排从右往左流向 -->
+  <path d="M 1420 640 L 1250 640" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+  <path d="M 850 640 L 680 640" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+
+  <!-- 从 8 绕回 1，完成闭环！ -->
+  <path d="M 450 550 V 465 H 230 V 380" fill="none" stroke="#9CA3AF" stroke-width="5" marker-end="url(#arrow-blue)"/>
+</svg>

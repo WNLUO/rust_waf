@@ -1,0 +1,40 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">L4 行为分桶与过载收紧机制</text>
+
+  <rect x="110" y="210" width="280" height="200" rx="24" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="250" y="280" text-anchor="middle" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">行为事件输入</text>
+  <text x="250" y="322" text-anchor="middle" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">连接建立 / 关闭</text>
+  <text x="250" y="356" text-anchor="middle" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">请求观测 / L7 反馈</text>
+
+  <rect x="470" y="170" width="360" height="280" rx="28" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="650" y="242" text-anchor="middle" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">细粒度分桶</text>
+  <text x="650" y="290" text-anchor="middle" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">peer_ip, authority, alpn, transport</text>
+  <text x="650" y="328" text-anchor="middle" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">动态退化与双视角合并</text>
+
+  <rect x="910" y="170" width="300" height="280" rx="28" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="1060" y="242" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">风险评分</text>
+  <text x="1060" y="290" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">连接数、反馈次数</text>
+  <text x="1060" y="324" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">连接寿命、累计字节</text>
+  <text x="1060" y="358" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">状态分级机制</text>
+
+  <rect x="1260" y="170" width="220" height="280" rx="28" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="1370" y="242" text-anchor="middle" fill="#4C1D95" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">过载态</text>
+  <text x="1370" y="290" text-anchor="middle" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Normal</text>
+  <text x="1370" y="324" text-anchor="middle" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">High</text>
+  <text x="1370" y="358" text-anchor="middle" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">Critical</text>
+
+  <rect x="430" y="520" width="760" height="150" rx="28" fill="#F9FAFB" stroke="#9CA3AF" stroke-width="2"/>
+  <text x="810" y="582" text-anchor="middle" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">策略输出</text>
+  <text x="810" y="626" text-anchor="middle" fill="#374151" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">连接预算收紧 · keepalive 收紧 · 软/硬延迟 · 拒绝新连接</text>
+
+  <path d="M390 310H470" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M830 310H910" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1210 310H1260" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M650 450V520" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1060 450V520" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M445 310L429 298V322L445 310Z" fill="#9CA3AF"/>
+  <path d="M885 310L869 298V322L885 310Z" fill="#9CA3AF"/>
+  <path d="M1245 310L1229 298V322L1245 310Z" fill="#9CA3AF"/>
+</svg>

@@ -1,0 +1,33 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">L4 / L7 协同防护机制示意</text>
+
+  <rect x="80" y="180" width="580" height="430" rx="28" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="120" y="248" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">L4 快速治理层</text>
+  <text x="120" y="312" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">关注对象：IP、端口、协议、频率、状态</text>
+  <text x="120" y="354" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">典型能力：限流、黑名单、分桶预算、DDoS 识别</text>
+  <text x="120" y="396" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">优势：路径短、开销低、适合及早拒绝异常连接</text>
+  <text x="120" y="458" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">目标是减少无意义的协议解析与上游转发开销，</text>
+  <text x="120" y="490" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">在连接建立阶段就完成第一轮风险裁决。</text>
+
+  <rect x="940" y="180" width="580" height="430" rx="28" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="980" y="248" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="34" font-weight="700">L7 精细检测层</text>
+  <text x="980" y="312" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">关注对象：方法、URI、Header、Body、元数据</text>
+  <text x="980" y="354" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">典型能力：行为检测、CC 检测、规则、响应模板</text>
+  <text x="980" y="396" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">优势：语义强、表达能力高、适合识别应用攻击</text>
+  <text x="980" y="458" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">目标是在通过 L4 初筛的请求中进行更细粒度的</text>
+  <text x="980" y="490" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">协议理解与规则裁决。</text>
+
+  <rect x="690" y="250" width="220" height="300" rx="28" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="800" y="312" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">协同关系</text>
+  <text x="800" y="370" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">L4 拦截明显异常</text>
+  <text x="800" y="406" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">L7 判断复杂语义</text>
+  <text x="800" y="442" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">两层共享事件与</text>
+  <text x="800" y="476" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">后续审计上下文</text>
+
+  <path d="M660 400H690" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M910 400H940" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M675 400L659 388V412L675 400Z" fill="#9CA3AF"/>
+  <path d="M925 400L909 388V412L925 400Z" fill="#9CA3AF"/>
+</svg>

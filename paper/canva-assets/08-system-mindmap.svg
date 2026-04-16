@@ -1,85 +1,62 @@
-<svg width="1600" height="980" viewBox="0 0 1600 980" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1600" height="980" fill="#F7F3EC"/>
-  <rect x="42" y="42" width="1516" height="896" rx="30" fill="#FFFDFC" stroke="#D9D0C4" stroke-width="2"/>
+<svg width="2000" height="900" viewBox="0 0 2000 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9CA3AF" />
+    </marker>
+  </defs>
 
-  <text x="88" y="106" fill="#2E261F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">基于 Rust 的 L4 / L7 协同 Web 防护系统思维导图</text>
-  <text x="88" y="144" fill="#7B6F63" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">对应论文第 3 章的功能结构概览，可与总体架构图互相补充</text>
+  <rect width="2000" height="900" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1904" height="804" rx="30" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="120" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="42" font-weight="700">Rust WAF 系统功能思维导图</text>
 
-  <rect x="560" y="196" width="480" height="96" rx="28" fill="#E8F1FB" stroke="#82ACD7" stroke-width="2"/>
-  <text x="800" y="250" text-anchor="middle" fill="#244C73" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">Rust 实现的 L4 / L7 协同 Web 防护系统</text>
+  <!-- 顶部主节点 -->
+  <rect x="700" y="180" width="600" height="120" rx="30" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="1000" y="250" text-anchor="middle" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">基于 Rust 的 L4 / L7 协同防护系统</text>
 
-  <rect x="100" y="372" width="238" height="284" rx="24" fill="#EAF4FF" stroke="#7FB0E0" stroke-width="2"/>
-  <text x="132" y="424" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">接入层</text>
-  <text x="132" y="468" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">TCP 监听</text>
-  <text x="132" y="504" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">UDP / QUIC</text>
-  <text x="132" y="540" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">TLS 接入</text>
-  <text x="132" y="576" fill="#234A72" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">HTTP/2 / HTTP/3</text>
-  <text x="132" y="628" fill="#52708C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">统一完成多协议入口、</text>
-  <text x="132" y="656" fill="#52708C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">监听与连接承载</text>
+  <!-- 连线 (从顶部中央到下层五个节点) -->
+  <path d="M 1000 300 V 360 H 260 V 400" stroke="#9CA3AF" stroke-width="4" fill="none" marker-end="url(#arrow-blue)"/>
+  <path d="M 1000 300 V 360 H 630 V 400" stroke="#9CA3AF" stroke-width="4" fill="none" marker-end="url(#arrow-blue)"/>
+  <path d="M 1000 300 V 400" stroke="#9CA3AF" stroke-width="4" fill="none" marker-end="url(#arrow-blue)"/>
+  <path d="M 1000 300 V 360 H 1370 V 400" stroke="#9CA3AF" stroke-width="4" fill="none" marker-end="url(#arrow-blue)"/>
+  <path d="M 1000 300 V 360 H 1740 V 400" stroke="#9CA3AF" stroke-width="4" fill="none" marker-end="url(#arrow-blue)"/>
 
-  <rect x="378" y="338" width="258" height="352" rx="24" fill="#EEF8EB" stroke="#8CB988" stroke-width="2"/>
-  <text x="410" y="390" fill="#2E5D2E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">L4 防护层</text>
-  <text x="410" y="434" fill="#2E5D2E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">连接跟踪</text>
-  <text x="410" y="470" fill="#2E5D2E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">速率限制</text>
-  <text x="410" y="506" fill="#2E5D2E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">黑名单阻断</text>
-  <text x="410" y="542" fill="#2E5D2E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">风险分桶 / 过载分级</text>
-  <text x="410" y="578" fill="#2E5D2E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">自适应连接预算</text>
-  <text x="410" y="630" fill="#547653" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责早期粗筛与</text>
-  <text x="410" y="658" fill="#547653" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">连接级快速收紧</text>
+  <!-- 下层节点 1: 接入层 (x=100) -->
+  <rect x="100" y="420" width="320" height="350" rx="24" fill="#F0F9FF" stroke="#0EA5E9" stroke-width="2"/>
+  <text x="260" y="480" text-anchor="middle" fill="#0C4A6E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">接入层</text>
+  <text x="140" y="540" fill="#075985" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• TCP 监听</text>
+  <text x="140" y="590" fill="#075985" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• UDP / QUIC</text>
+  <text x="140" y="640" fill="#075985" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• TLS 安全卸载</text>
+  <text x="140" y="690" fill="#075985" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• HTTP/1.1、2、3 入口</text>
 
-  <rect x="676" y="316" width="278" height="396" rx="24" fill="#F6EDF9" stroke="#B68AD3" stroke-width="2"/>
-  <text x="708" y="368" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">L7 防护层</text>
-  <text x="708" y="412" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">HTTP/1.1 解析</text>
-  <text x="708" y="448" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">HTTP/2 / HTTP/3 转换</text>
-  <text x="708" y="484" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">统一请求抽象</text>
-  <text x="708" y="520" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">规则引擎</text>
-  <text x="708" y="556" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">动作模板 / respond</text>
-  <text x="708" y="592" fill="#6D3C88" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">浏览器指纹诱导</text>
-  <text x="708" y="646" fill="#816198" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责语义级判定、</text>
-  <text x="708" y="674" fill="#816198" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">模板响应与画像采集</text>
+  <!-- 下层节点 2: L4 防护 (x=470) -->
+  <rect x="470" y="420" width="320" height="350" rx="24" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="630" y="480" text-anchor="middle" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">L4 防护层</text>
+  <text x="510" y="540" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• L4 连接跟踪</text>
+  <text x="510" y="590" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 黑名单与速率限制</text>
+  <text x="510" y="640" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 风险分桶治理</text>
+  <text x="510" y="690" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 自适应连接预算</text>
 
-  <rect x="994" y="372" width="238" height="284" rx="24" fill="#FFF4DF" stroke="#DEB25C" stroke-width="2"/>
-  <text x="1026" y="424" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">网关治理层</text>
-  <text x="1026" y="468" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">站点映射</text>
-  <text x="1026" y="504" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">证书选择</text>
-  <text x="1026" y="540" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">上游健康检查</text>
-  <text x="1026" y="576" fill="#7B5410" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">代理转发</text>
-  <text x="1026" y="628" fill="#8F6D35" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责多站点接入、</text>
-  <text x="1026" y="656" fill="#8F6D35" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">证书与后端治理</text>
+  <!-- 下层节点 3: L7 防护 (x=840) -->
+  <rect x="840" y="420" width="320" height="350" rx="24" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="1000" y="480" text-anchor="middle" fill="#4C1D95" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">L7 防护层</text>
+  <text x="880" y="540" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 多协议请求抽象</text>
+  <text x="880" y="590" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• CC 防护与行为识别</text>
+  <text x="880" y="640" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 正则与规则引擎</text>
+  <text x="880" y="690" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 模板响应 / 指纹诱导</text>
 
-  <rect x="1272" y="338" width="238" height="352" rx="24" fill="#FDECEE" stroke="#E19CA5" stroke-width="2"/>
-  <text x="1304" y="390" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="700">控制与数据层</text>
-  <text x="1304" y="434" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">管理 API</text>
-  <text x="1304" y="470" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">总览 / 流量地图</text>
-  <text x="1304" y="506" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">系统设置 / 证书管理</text>
-  <text x="1304" y="542" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">行为观测 / 智能档案</text>
-  <text x="1304" y="578" fill="#8C3946" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">AI 审计 / 联动同步</text>
-  <text x="1304" y="630" fill="#9B636B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">负责分层运维、实时观测</text>
-  <text x="1304" y="658" fill="#9B636B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="18">自动化接管总览与审计落库</text>
+  <!-- 下层节点 4: 网关治理 (x=1210) -->
+  <rect x="1210" y="420" width="320" height="350" rx="24" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="1370" y="480" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">网关治理层</text>
+  <text x="1250" y="540" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 多站点域映射</text>
+  <text x="1250" y="590" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 证书托管与复用</text>
+  <text x="1250" y="640" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 上游健康检查</text>
+  <text x="1250" y="690" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• Fail-open 容灾代理</text>
 
-  <path d="M800 292V340" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 292C800 318 219 318 219 372" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 292C800 318 507 318 507 338" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 292C800 318 1113 318 1113 372" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 292C800 318 1391 318 1391 338" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-
-  <path d="M350 514H378" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M648 514H676" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M966 514H994" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-  <path d="M1238 514H1272" stroke="#8F8275" stroke-width="6" stroke-linecap="round"/>
-
-  <path d="M219 360L207 342H231L219 360Z" fill="#8F8275"/>
-  <path d="M507 326L495 308H519L507 326Z" fill="#8F8275"/>
-  <path d="M800 328L788 310H812L800 328Z" fill="#8F8275"/>
-  <path d="M1113 360L1101 342H1125L1113 360Z" fill="#8F8275"/>
-  <path d="M1391 326L1379 308H1403L1391 326Z" fill="#8F8275"/>
-
-  <path d="M366 514L348 502V526L366 514Z" fill="#8F8275"/>
-  <path d="M664 514L646 502V526L664 514Z" fill="#8F8275"/>
-  <path d="M982 514L964 502V526L982 514Z" fill="#8F8275"/>
-  <path d="M1260 514L1242 502V526L1260 514Z" fill="#8F8275"/>
-
-  <rect x="88" y="760" width="1424" height="128" rx="22" fill="#F1E7DA"/>
-  <text x="122" y="808" fill="#5A4C3E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">讲解时可概括为：前端流量先进入多协议接入层，由 L4 进行快速粗筛，再交给 L7 统一请求抽象与规则裁决，</text>
-  <text x="122" y="842" fill="#5A4C3E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">随后配合网关治理、SQLite 审计落库和 Vue 控制台，形成“检测、治理、观测、联动、展示”一体化闭环。</text>
+  <!-- 下层节点 5: 控制面 (x=1580) -->
+  <rect x="1580" y="420" width="320" height="350" rx="24" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+  <text x="1740" y="480" text-anchor="middle" fill="#7F1D1D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">控制与数据层</text>
+  <text x="1620" y="540" fill="#991B1B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• SQLite 数据持久化</text>
+  <text x="1620" y="590" fill="#991B1B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 实时流量采集与推送</text>
+  <text x="1620" y="640" fill="#991B1B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 画像档案沉淀</text>
+  <text x="1620" y="690" fill="#991B1B" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">• 联动同步与管理控制台</text>
 </svg>

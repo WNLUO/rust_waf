@@ -1,0 +1,32 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">AI 审计与临时策略闭环图</text>
+
+  <rect x="110" y="240" width="250" height="180" rx="24" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="235" y="310" text-anchor="middle" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">运行数据输入</text>
+  <text x="235" y="352" text-anchor="middle" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">事件、画像、指标、会话</text>
+
+  <rect x="440" y="180" width="320" height="340" rx="28" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="600" y="250" text-anchor="middle" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">AI 审计生成</text>
+  <text x="600" y="298" text-anchor="middle" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">生成报告摘要与级别</text>
+  <text x="600" y="332" text-anchor="middle" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">记录处理结果与溯源</text>
+  <text x="600" y="366" text-anchor="middle" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">写入 ai_audit_reports</text>
+  <text x="600" y="424" text-anchor="middle" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">输出辅助运维的决策结论</text>
+
+  <rect x="850" y="180" width="320" height="340" rx="28" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="1010" y="250" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">临时策略建议</text>
+  <text x="1010" y="298" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">处置范围、动作与置信度</text>
+  <text x="1010" y="332" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">跟踪建议的运行态效果</text>
+  <text x="1010" y="366" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">写入 ai_temp_policies</text>
+  <text x="1010" y="424" text-anchor="middle" fill="#4B5563" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="21">形成建议与反馈的可追踪链</text>
+
+  <rect x="1260" y="240" width="250" height="180" rx="24" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+  <text x="1385" y="310" text-anchor="middle" fill="#4C1D95" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="30" font-weight="700">控制面反馈</text>
+  <text x="1385" y="352" text-anchor="middle" fill="#5B21B6" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">查看、标记与策略调整</text>
+
+  <path d="M360 330H440" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M760 330H850" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1170 330H1260" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1340 420C1340 520 980 600 640 600C380 600 300 520 300 420" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+</svg>

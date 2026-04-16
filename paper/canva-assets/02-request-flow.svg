@@ -1,60 +1,50 @@
-<svg width="1600" height="960" viewBox="0 0 1600 960" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1600" height="960" fill="#F4F7FB"/>
-  <text x="80" y="96" fill="#1E2C3A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="40" font-weight="700">请求处理流程图</text>
-  <text x="80" y="134" fill="#5E7387" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="20">可用于论文第 4 章或答辩流程页，导入 Canva 后可继续拆分节点</text>
+<svg width="1600" height="840" viewBox="0 0 1600 840" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="840" fill="#FFFFFF"/>
+  <text x="80" y="96" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="40" font-weight="700">请求处理流程图</text>
 
   <g font-family="PingFang SC, Microsoft YaHei, sans-serif">
-    <rect x="620" y="170" width="360" height="86" rx="22" fill="#DCEBFA" stroke="#7FB0E0" stroke-width="2"/>
-    <text x="760" y="222" text-anchor="middle" fill="#234A72" font-size="28" font-weight="700">客户端请求进入系统</text>
+    <rect x="620" y="150" width="360" height="86" rx="22" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="800" y="202" text-anchor="middle" fill="#1E3A8A" font-size="28" font-weight="700">客户端请求进入系统</text>
 
-    <rect x="620" y="304" width="360" height="86" rx="22" fill="#E4F4E3" stroke="#89BB88" stroke-width="2"/>
-    <text x="760" y="356" text-anchor="middle" fill="#2E602E" font-size="28" font-weight="700">构建 PacketInfo</text>
+    <rect x="620" y="284" width="360" height="86" rx="22" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+    <text x="800" y="336" text-anchor="middle" fill="#14532D" font-size="28" font-weight="700">构建 PacketInfo</text>
 
-    <rect x="620" y="438" width="360" height="86" rx="22" fill="#FFF2DA" stroke="#DDAA54" stroke-width="2"/>
-    <text x="760" y="490" text-anchor="middle" fill="#8A5A12" font-size="28" font-weight="700">L4 检测</text>
+    <rect x="620" y="418" width="360" height="86" rx="22" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+    <text x="800" y="470" text-anchor="middle" fill="#78350F" font-size="28" font-weight="700">L4 检测</text>
 
-    <rect x="240" y="580" width="340" height="96" rx="24" fill="#FCEBEC" stroke="#DF9AA2" stroke-width="2"/>
-    <text x="410" y="628" text-anchor="middle" fill="#8A3744" font-size="28" font-weight="700">命中阻断</text>
-    <text x="410" y="662" text-anchor="middle" fill="#A15C67" font-size="20">写入安全事件 / 封禁 IP</text>
+    <rect x="240" y="560" width="340" height="96" rx="24" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+    <text x="410" y="608" text-anchor="middle" fill="#7F1D1D" font-size="28" font-weight="700">命中阻断</text>
+    <text x="410" y="642" text-anchor="middle" fill="#991B1B" font-size="20">写入安全事件 / 封禁 IP</text>
 
-    <rect x="620" y="580" width="360" height="96" rx="24" fill="#E8F1FB" stroke="#7FB0E0" stroke-width="2"/>
-    <text x="800" y="628" text-anchor="middle" fill="#234A72" font-size="28" font-weight="700">协议识别</text>
-    <text x="800" y="662" text-anchor="middle" fill="#486989" font-size="20">HTTP/1.1 · HTTP/2 · HTTP/3</text>
+    <rect x="620" y="560" width="360" height="96" rx="24" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+    <text x="800" y="608" text-anchor="middle" fill="#1E3A8A" font-size="28" font-weight="700">协议识别</text>
+    <text x="800" y="642" text-anchor="middle" fill="#1E40AF" font-size="20">HTTP/1.1 · HTTP/2 · HTTP/3</text>
 
-    <rect x="620" y="724" width="360" height="148" rx="24" fill="#F4EAF8" stroke="#B888D6" stroke-width="2"/>
-    <text x="800" y="762" text-anchor="middle" fill="#6E3D88" font-size="26" font-weight="700">统一请求抽象</text>
-    <text x="800" y="794" text-anchor="middle" fill="#6E3D88" font-size="26" font-weight="700">+ L7 检测</text>
-    <text x="800" y="826" text-anchor="middle" fill="#7F5A97" font-size="18">规则匹配 / respond /</text>
-    <text x="800" y="852" text-anchor="middle" fill="#7F5A97" font-size="18">alert / allow</text>
+    <rect x="620" y="704" width="360" height="110" rx="24" fill="#F5F3FF" stroke="#8B5CF6" stroke-width="2"/>
+    <text x="800" y="748" text-anchor="middle" fill="#4C1D95" font-size="26" font-weight="700">统一请求抽象</text>
+    <text x="800" y="784" text-anchor="middle" fill="#4C1D95" font-size="26" font-weight="700">+ L7 检测</text>
 
-    <rect x="160" y="724" width="340" height="148" rx="24" fill="#FCEBEC" stroke="#DF9AA2" stroke-width="2"/>
-    <text x="330" y="770" text-anchor="middle" fill="#8A3744" font-size="26" font-weight="700">事件审计与</text>
-    <text x="330" y="802" text-anchor="middle" fill="#8A3744" font-size="26" font-weight="700">SQLite 落库</text>
-    <text x="330" y="832" text-anchor="middle" fill="#A15C67" font-size="18">security_events /</text>
-    <text x="330" y="858" text-anchor="middle" fill="#A15C67" font-size="18">blocked_ips / 同步状态</text>
+    <rect x="160" y="704" width="340" height="110" rx="24" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+    <text x="330" y="750" text-anchor="middle" fill="#7F1D1D" font-size="26" font-weight="700">事件审计与</text>
+    <text x="330" y="786" text-anchor="middle" fill="#7F1D1D" font-size="26" font-weight="700">SQLite 落库</text>
 
-    <rect x="1100" y="724" width="340" height="148" rx="24" fill="#FBEFD8" stroke="#D8AE59" stroke-width="2"/>
-    <text x="1270" y="770" text-anchor="middle" fill="#7B5410" font-size="26" font-weight="700">网关代理与</text>
-    <text x="1270" y="802" text-anchor="middle" fill="#7B5410" font-size="26" font-weight="700">上游治理</text>
-    <text x="1270" y="832" text-anchor="middle" fill="#8A6B34" font-size="18">站点匹配 / 证书 /</text>
-    <text x="1270" y="858" text-anchor="middle" fill="#8A6B34" font-size="18">健康检查 / SafeLine / 转发</text>
+    <rect x="1100" y="704" width="340" height="110" rx="24" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+    <text x="1270" y="750" text-anchor="middle" fill="#78350F" font-size="26" font-weight="700">网关代理与</text>
+    <text x="1270" y="786" text-anchor="middle" fill="#78350F" font-size="26" font-weight="700">上游治理</text>
   </g>
 
-  <path d="M800 256V304" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 390V438" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 524V580" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
-  <path d="M800 676V724" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
-  <path d="M620 772H500" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
-  <path d="M980 772H1100" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
-  <path d="M620 486C500 486 410 532 410 580" stroke="#7D8C99" stroke-width="6" stroke-linecap="round"/>
+  <path d="M800 236V284" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M800 370V418" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M800 504V560" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M800 656V704" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M620 752H500" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M980 752H1100" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
+  <path d="M620 466C500 466 410 512 410 560" stroke="#9CA3AF" stroke-width="6" stroke-linecap="round"/>
 
-  <path d="M800 288L788 270H812L800 288Z" fill="#7D8C99"/>
-  <path d="M800 422L788 404H812L800 422Z" fill="#7D8C99"/>
-  <path d="M800 558L788 540H812L800 558Z" fill="#7D8C99"/>
-  <path d="M800 702L788 684H812L800 702Z" fill="#7D8C99"/>
-  <path d="M522 772L540 760V784L522 772Z" fill="#7D8C99"/>
-  <path d="M1078 772L1060 760V784L1078 772Z" fill="#7D8C99"/>
-
-  <text x="116" y="892" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">建议配套讲解：L4 负责“先粗筛”，L7 负责“再精判”，</text>
-  <text x="116" y="924" fill="#56697C" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">命中后进入事件审计链路，未被阻断则继续进入多站点网关转发与联动治理。</text>
+  <path d="M800 268L788 250H812L800 268Z" fill="#9CA3AF"/>
+  <path d="M800 402L788 384H812L800 402Z" fill="#9CA3AF"/>
+  <path d="M800 538L788 520H812L800 538Z" fill="#9CA3AF"/>
+  <path d="M800 682L788 664H812L800 682Z" fill="#9CA3AF"/>
+  <path d="M522 752L540 740V764L522 752Z" fill="#9CA3AF"/>
+  <path d="M1078 752L1060 740V764L1078 752Z" fill="#9CA3AF"/>
 </svg>

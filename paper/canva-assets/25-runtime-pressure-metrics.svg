@@ -1,0 +1,25 @@
+<svg width="1600" height="760" viewBox="0 0 1600 760" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="760" fill="#FFFFFF"/>
+  <rect x="48" y="48" width="1504" height="664" rx="28" fill="#FAFAFA" stroke="#D1D5DB" stroke-width="2"/>
+  <text x="92" y="108" fill="#111827" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700">运行态指标与压力分级治理视图</text>
+
+  <rect x="80" y="210" width="400" height="360" rx="28" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2"/>
+  <text x="120" y="280" fill="#1E3A8A" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">输入指标</text>
+  <text x="120" y="338" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">runtime_pressure_level</text>
+  <text x="120" y="376" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">identity_pressure_percent</text>
+  <text x="120" y="414" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">avg_proxy_latency_ms</text>
+  <text x="120" y="452" fill="#1E40AF" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">behavior_event_drop</text>
+
+  <rect x="540" y="190" width="480" height="400" rx="28" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2"/>
+  <text x="780" y="260" text-anchor="middle" fill="#78350F" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">压力分级机制</text>
+  <text x="780" y="320" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="24">Normal → High → Critical</text>
+  <text x="780" y="366" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">随压力升高，预算收紧、延迟增加、</text>
+  <text x="780" y="400" text-anchor="middle" fill="#92400E" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">拒绝阈值提前，确保系统整体可用。</text>
+
+  <rect x="1080" y="210" width="440" height="360" rx="28" fill="#F0FDF4" stroke="#22C55E" stroke-width="2"/>
+  <text x="1120" y="280" fill="#14532D" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="32" font-weight="700">运维与观测</text>
+  <text x="1120" y="338" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">总览页：实时全局压力态</text>
+  <text x="1120" y="376" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">L4/L7页：细粒度治理参数</text>
+  <text x="1120" y="414" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">流量地图：活跃度展示</text>
+  <text x="1120" y="452" fill="#166534" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22">提供自动化参数调优依据</text>
+</svg>

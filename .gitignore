@@ -5,6 +5,7 @@
 # 临时目录
 /tmp/
 **/tmp/
+/paper/.docx_build/
 
 # IDE / 编辑器
 /.idea/

@@ -191,6 +191,7 @@ fn looks_like_article_path(route: &str) -> bool {
 }
 
 pub(super) fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
+    let path = request_path(&request.uri).to_ascii_lowercase();
     if let Some(kind) = request
         .get_metadata("l7.cc.request_kind")
         .map(String::as_str)
@@ -199,11 +200,13 @@ pub(super) fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
             "document" => RequestKind::Document,
             "static" => RequestKind::Static,
             "api" => RequestKind::Api,
+            "other" if path == "/" || path.ends_with(".html") || path.ends_with(".htm") => {
+                RequestKind::Document
+            }
             _ => RequestKind::Other,
         };
     }
 
-    let path = request_path(&request.uri).to_ascii_lowercase();
     let accept = request
         .get_header("accept")
         .map(|value| value.to_ascii_lowercase())

@@ -35,6 +35,14 @@ fn spoofed_forward_header_request(uri: &str) -> UnifiedHttpRequest {
     request
 }
 
+#[test]
+fn root_request_with_generic_accept_is_classified_as_document() {
+    let mut request = request("/");
+    request.add_header("accept".to_string(), "*/*".to_string());
+
+    assert_eq!(classify_request(&request, "/"), RequestKind::Document);
+}
+
 #[tokio::test]
 async fn issues_challenge_when_route_rate_crosses_threshold() {
     let config = CcDefenseConfig {

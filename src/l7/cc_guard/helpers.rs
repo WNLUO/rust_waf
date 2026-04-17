@@ -114,7 +114,11 @@ pub(super) fn classify_request(request: &UnifiedHttpRequest, route_path: &str) -
         .map(|value| value.eq_ignore_ascii_case("document"))
         .unwrap_or(false)
         || ((method == "GET" || method == "HEAD")
-            && (accept.contains("text/html") || accept.contains("application/xhtml+xml")))
+            && (accept.contains("text/html")
+                || accept.contains("application/xhtml+xml")
+                || route_path == "/"
+                || route_path.ends_with(".html")
+                || route_path.ends_with(".htm")))
     {
         return RequestKind::Document;
     }

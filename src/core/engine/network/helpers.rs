@@ -106,8 +106,8 @@ pub(crate) fn record_l7_behavior_metrics(
         .get_metadata("l7.behavior.action")
         .map(String::as_str)
     {
-        Some("challenge") => metrics.record_l7_behavior_challenge(),
-        Some("block") => metrics.record_l7_behavior_block(),
+        Some("challenge" | "aggregate_challenge") => metrics.record_l7_behavior_challenge(),
+        Some("block" | "aggregate_block") => metrics.record_l7_behavior_block(),
         Some(action) if action.starts_with("delay:") => metrics.record_l7_behavior_delay(),
         _ => {}
     }
@@ -161,4 +161,34 @@ pub(crate) fn next_connection_id(
     static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     format!("{transport}-{peer_addr}-{local_addr}-{id}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{HttpVersion, UnifiedHttpRequest};
+
+    #[test]
+    fn aggregate_behavior_actions_are_counted_in_behavior_metrics() {
+        let metrics = crate::metrics::MetricsCollector::new();
+        let mut challenge_request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        challenge_request.add_metadata(
+            "l7.behavior.action".to_string(),
+            "aggregate_challenge".to_string(),
+        );
+        record_l7_behavior_metrics(&metrics, &challenge_request);
+
+        let mut block_request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+        block_request.add_metadata(
+            "l7.behavior.action".to_string(),
+            "aggregate_block".to_string(),
+        );
+        record_l7_behavior_metrics(&metrics, &block_request);
+
+        let snapshot = metrics.get_stats();
+        assert_eq!(snapshot.l7_behavior_challenges, 1);
+        assert_eq!(snapshot.l7_behavior_blocks, 1);
+    }
 }

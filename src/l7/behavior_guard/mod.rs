@@ -665,11 +665,7 @@ fn behavior_aggregate_keys(
     if matches!(kind, RequestKind::Static) {
         return Vec::new();
     }
-    let host = request
-        .get_header("host")
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "-".to_string());
+    let host = behavior_host(request);
     let mut keys = vec![(
         format!("site:{host}|route:{route}|kind:{}", kind.as_str()),
         route.to_string(),
@@ -689,6 +685,37 @@ fn behavior_user_agent(request: &UnifiedHttpRequest) -> Option<String> {
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(|value| compact_component("ua", value, MAX_BEHAVIOR_KEY_LEN))
+}
+
+fn behavior_host(request: &UnifiedHttpRequest) -> String {
+    let raw = request
+        .get_header("host")
+        .or_else(|| request.get_metadata("authority"))
+        .map(String::as_str)
+        .unwrap_or("-")
+        .trim();
+    if raw.is_empty() {
+        return "-".to_string();
+    }
+    if let Ok(uri) = format!("http://{raw}").parse::<http::Uri>() {
+        if let Some(authority) = uri.authority() {
+            return compact_component(
+                "host",
+                &authority.host().to_ascii_lowercase(),
+                MAX_BEHAVIOR_KEY_LEN,
+            );
+        }
+    }
+    let normalized = raw
+        .trim_start_matches('[')
+        .split(']')
+        .next()
+        .unwrap_or(raw)
+        .split(':')
+        .next()
+        .unwrap_or(raw)
+        .to_ascii_lowercase();
+    compact_component("host", &normalized, MAX_BEHAVIOR_KEY_LEN)
 }
 
 fn behavior_header_signature(request: &UnifiedHttpRequest) -> Option<String> {
@@ -1118,6 +1145,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn aggregate_enforcement_uses_normalized_host() {
+        let guard = L7BehaviorGuard::new();
+
+        for index in 0..12 {
+            let mut request = request("GET", "/", "text/html");
+            request.add_header("host".to_string(), "Example.COM:443".to_string());
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header(
+                "user-agent".to_string(),
+                format!("DistributedHostBrowser/{index}"),
+            );
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            let _ = guard.inspect_request(&mut request).await;
+        }
+
+        let mut next = request("GET", "/", "text/html");
+        next.add_header("host".to_string(), "example.com".to_string());
+        next.set_client_ip("203.0.113.250".to_string());
+        next.add_header(
+            "user-agent".to_string(),
+            "DistributedHostBrowser/fresh".to_string(),
+        );
+        next.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        next.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+        let result = guard
+            .inspect_request(&mut next)
+            .await
+            .expect("normalized host aggregate enforcement should apply");
+
+        assert_eq!(result.action, crate::core::InspectionAction::Drop);
+        assert_eq!(
+            next.get_metadata("l7.behavior.action").map(String::as_str),
+            Some("aggregate_block")
+        );
+    }
+
+    #[tokio::test]
     async fn distributed_document_probe_activates_aggregate_challenge_enforcement() {
         let guard = L7BehaviorGuard::new();
 
@@ -1395,6 +1461,14 @@ mod tests {
         let key = bounded_dashmap_key(&map, "third".to_string(), 2, "behavior-test", 4);
 
         assert!(key.starts_with("__overflow__:behavior-test:"));
+    }
+
+    #[test]
+    fn cc_other_root_request_is_treated_as_document_behavior() {
+        let mut req = request("GET", "/", "*/*");
+        req.add_metadata("l7.cc.request_kind".to_string(), "other".to_string());
+
+        assert_eq!(request_kind(&req), RequestKind::Document);
     }
 
     #[tokio::test]

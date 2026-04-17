@@ -401,35 +401,41 @@ impl L7CcGuard {
                 && hot_path_client_count >= global_hot_path_client_challenge_threshold
                 && hot_path_effective >= global_hot_path_effective_challenge_threshold;
 
-        if !verified
-            && !low_risk_subresource
-            && (force_challenge
-                || global_hot_path_pressure_challenge
-                || route_effective >= route_challenge_threshold
-                || host_effective >= host_challenge_threshold
-                || ip_effective >= ip_challenge_threshold
-                || (hot_path_effective >= hot_path_challenge_threshold
-                    && route_effective >= route_challenge_threshold.saturating_sub(4).max(1)))
-        {
-            let action = challenge_action_name(html_mode);
-            let reason = format!(
-                "l7 cc guard {}: kind={} page_subresource={} ip={} host={} route={} hot_path={}",
-                challenge_reason_verb(html_mode),
-                request_kind.as_str(),
-                is_page_subresource,
-                ip_effective,
-                host_effective,
-                route_effective,
-                hot_path_effective,
-            );
-            request.add_metadata("l7.cc.action".to_string(), action.to_string());
-            return Some(InspectionResult::respond(
-                InspectionLayer::L7,
-                reason.clone(),
-                self.build_challenge_response(
-                    request, client_ip, &host, &reason, html_mode, &config,
-                ),
-            ));
+        let challenge_needed = force_challenge
+            || global_hot_path_pressure_challenge
+            || route_effective >= route_challenge_threshold
+            || host_effective >= host_challenge_threshold
+            || ip_effective >= ip_challenge_threshold
+            || (hot_path_effective >= hot_path_challenge_threshold
+                && route_effective >= route_challenge_threshold.saturating_sub(4).max(1));
+
+        if !verified && !low_risk_subresource && challenge_needed {
+            if request_kind == RequestKind::StaticAsset {
+                request.add_metadata(
+                    "l7.cc.action".to_string(),
+                    "skip_challenge:static_asset".to_string(),
+                );
+            } else {
+                let action = challenge_action_name(html_mode);
+                let reason = format!(
+                    "l7 cc guard {}: kind={} page_subresource={} ip={} host={} route={} hot_path={}",
+                    challenge_reason_verb(html_mode),
+                    request_kind.as_str(),
+                    is_page_subresource,
+                    ip_effective,
+                    host_effective,
+                    route_effective,
+                    hot_path_effective,
+                );
+                request.add_metadata("l7.cc.action".to_string(), action.to_string());
+                return Some(InspectionResult::respond(
+                    InspectionLayer::L7,
+                    reason.clone(),
+                    self.build_challenge_response(
+                        request, client_ip, &host, &reason, html_mode, &config,
+                    ),
+                ));
+            }
         }
 
         let delay_threshold_percent = if client_identity_unresolved {
@@ -452,7 +458,11 @@ impl L7CcGuard {
                         / 100)
         {
             if should_drop_delay_under_pressure(request) {
-                if !verified && !low_risk_subresource && !client_identity_unresolved {
+                if !verified
+                    && !low_risk_subresource
+                    && !client_identity_unresolved
+                    && request_kind != RequestKind::StaticAsset
+                {
                     let action = challenge_action_name(html_mode);
                     let reason = format!(
                         "l7 cc guard upgraded delay to {} under runtime pressure: kind={} ip={} host={} route={} hot_path={}",
@@ -563,21 +573,30 @@ impl L7CcGuard {
         );
         let reload_target =
             serde_json::to_string(&request.uri).unwrap_or_else(|_| "\"/\"".to_string());
+        let reason_html = if config.challenge_page.show_reason {
+            format!("<p><code>{}</code></p>", escape_html(reason))
+        } else {
+            String::new()
+        };
+        let title = escape_html(&config.challenge_page.title);
+        let heading = escape_html(&config.challenge_page.heading);
+        let description = escape_html(&config.challenge_page.description);
+        let completion_message = escape_html(&config.challenge_page.completion_message);
         let html = format!(
             concat!(
                 "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">",
                 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-                "<title>请求校验中</title>",
+                "<title>{title}</title>",
                 "<style>body{{font-family:ui-sans-serif,system-ui,sans-serif;margin:0;",
                 "min-height:100vh;display:grid;place-items:center;background:#f6f7f8;color:#111827;}}",
                 ".card{{max-width:540px;padding:32px 28px;border-radius:20px;background:#fff;",
                 "box-shadow:0 16px 60px rgba(15,23,42,.08);}}",
                 "h1{{margin:0 0 12px;font-size:28px;}}p{{margin:0 0 10px;line-height:1.6;color:#4b5563;}}",
                 "code{{font-family:ui-monospace,SFMono-Regular,monospace;background:#f3f4f6;padding:2px 6px;border-radius:8px;}}</style>",
-                "</head><body><main class=\"card\"><h1>正在校验请求</h1>",
-                "<p>检测到当前请求速率偏高，正在确认这是一个真实浏览器会话。</p>",
-                "<p>校验完成后会自动返回当前页面。</p>",
-                "<p><code>{reason}</code></p>",
+                "</head><body><main class=\"card\"><h1>{heading}</h1>",
+                "<p>{description}</p>",
+                "<p>{completion_message}</p>",
+                "{reason_html}",
                 "</main><script>",
                 "document.cookie = {cookie};",
                 "var __rwafTarget = {target};",
@@ -601,7 +620,11 @@ impl L7CcGuard {
                 "try{{fetch(__rwafReport,{{method:'POST',headers:{{'content-type':'application/json'}},credentials:'same-origin',body:JSON.stringify(__rwafPayload),keepalive:true}}).finally(function(){{setTimeout(__rwafDone,60);}});}}catch(_e){{setTimeout(__rwafDone,60);}}",
                 "</script></body></html>"
             ),
-            reason = escape_html(reason),
+            title = title,
+            heading = heading,
+            description = description,
+            completion_message = completion_message,
+            reason_html = reason_html,
             cookie = serde_json::to_string(&cookie_assignment)
                 .unwrap_or_else(|_| "\"\"".to_string()),
             target = reload_target,

@@ -220,6 +220,97 @@ pub(super) fn builtin_action_idea_presets() -> Vec<BuiltinActionIdeaPreset> {
             requires_upload: false,
         },
         BuiltinActionIdeaPreset {
+            id: "challenge-page",
+            title: "挑战页",
+            mood: "默认",
+            summary: "未给站点配置专属动作时，L7 CC 命中挑战会默认返回这个浏览器校验页。",
+            mechanism: "这是系统内置挑战动作的说明和同款页面模板；真实挑战由 L7 CC 自动签发 Cookie 并完成校验。",
+            performance: "低",
+            fallback_path: "/admin/l7",
+            plugin_id: "challenge-page-fun",
+            file_name: "challenge-page-fun.zip",
+            response_file_path: "challenge.html",
+            plugin_name: "Challenge Page Fun",
+            plugin_description: "默认浏览器挑战页示例插件",
+            template_local_id: "challenge_page",
+            template_description: "未配置站点动作时使用的默认浏览器挑战页",
+            pattern: "(?i).*",
+            severity: "medium",
+            content_type: "text/html; charset=utf-8",
+            status_code: 403,
+            gzip: false,
+            body_source: "inline_text",
+            response_content: r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>请求校验中</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    main {
+      width: min(520px, calc(100vw - 40px));
+      padding: 36px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      line-height: 1.25;
+    }
+    p {
+      margin: 0;
+      color: #475569;
+      line-height: 1.7;
+    }
+    .bar {
+      height: 4px;
+      margin: 24px 0;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e2e8f0;
+    }
+    .bar::before {
+      content: "";
+      display: block;
+      width: 42%;
+      height: 100%;
+      border-radius: inherit;
+      background: #2563eb;
+      animation: verify 1.4s ease-in-out infinite;
+    }
+    @keyframes verify {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(240%); }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>正在校验请求</h1>
+    <p>检测到当前请求速率偏高，正在确认这是一个真实浏览器会话。</p>
+    <div class="bar" aria-hidden="true"></div>
+    <p>校验完成后会自动返回当前页面。</p>
+  </main>
+  <script>
+    setTimeout(() => window.location.reload(), 1200);
+  </script>
+</body>
+</html>"#,
+            requires_upload: false,
+        },
+        BuiltinActionIdeaPreset {
             id: "inline-js",
             title: "内嵌JS",
             mood: "交互",

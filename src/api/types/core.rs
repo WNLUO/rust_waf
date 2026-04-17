@@ -294,6 +294,16 @@ pub struct CcDefenseConfigResponse {
     pub(crate) hard_host_block_multiplier: u8,
     pub(crate) hard_ip_block_multiplier: u8,
     pub(crate) hard_hot_path_block_multiplier: u8,
+    pub(crate) challenge_page: ChallengePageConfigResponse,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChallengePageConfigResponse {
+    pub(crate) title: String,
+    pub(crate) heading: String,
+    pub(crate) description: String,
+    pub(crate) completion_message: String,
+    pub(crate) show_reason: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

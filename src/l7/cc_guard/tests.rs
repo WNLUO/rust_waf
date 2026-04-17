@@ -134,6 +134,82 @@ async fn long_static_page_subresources_match_host_window() {
 }
 
 #[tokio::test]
+async fn static_assets_do_not_receive_challenge_payloads() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 2,
+        route_block_threshold: 200,
+        host_challenge_threshold: 2,
+        host_block_threshold: 200,
+        ip_challenge_threshold: 2,
+        ip_block_threshold: 200,
+        delay_ms: 0,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..4 {
+        let mut asset = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            format!("/wp-content/themes/CoreNext/static/js/chunk-{index}.js"),
+        );
+        asset.set_client_ip("203.0.113.10".to_string());
+        asset.add_header("host".to_string(), "example.com".to_string());
+        asset.add_header("sec-fetch-dest".to_string(), "script".to_string());
+        asset.add_header("accept".to_string(), "*/*".to_string());
+
+        let result = guard.inspect_request(&mut asset).await;
+        assert!(
+            result.is_none(),
+            "static assets should not receive a challenge response"
+        );
+    }
+}
+
+#[tokio::test]
+async fn challenge_page_uses_custom_copy() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 2,
+        route_block_threshold: 20,
+        host_challenge_threshold: 20,
+        host_block_threshold: 40,
+        ip_challenge_threshold: 20,
+        ip_block_threshold: 40,
+        challenge_page: crate::config::l7::ChallengePageConfig {
+            title: "安全校验".to_string(),
+            heading: "请稍候".to_string(),
+            description: "正在确认您的浏览器环境。".to_string(),
+            completion_message: "完成后会自动继续访问。".to_string(),
+            show_reason: false,
+        },
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/search?q=1");
+    assert!(guard.inspect_request(&mut first).await.is_none());
+    let mut second = request("/search?q=2");
+    let result = guard
+        .inspect_request(&mut second)
+        .await
+        .expect("challenge response");
+    let body = String::from_utf8(
+        result
+            .custom_response
+            .as_ref()
+            .expect("custom response")
+            .body
+            .clone(),
+    )
+    .expect("valid html");
+
+    assert!(body.contains("<title>安全校验</title>"));
+    assert!(body.contains("<h1>请稍候</h1>"));
+    assert!(body.contains("正在确认您的浏览器环境。"));
+    assert!(!body.contains("l7 cc guard issued challenge"));
+}
+
+#[tokio::test]
 async fn verified_browser_static_burst_does_not_persist_block() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 2,

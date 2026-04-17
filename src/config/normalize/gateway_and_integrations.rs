@@ -176,6 +176,30 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .cc_defense
         .hard_hot_path_block_multiplier
         .clamp(1, 20);
+    config.l7_config.cc_defense.challenge_page.title = trim_or_default(
+        &config.l7_config.cc_defense.challenge_page.title,
+        "请求校验中",
+    );
+    config.l7_config.cc_defense.challenge_page.heading = trim_or_default(
+        &config.l7_config.cc_defense.challenge_page.heading,
+        "正在校验请求",
+    );
+    config.l7_config.cc_defense.challenge_page.description = trim_or_default(
+        &config.l7_config.cc_defense.challenge_page.description,
+        "检测到当前请求速率偏高，正在确认这是一个真实浏览器会话。",
+    );
+    config
+        .l7_config
+        .cc_defense
+        .challenge_page
+        .completion_message = trim_or_default(
+        &config
+            .l7_config
+            .cc_defense
+            .challenge_page
+            .completion_message,
+        "校验完成后会自动返回当前页面。",
+    );
     config
         .l7_config
         .slow_attack_defense
@@ -497,4 +521,13 @@ fn normalize_supported_ssl_protocols(protocols: &[String]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+fn trim_or_default(value: &str, default: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }

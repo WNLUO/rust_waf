@@ -265,6 +265,13 @@ impl CcDefenseConfigResponse {
             hard_host_block_multiplier: config.hard_host_block_multiplier,
             hard_ip_block_multiplier: config.hard_ip_block_multiplier,
             hard_hot_path_block_multiplier: config.hard_hot_path_block_multiplier,
+            challenge_page: ChallengePageConfigResponse {
+                title: config.challenge_page.title.clone(),
+                heading: config.challenge_page.heading.clone(),
+                description: config.challenge_page.description.clone(),
+                completion_message: config.challenge_page.completion_message.clone(),
+                show_reason: config.challenge_page.show_reason,
+            },
         }
     }
 }

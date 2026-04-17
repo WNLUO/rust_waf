@@ -123,6 +123,22 @@ pub struct CcDefenseConfig {
     pub hard_ip_block_multiplier: u8,
     #[serde(default = "default_cc_hard_hot_path_block_multiplier")]
     pub hard_hot_path_block_multiplier: u8,
+    #[serde(default)]
+    pub challenge_page: ChallengePageConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChallengePageConfig {
+    #[serde(default = "default_challenge_page_title")]
+    pub title: String,
+    #[serde(default = "default_challenge_page_heading")]
+    pub heading: String,
+    #[serde(default = "default_challenge_page_description")]
+    pub description: String,
+    #[serde(default = "default_challenge_page_completion_message")]
+    pub completion_message: String,
+    #[serde(default = "default_challenge_page_show_reason")]
+    pub show_reason: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,6 +343,26 @@ fn default_cc_cookie_name() -> String {
     "rwaf_cc".to_string()
 }
 
+fn default_challenge_page_title() -> String {
+    "请求校验中".to_string()
+}
+
+fn default_challenge_page_heading() -> String {
+    "正在校验请求".to_string()
+}
+
+fn default_challenge_page_description() -> String {
+    "检测到当前请求速率偏高，正在确认这是一个真实浏览器会话。".to_string()
+}
+
+fn default_challenge_page_completion_message() -> String {
+    "校验完成后会自动返回当前页面。".to_string()
+}
+
+const fn default_challenge_page_show_reason() -> bool {
+    false
+}
+
 const fn default_cc_static_request_weight_percent() -> u8 {
     20
 }
@@ -451,6 +487,19 @@ impl Default for CcDefenseConfig {
             hard_host_block_multiplier: default_cc_hard_host_block_multiplier(),
             hard_ip_block_multiplier: default_cc_hard_ip_block_multiplier(),
             hard_hot_path_block_multiplier: default_cc_hard_hot_path_block_multiplier(),
+            challenge_page: ChallengePageConfig::default(),
+        }
+    }
+}
+
+impl Default for ChallengePageConfig {
+    fn default() -> Self {
+        Self {
+            title: default_challenge_page_title(),
+            heading: default_challenge_page_heading(),
+            description: default_challenge_page_description(),
+            completion_message: default_challenge_page_completion_message(),
+            show_reason: default_challenge_page_show_reason(),
         }
     }
 }

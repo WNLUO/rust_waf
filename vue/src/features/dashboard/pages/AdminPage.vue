@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import CyberCard from '@/shared/ui/CyberCard.vue'
-import AdminEventMapSection from '@/features/dashboard/components/AdminEventMapSection.vue'
 import { Activity, Database, Gauge, RefreshCw, Shield } from 'lucide-vue-next'
 import { useAdminDashboardPage } from '@/features/dashboard/composables/useAdminDashboardPage'
+
+const AdminEventMapSection = defineAsyncComponent(
+  () => import('@/features/dashboard/components/AdminEventMapSection.vue'),
+)
 
 const {
   dashboard,

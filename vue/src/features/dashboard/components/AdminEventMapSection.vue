@@ -1,12 +1,28 @@
 <script setup lang="ts">
 import { ref, shallowRef, onMounted, watch, onBeforeUnmount, toRef } from 'vue'
-import * as echarts from 'echarts'
+import { EffectScatterChart, LinesChart } from 'echarts/charts'
 import type {
   EffectScatterSeriesOption,
   LinesSeriesOption,
-} from 'echarts'
+} from 'echarts/charts'
+import { GeoComponent, TooltipComponent } from 'echarts/components'
+import { init, registerMap, use } from 'echarts/core'
+import type { ECharts } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import { useAdminEventMap } from '../composables/useAdminEventMap'
-import type { EventMapNode, TrafficEventDelta, TrafficMapResponse } from '@/shared/types'
+import type {
+  EventMapNode,
+  TrafficEventDelta,
+  TrafficMapResponse,
+} from '@/shared/types'
+
+use([
+  CanvasRenderer,
+  GeoComponent,
+  TooltipComponent,
+  LinesChart,
+  EffectScatterChart,
+])
 
 const props = defineProps<{
   trafficMap?: TrafficMapResponse | null
@@ -14,7 +30,7 @@ const props = defineProps<{
 }>()
 
 const chartRef = ref<HTMLElement | null>(null)
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
 
 const { snapshot } = useAdminEventMap({
   trafficMap: toRef(props, 'trafficMap'),
@@ -55,7 +71,7 @@ type LocalLinesDataItem = {
 const PROJECTILE_CAP = 80 // 限制同屏最大炮弹数
 const ACTIVE_TRAIL_OPACITY = 0.12
 const NORMAL_RATE_LIMIT_MS = 800 // 正常流量频率限制：同节点同方向每800ms最多一发
-const BLOCK_RATE_LIMIT_MS = 250  // 拦截流量频率限制：同节点同方向每250ms最多一发
+const BLOCK_RATE_LIMIT_MS = 250 // 拦截流量频率限制：同节点同方向每250ms最多一发
 
 // 使用基于 ID 的数组更新替代环形缓冲区，ECharts 通过 name (唯一标识) 进行 diff，不会重置旧动画
 const activeLinesData = shallowRef<LocalLinesDataItem[]>([])
@@ -79,11 +95,14 @@ const scheduleRender = () => {
     lastRenderTime = now
     renderChart()
   } else if (!renderTimeout) {
-    renderTimeout = window.setTimeout(() => {
-      lastRenderTime = Date.now()
-      renderTimeout = null
-      renderChart()
-    }, 150 - (now - lastRenderTime))
+    renderTimeout = window.setTimeout(
+      () => {
+        lastRenderTime = Date.now()
+        renderTimeout = null
+        renderChart()
+      },
+      150 - (now - lastRenderTime),
+    )
   }
 }
 
@@ -135,7 +154,7 @@ function runCleanup() {
   let changed = false
 
   // 清理过期的线条
-  const nextLines = activeLinesData.value.filter(line => now < line.expireAt)
+  const nextLines = activeLinesData.value.filter((line) => now < line.expireAt)
   if (nextLines.length !== activeLinesData.value.length) {
     activeLinesData.value = nextLines
     changed = true
@@ -168,26 +187,36 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
     if (processedTrafficEvents.has(key)) return
     processedTrafficEvents.add(key)
 
-    if (typeof event.node.lat === 'number' && typeof event.node.lng === 'number') {
+    if (
+      typeof event.node.lat === 'number' &&
+      typeof event.node.lng === 'number'
+    ) {
       activeRealtimeNodes.set(event.node.id, {
         node: event.node as GeoNode,
-        expireAt: now + 5000 // 节点小圆圈 5 秒后渐渐消失
+        expireAt: now + 5000, // 节点小圆圈 5 秒后渐渐消失
       })
     } else {
       return
     }
 
     const linkKey = launchKey(event)
-    const limitMs = event.decision === 'block' ? BLOCK_RATE_LIMIT_MS : NORMAL_RATE_LIMIT_MS
+    const limitMs =
+      event.decision === 'block' ? BLOCK_RATE_LIMIT_MS : NORMAL_RATE_LIMIT_MS
     const lastTime = lastLaunchTime.get(linkKey) || 0
 
     if (now - lastTime >= limitMs) {
       const isIngress = event.direction === 'ingress'
       const coords = isIngress
-        ? [[event.node.lng, event.node.lat], [originNode.lng, originNode.lat]]
-        : [[originNode.lng, originNode.lat], [event.node.lng, event.node.lat]]
+        ? [
+            [event.node.lng, event.node.lat],
+            [originNode.lng, originNode.lat],
+          ]
+        : [
+            [originNode.lng, originNode.lat],
+            [event.node.lng, event.node.lat],
+          ]
       const palette = projectilePalette(event)
-      
+
       const durationMs = 1000 + Math.random() * 120
 
       const lineData: LocalLinesDataItem = {
@@ -208,10 +237,12 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
           color: palette.color,
           loop: false, // 动画播放一次即停止
         },
-        expireAt: now + durationMs + 800
+        expireAt: now + durationMs + 800,
       }
 
-      activeLinesData.value = [...activeLinesData.value, lineData].slice(-PROJECTILE_CAP)
+      activeLinesData.value = [...activeLinesData.value, lineData].slice(
+        -PROJECTILE_CAP,
+      )
 
       lastLaunchTime.set(linkKey, now)
       hasNew = true
@@ -227,7 +258,7 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
     processedTrafficEvents.clear()
     retained.forEach((value) => processedTrafficEvents.add(value))
   }
-  
+
   if (lastLaunchTime.size > 100) {
     lastLaunchTime.clear()
   }
@@ -245,9 +276,11 @@ const baseGeoConfig = {
     borderColor: '#334155',
     borderWidth: 1,
     shadowColor: 'rgba(0, 0, 0, 0.5)',
-    shadowBlur: 10
+    shadowBlur: 10,
   },
-  regions: [{ name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } }]
+  regions: [
+    { name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } },
+  ],
 }
 
 // 加载地图并初始化
@@ -257,18 +290,18 @@ const initMap = async () => {
   try {
     const response = await fetch('/maps/china-full.geojson')
     const geoJson = await response.json()
-    
-    echarts.registerMap('china', geoJson)
 
-    chart = echarts.init(chartRef.value)
-    
+    registerMap('china', geoJson)
+
+    chart = init(chartRef.value)
+
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { show: false },
       geo: baseGeoConfig,
-      series: []
+      series: [],
     })
-    
+
     renderChart()
   } catch (error) {
     console.error('Failed to load map data:', error)
@@ -284,7 +317,7 @@ const renderChart = () => {
     return
   }
 
-  const snapshotNodeMap = new Map(nodes.filter(hasGeo).map(n => [n.id, n]))
+  const snapshotNodeMap = new Map(nodes.filter(hasGeo).map((n) => [n.id, n]))
   activeRealtimeNodes.forEach((record, id) => {
     if (!snapshotNodeMap.has(id)) {
       snapshotNodeMap.set(id, { ...record.node, trafficWeight: 1 })
@@ -292,12 +325,12 @@ const renderChart = () => {
   })
   const geoNodes = Array.from(snapshotNodeMap.values())
 
-  const scatterData = geoNodes.map(node => ({
+  const scatterData = geoNodes.map((node) => ({
     name: node.name,
     value: [node.lng, node.lat, node.trafficWeight],
     itemStyle: {
       color: node.id === snapshot.value.hottestNode?.id ? '#fbbf24' : '#60a5fa',
-    }
+    },
   }))
 
   scatterData.push({
@@ -305,7 +338,7 @@ const renderChart = () => {
     value: [originNode.lng, originNode.lat, 2.5],
     itemStyle: {
       color: '#10b981',
-    }
+    },
   })
 
   const linesSeries: LinesSeriesOption = {
@@ -321,7 +354,7 @@ const renderChart = () => {
     lineStyle: {
       curveness: 0.2,
     },
-    data: activeLinesData.value, 
+    data: activeLinesData.value,
   }
 
   const scatterSeries: EffectScatterSeriesOption = {
@@ -330,21 +363,21 @@ const renderChart = () => {
     zlevel: 2,
     rippleEffect: {
       brushType: 'stroke',
-      scale: 3
+      scale: 3,
     },
     label: {
-      show: false
+      show: false,
     },
     symbolSize: (val: unknown) => {
       const point = Array.isArray(val) ? val : []
       const weight = typeof point[2] === 'number' ? point[2] : 0
       return 3 + weight * 2
     },
-    data: scatterData
+    data: scatterData,
   }
 
   chart.setOption({
-    series: [linesSeries, scatterSeries]
+    series: [linesSeries, scatterSeries],
   })
 }
 
@@ -361,13 +394,13 @@ watch(
 )
 
 watch(
-  () => props.trafficEvents, 
+  () => props.trafficEvents,
   (events) => {
     if (!events || events.length === 0) return
     const originNode = snapshot.value.originNode
     if (!hasGeo(originNode)) return
     emitProjectiles(events, originNode)
-  }
+  },
 )
 
 onMounted(() => {
@@ -397,7 +430,9 @@ onBeforeUnmount(() => {
     <div class="flex items-center justify-between mb-4 px-2">
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-        <h3 class="text-sm font-medium text-slate-300 uppercase tracking-wider">实时流量监控 (CDN ↔ 源站)</h3>
+        <h3 class="text-sm font-medium text-slate-300 uppercase tracking-wider">
+          实时流量监控 (CDN ↔ 源站)
+        </h3>
       </div>
       <div class="flex items-center gap-4 text-xs text-slate-500">
         <div class="flex items-center gap-1">
@@ -414,7 +449,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-    
+
     <div class="relative flex-1">
       <!-- 地图容器 -->
       <div ref="chartRef" class="w-full h-full"></div>
@@ -423,29 +458,51 @@ onBeforeUnmount(() => {
         v-if="isOriginPending()"
         class="absolute inset-0 z-10 flex items-center justify-center bg-slate-950/45 backdrop-blur-[2px] pointer-events-none"
       >
-        <div class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-4 py-3 text-sm text-slate-200 shadow-xl">
+        <div
+          class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-4 py-3 text-sm text-slate-200 shadow-xl"
+        >
           后端正在获取物理位置中
         </div>
       </div>
-      
+
       <!-- 装饰性网格/线条 (可选，增强科技感) -->
       <div class="absolute inset-0 pointer-events-none opacity-10">
-        <div class="absolute inset-0" style="background-image: radial-gradient(#334155 1px, transparent 1px); background-size: 20px 20px;"></div>
+        <div
+          class="absolute inset-0"
+          style="
+            background-image: radial-gradient(#334155 1px, transparent 1px);
+            background-size: 20px 20px;
+          "
+        ></div>
       </div>
 
       <!-- 状态覆盖层 -->
-      <div class="absolute bottom-4 left-4 bg-slate-900/60 backdrop-blur-md border border-slate-700 p-3 rounded-lg flex flex-col gap-2 min-w-[140px]">
-        <div class="flex justify-between items-center text-[10px] text-slate-400">
+      <div
+        class="absolute bottom-4 left-4 bg-slate-900/60 backdrop-blur-md border border-slate-700 p-3 rounded-lg flex flex-col gap-2 min-w-[140px]"
+      >
+        <div
+          class="flex justify-between items-center text-[10px] text-slate-400"
+        >
           <span>活跃节点</span>
-          <span class="text-blue-400 font-mono">{{ snapshot.activeNodeCount }}</span>
+          <span class="text-blue-400 font-mono">{{
+            snapshot.activeNodeCount
+          }}</span>
         </div>
-        <div class="flex justify-between items-center text-[10px] text-slate-400">
+        <div
+          class="flex justify-between items-center text-[10px] text-slate-400"
+        >
           <span>拦截流</span>
-          <span class="text-red-400 font-mono">{{ snapshot.blockedFlowCount }}</span>
+          <span class="text-red-400 font-mono">{{
+            snapshot.blockedFlowCount
+          }}</span>
         </div>
-        <div class="flex justify-between items-center text-[10px] text-slate-400">
+        <div
+          class="flex justify-between items-center text-[10px] text-slate-400"
+        >
           <span>最高带宽</span>
-          <span class="text-emerald-400 font-mono">{{ (snapshot.peakBandwidthMbps).toFixed(1) }} Mbps</span>
+          <span class="text-emerald-400 font-mono"
+            >{{ snapshot.peakBandwidthMbps.toFixed(1) }} Mbps</span
+          >
         </div>
       </div>
     </div>

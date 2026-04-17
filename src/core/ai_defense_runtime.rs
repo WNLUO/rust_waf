@@ -1,10 +1,16 @@
 use super::{
-    unix_timestamp, AiDefenseDecision, AiDefenseL4Signal, AiDefensePolicySignal,
-    AiDefensePortSignal, AiDefenseRunResult, AiDefenseRuntimePressureSignal,
-    AiDefenseSignalSnapshot, AiDefenseUpstreamSignal, LocalDefenseRecommendation, WafContext,
+    unix_timestamp, AiDefenseDecision, AiDefenseIdentitySignal, AiDefenseL4Signal,
+    AiDefensePolicySignal, AiDefensePortSignal, AiDefenseRunResult, AiDefenseRuntimePressureSignal,
+    AiDefenseSignalSnapshot, AiDefenseUpstreamSignal, AiDefenseUserAgentSignal,
+    LocalDefenseRecommendation, WafContext,
 };
+use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{AiTempPolicyEffectStats, AiTempPolicyEntry, AiTempPolicyUpsert};
 use anyhow::Result;
+
+const MAX_AI_DEFENSE_IDENTITY_BUCKETS: usize = 8_192;
+const MAX_AI_DEFENSE_DISTINCT_CLIENTS_PER_BUCKET: usize = 256;
+const MAX_AI_DEFENSE_USER_AGENTS_PER_BUCKET: usize = 16;
 
 impl WafContext {
     pub(crate) fn note_ai_defense_route_trigger(
@@ -36,6 +42,89 @@ impl WafContext {
             "route_pressure:{}:{}:{}:soft={}:hard={}",
             site_id, route, depth, soft_events, hard_events
         ));
+    }
+
+    pub(crate) fn note_ai_defense_identity_signal(
+        &self,
+        site_id: &str,
+        route: &str,
+        request: &UnifiedHttpRequest,
+        now: i64,
+    ) {
+        if !self
+            .config_snapshot()
+            .integrations
+            .ai_audit
+            .auto_defense_enabled
+        {
+            return;
+        }
+        if !ai_defense_route_allowed(route) {
+            return;
+        }
+        let window_start = now.div_euclid(60) * 60;
+        let key = ai_defense_identity_key(site_id, route);
+        if !self.ensure_ai_defense_identity_capacity(&key, window_start) {
+            return;
+        }
+        let entry = self
+            .ai_defense_identity_buckets
+            .entry(key)
+            .or_insert_with(|| std::sync::Mutex::new(super::AiDefenseIdentityBucket::default()));
+        let mut bucket = entry
+            .lock()
+            .expect("ai defense identity bucket lock poisoned");
+        if bucket.window_start != window_start {
+            *bucket = super::AiDefenseIdentityBucket {
+                window_start,
+                ..super::AiDefenseIdentityBucket::default()
+            };
+        }
+        bucket.total_events = bucket.total_events.saturating_add(1);
+        if metadata_true(request, "network.client_ip_unresolved") {
+            bucket.unresolved_events = bucket.unresolved_events.saturating_add(1);
+        }
+        if metadata_true(request, "network.trusted_proxy_peer") {
+            bucket.trusted_proxy_events = bucket.trusted_proxy_events.saturating_add(1);
+        }
+        if metadata_true(request, "l7.cc.challenge_verified") {
+            bucket.verified_challenge_events = bucket.verified_challenge_events.saturating_add(1);
+        }
+        if metadata_true(request, "l7.cc.interactive_session") {
+            bucket.interactive_session_events = bucket.interactive_session_events.saturating_add(1);
+        }
+        if request
+            .get_metadata("network.identity_state")
+            .is_some_and(|state| state == "spoofed_forward_header")
+        {
+            bucket.spoofed_forward_header_events =
+                bucket.spoofed_forward_header_events.saturating_add(1);
+        }
+        if bucket.distinct_clients.len() < MAX_AI_DEFENSE_DISTINCT_CLIENTS_PER_BUCKET {
+            if let Some(client) = request
+                .client_ip
+                .as_deref()
+                .or_else(|| {
+                    request
+                        .get_metadata("network.client_ip")
+                        .map(String::as_str)
+                })
+                .map(compact_identity_value)
+            {
+                bucket.distinct_clients.insert(client);
+            }
+        }
+        if let Some(user_agent) = request
+            .get_header("user-agent")
+            .map(|value| compact_user_agent(value))
+            .filter(|value| !value.is_empty())
+        {
+            if bucket.user_agents.contains_key(&user_agent)
+                || bucket.user_agents.len() < MAX_AI_DEFENSE_USER_AGENTS_PER_BUCKET
+            {
+                *bucket.user_agents.entry(user_agent).or_insert(0) += 1;
+            }
+        }
     }
 
     pub(crate) fn consume_ai_auto_defense_trigger(&self, now: i64) -> Option<String> {
@@ -117,6 +206,7 @@ impl WafContext {
                 .map(ai_defense_policy_signal)
                 .take(12)
                 .collect(),
+            identity_summaries: self.ai_defense_identity_summaries(now, 24),
             local_recommendations: self.local_defense_recommendations(24),
         })
     }
@@ -304,6 +394,82 @@ impl WafContext {
             top_ports: ports,
         })
     }
+
+    fn ai_defense_identity_summaries(
+        &self,
+        now: i64,
+        limit: usize,
+    ) -> Vec<AiDefenseIdentitySignal> {
+        let mut summaries = self
+            .ai_defense_identity_buckets
+            .iter()
+            .filter_map(|entry| {
+                let (site_id, route) = split_ai_defense_identity_key(entry.key())?;
+                let bucket = entry
+                    .value()
+                    .lock()
+                    .expect("ai defense identity bucket lock poisoned");
+                if now.saturating_sub(bucket.window_start) > 75 {
+                    return None;
+                }
+                let mut top_user_agents = bucket
+                    .user_agents
+                    .iter()
+                    .map(|(value, count)| AiDefenseUserAgentSignal {
+                        value: value.clone(),
+                        count: *count,
+                    })
+                    .collect::<Vec<_>>();
+                top_user_agents.sort_by(|left, right| right.count.cmp(&left.count));
+                top_user_agents.truncate(5);
+                Some(AiDefenseIdentitySignal {
+                    site_id,
+                    route,
+                    total_events: bucket.total_events,
+                    distinct_client_count: bucket.distinct_clients.len(),
+                    unresolved_events: bucket.unresolved_events,
+                    trusted_proxy_events: bucket.trusted_proxy_events,
+                    verified_challenge_events: bucket.verified_challenge_events,
+                    interactive_session_events: bucket.interactive_session_events,
+                    spoofed_forward_header_events: bucket.spoofed_forward_header_events,
+                    top_user_agents,
+                })
+            })
+            .collect::<Vec<_>>();
+        summaries.sort_by(|left, right| {
+            right
+                .total_events
+                .cmp(&left.total_events)
+                .then_with(|| right.distinct_client_count.cmp(&left.distinct_client_count))
+        });
+        summaries.truncate(limit);
+        summaries
+    }
+
+    fn ensure_ai_defense_identity_capacity(&self, key: &str, window_start: i64) -> bool {
+        if self.ai_defense_identity_buckets.contains_key(key)
+            || self.ai_defense_identity_buckets.len() < MAX_AI_DEFENSE_IDENTITY_BUCKETS
+        {
+            return true;
+        }
+        let stale_before = window_start.saturating_sub(120);
+        let stale_keys = self
+            .ai_defense_identity_buckets
+            .iter()
+            .filter_map(|entry| {
+                let bucket = entry
+                    .value()
+                    .lock()
+                    .expect("ai defense identity bucket lock poisoned");
+                (bucket.window_start < stale_before).then(|| entry.key().clone())
+            })
+            .take(256)
+            .collect::<Vec<_>>();
+        for stale_key in stale_keys {
+            self.ai_defense_identity_buckets.remove(&stale_key);
+        }
+        self.ai_defense_identity_buckets.len() < MAX_AI_DEFENSE_IDENTITY_BUCKETS
+    }
 }
 
 fn ai_defense_decision_from_local_recommendation(
@@ -324,6 +490,26 @@ fn ai_defense_decision_from_local_recommendation(
     }
     if snapshot.runtime_pressure.defense_depth == "survival" {
         confidence = confidence.saturating_add(3).min(100);
+    }
+    if let Some(identity) = snapshot.identity_summaries.iter().find(|identity| {
+        identity.site_id == recommendation.site_id && identity.route == recommendation.route
+    }) {
+        if identity.distinct_client_count >= 8 && identity.interactive_session_events == 0 {
+            confidence = confidence.saturating_add(5).min(100);
+        }
+        if identity.spoofed_forward_header_events > 0 {
+            confidence = confidence.saturating_add(6).min(100);
+        }
+        if identity.verified_challenge_events.saturating_mul(2) >= identity.total_events
+            || identity.interactive_session_events.saturating_mul(2) >= identity.total_events
+        {
+            confidence = confidence.saturating_sub(10);
+        }
+        if identity.unresolved_events.saturating_mul(2) >= identity.total_events
+            && identity.distinct_client_count <= 2
+        {
+            confidence = confidence.saturating_sub(6);
+        }
     }
     if !snapshot.upstream_health.healthy {
         confidence = confidence.saturating_sub(8);
@@ -353,6 +539,34 @@ fn ai_defense_decision_from_local_recommendation(
             snapshot.upstream_health.healthy
         ),
     })
+}
+
+fn ai_defense_identity_key(site_id: &str, route: &str) -> String {
+    format!("{}|{}", site_id, route)
+}
+
+fn split_ai_defense_identity_key(value: &str) -> Option<(String, String)> {
+    let (site_id, route) = value.split_once('|')?;
+    Some((site_id.to_string(), route.to_string()))
+}
+
+fn metadata_true(request: &UnifiedHttpRequest, key: &str) -> bool {
+    request
+        .get_metadata(key)
+        .is_some_and(|value| value == "true" || value == "1")
+}
+
+fn compact_identity_value(value: &str) -> String {
+    value.chars().take(96).collect()
+}
+
+fn compact_user_agent(value: &str) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.len() <= 96 {
+        normalized
+    } else {
+        normalized.chars().take(96).collect()
+    }
 }
 
 fn ai_defense_policy_signal(policy: &AiTempPolicyEntry) -> AiDefensePolicySignal {
@@ -456,5 +670,50 @@ mod tests {
             Some("timeout")
         );
         assert!(snapshot.active_policy_summaries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ai_defense_snapshot_includes_identity_profile() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        let result =
+            crate::core::InspectionResult::drop(crate::core::InspectionLayer::L7, "route pressure");
+
+        for idx in 0..3 {
+            let mut request = UnifiedHttpRequest::new(
+                crate::protocol::HttpVersion::Http1_1,
+                "POST".to_string(),
+                "/api/login".to_string(),
+            );
+            request.set_client_ip(format!("203.0.113.{}", idx + 10));
+            request.add_header("User-Agent".to_string(), "UnitTest/1.0".to_string());
+            request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+            if idx == 0 {
+                request.add_metadata(
+                    "network.identity_state".to_string(),
+                    "spoofed_forward_header".to_string(),
+                );
+            }
+            context.note_site_defense_signal(&request, &result);
+        }
+
+        let snapshot = context
+            .ai_defense_signal_snapshot(unix_timestamp(), Some("test".to_string()))
+            .await
+            .unwrap();
+        let identity = snapshot
+            .identity_summaries
+            .iter()
+            .find(|item| item.site_id == "site-a" && item.route == "/api/login")
+            .expect("identity profile should be present");
+
+        assert_eq!(identity.total_events, 3);
+        assert_eq!(identity.distinct_client_count, 3);
+        assert_eq!(identity.spoofed_forward_header_events, 1);
+        assert_eq!(identity.top_user_agents[0].value, "UnitTest/1.0");
+        assert_eq!(identity.top_user_agents[0].count, 3);
     }
 }

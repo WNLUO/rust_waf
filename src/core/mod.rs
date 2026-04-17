@@ -86,6 +86,7 @@ pub struct WafContext {
     ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
     ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
     ai_defense_trigger_runtime: std::sync::Mutex<AiDefenseTriggerState>,
+    ai_defense_identity_buckets: DashMap<String, std::sync::Mutex<AiDefenseIdentityBucket>>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     rule_count: AtomicU64,
@@ -137,6 +138,19 @@ struct AiDefenseTriggerState {
 }
 
 #[derive(Debug, Default)]
+struct AiDefenseIdentityBucket {
+    window_start: i64,
+    total_events: u64,
+    unresolved_events: u64,
+    trusted_proxy_events: u64,
+    verified_challenge_events: u64,
+    interactive_session_events: u64,
+    spoofed_forward_header_events: u64,
+    distinct_clients: std::collections::HashSet<String>,
+    user_agents: std::collections::BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Default)]
 struct SiteDefenseBucket {
     window_start: i64,
     soft_events: u64,
@@ -171,6 +185,7 @@ pub struct AiDefenseSignalSnapshot {
     pub l4_pressure: Option<AiDefenseL4Signal>,
     pub upstream_health: AiDefenseUpstreamSignal,
     pub active_policy_summaries: Vec<AiDefensePolicySignal>,
+    pub identity_summaries: Vec<AiDefenseIdentitySignal>,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
 }
 
@@ -218,6 +233,26 @@ pub struct AiDefensePolicySignal {
     pub action: String,
     pub hit_count: i64,
     pub expires_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseIdentitySignal {
+    pub site_id: String,
+    pub route: String,
+    pub total_events: u64,
+    pub distinct_client_count: usize,
+    pub unresolved_events: u64,
+    pub trusted_proxy_events: u64,
+    pub verified_challenge_events: u64,
+    pub interactive_session_events: u64,
+    pub spoofed_forward_header_events: u64,
+    pub top_user_agents: Vec<AiDefenseUserAgentSignal>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseUserAgentSignal {
+    pub value: String,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -338,6 +373,7 @@ impl WafContext {
             ai_temp_policies: RwLock::new(Vec::new()),
             ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
             ai_defense_trigger_runtime: std::sync::Mutex::new(AiDefenseTriggerState::default()),
+            ai_defense_identity_buckets: DashMap::new(),
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),

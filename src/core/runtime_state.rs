@@ -224,6 +224,7 @@ impl WafContext {
         }
 
         let route = runtime_route_path(&request.uri);
+        self.note_ai_defense_identity_signal(&site_id, &route, request, unix_timestamp());
         self.note_site_defense_event(&site_id, Some(&route), is_soft, is_hard);
     }
 

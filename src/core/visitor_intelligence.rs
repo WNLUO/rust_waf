@@ -27,13 +27,22 @@ pub(super) struct VisitorIntelligenceBucket {
     pub admin_count: u64,
     pub challenge_count: u64,
     pub challenge_verified_count: u64,
+    pub challenge_page_report_count: u64,
+    pub challenge_js_report_count: u64,
     pub local_response_count: u64,
     pub blocked_response_count: u64,
     pub upstream_error_count: u64,
+    pub upstream_success_count: u64,
+    pub upstream_redirect_count: u64,
+    pub upstream_client_error_count: u64,
+    pub auth_required_route_count: u64,
+    pub auth_success_count: u64,
+    pub auth_rejected_count: u64,
     pub same_site_referer_count: u64,
     pub no_referer_document_count: u64,
     pub fingerprint_seen: bool,
     pub route_counts: BTreeMap<String, u64>,
+    pub business_route_types: BTreeMap<String, u64>,
     pub status_codes: BTreeMap<String, u64>,
     pub recent_routes: VecDeque<String>,
     pub flags: HashSet<String>,
@@ -66,7 +75,16 @@ pub struct VisitorProfileSignal {
     pub admin_count: u64,
     pub challenge_count: u64,
     pub challenge_verified_count: u64,
+    pub challenge_page_report_count: u64,
+    pub challenge_js_report_count: u64,
     pub fingerprint_seen: bool,
+    pub upstream_success_count: u64,
+    pub upstream_redirect_count: u64,
+    pub upstream_client_error_count: u64,
+    pub upstream_error_count: u64,
+    pub auth_required_route_count: u64,
+    pub auth_success_count: u64,
+    pub auth_rejected_count: u64,
     pub human_confidence: u8,
     pub automation_risk: u8,
     pub probe_risk: u8,
@@ -74,6 +92,7 @@ pub struct VisitorProfileSignal {
     pub false_positive_risk: String,
     pub tracking_priority: String,
     pub route_summary: Vec<VisitorRouteSummary>,
+    pub business_route_types: BTreeMap<String, u64>,
     pub status_codes: BTreeMap<String, u64>,
     pub flags: Vec<String>,
     pub ai_rationale: String,
@@ -154,7 +173,7 @@ impl WafContext {
         }
         bucket.identity_key = identity_key;
         bucket.identity_source = identity_source;
-        bucket.site_id = site_id;
+        bucket.site_id = site_id.clone();
         bucket.client_ip = request
             .client_ip
             .clone()
@@ -206,10 +225,47 @@ impl WafContext {
         if observation.upstream_error {
             bucket.upstream_error_count = bucket.upstream_error_count.saturating_add(1);
         }
+        if !observation.local_response {
+            match observation.status_code {
+                200..=299 => {
+                    bucket.upstream_success_count = bucket.upstream_success_count.saturating_add(1);
+                }
+                300..=399 => {
+                    bucket.upstream_redirect_count =
+                        bucket.upstream_redirect_count.saturating_add(1);
+                }
+                400..=499 => {
+                    bucket.upstream_client_error_count =
+                        bucket.upstream_client_error_count.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
         *bucket
             .status_codes
             .entry(observation.status_code.to_string())
             .or_insert(0) += 1;
+        if let Some(profile) = self.ai_business_route_profile(&site_id, &route) {
+            if profile.route_type != "unknown" {
+                *bucket
+                    .business_route_types
+                    .entry(profile.route_type.clone())
+                    .or_insert(0) += 1;
+            }
+            if matches!(profile.auth_required.as_str(), "true" | "mixed") {
+                bucket.auth_required_route_count =
+                    bucket.auth_required_route_count.saturating_add(1);
+                match observation.status_code {
+                    200..=399 => {
+                        bucket.auth_success_count = bucket.auth_success_count.saturating_add(1);
+                    }
+                    401 | 403 => {
+                        bucket.auth_rejected_count = bucket.auth_rejected_count.saturating_add(1);
+                    }
+                    _ => {}
+                }
+            }
+        }
         if bucket.route_counts.contains_key(&route)
             || bucket.route_counts.len() < MAX_VISITOR_ROUTES
         {
@@ -231,6 +287,7 @@ impl WafContext {
         &self,
         request: &UnifiedHttpRequest,
         fingerprint_id: &str,
+        payload: Option<&serde_json::Value>,
     ) {
         let Some(site_id) = request
             .get_metadata("gateway.site_id")
@@ -262,6 +319,11 @@ impl WafContext {
         bucket.last_seen_at = now;
         bucket.fingerprint_seen = true;
         bucket.challenge_verified_count = bucket.challenge_verified_count.saturating_add(1);
+        bucket.challenge_page_report_count = bucket.challenge_page_report_count.saturating_add(1);
+        if payload.and_then(|value| value.get("challenge")).is_some() {
+            bucket.challenge_js_report_count = bucket.challenge_js_report_count.saturating_add(1);
+            bucket.flags.insert("challenge_js_report_seen".to_string());
+        }
         bucket.flags.insert("browser_fingerprint_seen".to_string());
     }
 
@@ -359,6 +421,16 @@ impl WafContext {
         self.visitor_intelligence_buckets.contains_key(key)
             || self.visitor_intelligence_buckets.len() < MAX_VISITOR_BUCKETS
     }
+
+    fn ai_business_route_profile(
+        &self,
+        site_id: &str,
+        route: &str,
+    ) -> Option<crate::storage::AiRouteProfileEntry> {
+        self.active_ai_route_profiles().into_iter().find(|profile| {
+            profile.site_id == site_id && storage_route_profile_matches(profile, route)
+        })
+    }
 }
 
 fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProfileSignal {
@@ -376,6 +448,9 @@ fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProf
     }
     if bucket.challenge_verified_count > 0 {
         human = human.saturating_add(25);
+    }
+    if bucket.challenge_js_report_count > 0 {
+        human = human.saturating_add(10);
     }
     if bucket.static_count >= bucket.document_count.max(1) {
         human = human.saturating_add(10);
@@ -397,6 +472,9 @@ fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProf
     }
     if bucket.admin_count >= 3 && !bucket.fingerprint_seen {
         probe = probe.saturating_add(40);
+    }
+    if bucket.auth_rejected_count >= 3 && bucket.auth_success_count == 0 {
+        probe = probe.saturating_add(25);
     }
     if bucket.status_codes.get("404").copied().unwrap_or(0) >= 3
         || bucket.status_codes.get("403").copied().unwrap_or(0) >= 3
@@ -451,7 +529,7 @@ fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProf
     }
     .to_string();
     let ai_rationale = format!(
-        "state={} human={} automation={} probe={} abuse={} docs={} static={} api={} admin={} verified={} fp={} routes={}",
+        "state={} human={} automation={} probe={} abuse={} docs={} static={} api={} admin={} verified={} fp={} challenge_js={} upstream_success={} upstream_error={} auth_required={} auth_success={} auth_rejected={} business_types={:?} routes={}",
         state,
         human,
         automation,
@@ -463,6 +541,13 @@ fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProf
         bucket.admin_count,
         bucket.challenge_verified_count,
         bucket.fingerprint_seen,
+        bucket.challenge_js_report_count,
+        bucket.upstream_success_count,
+        bucket.upstream_error_count,
+        bucket.auth_required_route_count,
+        bucket.auth_success_count,
+        bucket.auth_rejected_count,
+        bucket.business_route_types,
         bucket.route_counts.len()
     );
     VisitorProfileSignal {
@@ -481,7 +566,16 @@ fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProf
         admin_count: bucket.admin_count,
         challenge_count: bucket.challenge_count,
         challenge_verified_count: bucket.challenge_verified_count,
+        challenge_page_report_count: bucket.challenge_page_report_count,
+        challenge_js_report_count: bucket.challenge_js_report_count,
         fingerprint_seen: bucket.fingerprint_seen,
+        upstream_success_count: bucket.upstream_success_count,
+        upstream_redirect_count: bucket.upstream_redirect_count,
+        upstream_client_error_count: bucket.upstream_client_error_count,
+        upstream_error_count: bucket.upstream_error_count,
+        auth_required_route_count: bucket.auth_required_route_count,
+        auth_success_count: bucket.auth_success_count,
+        auth_rejected_count: bucket.auth_rejected_count,
         human_confidence: human.min(100),
         automation_risk: automation.min(100),
         probe_risk: probe.min(100),
@@ -489,6 +583,7 @@ fn profile_signal_from_bucket(bucket: &VisitorIntelligenceBucket) -> VisitorProf
         false_positive_risk,
         tracking_priority,
         route_summary,
+        business_route_types: bucket.business_route_types.clone(),
         status_codes: bucket.status_codes.clone(),
         flags,
         ai_rationale,
@@ -616,6 +711,28 @@ fn update_bucket_flags(
     if request.get_metadata("ai.policy.matched_ids").is_some() {
         bucket.flags.insert("ai_policy_matched".to_string());
     }
+}
+
+fn storage_route_profile_matches(
+    profile: &crate::storage::AiRouteProfileEntry,
+    route: &str,
+) -> bool {
+    match profile.match_mode.as_str() {
+        "exact" => route == profile.route_pattern,
+        "prefix" => route.starts_with(&profile.route_pattern),
+        "wildcard" => wildcard_route_matches(&profile.route_pattern, route),
+        _ => false,
+    }
+}
+
+fn wildcard_route_matches(pattern: &str, route: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    let Some((prefix, suffix)) = pattern.split_once('*') else {
+        return route == pattern;
+    };
+    route.starts_with(prefix) && route.ends_with(suffix)
 }
 
 fn classify_request_kind(request: &UnifiedHttpRequest, route: &str) -> &'static str {

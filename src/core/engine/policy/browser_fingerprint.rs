@@ -130,6 +130,8 @@ fn handle_browser_fingerprint_report(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
     let derived_provider_event_id = derive_browser_fingerprint_id(&payload);
+    let provider_event_id = provided_provider_event_id.unwrap_or(derived_provider_event_id);
+    context.note_visitor_fingerprint_report(request, &provider_event_id, Some(&payload));
 
     let Some(payload_object) = payload.as_object_mut() else {
         return json_http_response(
@@ -146,8 +148,6 @@ fn handle_browser_fingerprint_report(
         .client_ip
         .clone()
         .unwrap_or_else(|| packet.source_ip.to_string());
-    let provider_event_id = provided_provider_event_id.unwrap_or(derived_provider_event_id);
-    context.note_visitor_fingerprint_report(request, &provider_event_id);
 
     payload_object.insert(
         "fingerprintId".to_string(),

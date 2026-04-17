@@ -635,7 +635,7 @@ impl L7CcGuard {
                 "touch:(navigator.maxTouchPoints||0)",
                 "}});",
                 "var __rwafHash=function(v){{var h=2166136261;for(var i=0;i<v.length;i++){{h^=v.charCodeAt(i);h=Math.imul(h,16777619);}}return ('00000000'+(h>>>0).toString(16)).slice(-8);}};",
-                "var __rwafPayload={{fingerprintId:__rwafHash(__rwafSeed)+__rwafHash(__rwafSeed.split('').reverse().join('')),...JSON.parse(__rwafSeed)}};",
+                "var __rwafPayload={{fingerprintId:__rwafHash(__rwafSeed)+__rwafHash(__rwafSeed.split('').reverse().join('')),...JSON.parse(__rwafSeed),challenge:{{rendered:true,js:true,action:'challenge',target:__rwafTarget,waitMs:{wait_ms},issuedAt:Date.now()}}}};",
                 "var __rwafStatus=document.getElementById('rwaf-status');",
                 "var __rwafDone=function(){{if(__rwafStatus)__rwafStatus.textContent='验证完成，正在返回原页面。';window.location.replace(__rwafTarget);}};",
                 "var __rwafWait=function(){{setTimeout(__rwafDone,{wait_ms});}};",

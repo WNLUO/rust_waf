@@ -1,12 +1,21 @@
 <script setup lang="ts">
-import { RefreshCw, Save, Sparkles } from 'lucide-vue-next'
+import { ref } from 'vue'
+import {
+  Download,
+  RefreshCw,
+  Save,
+  Settings,
+  Sparkles,
+  X,
+} from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
+import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import AiAuditSettingsPanel from '@/features/behavior/components/AiAuditSettingsPanel.vue'
-import AiAuditReportOverview from '@/features/behavior/components/AiAuditReportOverview.vue'
 import AiAuditReportDetails from '@/features/behavior/components/AiAuditReportDetails.vue'
 import AiAuditHistoryPanel from '@/features/behavior/components/AiAuditHistoryPanel.vue'
-import AiAuditAutoStatusPanel from '@/features/behavior/components/AiAuditAutoStatusPanel.vue'
 import { useAdminAiAuditSection } from '@/features/behavior/composables/useAdminAiAuditSection'
+
+const settingsDialogOpen = ref(false)
 
 const {
   loading,
@@ -34,8 +43,6 @@ const {
   priorityLabel,
   actionTypeLabel,
   feedbackStatusLabel,
-  analysisModeLabel,
-  inputSourceLabel,
   riskBadgeType,
   providerStatusText,
   cachedReportLabel,
@@ -45,9 +52,7 @@ const {
   autoAuditTimeline,
   comparisonSummary,
   formatPolicyEffectMap,
-  formatCountItems,
   formatDelta,
-  truncateMiddle,
   describeAutoTriggerReason,
   triggerReasonFilterLabel,
   loadSection,
@@ -63,10 +68,7 @@ const {
 </script>
 
 <template>
-  <CyberCard
-    title="AI 审计"
-    sub-title="把模型配置、试跑结果和本地回退状态放在同一个入口里，方便直接验证你的审计链路有没有接通。"
-  >
+  <CyberCard title="AI 审计">
     <template #header-action>
       <div class="flex flex-wrap items-center gap-2">
         <button
@@ -81,11 +83,11 @@ const {
         <button
           type="button"
           class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
-          :disabled="loading || saving"
-          @click="saveAiAuditSettings"
+          :disabled="loading"
+          @click="settingsDialogOpen = true"
         >
-          <Save :size="14" />
-          {{ saving ? '保存中...' : '保存配置' }}
+          <Settings :size="14" />
+          模型配置
         </button>
         <button
           type="button"
@@ -113,6 +115,7 @@ const {
           :disabled="!report"
           @click="downloadReportJson"
         >
+          <Download :size="14" />
           导出 JSON
         </button>
       </div>
@@ -124,76 +127,254 @@ const {
 
     <div v-else class="space-y-5">
       <section
-        class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.25fr)]"
+        class="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.6fr)]"
       >
+        <div class="rounded-md border border-slate-200 bg-white p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge
+              :type="riskBadgeType"
+              :text="
+                report
+                  ? `风险 ${riskLevelLabel(report.risk_level)}`
+                  : '尚未执行'
+              "
+            />
+            <StatusBadge type="muted" :text="providerStatusText" />
+            <StatusBadge type="muted" :text="cachedReportLabel" />
+            <StatusBadge
+              v-if="comparisonSummary"
+              type="info"
+              :text="`对比 ${formatDelta(comparisonSummary.findingsDelta)}`"
+            />
+          </div>
+
+          <div v-if="report" class="mt-4">
+            <div
+              class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between"
+            >
+              <div class="min-w-0">
+                <p class="text-base font-semibold text-slate-900">
+                  {{ report.headline }}
+                </p>
+                <p class="mt-1 text-xs text-slate-500">
+                  {{ formatTimestamp(report.generated_at) }} · 采样
+                  {{ formatNumber(report.summary.sampled_events) }} /
+                  {{ formatNumber(report.summary.total_events) }}
+                </p>
+              </div>
+              <div
+                class="grid grid-cols-3 gap-2 text-center text-xs text-slate-500 xl:min-w-[21rem]"
+              >
+                <div
+                  class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <p>身份压力</p>
+                  <p class="mt-1 text-base font-semibold text-slate-900">
+                    {{
+                      formatNumber(
+                        report.summary.current.identity_pressure_percent,
+                      )
+                    }}%
+                  </p>
+                </div>
+                <div
+                  class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <p>L7 摩擦</p>
+                  <p class="mt-1 text-base font-semibold text-slate-900">
+                    {{
+                      formatNumber(
+                        report.summary.current.l7_friction_pressure_percent,
+                      )
+                    }}%
+                  </p>
+                </div>
+                <div
+                  class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <p>慢速攻击</p>
+                  <p class="mt-1 text-base font-semibold text-slate-900">
+                    {{
+                      formatNumber(
+                        report.summary.current.slow_attack_pressure_percent,
+                      )
+                    }}%
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <ul
+              v-if="report.executive_summary.length"
+              class="mt-3 grid gap-2 text-sm leading-6 text-slate-700 xl:grid-cols-2"
+            >
+              <li
+                v-for="(item, index) in report.executive_summary.slice(0, 4)"
+                :key="`${index}-${item}`"
+                class="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+              >
+                {{ item }}
+              </li>
+            </ul>
+          </div>
+
+          <div
+            v-else
+            class="mt-4 rounded-md border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500"
+          >
+            暂无审计报告
+          </div>
+        </div>
+
+        <div class="rounded-md border border-slate-200 bg-slate-50 p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <StatusBadge
+              :type="autoAuditStatus?.enabled ? 'info' : 'muted'"
+              :text="
+                autoAuditStatus?.enabled ? '自动审计已启用' : '自动审计未启用'
+              "
+            />
+            <StatusBadge
+              v-if="autoAuditStatus?.last_trigger_reason"
+              type="warning"
+              :text="
+                describeAutoTriggerReason(autoAuditStatus.last_trigger_reason)
+              "
+            />
+          </div>
+          <div class="mt-3 grid gap-3 text-sm text-slate-600">
+            <div>
+              <p class="text-xs text-slate-400">最近状态</p>
+              <p class="mt-1 font-semibold text-slate-900">
+                {{ autoAuditStatusText }}
+              </p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <p class="text-xs text-slate-400">触发条件</p>
+                <p class="mt-1 font-semibold text-slate-900">
+                  {{
+                    autoAuditTriggerFlags.length
+                      ? autoAuditTriggerFlags.join(' / ')
+                      : '暂无'
+                  }}
+                </p>
+              </div>
+              <div>
+                <p class="text-xs text-slate-400">报告</p>
+                <p class="mt-1 font-semibold text-slate-900">
+                  {{
+                    autoAuditStatus?.last_report_id
+                      ? `#${autoAuditStatus.last_report_id}`
+                      : '暂无'
+                  }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <details class="rounded-md border border-slate-200 bg-white">
+        <summary
+          class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900"
+        >
+          审计详情与历史反馈
+        </summary>
+        <div class="space-y-4 border-t border-slate-200 p-4">
+          <AiAuditReportDetails
+            v-if="report"
+            :report="report"
+            :active-policies="activePolicies"
+            :policies-loading="policiesLoading"
+            :revoking-policy-id="revokingPolicyId"
+            :format-number="formatNumber"
+            :format-timestamp="formatTimestamp"
+            :risk-level-label="riskLevelLabel"
+            :priority-label="priorityLabel"
+            :action-type-label="actionTypeLabel"
+            :format-policy-effect-map="formatPolicyEffectMap"
+            :format-delta="formatDelta"
+            :revoke-policy="revokePolicy"
+          />
+
+          <AiAuditHistoryPanel
+            v-model:feedback-filter="feedbackFilter"
+            v-model:trigger-reason-filter="triggerReasonFilter"
+            :history-total="historyTotal"
+            :history-loading="historyLoading"
+            :filtered-report-history="filteredReportHistory"
+            :auto-audit-timeline="autoAuditTimeline"
+            :compare-report-id="compareReportId"
+            :feedback-notes="feedbackNotes"
+            :updating-feedback-id="updatingFeedbackId"
+            :format-number="formatNumber"
+            :format-timestamp="formatTimestamp"
+            :risk-level-label="riskLevelLabel"
+            :provider-label="providerLabel"
+            :feedback-status-label="feedbackStatusLabel"
+            :describe-auto-trigger-reason="describeAutoTriggerReason"
+            :trigger-reason-filter-label="triggerReasonFilterLabel"
+            :use-history-report="useHistoryReport"
+            :pin-compare-report="pinCompareReport"
+            :update-feedback="updateFeedback"
+          />
+        </div>
+      </details>
+    </div>
+  </CyberCard>
+
+  <div
+    v-if="settingsDialogOpen"
+    class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4 py-8"
+    @click.self="settingsDialogOpen = false"
+  >
+    <div
+      class="max-h-full w-full max-w-5xl overflow-hidden rounded-md border border-slate-300 bg-white shadow-xl"
+    >
+      <div
+        class="flex items-center justify-between border-b border-slate-200 px-4 py-3"
+      >
+        <div>
+          <p class="text-sm font-semibold text-slate-900">AI 模型配置</p>
+          <p class="mt-0.5 text-xs text-slate-500">保存后会更新全局审计设置</p>
+        </div>
+        <button
+          type="button"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+          :disabled="saving"
+          @click="settingsDialogOpen = false"
+        >
+          <X :size="16" />
+        </button>
+      </div>
+      <div class="max-h-[calc(100vh-12rem)] overflow-y-auto p-4">
         <AiAuditSettingsPanel
           v-model:window-seconds="windowSeconds"
           :form="form"
         />
-
-        <AiAuditReportOverview
-          :report="report"
-          :risk-badge-type="riskBadgeType"
-          :provider-status-text="providerStatusText"
-          :cached-report-label="cachedReportLabel"
-          :comparison-summary="comparisonSummary"
-          :format-number="formatNumber"
-          :format-timestamp="formatTimestamp"
-          :risk-level-label="riskLevelLabel"
-          :analysis-mode-label="analysisModeLabel"
-          :input-source-label="inputSourceLabel"
-          :format-count-items="formatCountItems"
-          :describe-auto-trigger-reason="describeAutoTriggerReason"
-        />
-
-        <AiAuditAutoStatusPanel
-          :auto-audit-status="autoAuditStatus"
-          :auto-audit-status-text="autoAuditStatusText"
-          :auto-audit-trigger-flags="autoAuditTriggerFlags"
-          :format-number="formatNumber"
-          :format-timestamp="formatTimestamp"
-          :truncate-middle="truncateMiddle"
-          :describe-auto-trigger-reason="describeAutoTriggerReason"
-        />
-      </section>
-
-      <AiAuditReportDetails
-        v-if="report"
-        :report="report"
-        :active-policies="activePolicies"
-        :policies-loading="policiesLoading"
-        :revoking-policy-id="revokingPolicyId"
-        :format-number="formatNumber"
-        :format-timestamp="formatTimestamp"
-        :risk-level-label="riskLevelLabel"
-        :priority-label="priorityLabel"
-        :action-type-label="actionTypeLabel"
-        :format-policy-effect-map="formatPolicyEffectMap"
-        :format-delta="formatDelta"
-        :revoke-policy="revokePolicy"
-      />
-
-      <AiAuditHistoryPanel
-        v-model:feedback-filter="feedbackFilter"
-        v-model:trigger-reason-filter="triggerReasonFilter"
-        :history-total="historyTotal"
-        :history-loading="historyLoading"
-        :filtered-report-history="filteredReportHistory"
-        :auto-audit-timeline="autoAuditTimeline"
-        :compare-report-id="compareReportId"
-        :feedback-notes="feedbackNotes"
-        :updating-feedback-id="updatingFeedbackId"
-        :format-number="formatNumber"
-        :format-timestamp="formatTimestamp"
-        :risk-level-label="riskLevelLabel"
-        :provider-label="providerLabel"
-        :feedback-status-label="feedbackStatusLabel"
-        :describe-auto-trigger-reason="describeAutoTriggerReason"
-        :trigger-reason-filter-label="triggerReasonFilterLabel"
-        :use-history-report="useHistoryReport"
-        :pin-compare-report="pinCompareReport"
-        :update-feedback="updateFeedback"
-      />
+      </div>
+      <div
+        class="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3"
+      >
+        <button
+          type="button"
+          class="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          :disabled="saving"
+          @click="settingsDialogOpen = false"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-md border border-cyan-300 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-700 hover:bg-cyan-100 disabled:opacity-60"
+          :disabled="loading || saving"
+          @click="saveAiAuditSettings"
+        >
+          <Save :size="15" />
+          {{ saving ? '保存中...' : '保存配置' }}
+        </button>
+      </div>
     </div>
-  </CyberCard>
+  </div>
 </template>

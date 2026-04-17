@@ -22,8 +22,9 @@ pub(crate) use inspection::{
 #[cfg(test)]
 pub(crate) use request::expand_request_template;
 pub(crate) use request::{
-    apply_client_identity, apply_response_policies, body_for_request, inspect_blocked_client_ip,
-    prepare_request_for_proxy, prepare_request_for_routing, should_keep_client_connection_open,
+    apply_client_identity, apply_response_policies, apply_server_public_ip_metadata,
+    body_for_request, inspect_blocked_client_ip, prepare_request_for_proxy,
+    prepare_request_for_routing, should_keep_client_connection_open,
 };
 pub(crate) use routing::{
     apply_gateway_site_metadata, enforce_upstream_policy, generate_request_id, http_status_text,

@@ -11,6 +11,7 @@ pub mod packet;
 mod resource_budget;
 mod rule_engine;
 mod runtime_state;
+mod self_protection;
 mod storage_runtime;
 mod system_profile;
 pub mod traffic_map;
@@ -43,6 +44,7 @@ pub use packet::{
     RandomStatusConfig, TarpitConfig,
 };
 pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
+pub use self_protection::ServerPublicIpSnapshot;
 
 #[derive(Debug, Clone)]
 pub struct UpstreamHealthSnapshot {
@@ -91,6 +93,7 @@ pub struct WafContext {
     ai_route_result_buckets: DashMap<String, std::sync::Mutex<AiRouteResultBucket>>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
+    server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -472,6 +475,7 @@ impl WafContext {
             ai_route_result_buckets: DashMap::new(),
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
+            server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,

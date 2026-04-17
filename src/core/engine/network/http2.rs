@@ -62,6 +62,7 @@ pub(crate) async fn handle_http2_connection(
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);
                     }
+                    apply_server_public_ip_metadata(context.as_ref(), &packet, &mut request);
                     let mut first_registration = false;
                     if !registered.swap(true, std::sync::atomic::Ordering::Relaxed) {
                         first_registration = true;

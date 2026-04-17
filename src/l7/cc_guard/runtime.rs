@@ -23,6 +23,14 @@ impl L7CcGuard {
         if !config.enabled {
             return None;
         }
+        if request
+            .get_metadata("network.server_public_ip_exempt")
+            .map(|value| value == "true")
+            .unwrap_or(false)
+        {
+            request.add_metadata("l7.cc.skipped".to_string(), "server_public_ip".to_string());
+            return None;
+        }
         let defense_depth = runtime_defense_depth(request);
         let rich_tracking = matches!(
             defense_depth,
@@ -588,6 +596,7 @@ impl L7CcGuard {
         let heading = escape_html(&config.challenge_page.heading);
         let description = escape_html(&config.challenge_page.description);
         let completion_message = escape_html(&config.challenge_page.completion_message);
+        let wait_ms = 2800_u64;
         let html = format!(
             concat!(
                 "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">",
@@ -602,6 +611,7 @@ impl L7CcGuard {
                 "</head><body><main class=\"card\"><h1>{heading}</h1>",
                 "<p>{description}</p>",
                 "<p>{completion_message}</p>",
+                "<p id=\"rwaf-status\">正在验证浏览器环境，请保持此页面打开。</p>",
                 "{reason_html}",
                 "</main><script>",
                 "document.cookie = {cookie};",
@@ -622,8 +632,10 @@ impl L7CcGuard {
                 "}});",
                 "var __rwafHash=function(v){{var h=2166136261;for(var i=0;i<v.length;i++){{h^=v.charCodeAt(i);h=Math.imul(h,16777619);}}return ('00000000'+(h>>>0).toString(16)).slice(-8);}};",
                 "var __rwafPayload={{fingerprintId:__rwafHash(__rwafSeed)+__rwafHash(__rwafSeed.split('').reverse().join('')),...JSON.parse(__rwafSeed)}};",
-                "var __rwafDone=function(){{window.location.replace(__rwafTarget);}};",
-                "try{{fetch(__rwafReport,{{method:'POST',headers:{{'content-type':'application/json'}},credentials:'same-origin',body:JSON.stringify(__rwafPayload),keepalive:true}}).finally(function(){{setTimeout(__rwafDone,60);}});}}catch(_e){{setTimeout(__rwafDone,60);}}",
+                "var __rwafStatus=document.getElementById('rwaf-status');",
+                "var __rwafDone=function(){{if(__rwafStatus)__rwafStatus.textContent='验证完成，正在返回原页面。';window.location.replace(__rwafTarget);}};",
+                "var __rwafWait=function(){{setTimeout(__rwafDone,{wait_ms});}};",
+                "try{{fetch(__rwafReport,{{method:'POST',headers:{{'content-type':'application/json'}},credentials:'same-origin',body:JSON.stringify(__rwafPayload),keepalive:true}}).finally(__rwafWait);}}catch(_e){{__rwafWait();}}",
                 "</script></body></html>"
             ),
             title = title,
@@ -634,6 +646,7 @@ impl L7CcGuard {
             cookie = serde_json::to_string(&cookie_assignment)
                 .unwrap_or_else(|_| "\"\"".to_string()),
             target = reload_target,
+            wait_ms = wait_ms,
         );
 
         CustomHttpResponse {

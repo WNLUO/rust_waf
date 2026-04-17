@@ -38,6 +38,18 @@ pub(crate) fn apply_client_identity(
         "network.identity_state".to_string(),
         identity.identity_state.to_string(),
     );
+    let self_public_ip = context.is_server_public_ip(identity.resolved_client_ip)
+        || context.is_server_public_ip(peer_addr.ip());
+    request.add_metadata(
+        "network.server_public_ip".to_string(),
+        self_public_ip.to_string(),
+    );
+    if self_public_ip {
+        request.add_metadata(
+            "network.server_public_ip_exempt".to_string(),
+            "true".to_string(),
+        );
+    }
 
     apply_proxy_headers(
         context,
@@ -64,6 +76,12 @@ pub(crate) async fn inspect_blocked_client_ip(
     if client_ip.is_empty() {
         return None;
     }
+    if context.is_server_public_ip_str(client_ip) {
+        context
+            .remove_server_public_ip_from_local_blocks(client_ip)
+            .await;
+        return None;
+    }
 
     let store = context.sqlite_store.as_ref()?;
     let entry = match store.load_active_local_blocked_ip_by_ip(client_ip).await {
@@ -84,6 +102,39 @@ pub(crate) async fn inspect_blocked_client_ip(
             entry.ip, entry.reason
         ),
     ))
+}
+
+pub(crate) fn apply_server_public_ip_metadata(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &mut UnifiedHttpRequest,
+) {
+    let client_ip = request
+        .client_ip
+        .as_deref()
+        .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok());
+    let self_public_ip = client_ip
+        .map(|ip| {
+            context.is_server_public_ip(ip)
+                || (ip == packet.dest_ip
+                    && context.learn_server_public_ip_candidate(
+                        ip,
+                        "resolved client IP matched listener destination IP",
+                    ))
+        })
+        .unwrap_or(false)
+        || context.is_server_public_ip(packet.source_ip);
+
+    request.add_metadata(
+        "network.server_public_ip".to_string(),
+        self_public_ip.to_string(),
+    );
+    if self_public_ip {
+        request.add_metadata(
+            "network.server_public_ip_exempt".to_string(),
+            "true".to_string(),
+        );
+    }
 }
 
 pub(crate) fn prepare_request_for_routing(context: &WafContext, request: &mut UnifiedHttpRequest) {

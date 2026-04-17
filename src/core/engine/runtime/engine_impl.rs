@@ -47,6 +47,10 @@ impl WafEngine {
             .await?;
         self.context.refresh_ai_temp_policies().await?;
         self.context.refresh_ai_route_profiles().await?;
+        let context = Arc::clone(&self.context);
+        tokio::spawn(async move {
+            let _ = context.refresh_server_public_ip_allowlist(true).await;
+        });
 
         #[cfg(feature = "api")]
         if startup_config.api_enabled {
@@ -339,6 +343,9 @@ impl WafEngine {
         }
         if let Err(err) = self.context.refresh_ai_route_profiles().await {
             warn!("Failed to refresh AI route profiles: {}", err);
+        }
+        if let Err(err) = self.context.refresh_server_public_ip_allowlist(false).await {
+            debug!("Server public IP allowlist refresh did not update: {}", err);
         }
 
         #[cfg(feature = "api")]

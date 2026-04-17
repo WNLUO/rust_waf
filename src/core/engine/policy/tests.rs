@@ -349,3 +349,69 @@ async fn inspect_blocked_client_ip_skips_socket_peer_when_header_strategy_unreso
     let result = inspect_blocked_client_ip(&context, &request).await;
     assert!(result.is_none());
 }
+
+#[tokio::test]
+async fn server_public_ip_is_marked_and_skips_local_blocklist() {
+    let mut config = crate::config::Config::default();
+    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
+    config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
+    config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
+    let context = WafContext::new(config).await.unwrap();
+    let server_ip = "198.51.100.25".parse().unwrap();
+    context.replace_server_public_ips_for_test([server_ip]);
+
+    let store = context.sqlite_store.as_ref().unwrap();
+    let blocked_at = unix_timestamp();
+    store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+        "198.51.100.25".to_string(),
+        "previous self ban".to_string(),
+        blocked_at,
+        blocked_at + 3600,
+    ));
+    store.flush().await.unwrap();
+
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    request.add_header("x-cdn-real-ip".to_string(), "198.51.100.25".to_string());
+
+    apply_client_identity(&context, "203.0.113.10:443".parse().unwrap(), &mut request);
+
+    assert_eq!(
+        request
+            .get_metadata("network.server_public_ip_exempt")
+            .map(String::as_str),
+        Some("true")
+    );
+    let result = inspect_blocked_client_ip(&context, &request).await;
+    assert!(result.is_none());
+    assert!(store
+        .load_active_local_blocked_ip_by_ip("198.51.100.25")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn server_public_ip_can_be_learned_from_destination_match() {
+    let mut config = crate::config::Config::default();
+    config.sqlite_enabled = false;
+    let context = WafContext::new(config).await.unwrap();
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    request.set_client_ip("8.8.8.8".to_string());
+    let packet = PacketInfo::from_socket_addrs(
+        "203.0.113.10:443".parse().unwrap(),
+        "8.8.8.8:660".parse().unwrap(),
+        Protocol::TCP,
+    );
+
+    apply_server_public_ip_metadata(&context, &packet, &mut request);
+
+    assert_eq!(
+        request
+            .get_metadata("network.server_public_ip_exempt")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert!(context.is_server_public_ip("8.8.8.8".parse().unwrap()));
+}

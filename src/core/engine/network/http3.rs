@@ -128,6 +128,7 @@ async fn handle_http3_request(
     unified.add_metadata("udp.peer".to_string(), packet.source_ip.to_string());
     unified.add_metadata("udp.local".to_string(), packet.dest_ip.to_string());
     apply_client_identity(context.as_ref(), peer_addr, &mut unified);
+    apply_server_public_ip_metadata(context.as_ref(), &packet, &mut unified);
     let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
         context.as_ref(),
         Arc::clone(&request_semaphore),

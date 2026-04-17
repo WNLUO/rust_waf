@@ -4,6 +4,8 @@ use sha2::{Digest, Sha256};
 use std::hash::{Hash, Hasher};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(super) const BEHAVIOR_CLEARANCE_COOKIE_NAME: &str = "rwaf_behavior";
+
 pub(super) fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
     let identity_state = request
         .get_metadata("network.identity_state")
@@ -41,6 +43,13 @@ pub(super) fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
             MAX_BEHAVIOR_KEY_LEN,
         ));
     }
+    if let Some(value) = cookie_value(request, BEHAVIOR_CLEARANCE_COOKIE_NAME) {
+        return Some(compact_component(
+            "identity",
+            &format!("behavior:{value}"),
+            MAX_BEHAVIOR_KEY_LEN,
+        ));
+    }
     if identity_state == "trusted_cdn_unresolved" {
         return None;
     }
@@ -58,6 +67,19 @@ pub(super) fn request_identity(request: &UnifiedHttpRequest) -> Option<String> {
         &format!("ipua:{ip}|{ua}"),
         MAX_BEHAVIOR_KEY_LEN,
     ))
+}
+
+pub(super) fn has_valid_behavior_clearance(request: &UnifiedHttpRequest) -> bool {
+    let Some(value) = cookie_value(request, BEHAVIOR_CLEARANCE_COOKIE_NAME) else {
+        return false;
+    };
+    let Some((expires_at, _nonce)) = value.split_once(':') else {
+        return false;
+    };
+    expires_at
+        .parse::<i64>()
+        .map(|expires_at| expires_at > unix_timestamp())
+        .unwrap_or(false)
 }
 
 pub(super) fn passive_fingerprint_id(request: &UnifiedHttpRequest) -> Option<String> {

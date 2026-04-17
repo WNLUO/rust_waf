@@ -80,6 +80,7 @@ pub(crate) async fn handle_http1_connection(
         apply_client_identity(context.as_ref(), peer_addr, &mut request);
         request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());
         request.add_metadata("protocol".to_string(), "HTTP/1.1".to_string());
+        apply_server_public_ip_metadata(context.as_ref(), packet, &mut request);
         for (key, value) in &extra_metadata {
             request.add_metadata(key.clone(), value.clone());
         }

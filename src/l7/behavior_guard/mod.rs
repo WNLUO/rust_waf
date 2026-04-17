@@ -68,6 +68,24 @@ impl L7BehaviorGuard {
         &self,
         request: &mut UnifiedHttpRequest,
     ) -> Option<InspectionResult> {
+        if request
+            .get_metadata("network.server_public_ip_exempt")
+            .map(|value| value == "true")
+            .unwrap_or(false)
+        {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "server_public_ip".to_string(),
+            );
+            return None;
+        }
+        if request_utils::has_valid_behavior_clearance(request) {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "behavior_clearance".to_string(),
+            );
+            return None;
+        }
         let defense_depth = runtime_defense_depth(request);
         if defense_depth == crate::core::DefenseDepth::Survival {
             request.add_metadata(

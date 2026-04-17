@@ -4,9 +4,12 @@ use serde_json::json;
 pub(crate) fn inspect_application_layers(
     context: &WafContext,
     packet: &PacketInfo,
-    _request: &UnifiedHttpRequest,
+    request: &UnifiedHttpRequest,
     serialized_request: &str,
 ) -> InspectionResult {
+    if request_is_server_public_ip_exempt(context, packet, request) {
+        return InspectionResult::allow(InspectionLayer::L7);
+    }
     let rule_result = inspect_l7_rules(context, packet, serialized_request);
     if rule_result.blocked || !rule_result.reason.is_empty() {
         return rule_result;
@@ -20,6 +23,17 @@ pub(crate) fn inspect_l7_bloom_filter(
     request: &mut UnifiedHttpRequest,
     include_body: bool,
 ) -> Option<InspectionResult> {
+    if request
+        .get_metadata("network.server_public_ip_exempt")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        request.add_metadata(
+            "l7.bloom.skipped".to_string(),
+            "server_public_ip".to_string(),
+        );
+        return None;
+    }
     let bloom = context.l7_bloom_filter()?;
     if !bloom.is_enabled() {
         return None;
@@ -173,6 +187,9 @@ pub(crate) fn inspect_transport_layers(
     packet: &PacketInfo,
     trusted_proxy_peer: bool,
 ) -> InspectionResult {
+    if context.is_server_public_ip(packet.source_ip) {
+        return InspectionResult::allow(InspectionLayer::L4);
+    }
     if let Some(l4_inspector) = context.l4_inspector() {
         let l4_result = l4_inspector.inspect_packet(packet, trusted_proxy_peer);
         if l4_result.blocked || l4_result.should_persist_event() {
@@ -208,6 +225,9 @@ pub(crate) fn persist_l4_inspection_event(
 
     if result.persist_blocked_ip {
         let blocked_at = unix_timestamp();
+        if context.is_server_public_ip(packet.source_ip) {
+            return;
+        }
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             packet.source_ip.to_string(),
             result.reason.clone(),
@@ -264,6 +284,9 @@ pub(crate) fn persist_http_inspection_event(
             .client_ip
             .clone()
             .unwrap_or_else(|| packet.source_ip.to_string());
+        if context.is_server_public_ip_str(&ip) {
+            return;
+        }
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             ip,
             result.reason.clone(),
@@ -380,6 +403,9 @@ pub(crate) fn persist_safeline_intercept_blocked_ip(
         .client_ip
         .clone()
         .unwrap_or_else(|| packet.source_ip.to_string());
+    if context.is_server_public_ip_str(&ip) {
+        return;
+    }
     let reason = provider_event_id
         .map(|event_id| format!("safeline upstream intercept: event_id={event_id}"))
         .unwrap_or_else(|| "safeline upstream intercept".to_string());
@@ -466,6 +492,9 @@ pub(crate) fn enforce_runtime_http_block_if_needed(
         .as_deref()
         .and_then(|value| value.parse::<std::net::IpAddr>().ok())
         .unwrap_or(packet.source_ip);
+    if context.is_server_public_ip(ip) {
+        return;
+    }
 
     inspector.block_ip(
         &ip,
@@ -477,6 +506,23 @@ pub(crate) fn enforce_runtime_http_block_if_needed(
                 .unwrap_or(crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS),
         ),
     );
+}
+
+fn request_is_server_public_ip_exempt(
+    context: &WafContext,
+    packet: &PacketInfo,
+    request: &UnifiedHttpRequest,
+) -> bool {
+    request
+        .get_metadata("network.server_public_ip_exempt")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+        || request
+            .client_ip
+            .as_deref()
+            .map(|ip| context.is_server_public_ip_str(ip))
+            .unwrap_or(false)
+        || context.is_server_public_ip(packet.source_ip)
 }
 
 fn build_request_identity_details(

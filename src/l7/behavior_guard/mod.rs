@@ -54,6 +54,32 @@ impl L7BehaviorGuard {
         &self,
         request: &mut UnifiedHttpRequest,
     ) -> Option<InspectionResult> {
+        let defense_depth = runtime_defense_depth(request);
+        if defense_depth == crate::core::DefenseDepth::Survival {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "resource_survival".to_string(),
+            );
+            return None;
+        }
+        let sample_stride =
+            runtime_u64_metadata(request, "runtime.budget.behavior_sample_stride", 1);
+        if sample_stride > 1 {
+            let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+            if !sequence.is_multiple_of(sample_stride) {
+                request.add_metadata(
+                    "l7.behavior.skipped".to_string(),
+                    "resource_sampling".to_string(),
+                );
+                return None;
+            }
+        }
+        let bucket_limit = runtime_usize_metadata(
+            request,
+            "runtime.budget.behavior_bucket_limit",
+            MAX_BEHAVIOR_BUCKETS,
+        )
+        .clamp(512, MAX_BEHAVIOR_BUCKETS);
         let Some(identity) = request_identity(request) else {
             return None;
         };
@@ -71,8 +97,16 @@ impl L7BehaviorGuard {
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
-        let mut assessment =
-            self.observe_and_assess(&identity, route, kind, client_ip, now, unix_now, window);
+        let mut assessment = self.observe_and_assess(
+            &identity,
+            route,
+            kind,
+            client_ip,
+            now,
+            unix_now,
+            window,
+            bucket_limit,
+        );
         let ai_score_boost = request
             .get_metadata("ai.behavior.score_boost")
             .and_then(|value| value.parse::<u32>().ok())
@@ -245,11 +279,12 @@ impl L7BehaviorGuard {
         now: Instant,
         unix_now: i64,
         window: Duration,
+        bucket_limit: usize,
     ) -> BehaviorAssessment {
         let identity = bounded_dashmap_key(
             &self.buckets,
             compact_component("identity", &identity, MAX_BEHAVIOR_KEY_LEN),
-            MAX_BEHAVIOR_BUCKETS,
+            bucket_limit,
             "behavior",
             OVERFLOW_SHARDS,
         );
@@ -317,6 +352,27 @@ impl L7BehaviorGuard {
         }
         profiles
     }
+}
+
+fn runtime_defense_depth(request: &UnifiedHttpRequest) -> crate::core::DefenseDepth {
+    request
+        .get_metadata("runtime.defense.depth")
+        .map(|value| crate::core::DefenseDepth::from_str(value))
+        .unwrap_or(crate::core::DefenseDepth::Balanced)
+}
+
+fn runtime_usize_metadata(request: &UnifiedHttpRequest, key: &str, default: usize) -> usize {
+    request
+        .get_metadata(key)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn runtime_u64_metadata(request: &UnifiedHttpRequest, key: &str, default: u64) -> u64 {
+    request
+        .get_metadata(key)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(default)
 }
 
 impl BehaviorWindow {

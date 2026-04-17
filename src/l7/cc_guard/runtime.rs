@@ -23,6 +23,23 @@ impl L7CcGuard {
         if !config.enabled {
             return None;
         }
+        let defense_depth = runtime_defense_depth(request);
+        let rich_tracking = matches!(
+            defense_depth,
+            crate::core::DefenseDepth::Full | crate::core::DefenseDepth::Balanced
+        );
+        let bucket_limit = runtime_usize_metadata(
+            request,
+            "runtime.budget.l7_bucket_limit",
+            MAX_COUNTER_BUCKETS,
+        )
+        .clamp(512, MAX_COUNTER_BUCKETS);
+        let page_window_limit = runtime_usize_metadata(
+            request,
+            "runtime.budget.l7_page_window_limit",
+            MAX_PAGE_WINDOW_BUCKETS,
+        )
+        .clamp(128, MAX_PAGE_WINDOW_BUCKETS);
 
         let client_ip = request_client_ip(request)?;
         let path = request_path(&request.uri);
@@ -67,11 +84,26 @@ impl L7CcGuard {
             return Some(InspectionResult::drop(InspectionLayer::L7, reason));
         }
 
-        if request_kind == RequestKind::Document {
-            self.record_page_load_window(client_ip, &host, &route_path, unix_now, &config);
+        if rich_tracking && request_kind == RequestKind::Document {
+            self.record_page_load_window(
+                client_ip,
+                &host,
+                &route_path,
+                unix_now,
+                &config,
+                page_window_limit,
+            );
         }
-        let is_page_subresource = request_kind == RequestKind::StaticAsset
-            && self.matches_page_load_window(request, client_ip, &host, &route_path, unix_now);
+        let is_page_subresource = rich_tracking
+            && request_kind == RequestKind::StaticAsset
+            && self.matches_page_load_window(
+                request,
+                client_ip,
+                &host,
+                &route_path,
+                unix_now,
+                page_window_limit,
+            );
         let weight_percent = self.request_weight_percent(
             request_kind,
             is_page_subresource,
@@ -85,6 +117,7 @@ impl L7CcGuard {
             now,
             unix_now,
             window,
+            bucket_limit,
         );
         let host_count = self.observe(
             &self.host_buckets,
@@ -92,6 +125,7 @@ impl L7CcGuard {
             now,
             unix_now,
             window,
+            bucket_limit,
         );
         let route_count = self.observe(
             &self.route_buckets,
@@ -99,6 +133,7 @@ impl L7CcGuard {
             now,
             unix_now,
             window,
+            bucket_limit,
         );
         let hot_path_count = self.observe(
             &self.hot_path_buckets,
@@ -106,48 +141,74 @@ impl L7CcGuard {
             now,
             unix_now,
             window,
+            bucket_limit,
         );
-        let hot_path_client_count = self.observe_distinct(
-            &self.hot_path_client_buckets,
-            format!("{host}|{route_path}"),
-            client_ip.to_string(),
-            now,
-            unix_now,
-            window,
-        );
+        let hot_path_client_count = if rich_tracking {
+            self.observe_distinct(
+                &self.hot_path_client_buckets,
+                format!("{host}|{route_path}"),
+                client_ip.to_string(),
+                now,
+                unix_now,
+                window,
+                bucket_limit,
+            )
+        } else {
+            0
+        };
 
-        let ip_weighted_points = self.observe_weighted(
-            &self.ip_weighted_buckets,
-            client_ip.to_string(),
-            now,
-            unix_now,
-            window,
-            weight_percent,
-        );
-        let host_weighted_points = self.observe_weighted(
-            &self.host_weighted_buckets,
-            format!("{client_ip}|{host}"),
-            now,
-            unix_now,
-            window,
-            weight_percent,
-        );
-        let route_weighted_points = self.observe_weighted(
-            &self.route_weighted_buckets,
-            format!("{client_ip}|{host}|{method}|{route_path}"),
-            now,
-            unix_now,
-            window,
-            weight_percent,
-        );
-        let hot_path_weighted_points = self.observe_weighted(
-            &self.hot_path_weighted_buckets,
-            format!("{host}|{route_path}"),
-            now,
-            unix_now,
-            window,
-            weight_percent,
-        );
+        let (
+            ip_weighted_points,
+            host_weighted_points,
+            route_weighted_points,
+            hot_path_weighted_points,
+        ) = if rich_tracking {
+            (
+                self.observe_weighted(
+                    &self.ip_weighted_buckets,
+                    client_ip.to_string(),
+                    now,
+                    unix_now,
+                    window,
+                    weight_percent,
+                    bucket_limit,
+                ),
+                self.observe_weighted(
+                    &self.host_weighted_buckets,
+                    format!("{client_ip}|{host}"),
+                    now,
+                    unix_now,
+                    window,
+                    weight_percent,
+                    bucket_limit,
+                ),
+                self.observe_weighted(
+                    &self.route_weighted_buckets,
+                    format!("{client_ip}|{host}|{method}|{route_path}"),
+                    now,
+                    unix_now,
+                    window,
+                    weight_percent,
+                    bucket_limit,
+                ),
+                self.observe_weighted(
+                    &self.hot_path_weighted_buckets,
+                    format!("{host}|{route_path}"),
+                    now,
+                    unix_now,
+                    window,
+                    weight_percent,
+                    bucket_limit,
+                ),
+            )
+        } else {
+            (
+                ip_count.saturating_mul(100),
+                host_count.saturating_mul(100),
+                route_count.saturating_mul(100),
+                hot_path_count.saturating_mul(100),
+            )
+        };
 
         let ip_effective = weighted_points_to_requests(ip_weighted_points);
         let host_effective = weighted_points_to_requests(host_weighted_points);
@@ -202,6 +263,7 @@ impl L7CcGuard {
             "l7.cc.client_identity_unresolved".to_string(),
             client_identity_unresolved.to_string(),
         );
+        request.add_metadata("l7.cc.rich_tracking".to_string(), rich_tracking.to_string());
 
         self.maybe_cleanup(unix_now, &config);
 
@@ -591,8 +653,9 @@ impl L7CcGuard {
         now: Instant,
         unix_now: i64,
         window: Duration,
+        limit: usize,
     ) -> u32 {
-        let key = bounded_dashmap_key(map, key, MAX_COUNTER_BUCKETS, "cc", OVERFLOW_SHARDS);
+        let key = bounded_dashmap_key(map, key, limit, "cc", OVERFLOW_SHARDS);
         let mut entry = map.entry(key).or_insert_with(SlidingWindowCounter::new);
         entry.observe(now, unix_now, window)
     }
@@ -605,14 +668,9 @@ impl L7CcGuard {
         unix_now: i64,
         window: Duration,
         weight_percent: u8,
+        limit: usize,
     ) -> u32 {
-        let key = bounded_dashmap_key(
-            map,
-            key,
-            MAX_COUNTER_BUCKETS,
-            "cc_weighted",
-            OVERFLOW_SHARDS,
-        );
+        let key = bounded_dashmap_key(map, key, limit, "cc_weighted", OVERFLOW_SHARDS);
         let mut entry = map
             .entry(key)
             .or_insert_with(WeightedSlidingWindowCounter::new);
@@ -627,14 +685,9 @@ impl L7CcGuard {
         now: Instant,
         unix_now: i64,
         window: Duration,
+        limit: usize,
     ) -> u32 {
-        let key = bounded_dashmap_key(
-            map,
-            key,
-            MAX_COUNTER_BUCKETS,
-            "cc_distinct",
-            OVERFLOW_SHARDS,
-        );
+        let key = bounded_dashmap_key(map, key, limit, "cc_distinct", OVERFLOW_SHARDS);
         let mut entry = map
             .entry(key)
             .or_insert_with(DistinctSlidingWindowCounter::new);
@@ -673,18 +726,19 @@ impl L7CcGuard {
         document_path: &str,
         unix_now: i64,
         config: &CcDefenseConfig,
+        limit: usize,
     ) {
         let key = bounded_dashmap_key(
             &self.page_load_windows,
             page_window_key(client_ip, host, document_path),
-            MAX_PAGE_WINDOW_BUCKETS,
+            limit,
             "cc_page_window",
             OVERFLOW_SHARDS,
         );
         let host_key = bounded_dashmap_key(
             &self.page_load_host_windows,
             page_host_window_key(client_ip, host),
-            MAX_PAGE_WINDOW_BUCKETS,
+            limit,
             "cc_page_host_window",
             OVERFLOW_SHARDS,
         );
@@ -708,6 +762,7 @@ impl L7CcGuard {
         host: &str,
         route_path: &str,
         unix_now: i64,
+        limit: usize,
     ) -> bool {
         if !request.method.eq_ignore_ascii_case("GET")
             && !request.method.eq_ignore_ascii_case("HEAD")
@@ -720,7 +775,7 @@ impl L7CcGuard {
                 let key = bounded_dashmap_key(
                     &self.page_load_windows,
                     page_window_key(client_ip, host, &normalized_route_path(&referer_path)),
-                    MAX_PAGE_WINDOW_BUCKETS,
+                    limit,
                     "cc_page_window",
                     OVERFLOW_SHARDS,
                 );
@@ -743,7 +798,7 @@ impl L7CcGuard {
         let host_key = bounded_dashmap_key(
             &self.page_load_host_windows,
             page_host_window_key(client_ip, host),
-            MAX_PAGE_WINDOW_BUCKETS,
+            limit,
             "cc_page_host_window",
             OVERFLOW_SHARDS,
         );
@@ -800,4 +855,18 @@ impl L7CcGuard {
             cleanup_batch,
         );
     }
+}
+
+fn runtime_defense_depth(request: &UnifiedHttpRequest) -> crate::core::DefenseDepth {
+    request
+        .get_metadata("runtime.defense.depth")
+        .map(|value| crate::core::DefenseDepth::from_str(value))
+        .unwrap_or(crate::core::DefenseDepth::Balanced)
+}
+
+fn runtime_usize_metadata(request: &UnifiedHttpRequest, key: &str, default: usize) -> usize {
+    request
+        .get_metadata(key)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(default)
 }

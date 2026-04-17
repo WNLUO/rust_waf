@@ -7,6 +7,7 @@ mod engine_maintenance;
 mod engine_tls;
 pub mod gateway;
 pub mod packet;
+mod resource_budget;
 mod rule_engine;
 mod runtime_state;
 mod storage_runtime;
@@ -37,6 +38,7 @@ pub use packet::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
     RandomStatusConfig, TarpitConfig,
 };
+pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
 
 #[derive(Debug, Clone)]
 pub struct UpstreamHealthSnapshot {
@@ -85,9 +87,16 @@ pub struct WafContext {
 #[derive(Debug, Clone)]
 pub struct RuntimePressureSnapshot {
     pub level: &'static str,
+    pub capacity_class: &'static str,
+    pub defense_depth: &'static str,
     pub storage_queue_usage_percent: u64,
     pub drop_delay: bool,
     pub trim_event_persistence: bool,
+    pub l7_bucket_limit: usize,
+    pub l7_page_window_limit: usize,
+    pub behavior_bucket_limit: usize,
+    pub behavior_sample_stride: u64,
+    pub prefer_drop: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -270,6 +279,21 @@ impl WafContext {
             .iter()
             .any(|item| item == &cidr)
         {
+            return false;
+        }
+        let pressure = self.runtime_pressure_snapshot();
+        if next.l4_config.trusted_cdn.manual_cidrs.len()
+            >= resource_budget::current_runtime_resource_budget(
+                pressure.level,
+                pressure.storage_queue_usage_percent,
+            )
+            .trusted_cdn_auto_learn_limit
+        {
+            log::warn!(
+                "Skipped learning trusted CDN peer {} from header {} because the automatic learn budget is full",
+                cidr,
+                evidence_header
+            );
             return false;
         }
 

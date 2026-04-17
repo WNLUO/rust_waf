@@ -1,6 +1,7 @@
 use super::{
-    adaptive_protection, auto_tuning, traffic_map, unix_timestamp, AiAutoAuditRuntimeSnapshot,
-    Http3RuntimeSnapshot, RuntimePressureSnapshot, UpstreamHealthSnapshot, WafContext,
+    adaptive_protection, auto_tuning, resource_budget, traffic_map, unix_timestamp,
+    AiAutoAuditRuntimeSnapshot, Http3RuntimeSnapshot, RuntimePressureSnapshot,
+    UpstreamHealthSnapshot, WafContext,
 };
 use crate::l4::L4Inspector;
 use crate::protocol::UnifiedHttpRequest;
@@ -52,12 +53,23 @@ impl WafContext {
             _ => "attack",
         };
 
+        let budget =
+            resource_budget::current_runtime_resource_budget(level, storage_queue_usage_percent);
+
         RuntimePressureSnapshot {
             level,
+            capacity_class: budget.capacity_class.as_str(),
+            defense_depth: budget.defense_depth.as_str(),
             storage_queue_usage_percent,
-            drop_delay: matches!(level, "high" | "attack"),
+            drop_delay: matches!(level, "high" | "attack") || budget.prefer_drop,
             trim_event_persistence: storage_queue_usage_percent >= 75
-                || matches!(level, "high" | "attack"),
+                || matches!(level, "high" | "attack")
+                || budget.aggregate_events,
+            l7_bucket_limit: budget.l7_bucket_limit,
+            l7_page_window_limit: budget.l7_page_window_limit,
+            behavior_bucket_limit: budget.behavior_bucket_limit,
+            behavior_sample_stride: budget.behavior_sample_stride,
+            prefer_drop: budget.prefer_drop,
         }
     }
 
@@ -71,11 +83,38 @@ impl WafContext {
             "runtime.pressure.storage_queue_percent".to_string(),
             pressure.storage_queue_usage_percent.to_string(),
         );
+        request.add_metadata(
+            "runtime.capacity.class".to_string(),
+            pressure.capacity_class.to_string(),
+        );
+        request.add_metadata(
+            "runtime.defense.depth".to_string(),
+            pressure.defense_depth.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.l7_bucket_limit".to_string(),
+            pressure.l7_bucket_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.l7_page_window_limit".to_string(),
+            pressure.l7_page_window_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.behavior_bucket_limit".to_string(),
+            pressure.behavior_bucket_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.behavior_sample_stride".to_string(),
+            pressure.behavior_sample_stride.to_string(),
+        );
         if pressure.drop_delay {
             request.add_metadata(
                 "runtime.pressure.drop_delay".to_string(),
                 "true".to_string(),
             );
+        }
+        if pressure.prefer_drop {
+            request.add_metadata("runtime.prefer_drop".to_string(), "true".to_string());
         }
         if pressure.trim_event_persistence {
             request.add_metadata(

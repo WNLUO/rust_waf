@@ -29,9 +29,16 @@ fn test_build_metrics_response_without_sources() {
         None,
         crate::core::RuntimePressureSnapshot {
             level: "normal",
+            capacity_class: "standard",
+            defense_depth: "balanced",
             storage_queue_usage_percent: 0,
             drop_delay: false,
             trim_event_persistence: false,
+            l7_bucket_limit: 32_768,
+            l7_page_window_limit: 12_288,
+            behavior_bucket_limit: 16_384,
+            behavior_sample_stride: 1,
+            prefer_drop: false,
         },
     );
 
@@ -47,6 +54,8 @@ fn test_build_metrics_response_without_sources() {
     assert_eq!(response.l4_bucket_count, 0);
     assert_eq!(response.l4_overload_level, "normal");
     assert_eq!(response.runtime_pressure_level, "normal");
+    assert_eq!(response.runtime_capacity_class, "standard");
+    assert_eq!(response.runtime_defense_depth, "balanced");
     assert!(!response.runtime_pressure_drop_delay);
     assert!(!response.runtime_pressure_trim_event_persistence);
     assert_eq!(response.runtime_pressure_storage_queue_percent, 0);
@@ -135,9 +144,16 @@ fn test_build_metrics_response_with_sources() {
         }),
         crate::core::RuntimePressureSnapshot {
             level: "high",
+            capacity_class: "small",
+            defense_depth: "lean",
             storage_queue_usage_percent: 81,
             drop_delay: true,
             trim_event_persistence: true,
+            l7_bucket_limit: 8_192,
+            l7_page_window_limit: 2_048,
+            behavior_bucket_limit: 4_096,
+            behavior_sample_stride: 2,
+            prefer_drop: true,
         },
     );
 
@@ -184,6 +200,8 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.l4_behavior_dropped_events, 11);
     assert_eq!(response.l4_overload_level, "high");
     assert_eq!(response.runtime_pressure_level, "high");
+    assert_eq!(response.runtime_capacity_class, "small");
+    assert_eq!(response.runtime_defense_depth, "lean");
     assert!(response.runtime_pressure_drop_delay);
     assert!(response.runtime_pressure_trim_event_persistence);
     assert_eq!(response.runtime_pressure_storage_queue_percent, 81);

@@ -6,7 +6,8 @@ use super::{
 };
 use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{
-    AiRouteProfileEntry, AiTempPolicyEffectStats, AiTempPolicyEntry, AiTempPolicyUpsert,
+    AiRouteProfileEntry, AiRouteProfileUpsert, AiTempPolicyEffectStats, AiTempPolicyEntry,
+    AiTempPolicyUpsert,
 };
 use anyhow::Result;
 
@@ -391,7 +392,58 @@ impl WafContext {
                 .expect("ai_defense_trigger_runtime lock poisoned");
             guard.pending_since = None;
         }
+        if let Err(err) = self
+            .generate_ai_route_profile_candidates_from_snapshot(store.as_ref(), &snapshot, now)
+            .await
+        {
+            log::warn!("Failed to generate AI route profile candidates: {}", err);
+        }
         Ok(result)
+    }
+
+    async fn generate_ai_route_profile_candidates_from_snapshot(
+        &self,
+        store: &crate::storage::SqliteStore,
+        snapshot: &AiDefenseSignalSnapshot,
+        now: i64,
+    ) -> Result<usize> {
+        let existing = store
+            .list_ai_route_profiles(None, None, 1_000)
+            .await?
+            .into_iter()
+            .map(|profile| {
+                (
+                    profile.site_id,
+                    profile.route_pattern,
+                    profile.match_mode,
+                    profile.status,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut generated = 0usize;
+        for recommendation in &snapshot.local_recommendations {
+            if generated >= 8 {
+                break;
+            }
+            if existing
+                .iter()
+                .any(|(site_id, route_pattern, match_mode, status)| {
+                    site_id == &recommendation.site_id
+                        && route_pattern == &recommendation.route
+                        && match_mode == "exact"
+                        && status != "rejected"
+                })
+            {
+                continue;
+            }
+            let identity = snapshot.identity_summaries.iter().find(|identity| {
+                identity.site_id == recommendation.site_id && identity.route == recommendation.route
+            });
+            let candidate = infer_route_profile_candidate(recommendation, identity, now);
+            store.upsert_ai_route_profile(&candidate).await?;
+            generated += 1;
+        }
+        Ok(generated)
     }
 
     fn ai_defense_l4_signal(&self) -> Option<AiDefenseL4Signal> {
@@ -636,6 +688,114 @@ fn profile_match_rank(profile: &AiDefenseRouteProfileSignal) -> u8 {
         "prefix" | "starts_with" => 2,
         "wildcard" => 1,
         _ => 0,
+    }
+}
+
+fn infer_route_profile_candidate(
+    recommendation: &LocalDefenseRecommendation,
+    identity: Option<&AiDefenseIdentitySignal>,
+    now: i64,
+) -> AiRouteProfileUpsert {
+    let route_lower = recommendation.route.to_ascii_lowercase();
+    let mut route_type = "unknown";
+    let mut sensitivity = "unknown";
+    let mut auth_required = "unknown";
+    let mut normal_traffic_pattern = "unknown";
+    let mut recommended_actions = vec!["tighten_route_cc".to_string()];
+    let mut avoid_actions = Vec::<String>::new();
+    let mut confidence = 55i64;
+
+    if route_lower.contains("login")
+        || route_lower.contains("signin")
+        || route_lower.contains("auth")
+        || route_lower.contains("token")
+        || route_lower.contains("sso")
+    {
+        route_type = "authentication";
+        sensitivity = "high";
+        auth_required = "false";
+        normal_traffic_pattern = "interactive";
+        recommended_actions.push("increase_challenge".to_string());
+        avoid_actions.push("add_temp_block".to_string());
+        confidence += 18;
+    } else if route_lower.contains("callback")
+        || route_lower.contains("webhook")
+        || route_lower.contains("notify")
+    {
+        route_type = "callback";
+        sensitivity = "high";
+        normal_traffic_pattern = "machine_to_machine";
+        avoid_actions.push("increase_challenge".to_string());
+        avoid_actions.push("increase_delay".to_string());
+        recommended_actions.push("raise_identity_risk".to_string());
+        confidence += 14;
+    } else if route_lower.starts_with("/api/")
+        || route_lower.contains("/api/")
+        || route_lower.contains("graphql")
+    {
+        route_type = "api";
+        sensitivity = "medium";
+        normal_traffic_pattern = "api";
+        recommended_actions.push("raise_identity_risk".to_string());
+        confidence += 10;
+    } else if route_lower.contains("admin")
+        || route_lower.contains("console")
+        || route_lower.contains("dashboard")
+    {
+        route_type = "admin";
+        sensitivity = "critical";
+        auth_required = "true";
+        normal_traffic_pattern = "interactive";
+        recommended_actions.push("increase_challenge".to_string());
+        avoid_actions.push("add_temp_block".to_string());
+        confidence += 18;
+    }
+
+    if let Some(identity) = identity {
+        if identity.distinct_client_count >= 8 {
+            confidence += 6;
+        }
+        if identity.verified_challenge_events.saturating_mul(2) >= identity.total_events
+            || identity.interactive_session_events.saturating_mul(2) >= identity.total_events
+        {
+            normal_traffic_pattern = "interactive";
+            confidence += 4;
+        }
+        if identity.unresolved_events.saturating_mul(2) >= identity.total_events {
+            auth_required = "unknown";
+            confidence -= 4;
+        }
+    }
+    if recommendation.defense_depth == "survival" {
+        confidence += 6;
+    }
+
+    recommended_actions.sort();
+    recommended_actions.dedup();
+    avoid_actions.sort();
+    avoid_actions.dedup();
+
+    AiRouteProfileUpsert {
+        site_id: recommendation.site_id.clone(),
+        route_pattern: recommendation.route.clone(),
+        match_mode: "exact".to_string(),
+        route_type: route_type.to_string(),
+        sensitivity: sensitivity.to_string(),
+        auth_required: auth_required.to_string(),
+        normal_traffic_pattern: normal_traffic_pattern.to_string(),
+        recommended_actions,
+        avoid_actions,
+        confidence: confidence.clamp(0, 100),
+        source: "local_ai_observed".to_string(),
+        status: "candidate".to_string(),
+        rationale: format!(
+            "local AI inferred route profile from {} defense depth with {} total events and {} hard events",
+            recommendation.defense_depth,
+            recommendation.total_events,
+            recommendation.hard_events
+        ),
+        last_observed_at: Some(now),
+        reviewed_at: None,
     }
 }
 

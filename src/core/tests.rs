@@ -254,6 +254,65 @@ async fn test_ai_route_profile_refreshes_into_auto_defense_snapshot() {
         .any(|item| item == "tighten_route_cc"));
 }
 
+#[tokio::test]
+async fn test_ai_auto_defense_generates_route_profile_candidate() {
+    let db_path = unique_test_db_path("ai_route_profile_candidate");
+    let config = Config {
+        interface: "lo0".to_string(),
+        listen_addrs: vec!["127.0.0.1:0".to_string()],
+        tcp_upstream_addr: None,
+        udp_upstream_addr: None,
+        runtime_profile: RuntimeProfile::Standard,
+        api_enabled: false,
+        api_bind: "127.0.0.1:3740".to_string(),
+        bloom_enabled: false,
+        l4_bloom_false_positive_verification: false,
+        l7_bloom_false_positive_verification: false,
+        maintenance_interval_secs: 30,
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        sqlite_rules_enabled: false,
+        max_concurrent_tasks: 128,
+        ..Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+    let result = InspectionResult::drop(InspectionLayer::L7, "route pressure");
+
+    for idx in 0..5 {
+        let mut request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/login".to_string(),
+        );
+        request.set_client_ip(format!("203.0.113.{}", idx + 10));
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        context.note_site_defense_signal(&request, &result);
+    }
+
+    let now = unix_timestamp();
+    let trigger_reason = context.consume_ai_auto_defense_trigger(now);
+    context
+        .run_ai_auto_defense(now, trigger_reason)
+        .await
+        .unwrap();
+
+    let profiles = context
+        .sqlite_store
+        .as_ref()
+        .unwrap()
+        .list_ai_route_profiles(Some("site-a"), Some("candidate"), 20)
+        .await
+        .unwrap();
+
+    assert_eq!(profiles.len(), 1);
+    let profile = &profiles[0];
+    assert_eq!(profile.route_pattern, "/api/login");
+    assert_eq!(profile.route_type, "authentication");
+    assert_eq!(profile.status, "candidate");
+    assert_eq!(profile.source, "local_ai_observed");
+}
+
 fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {
     AiTempPolicyEntry {
         id: 1,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { Plus, Trash2 } from 'lucide-vue-next'
+import { onMounted, reactive, ref } from 'vue'
+import { Plus, Trash2, X } from 'lucide-vue-next'
 import { fetchGlobalSettings, updateGlobalSettings } from '@/shared/api/settings'
 import type { GlobalSettingsPayload, HeaderOperationItem } from '@/shared/types'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
@@ -9,20 +9,14 @@ type AdvancedGlobalSettingsForm = Pick<
   GlobalSettingsPayload,
   | 'source_ip_strategy'
   | 'custom_source_ip_header'
-  | 'trusted_proxy_cidrs'
   | 'http_to_https_redirect'
   | 'enable_hsts'
   | 'add_x_forwarded_headers'
   | 'rewrite_x_forwarded_for'
-  | 'support_gzip'
-  | 'support_brotli'
   | 'support_sse'
   | 'enable_ntlm'
-  | 'fallback_self_signed_certificate'
   | 'ssl_protocols'
   | 'ssl_ciphers'
-  | 'rewrite_host_enabled'
-  | 'rewrite_host_value'
   | 'header_operations'
 >
 
@@ -30,20 +24,14 @@ function createDefaultAdvancedSettings(): AdvancedGlobalSettingsForm {
   return {
     source_ip_strategy: 'connection',
     custom_source_ip_header: '',
-    trusted_proxy_cidrs: [],
     http_to_https_redirect: true,
     enable_hsts: true,
     add_x_forwarded_headers: true,
     rewrite_x_forwarded_for: true,
-    support_gzip: true,
-    support_brotli: true,
     support_sse: true,
     enable_ntlm: true,
-    fallback_self_signed_certificate: true,
     ssl_protocols: ['TLSv1.2', 'TLSv1.3'],
     ssl_ciphers: '',
-    rewrite_host_enabled: true,
-    rewrite_host_value: '$http_host',
     header_operations: [],
   }
 }
@@ -52,26 +40,16 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const successMessage = ref('')
-const trustedProxyCidrsText = ref('')
-const trustedProxyCidrsDialogOpen = ref(false)
+const sslCiphersDialogOpen = ref(false)
 const form = reactive<AdvancedGlobalSettingsForm>(
   createDefaultAdvancedSettings(),
 )
 
-const trustedProxyCidrsSummary = computed(() => {
-  const count = trustedProxyCidrsText.value
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean).length
-
-  return count ? `已配置 ${count} 条` : '点击配置'
-})
-
 useFlashMessages({
   error,
   success: successMessage,
-  errorTitle: 'L7 管理',
-  successTitle: 'L7 管理',
+  errorTitle: '高级配置',
+  successTitle: '高级配置',
   errorDuration: 5600,
   successDuration: 3200,
 })
@@ -79,23 +57,15 @@ useFlashMessages({
 function assignForm(payload: GlobalSettingsPayload) {
   form.source_ip_strategy = payload.source_ip_strategy
   form.custom_source_ip_header = payload.custom_source_ip_header
-  form.trusted_proxy_cidrs = [...payload.trusted_proxy_cidrs]
   form.http_to_https_redirect = payload.http_to_https_redirect
   form.enable_hsts = payload.enable_hsts
   form.add_x_forwarded_headers = payload.add_x_forwarded_headers
   form.rewrite_x_forwarded_for = payload.rewrite_x_forwarded_for
-  form.support_gzip = payload.support_gzip
-  form.support_brotli = payload.support_brotli
   form.support_sse = payload.support_sse
   form.enable_ntlm = payload.enable_ntlm
-  form.fallback_self_signed_certificate =
-    payload.fallback_self_signed_certificate
   form.ssl_protocols = [...payload.ssl_protocols]
   form.ssl_ciphers = payload.ssl_ciphers
-  form.rewrite_host_enabled = payload.rewrite_host_enabled
-  form.rewrite_host_value = payload.rewrite_host_value
   form.header_operations = payload.header_operations.map((item) => ({ ...item }))
-  trustedProxyCidrsText.value = payload.trusted_proxy_cidrs.join('\n')
 }
 
 function toggleSslProtocol(protocol: string, enabled: boolean) {
@@ -142,13 +112,8 @@ async function saveSettings() {
     const payload: GlobalSettingsPayload = {
       ...latest,
       ...form,
-      trusted_proxy_cidrs: trustedProxyCidrsText.value
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean),
       custom_source_ip_header: form.custom_source_ip_header.trim(),
       ssl_ciphers: form.ssl_ciphers.trim(),
-      rewrite_host_value: form.rewrite_host_value.trim(),
       header_operations: form.header_operations.map(
         (item): HeaderOperationItem => ({
           scope: item.scope,
@@ -237,16 +202,6 @@ onMounted(loadSettings)
               placeholder="例如 x-cdn-real-ip"
             />
           </label>
-          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
-            <span class="font-medium whitespace-nowrap">可信代理 CIDR</span>
-            <button
-              type="button"
-              class="rounded border border-slate-200 bg-transparent px-3 py-1 text-sm text-stone-700 outline-none transition hover:border-blue-500 hover:text-blue-700"
-              @click="trustedProxyCidrsDialogOpen = true"
-            >
-              {{ trustedProxyCidrsSummary }}
-            </button>
-          </label>
         </div>
       </div>
 
@@ -276,15 +231,16 @@ onMounted(loadSettings)
               </label>
             </div>
           </div>
-          <label class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2 lg:col-span-1">
+          <div class="flex items-center justify-between gap-2 text-sm text-stone-700 md:col-span-2 lg:col-span-1">
             <span class="font-medium whitespace-nowrap">SSL 加密套件</span>
-            <input
-              v-model="form.ssl_ciphers"
-              class="w-48 flex-1 rounded border border-slate-200 bg-transparent px-2 py-1 text-sm outline-none transition focus:border-blue-500 text-left"
-              type="text"
-              placeholder="留空则沿用默认"
-            />
-          </label>
+            <button
+              type="button"
+              class="rounded border border-slate-200 bg-transparent px-3 py-1 text-sm text-stone-700 outline-none transition hover:border-blue-500 hover:text-blue-700"
+              @click="sslCiphersDialogOpen = true"
+            >
+              {{ form.ssl_ciphers.trim() ? '已自定义' : '默认' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -306,41 +262,12 @@ onMounted(loadSettings)
           <input v-model="form.rewrite_x_forwarded_for" type="checkbox" class="ui-switch" />
         </label>
         <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
-          <span>支持 Gzip 压缩</span>
-          <input v-model="form.support_gzip" type="checkbox" class="ui-switch" />
-        </label>
-        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
-          <span>支持 Brotli 压缩</span>
-          <input v-model="form.support_brotli" type="checkbox" class="ui-switch" />
-        </label>
-        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
           <span>支持 SSE 流式响应</span>
           <input v-model="form.support_sse" type="checkbox" class="ui-switch" />
         </label>
         <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
           <span>启用 NTLM 认证</span>
           <input v-model="form.enable_ntlm" type="checkbox" class="ui-switch" />
-        </label>
-        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
-          <span>应用不存在时返回自置证书</span>
-          <input v-model="form.fallback_self_signed_certificate" type="checkbox" class="ui-switch" />
-        </label>
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="inline-flex items-center justify-start gap-3 text-sm text-stone-800">
-          <span>代理时修改请求中的 Host 头</span>
-          <input v-model="form.rewrite_host_enabled" type="checkbox" class="ui-switch" />
-        </label>
-        <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
-          <span class="font-medium whitespace-nowrap">Host 头</span>
-          <input
-            v-model="form.rewrite_host_value"
-            :disabled="!form.rewrite_host_enabled"
-            class="w-24 flex-1 rounded border border-slate-200 px-2 py-1 text-sm outline-none transition focus:border-blue-500 disabled:bg-slate-50 text-left"
-            type="text"
-            placeholder="$http_host"
-          />
         </label>
       </div>
 
@@ -404,35 +331,35 @@ onMounted(loadSettings)
       </div>
 
       <div
-        v-if="trustedProxyCidrsDialogOpen"
+        v-if="sslCiphersDialogOpen"
         class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
-        @click.self="trustedProxyCidrsDialogOpen = false"
+        @click.self="sslCiphersDialogOpen = false"
       >
         <div
-          class="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+          class="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
         >
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="text-sm tracking-wider text-blue-700">可信代理 CIDR</p>
+              <p class="text-sm tracking-wider text-blue-700">SSL 加密套件</p>
               <h3 class="mt-2 text-lg font-semibold text-stone-900">
-                配置可信代理 CIDR
+                自定义 TLS Cipher
               </h3>
             </div>
             <button
               type="button"
-              class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-stone-600 transition hover:border-slate-300 hover:text-stone-900"
-              @click="trustedProxyCidrsDialogOpen = false"
+              class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-stone-600 transition hover:border-slate-300 hover:text-stone-900"
+              @click="sslCiphersDialogOpen = false"
             >
-              关闭
+              <X :size="14" />
             </button>
           </div>
 
           <label class="mt-4 block text-sm text-stone-700">
-            每行一个 CIDR
+            Cipher 字符串
             <textarea
-              v-model="trustedProxyCidrsText"
-              class="mt-2 min-h-[14rem] w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500"
-              placeholder="例如 10.0.0.0/8"
+              v-model="form.ssl_ciphers"
+              class="mt-2 min-h-[8rem] w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-mono text-xs outline-none transition focus:border-blue-500"
+              placeholder="留空则沿用默认"
             />
           </label>
 
@@ -440,13 +367,14 @@ onMounted(loadSettings)
             <button
               type="button"
               class="rounded-lg border border-slate-200 px-4 py-2 text-sm text-stone-700 transition hover:border-slate-300 hover:text-stone-900"
-              @click="trustedProxyCidrsDialogOpen = false"
+              @click="sslCiphersDialogOpen = false"
             >
               完成
             </button>
           </div>
         </div>
       </div>
+
     </template>
   </section>
 </template>

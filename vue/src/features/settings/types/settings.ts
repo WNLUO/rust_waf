@@ -3,7 +3,6 @@ export interface SafeLineSettingsForm {
   auto_sync_events: boolean
   auto_sync_blocked_ips_push: boolean
   auto_sync_blocked_ips_pull: boolean
-  auto_sync_interval_secs: number
   base_url: string
   api_token: string
   username: string
@@ -22,7 +21,6 @@ export interface SafeLineSettingsUpdatePayload {
   auto_sync_events: boolean
   auto_sync_blocked_ips_push: boolean
   auto_sync_blocked_ips_pull: boolean
-  auto_sync_interval_secs: number
   base_url: string
   api_token: string
   username: string
@@ -48,8 +46,6 @@ export interface SafeLineTestPayload {
 export interface SettingsPayload {
   gateway_name: string
   drop_unmatched_requests: boolean
-  cdn_525_diagnostic_mode: boolean
-  client_identity_debug_enabled: boolean
   adaptive_protection: AdaptiveProtectionSettingsPayload
   https_listen_addr: string
   default_certificate_id: number | null
@@ -61,8 +57,6 @@ export interface SettingsPayload {
 export interface SettingsUpdatePayload {
   gateway_name: string
   drop_unmatched_requests: boolean
-  cdn_525_diagnostic_mode: boolean
-  client_identity_debug_enabled: boolean
   adaptive_protection: AdaptiveProtectionSettingsPayload
   https_listen_addr: string
   default_certificate_id: number | null
@@ -71,10 +65,4 @@ export interface SettingsUpdatePayload {
   safeline: SafeLineSettingsUpdatePayload
 }
 
-export interface AdaptiveProtectionSettingsPayload {
-  enabled: boolean
-  mode: 'relaxed' | 'balanced' | 'strict' | string
-  goal: 'availability_first' | 'balanced' | 'security_first' | string
-  cdn_fronted: boolean
-  allow_emergency_reject: boolean
-}
+export type AdaptiveProtectionSettingsPayload = Record<string, never>

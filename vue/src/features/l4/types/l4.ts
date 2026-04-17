@@ -1,29 +1,5 @@
 import type { AdaptiveProtectionRuntimePayload } from '@/shared/types'
 
-export interface TrustedCdnProviderPayload {
-  enabled: boolean
-  synced_cidrs: string[]
-  last_synced_at: number | null
-  last_sync_status: 'idle' | 'success' | 'error' | string
-  last_sync_message: string
-}
-
-export interface TrustedCdnAliyunEsaPayload extends TrustedCdnProviderPayload {
-  site_id: string
-  access_key_id: string
-  access_key_secret: string
-  endpoint: string
-}
-
-export interface TrustedCdnConfigPayload {
-  manual_cidrs: string[]
-  effective_cidrs: string[]
-  sync_interval_value: number
-  sync_interval_unit: 'minute' | 'hour' | 'day' | string
-  edgeone_overseas: TrustedCdnProviderPayload
-  aliyun_esa: TrustedCdnAliyunEsaPayload
-}
-
 export interface L4AdvancedCompatibilityPayload {
   persisted_behavior_event_channel_capacity: number
   persisted_behavior_drop_critical_threshold: number
@@ -46,8 +22,6 @@ export interface L4AdvancedCompatibilityPayload {
 }
 
 export interface L4ConfigPayload {
-  ddos_protection_enabled: boolean
-  advanced_ddos_enabled: boolean
   connection_rate_limit: number
   syn_flood_threshold: number
   max_tracked_ips: number
@@ -79,7 +53,6 @@ export interface L4ConfigPayload {
   adaptive_managed_fields: boolean
   adaptive_runtime: AdaptiveProtectionRuntimePayload
   advanced_compatibility: L4AdvancedCompatibilityPayload
-  trusted_cdn: TrustedCdnConfigPayload
 }
 
 export interface L4ConnectionStats {

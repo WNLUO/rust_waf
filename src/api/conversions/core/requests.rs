@@ -1,8 +1,6 @@
 use super::helpers::{
-    normalize_https_listen_addr_input, parse_adaptive_protection_goal,
-    parse_adaptive_protection_mode, parse_safeline_intercept_action,
-    parse_safeline_intercept_match_mode, parse_source_ip_strategy,
-    parse_trusted_cdn_sync_interval_unit, parse_upstream_failure_mode,
+    normalize_https_listen_addr_input, parse_safeline_intercept_action,
+    parse_safeline_intercept_match_mode, parse_source_ip_strategy, parse_upstream_failure_mode,
     parse_upstream_protocol_policy,
 };
 use super::*;
@@ -46,13 +44,10 @@ impl L4ConfigUpdateRequest {
         mut current: Config,
         _allow_compatibility_updates: bool,
     ) -> Config {
-        let previous_trusted_cdn = current.l4_config.trusted_cdn.clone();
         let previous_l4 = current.l4_config.clone();
-        let previous_edgeone = previous_trusted_cdn.edgeone_overseas;
-        let previous_aliyun_esa = previous_trusted_cdn.aliyun_esa;
         current.l4_config = L4Config {
-            ddos_protection_enabled: self.ddos_protection_enabled,
-            advanced_ddos_enabled: self.advanced_ddos_enabled,
+            ddos_protection_enabled: true,
+            advanced_ddos_enabled: previous_l4.advanced_ddos_enabled,
             connection_rate_limit: previous_l4.connection_rate_limit,
             syn_flood_threshold: previous_l4.syn_flood_threshold,
             max_tracked_ips: previous_l4.max_tracked_ips,
@@ -87,32 +82,7 @@ impl L4ConfigUpdateRequest {
             behavior_reject_threshold_percent: previous_l4.behavior_reject_threshold_percent,
             behavior_critical_reject_threshold_percent: previous_l4
                 .behavior_critical_reject_threshold_percent,
-            trusted_cdn: crate::config::l4::TrustedCdnConfig {
-                manual_cidrs: self.trusted_cdn.manual_cidrs,
-                sync_interval_value: self.trusted_cdn.sync_interval_value,
-                sync_interval_unit: parse_trusted_cdn_sync_interval_unit(
-                    &self.trusted_cdn.sync_interval_unit,
-                )
-                .unwrap_or_default(),
-                edgeone_overseas: crate::config::l4::TrustedCdnEdgeOneConfig {
-                    enabled: self.trusted_cdn.edgeone_overseas.enabled,
-                    synced_cidrs: previous_edgeone.synced_cidrs,
-                    last_synced_at: previous_edgeone.last_synced_at,
-                    last_sync_status: previous_edgeone.last_sync_status,
-                    last_sync_message: previous_edgeone.last_sync_message,
-                },
-                aliyun_esa: crate::config::l4::TrustedCdnAliyunEsaConfig {
-                    enabled: self.trusted_cdn.aliyun_esa.enabled,
-                    site_id: self.trusted_cdn.aliyun_esa.site_id,
-                    access_key_id: self.trusted_cdn.aliyun_esa.access_key_id,
-                    access_key_secret: self.trusted_cdn.aliyun_esa.access_key_secret,
-                    endpoint: self.trusted_cdn.aliyun_esa.endpoint,
-                    synced_cidrs: previous_aliyun_esa.synced_cidrs,
-                    last_synced_at: previous_aliyun_esa.last_synced_at,
-                    last_sync_status: previous_aliyun_esa.last_sync_status,
-                    last_sync_message: previous_aliyun_esa.last_sync_message,
-                },
-            },
+            trusted_cdn: previous_l4.trusted_cdn,
         };
 
         current.normalized()
@@ -167,7 +137,6 @@ impl L7ConfigUpdateRequest {
         };
         http3_config.validate()?;
 
-        current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
         current.l7_config.upstream_healthcheck_enabled = self.upstream_healthcheck_enabled;
         current.l7_config.upstream_failure_mode =
             parse_upstream_failure_mode(&self.upstream_failure_mode)?;
@@ -211,13 +180,12 @@ impl SafeLineInterceptConfigRequest {
 
 impl AdaptiveProtectionConfigRequest {
     pub(crate) fn into_config(self) -> Result<crate::config::AdaptiveProtectionConfig, String> {
-        let _requested_enabled = self.enabled;
         Ok(crate::config::AdaptiveProtectionConfig {
             enabled: true,
-            mode: parse_adaptive_protection_mode(&self.mode)?,
-            goal: parse_adaptive_protection_goal(&self.goal)?,
-            cdn_fronted: self.cdn_fronted,
-            allow_emergency_reject: self.allow_emergency_reject,
+            mode: crate::config::AdaptiveProtectionMode::Balanced,
+            goal: crate::config::AdaptiveProtectionGoal::Balanced,
+            cdn_fronted: true,
+            allow_emergency_reject: false,
         })
     }
 }
@@ -242,8 +210,6 @@ impl SettingsUpdateRequest {
 
         current.console_settings.gateway_name = self.gateway_name;
         current.console_settings.drop_unmatched_requests = self.drop_unmatched_requests;
-        current.console_settings.cdn_525_diagnostic_mode = self.cdn_525_diagnostic_mode;
-        current.console_settings.client_identity_debug_enabled = self.client_identity_debug_enabled;
         current.adaptive_protection = self.adaptive_protection.into_config()?;
         current.gateway_config = GatewayConfig {
             https_listen_addr,
@@ -278,7 +244,6 @@ impl GlobalSettingsUpdateRequest {
             self.custom_source_ip_header_auth_header;
         current.gateway_config.custom_source_ip_header_auth_secret =
             self.custom_source_ip_header_auth_secret;
-        current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
         current.gateway_config.http_to_https_redirect = self.http_to_https_redirect;
         current.gateway_config.enable_hsts = self.enable_hsts;
         current.gateway_config.rewrite_host_enabled = self.rewrite_host_enabled;
@@ -355,7 +320,7 @@ impl SafeLineSettingsRequest {
             auto_sync_events: self.auto_sync_events,
             auto_sync_blocked_ips_push: self.auto_sync_blocked_ips_push,
             auto_sync_blocked_ips_pull: self.auto_sync_blocked_ips_pull,
-            auto_sync_interval_secs: self.auto_sync_interval_secs,
+            auto_sync_interval_secs: previous.auto_sync_interval_secs,
             base_url: self.base_url,
             api_token: self.api_token,
             username: self.username,
@@ -406,7 +371,6 @@ mod tests {
             auto_sync_events: false,
             auto_sync_blocked_ips_push: false,
             auto_sync_blocked_ips_pull: false,
-            auto_sync_interval_secs: 300,
             base_url: "https://safeline.example.com".to_string(),
             api_token: "token".to_string(),
             username: String::new(),
@@ -427,7 +391,6 @@ mod tests {
             auto_sync_events: false,
             auto_sync_blocked_ips_push: false,
             auto_sync_blocked_ips_pull: false,
-            auto_sync_interval_secs: 300,
             base_url: "https://safeline.example.com".to_string(),
             api_token: "token".to_string(),
             username: String::new(),
@@ -463,12 +426,7 @@ mod tests {
             ..Config::default()
         };
 
-        let next = L4ConfigUpdateRequest {
-            ddos_protection_enabled: true,
-            advanced_ddos_enabled: true,
-            trusted_cdn: TrustedCdnConfigRequest::default(),
-        }
-        .into_config(current, false);
+        let next = L4ConfigUpdateRequest {}.into_config(current, false);
 
         assert_eq!(next.l4_config.connection_rate_limit, 100);
         assert_eq!(next.l4_config.behavior_soft_delay_ms, 25);
@@ -510,7 +468,6 @@ mod tests {
         };
 
         let next = L7ConfigUpdateRequest {
-            trusted_proxy_cidrs: vec![],
             upstream_healthcheck_enabled: true,
             upstream_failure_mode: "fail_open".to_string(),
             upstream_protocol_policy: "http2_preferred".to_string(),

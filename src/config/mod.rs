@@ -32,11 +32,6 @@ impl Config {
     pub fn effective_trusted_proxy_cidrs(&self) -> Vec<String> {
         let mut cidrs = Vec::new();
 
-        for cidr in &self.l7_config.trusted_proxy_cidrs {
-            if !cidrs.iter().any(|item| item == cidr) {
-                cidrs.push(cidr.clone());
-            }
-        }
         for cidr in self.l4_config.trusted_cdn.effective_cidrs() {
             if !cidrs.iter().any(|item| item == &cidr) {
                 cidrs.push(cidr);
@@ -161,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_trusted_proxy_cidrs_merge_global_and_trusted_cdn() {
+    fn effective_trusted_proxy_cidrs_uses_trusted_cdn_only() {
         let config = Config {
             l4_config: L4Config {
                 trusted_cdn: l4::TrustedCdnConfig {
@@ -185,11 +180,7 @@ mod tests {
 
         assert_eq!(
             config.effective_trusted_proxy_cidrs(),
-            vec![
-                "203.0.113.0/24".to_string(),
-                "192.0.2.0/24".to_string(),
-                "198.51.100.0/24".to_string()
-            ]
+            vec!["192.0.2.0/24".to_string(), "198.51.100.0/24".to_string()]
         );
     }
 

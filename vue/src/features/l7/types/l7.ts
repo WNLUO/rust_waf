@@ -125,7 +125,6 @@ export interface L7AdvancedCompatibilityPayload {
 
 export interface L7ConfigPayload {
   max_request_size: number
-  trusted_proxy_cidrs: string[]
   first_byte_timeout_ms: number
   read_idle_timeout_ms: number
   tls_handshake_timeout_ms: number

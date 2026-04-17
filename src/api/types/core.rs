@@ -14,8 +14,6 @@ pub struct HealthResponse {
 pub struct SettingsResponse {
     pub(crate) gateway_name: String,
     pub(crate) drop_unmatched_requests: bool,
-    pub(crate) cdn_525_diagnostic_mode: bool,
-    pub(crate) client_identity_debug_enabled: bool,
     pub(crate) adaptive_protection: AdaptiveProtectionConfigResponse,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
@@ -27,7 +25,6 @@ pub struct SettingsResponse {
 #[derive(Debug, Serialize)]
 pub struct L4ConfigResponse {
     pub(crate) ddos_protection_enabled: bool,
-    pub(crate) advanced_ddos_enabled: bool,
     pub(crate) connection_rate_limit: usize,
     pub(crate) syn_flood_threshold: usize,
     pub(crate) max_tracked_ips: usize,
@@ -59,45 +56,11 @@ pub struct L4ConfigResponse {
     pub(crate) adaptive_managed_fields: bool,
     pub(crate) adaptive_runtime: AdaptiveProtectionRuntimeResponse,
     pub(crate) advanced_compatibility: L4AdvancedCompatibilityResponse,
-    pub(crate) trusted_cdn: TrustedCdnConfigResponse,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TrustedCdnConfigResponse {
-    pub(crate) manual_cidrs: Vec<String>,
-    pub(crate) effective_cidrs: Vec<String>,
-    pub(crate) sync_interval_value: u64,
-    pub(crate) sync_interval_unit: String,
-    pub(crate) edgeone_overseas: TrustedCdnProviderResponse,
-    pub(crate) aliyun_esa: TrustedCdnAliyunEsaResponse,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TrustedCdnProviderResponse {
-    pub(crate) enabled: bool,
-    pub(crate) synced_cidrs: Vec<String>,
-    pub(crate) last_synced_at: Option<i64>,
-    pub(crate) last_sync_status: String,
-    pub(crate) last_sync_message: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TrustedCdnAliyunEsaResponse {
-    pub(crate) enabled: bool,
-    pub(crate) site_id: String,
-    pub(crate) access_key_id: String,
-    pub(crate) access_key_secret: String,
-    pub(crate) endpoint: String,
-    pub(crate) synced_cidrs: Vec<String>,
-    pub(crate) last_synced_at: Option<i64>,
-    pub(crate) last_sync_status: String,
-    pub(crate) last_sync_message: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct L7ConfigResponse {
     pub(crate) max_request_size: usize,
-    pub(crate) trusted_proxy_cidrs: Vec<String>,
     pub(crate) first_byte_timeout_ms: u64,
     pub(crate) read_idle_timeout_ms: u64,
     pub(crate) tls_handshake_timeout_ms: u64,
@@ -153,7 +116,6 @@ pub struct SafeLineSettingsResponse {
     pub(crate) auto_sync_events: bool,
     pub(crate) auto_sync_blocked_ips_push: bool,
     pub(crate) auto_sync_blocked_ips_pull: bool,
-    pub(crate) auto_sync_interval_secs: u64,
     pub(crate) base_url: String,
     pub(crate) api_token: String,
     pub(crate) username: String,
@@ -172,8 +134,6 @@ pub struct SafeLineSettingsResponse {
 pub struct SettingsUpdateRequest {
     pub(crate) gateway_name: String,
     pub(crate) drop_unmatched_requests: bool,
-    pub(crate) cdn_525_diagnostic_mode: bool,
-    pub(crate) client_identity_debug_enabled: bool,
     pub(crate) adaptive_protection: AdaptiveProtectionConfigRequest,
     pub(crate) https_listen_addr: String,
     pub(crate) default_certificate_id: Option<i64>,
@@ -183,30 +143,13 @@ pub struct SettingsUpdateRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct L4ConfigUpdateRequest {
-    pub(crate) ddos_protection_enabled: bool,
-    pub(crate) advanced_ddos_enabled: bool,
-    #[serde(default)]
-    pub(crate) trusted_cdn: TrustedCdnConfigRequest,
-}
+pub struct L4ConfigUpdateRequest {}
 
 #[derive(Debug, Clone, Serialize)]
-pub struct AdaptiveProtectionConfigResponse {
-    pub(crate) enabled: bool,
-    pub(crate) mode: String,
-    pub(crate) goal: String,
-    pub(crate) cdn_fronted: bool,
-    pub(crate) allow_emergency_reject: bool,
-}
+pub struct AdaptiveProtectionConfigResponse {}
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct AdaptiveProtectionConfigRequest {
-    pub(crate) enabled: bool,
-    pub(crate) mode: String,
-    pub(crate) goal: String,
-    pub(crate) cdn_fronted: bool,
-    pub(crate) allow_emergency_reject: bool,
-}
+pub struct AdaptiveProtectionConfigRequest {}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AdaptiveProtectionRuntimeResponse {
@@ -286,43 +229,8 @@ pub struct SlowAttackDefenseConfigResponse {
     pub(crate) block_duration_secs: u64,
 }
 
-#[derive(Debug, Deserialize, Default)]
-pub struct TrustedCdnConfigRequest {
-    #[serde(default)]
-    pub(crate) manual_cidrs: Vec<String>,
-    #[serde(default)]
-    pub(crate) sync_interval_value: u64,
-    #[serde(default)]
-    pub(crate) sync_interval_unit: String,
-    #[serde(default)]
-    pub(crate) edgeone_overseas: TrustedCdnProviderRequest,
-    #[serde(default)]
-    pub(crate) aliyun_esa: TrustedCdnAliyunEsaRequest,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct TrustedCdnProviderRequest {
-    #[serde(default)]
-    pub(crate) enabled: bool,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct TrustedCdnAliyunEsaRequest {
-    #[serde(default)]
-    pub(crate) enabled: bool,
-    #[serde(default)]
-    pub(crate) site_id: String,
-    #[serde(default)]
-    pub(crate) access_key_id: String,
-    #[serde(default)]
-    pub(crate) access_key_secret: String,
-    #[serde(default)]
-    pub(crate) endpoint: String,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct L7ConfigUpdateRequest {
-    pub(crate) trusted_proxy_cidrs: Vec<String>,
     pub(crate) upstream_healthcheck_enabled: bool,
     pub(crate) upstream_failure_mode: String,
     pub(crate) upstream_protocol_policy: String,
@@ -413,7 +321,6 @@ pub struct SafeLineSettingsRequest {
     pub(crate) auto_sync_events: bool,
     pub(crate) auto_sync_blocked_ips_push: bool,
     pub(crate) auto_sync_blocked_ips_pull: bool,
-    pub(crate) auto_sync_interval_secs: u64,
     pub(crate) base_url: String,
     pub(crate) api_token: String,
     pub(crate) username: String,

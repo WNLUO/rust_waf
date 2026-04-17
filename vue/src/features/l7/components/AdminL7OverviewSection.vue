@@ -458,18 +458,6 @@ function hotspotViewButtonClass(view: 'host' | 'route') {
             </p>
           </div>
         </div>
-        <div>
-          <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
-            <p class="text-xs tracking-wide text-slate-500">可信代理网段</p>
-            <p class="mt-3 text-sm leading-7 text-stone-800">
-              {{
-                configForm.trusted_proxy_cidrs.length
-                  ? configForm.trusted_proxy_cidrs.join('，')
-                  : '未配置，默认仅信任直连对端'
-              }}
-            </p>
-          </div>
-        </div>
         <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
           <p class="text-xs tracking-wide text-slate-500">最近健康检查</p>
           <p class="mt-3 text-sm text-stone-800">

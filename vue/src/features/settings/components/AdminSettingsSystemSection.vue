@@ -41,66 +41,6 @@ const apiEndpoint = computed({
   get: () => props.systemSettings.api_endpoint,
   set: (value: string) => updateSystemSettings({ api_endpoint: value }),
 })
-const cdn525DiagnosticMode = computed({
-  get: () => props.systemSettings.cdn_525_diagnostic_mode,
-  set: (value: boolean) =>
-    updateSystemSettings({ cdn_525_diagnostic_mode: value }),
-})
-const clientIdentityDebugEnabled = computed({
-  get: () => props.systemSettings.client_identity_debug_enabled,
-  set: (value: boolean) =>
-    updateSystemSettings({ client_identity_debug_enabled: value }),
-})
-const adaptiveProtectionEnabled = computed({
-  get: () => props.systemSettings.adaptive_protection.enabled,
-  set: (value: boolean) =>
-    updateSystemSettings({
-      adaptive_protection: {
-        ...props.systemSettings.adaptive_protection,
-        enabled: value,
-      },
-    }),
-})
-const adaptiveProtectionMode = computed({
-  get: () => props.systemSettings.adaptive_protection.mode,
-  set: (value: string) =>
-    updateSystemSettings({
-      adaptive_protection: {
-        ...props.systemSettings.adaptive_protection,
-        mode: value,
-      },
-    }),
-})
-const adaptiveProtectionGoal = computed({
-  get: () => props.systemSettings.adaptive_protection.goal,
-  set: (value: string) =>
-    updateSystemSettings({
-      adaptive_protection: {
-        ...props.systemSettings.adaptive_protection,
-        goal: value,
-      },
-    }),
-})
-const adaptiveProtectionCdnFronted = computed({
-  get: () => props.systemSettings.adaptive_protection.cdn_fronted,
-  set: (value: boolean) =>
-    updateSystemSettings({
-      adaptive_protection: {
-        ...props.systemSettings.adaptive_protection,
-        cdn_fronted: value,
-      },
-    }),
-})
-const adaptiveEmergencyReject = computed({
-  get: () => props.systemSettings.adaptive_protection.allow_emergency_reject,
-  set: (value: boolean) =>
-    updateSystemSettings({
-      adaptive_protection: {
-        ...props.systemSettings.adaptive_protection,
-        allow_emergency_reject: value,
-      },
-    }),
-})
 const defaultCertificateId = computed({
   get: () => props.systemSettings.default_certificate_id,
   set: (value: number | null) =>
@@ -194,17 +134,6 @@ const safeLineAutoSyncPull = computed({
       },
     }),
 })
-const safeLineAutoSyncInterval = computed({
-  get: () => props.systemSettings.safeline.auto_sync_interval_secs,
-  set: (value: number) =>
-    updateSystemSettings({
-      safeline: {
-        ...props.systemSettings.safeline,
-        auto_sync_interval_secs: value,
-      },
-    }),
-})
-
 function truncateCertificateName(name: string, maxLength = 18) {
   if (name.length <= maxLength) return name
   return `${name.slice(0, maxLength)}...`
@@ -275,85 +204,6 @@ function truncateCertificateName(name: string, maxLength = 18) {
           </label>
         </div>
 
-        <div class="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-3">
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-800"
-          >
-            <span>自适应防护</span>
-            <input
-              v-model="adaptiveProtectionEnabled"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800"
-          >
-            <span>CDN 525 诊断模式</span>
-            <input
-              v-model="cdn525DiagnosticMode"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
-          >
-            <span>身份调试事件</span>
-            <input
-              v-model="clientIdentityDebugEnabled"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-        </div>
-
-        <p class="mt-3 text-xs leading-5 text-slate-500">
-          开启后会对可信 CDN / 代理来源放宽 TLS 握手等待与入口 permit 等待，尽量避免
-          Rust 侧自身造成 525，方便排查是否为 CDN、证书或源站链路问题。
-        </p>
-
-        <div class="mt-4 border-t border-slate-100 pt-3">
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <label class="flex items-center gap-2.5 px-1 py-1.5">
-            <span class="shrink-0 text-xs font-medium text-slate-500">防护模式</span>
-            <select
-              v-model="adaptiveProtectionMode"
-              class="w-full max-w-[10rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-            >
-              <option value="relaxed">宽松</option>
-              <option value="balanced">均衡</option>
-              <option value="strict">严格</option>
-            </select>
-          </label>
-          <label class="flex items-center gap-2.5 px-1 py-1.5">
-            <span class="shrink-0 text-xs font-medium text-slate-500">防护目标</span>
-            <select
-              v-model="adaptiveProtectionGoal"
-              class="w-full max-w-[12rem] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-            >
-              <option value="availability_first">可用性优先</option>
-              <option value="balanced">均衡</option>
-              <option value="security_first">安全优先</option>
-            </select>
-          </label>
-          </div>
-          <div class="mt-3 flex flex-wrap items-center gap-3">
-          <label class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700">
-            <span>CDN 前置架构</span>
-            <input v-model="adaptiveProtectionCdnFronted" type="checkbox" class="ui-switch" />
-          </label>
-          <label class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700">
-            <span>允许极端拒绝</span>
-            <input v-model="adaptiveEmergencyReject" type="checkbox" class="ui-switch" />
-          </label>
-          </div>
-        </div>
-
-        <p class="text-xs leading-5 text-slate-500">
-          自适应防护会根据机器资源、代理延迟、握手异常与 permit 压力自动收紧 L4/L7 策略。开启后，L4/L7 页面中的大部分细粒度参数将作为兼容字段保留，但不再建议人工频繁调整。
-        </p>
-
         <div class="mt-4 border-t border-slate-100 pt-3">
           <div class="mb-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
             <p class="text-sm font-semibold text-stone-900">雷池接入参数</p>
@@ -397,18 +247,6 @@ function truncateCertificateName(name: string, maxLength = 18) {
                   type="checkbox"
                   class="ui-switch"
                 />
-              </label>
-              <label class="inline-flex items-center gap-1.5 text-xs text-stone-700">
-                <span>自动</span>
-                <input
-                  v-model.number="safeLineAutoSyncInterval"
-                  type="number"
-                  min="15"
-                  max="86400"
-                  step="15"
-                  class="no-spinner w-12 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 text-center text-xs font-bold text-stone-900 outline-none focus:border-blue-500 focus:bg-white"
-                />
-                <span>s 同步</span>
               </label>
             </div>
           </div>

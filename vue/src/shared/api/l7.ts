@@ -3,7 +3,6 @@ import { apiRequest } from './core'
 
 export type L7ConfigUpdatePayload = Pick<
   L7ConfigPayload,
-  | 'trusted_proxy_cidrs'
   | 'upstream_healthcheck_enabled'
   | 'upstream_failure_mode'
   | 'upstream_protocol_policy'

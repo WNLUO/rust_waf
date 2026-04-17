@@ -41,15 +41,6 @@ export function useAdminSettingsSystem({
     saving.value = true
     clearFeedback()
     try {
-      systemSettings.safeline.auto_sync_interval_secs = Number.isFinite(
-        systemSettings.safeline.auto_sync_interval_secs,
-      )
-        ? Math.min(
-            Math.max(systemSettings.safeline.auto_sync_interval_secs, 15),
-            86400,
-          )
-        : 300
-
       const settingsResponse = await updateSettings(toPlainSettingsPayload())
       const globalEntryResponse = await updateGlobalEntryConfig({
         http_port: globalEntryForm.http_port.trim(),

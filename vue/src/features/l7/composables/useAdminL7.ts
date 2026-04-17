@@ -45,7 +45,6 @@ export function useAdminL7() {
   const assignBaseFields = (target: L7ConfigForm, payload: L7ConfigPayload) => {
     Object.assign(target, {
       ...payload,
-      trusted_proxy_cidrs: [...payload.trusted_proxy_cidrs],
       listen_addrs: [...payload.listen_addrs],
       slow_attack_defense: {
         ...payload.slow_attack_defense,
@@ -125,7 +124,6 @@ export function useAdminL7() {
     try {
       const targetForm = configForm
       const response = await updateL7Config({
-        trusted_proxy_cidrs: [...targetForm.trusted_proxy_cidrs],
         upstream_healthcheck_enabled: targetForm.upstream_healthcheck_enabled,
         upstream_failure_mode: targetForm.upstream_failure_mode,
         upstream_protocol_policy: targetForm.upstream_protocol_policy,
@@ -158,13 +156,6 @@ export function useAdminL7() {
       saving.value = false
     }
   }
-
-  const trustedProxyCidrsText = computed({
-    get: () => configForm.trusted_proxy_cidrs.join('\n'),
-    set: (value: string) => {
-      configForm.trusted_proxy_cidrs = splitTextareaList(value)
-    },
-  })
 
   const listenAddrsText = computed({
     get: () => configForm.listen_addrs.join('\n'),
@@ -303,7 +294,6 @@ export function useAdminL7() {
     saving,
     stats,
     successMessage,
-    trustedProxyCidrsText,
     upstreamProtocolLabel,
     upstreamStatusText,
     upstreamStatusType,

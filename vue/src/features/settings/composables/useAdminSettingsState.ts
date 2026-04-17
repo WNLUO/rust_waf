@@ -87,9 +87,6 @@ export function useAdminSettingsState() {
     return {
       gateway_name: systemSettings.gateway_name,
       drop_unmatched_requests: systemSettings.drop_unmatched_requests,
-      cdn_525_diagnostic_mode: systemSettings.cdn_525_diagnostic_mode,
-      client_identity_debug_enabled:
-        systemSettings.client_identity_debug_enabled,
       adaptive_protection: { ...systemSettings.adaptive_protection },
       https_listen_addr: systemSettings.https_listen_addr,
       default_certificate_id: systemSettings.default_certificate_id,
@@ -101,8 +98,6 @@ export function useAdminSettingsState() {
           systemSettings.safeline.auto_sync_blocked_ips_push,
         auto_sync_blocked_ips_pull:
           systemSettings.safeline.auto_sync_blocked_ips_pull,
-        auto_sync_interval_secs:
-          systemSettings.safeline.auto_sync_interval_secs,
         base_url: systemSettings.safeline.base_url,
         api_token: systemSettings.safeline.api_token,
         username: systemSettings.safeline.username,

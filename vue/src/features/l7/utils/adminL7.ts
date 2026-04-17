@@ -18,7 +18,6 @@ export function createDefaultL7ConfigForm(): L7ConfigForm {
   return {
     runtime_profile: 'standard',
     max_request_size: 8192,
-    trusted_proxy_cidrs: [],
     first_byte_timeout_ms: 2000,
     read_idle_timeout_ms: 5000,
     tls_handshake_timeout_ms: 3000,

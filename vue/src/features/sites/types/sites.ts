@@ -184,7 +184,6 @@ export interface GlobalSettingsPayload {
   custom_source_ip_header_auth_enabled: boolean
   custom_source_ip_header_auth_header: string
   custom_source_ip_header_auth_secret: string
-  trusted_proxy_cidrs: string[]
   http_to_https_redirect: boolean
   enable_hsts: boolean
   rewrite_host_enabled: boolean

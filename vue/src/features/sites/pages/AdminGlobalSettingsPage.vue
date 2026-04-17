@@ -19,7 +19,6 @@ function createDefaultSettings(): GlobalSettingsPayload {
     custom_source_ip_header_auth_enabled: false,
     custom_source_ip_header_auth_header: '',
     custom_source_ip_header_auth_secret: '',
-    trusted_proxy_cidrs: [],
     http_to_https_redirect: true,
     enable_hsts: true,
     rewrite_host_enabled: true,

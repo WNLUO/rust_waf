@@ -56,7 +56,7 @@ async fn apply_response_policies_replaces_existing_hsts_header() {
 #[tokio::test]
 async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
     let mut config = crate::config::Config::default();
-    config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
+    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
     let context = WafContext::new(config).await.unwrap();
@@ -148,7 +148,7 @@ async fn apply_client_identity_learns_cdn_peer_from_custom_source_ip_header_when
 #[tokio::test]
 async fn apply_client_identity_marks_unresolved_client_ip_for_trusted_proxy() {
     let mut config = crate::config::Config::default();
-    config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
+    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::XForwardedForFirst;
     let context = WafContext::new(config).await.unwrap();
     let mut request =
@@ -185,7 +185,7 @@ async fn apply_client_identity_marks_unresolved_client_ip_for_trusted_proxy() {
 #[tokio::test]
 async fn apply_client_identity_marks_trusted_header_resolution_state() {
     let mut config = crate::config::Config::default();
-    config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
+    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
     let context = WafContext::new(config).await.unwrap();
@@ -219,7 +219,7 @@ async fn apply_client_identity_marks_trusted_header_resolution_state() {
 #[tokio::test]
 async fn apply_client_identity_requires_auth_header_when_enabled() {
     let mut config = crate::config::Config::default();
-    config.l7_config.trusted_proxy_cidrs = vec!["43.168.34.0/24".to_string()];
+    config.l4_config.trusted_cdn.manual_cidrs = vec!["43.168.34.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
     config.gateway_config.custom_source_ip_header_auth_enabled = true;
@@ -265,7 +265,7 @@ async fn apply_client_identity_requires_auth_header_when_enabled() {
 #[tokio::test]
 async fn inspect_blocked_client_ip_matches_resolved_forwarded_client_ip() {
     let mut config = crate::config::Config::default();
-    config.l7_config.trusted_proxy_cidrs = vec!["203.0.113.0/24".to_string()];
+    config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "cf-connecting-ip".to_string();
     let context = WafContext::new(config).await.unwrap();

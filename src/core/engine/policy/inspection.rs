@@ -226,45 +226,7 @@ pub(crate) fn persist_http_identity_debug_event(
     packet: &PacketInfo,
     request: &UnifiedHttpRequest,
 ) {
-    if !context
-        .config_snapshot()
-        .console_settings
-        .client_identity_debug_enabled
-    {
-        return;
-    }
-    if should_trim_event_persistence(context, Some(request)) {
-        return;
-    }
-
-    let Some(store) = context.sqlite_store.as_ref() else {
-        return;
-    };
-    let configured_header = context
-        .config_snapshot()
-        .gateway_config
-        .custom_source_ip_header;
-
-    let mut event = SecurityEventRecord::now(
-        "L7",
-        "log",
-        "client identity debug".to_string(),
-        request
-            .client_ip
-            .clone()
-            .unwrap_or_else(|| packet.source_ip.to_string()),
-        packet.dest_ip.to_string(),
-        packet.source_port,
-        packet.dest_port,
-        format!("{:?}", packet.protocol),
-    );
-    event.http_method = Some(request.method.clone());
-    event.uri = Some(request.uri.clone());
-    event.http_version = Some(request.version.to_string());
-    event.details_json =
-        build_request_identity_details_with_header(&configured_header, request, packet);
-
-    store.enqueue_security_event(event);
+    let _ = (context, packet, request);
 }
 
 pub(crate) fn persist_upstream_http2_debug_event(
@@ -273,40 +235,7 @@ pub(crate) fn persist_upstream_http2_debug_event(
     stage: &str,
     details: serde_json::Value,
 ) {
-    if !context
-        .config_snapshot()
-        .console_settings
-        .client_identity_debug_enabled
-    {
-        return;
-    }
-    if should_trim_event_persistence(context, Some(request)) {
-        return;
-    }
-
-    let Some(store) = context.sqlite_store.as_ref() else {
-        return;
-    };
-
-    let mut event = SecurityEventRecord::now(
-        "L7",
-        "log",
-        format!("upstream http2 debug ({stage})"),
-        request
-            .client_ip
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string()),
-        "upstream".to_string(),
-        0,
-        0,
-        "HTTP/2".to_string(),
-    );
-    event.http_method = Some(request.method.clone());
-    event.uri = Some(request.uri.clone());
-    event.http_version = Some(request.version.to_string());
-    event.details_json = serde_json::to_string_pretty(&details).ok();
-
-    store.enqueue_security_event(event);
+    let _ = (context, request, stage, details);
 }
 
 pub(crate) fn persist_safeline_intercept_event(

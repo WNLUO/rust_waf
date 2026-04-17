@@ -1,8 +1,6 @@
 use super::helpers::{
-    adaptive_protection_goal_label, adaptive_protection_mode_label, auto_tuning_intent_label,
-    auto_tuning_mode_label, display_https_listen_port, safeline_intercept_action_label,
-    safeline_intercept_match_mode_label, source_ip_strategy_label,
-    trusted_cdn_sync_interval_unit_label, trusted_cdn_sync_status_label,
+    auto_tuning_intent_label, auto_tuning_mode_label, display_https_listen_port,
+    safeline_intercept_action_label, safeline_intercept_match_mode_label, source_ip_strategy_label,
     upstream_failure_mode_label, upstream_protocol_policy_label,
 };
 use super::*;
@@ -30,8 +28,6 @@ impl SettingsResponse {
         Self {
             gateway_name: config.console_settings.gateway_name.clone(),
             drop_unmatched_requests: config.console_settings.drop_unmatched_requests,
-            cdn_525_diagnostic_mode: config.console_settings.cdn_525_diagnostic_mode,
-            client_identity_debug_enabled: config.console_settings.client_identity_debug_enabled,
             adaptive_protection: AdaptiveProtectionConfigResponse::from_config(
                 &config.adaptive_protection,
             ),
@@ -58,7 +54,6 @@ impl L4ConfigResponse {
 
         Self {
             ddos_protection_enabled: effective_l4_config.ddos_protection_enabled,
-            advanced_ddos_enabled: effective_l4_config.advanced_ddos_enabled,
             connection_rate_limit: effective_l4_config.connection_rate_limit,
             syn_flood_threshold: effective_l4_config.syn_flood_threshold,
             max_tracked_ips: effective_l4_config.max_tracked_ips,
@@ -153,68 +148,6 @@ impl L4ConfigResponse {
                     .l4_config
                     .behavior_critical_reject_threshold_percent,
             },
-            trusted_cdn: TrustedCdnConfigResponse {
-                manual_cidrs: config.l4_config.trusted_cdn.manual_cidrs.clone(),
-                effective_cidrs: config.l4_config.trusted_cdn.effective_cidrs(),
-                sync_interval_value: config.l4_config.trusted_cdn.sync_interval_value,
-                sync_interval_unit: trusted_cdn_sync_interval_unit_label(
-                    config.l4_config.trusted_cdn.sync_interval_unit,
-                )
-                .to_string(),
-                edgeone_overseas: TrustedCdnProviderResponse {
-                    enabled: config.l4_config.trusted_cdn.edgeone_overseas.enabled,
-                    synced_cidrs: config
-                        .l4_config
-                        .trusted_cdn
-                        .edgeone_overseas
-                        .synced_cidrs
-                        .clone(),
-                    last_synced_at: config.l4_config.trusted_cdn.edgeone_overseas.last_synced_at,
-                    last_sync_status: trusted_cdn_sync_status_label(
-                        config
-                            .l4_config
-                            .trusted_cdn
-                            .edgeone_overseas
-                            .last_sync_status,
-                    )
-                    .to_string(),
-                    last_sync_message: config
-                        .l4_config
-                        .trusted_cdn
-                        .edgeone_overseas
-                        .last_sync_message
-                        .clone(),
-                },
-                aliyun_esa: TrustedCdnAliyunEsaResponse {
-                    enabled: config.l4_config.trusted_cdn.aliyun_esa.enabled,
-                    site_id: config.l4_config.trusted_cdn.aliyun_esa.site_id.clone(),
-                    access_key_id: config
-                        .l4_config
-                        .trusted_cdn
-                        .aliyun_esa
-                        .access_key_id
-                        .clone(),
-                    access_key_secret: config
-                        .l4_config
-                        .trusted_cdn
-                        .aliyun_esa
-                        .access_key_secret
-                        .clone(),
-                    endpoint: config.l4_config.trusted_cdn.aliyun_esa.endpoint.clone(),
-                    synced_cidrs: config.l4_config.trusted_cdn.aliyun_esa.synced_cidrs.clone(),
-                    last_synced_at: config.l4_config.trusted_cdn.aliyun_esa.last_synced_at,
-                    last_sync_status: trusted_cdn_sync_status_label(
-                        config.l4_config.trusted_cdn.aliyun_esa.last_sync_status,
-                    )
-                    .to_string(),
-                    last_sync_message: config
-                        .l4_config
-                        .trusted_cdn
-                        .aliyun_esa
-                        .last_sync_message
-                        .clone(),
-                },
-            },
         }
     }
 }
@@ -230,7 +163,6 @@ impl L7ConfigResponse {
 
         Self {
             max_request_size: config.l7_config.max_request_size,
-            trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
             first_byte_timeout_ms: config.l7_config.first_byte_timeout_ms,
             read_idle_timeout_ms: config.l7_config.read_idle_timeout_ms,
             tls_handshake_timeout_ms: config.l7_config.tls_handshake_timeout_ms,
@@ -367,14 +299,8 @@ impl SafeLineInterceptConfigResponse {
 }
 
 impl AdaptiveProtectionConfigResponse {
-    pub(crate) fn from_config(config: &crate::config::AdaptiveProtectionConfig) -> Self {
-        Self {
-            enabled: config.enabled,
-            mode: adaptive_protection_mode_label(config.mode).to_string(),
-            goal: adaptive_protection_goal_label(config.goal).to_string(),
-            cdn_fronted: config.cdn_fronted,
-            allow_emergency_reject: config.allow_emergency_reject,
-        }
+    pub(crate) fn from_config(_config: &crate::config::AdaptiveProtectionConfig) -> Self {
+        Self {}
     }
 }
 
@@ -427,7 +353,6 @@ impl SafeLineSettingsResponse {
             auto_sync_events: config.auto_sync_events,
             auto_sync_blocked_ips_push: config.auto_sync_blocked_ips_push,
             auto_sync_blocked_ips_pull: config.auto_sync_blocked_ips_pull,
-            auto_sync_interval_secs: config.auto_sync_interval_secs,
             base_url: config.base_url.clone(),
             api_token: config.api_token.clone(),
             username: config.username.clone(),
@@ -602,7 +527,6 @@ impl GlobalSettingsResponse {
                 .gateway_config
                 .custom_source_ip_header_auth_secret
                 .clone(),
-            trusted_proxy_cidrs: config.l7_config.trusted_proxy_cidrs.clone(),
             http_to_https_redirect: config.gateway_config.http_to_https_redirect,
             enable_hsts: config.gateway_config.enable_hsts,
             rewrite_host_enabled: config.gateway_config.rewrite_host_enabled,

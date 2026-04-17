@@ -1,9 +1,5 @@
 import { computed, onMounted, reactive, ref } from 'vue'
-import {
-  fetchL4Config,
-  fetchL4Stats,
-  updateL4Config,
-} from '@/shared/api/l4'
+import { fetchL4Config, fetchL4Stats, updateL4Config } from '@/shared/api/l4'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
 import type {
   AdaptiveProtectionRuntimePayload,
@@ -12,16 +8,6 @@ import type {
   L4StatsPayload,
 } from '@/shared/types'
 import { useAdminRealtimeTopic } from '@/shared/realtime/adminRealtime'
-
-const clampInteger = (
-  value: number,
-  min: number,
-  max: number,
-  fallback: number,
-) => {
-  const normalized = Number.isFinite(value) ? Math.round(value) : fallback
-  return Math.min(Math.max(normalized, min), max)
-}
 
 export function useAdminL4() {
   const loading = ref(true)
@@ -44,28 +30,12 @@ export function useAdminL4() {
 
   const assignBaseFields = (target: L4ConfigForm, payload: L4ConfigPayload) => {
     Object.assign(target, {
-      ddos_protection_enabled: payload.ddos_protection_enabled,
-      advanced_ddos_enabled: payload.advanced_ddos_enabled,
       connection_rate_limit: payload.connection_rate_limit,
       syn_flood_threshold: payload.syn_flood_threshold,
       max_tracked_ips: payload.max_tracked_ips,
       max_blocked_ips: payload.max_blocked_ips,
       state_ttl_secs: payload.state_ttl_secs,
       bloom_filter_scale: payload.bloom_filter_scale,
-      trusted_cdn: {
-        manual_cidrs: [...payload.trusted_cdn.manual_cidrs],
-        effective_cidrs: [...payload.trusted_cdn.effective_cidrs],
-        sync_interval_value: payload.trusted_cdn.sync_interval_value,
-        sync_interval_unit: payload.trusted_cdn.sync_interval_unit,
-        edgeone_overseas: {
-          ...payload.trusted_cdn.edgeone_overseas,
-          synced_cidrs: [...payload.trusted_cdn.edgeone_overseas.synced_cidrs],
-        },
-        aliyun_esa: {
-          ...payload.trusted_cdn.aliyun_esa,
-          synced_cidrs: [...payload.trusted_cdn.aliyun_esa.synced_cidrs],
-        },
-      },
     })
   }
 
@@ -146,34 +116,7 @@ export function useAdminL4() {
     successMessage.value = ''
 
     try {
-      const targetForm = configForm
-
-      targetForm.trusted_cdn.sync_interval_value = clampInteger(
-        targetForm.trusted_cdn.sync_interval_value,
-        1,
-        365,
-        12,
-      )
-
-      const response = await updateL4Config({
-        ddos_protection_enabled: targetForm.ddos_protection_enabled,
-        advanced_ddos_enabled: targetForm.advanced_ddos_enabled,
-        trusted_cdn: {
-          manual_cidrs: [...targetForm.trusted_cdn.manual_cidrs],
-          sync_interval_value: targetForm.trusted_cdn.sync_interval_value,
-          sync_interval_unit: targetForm.trusted_cdn.sync_interval_unit,
-          edgeone_overseas: {
-            enabled: targetForm.trusted_cdn.edgeone_overseas.enabled,
-          },
-          aliyun_esa: {
-            enabled: targetForm.trusted_cdn.aliyun_esa.enabled,
-            site_id: targetForm.trusted_cdn.aliyun_esa.site_id,
-            access_key_id: targetForm.trusted_cdn.aliyun_esa.access_key_id,
-            access_key_secret: targetForm.trusted_cdn.aliyun_esa.access_key_secret,
-            endpoint: targetForm.trusted_cdn.aliyun_esa.endpoint,
-          },
-        },
-      })
+      const response = await updateL4Config({})
       successMessage.value = response.message
       await refreshAll()
       return true

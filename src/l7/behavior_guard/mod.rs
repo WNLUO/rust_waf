@@ -35,11 +35,14 @@ const MAX_BEHAVIOR_BUCKETS: usize = 32_768;
 const MAX_BEHAVIOR_KEY_LEN: usize = 160;
 const MAX_BEHAVIOR_ROUTE_LEN: usize = 160;
 const OVERFLOW_SHARDS: u64 = 64;
+const AGGREGATE_CHALLENGE_ENFORCEMENT_SECS: u64 = 30;
+const AGGREGATE_BLOCK_ENFORCEMENT_SECS: u64 = 90;
 
 #[derive(Debug)]
 pub struct L7BehaviorGuard {
     buckets: DashMap<String, BehaviorWindow>,
     aggregate_buckets: DashMap<String, BehaviorWindow>,
+    aggregate_enforcements: DashMap<String, AggregateEnforcement>,
     request_sequence: AtomicU64,
 }
 
@@ -48,6 +51,7 @@ impl L7BehaviorGuard {
         Self {
             buckets: DashMap::new(),
             aggregate_buckets: DashMap::new(),
+            aggregate_enforcements: DashMap::new(),
             request_sequence: AtomicU64::new(0),
         }
     }
@@ -98,6 +102,46 @@ impl L7BehaviorGuard {
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
+        let aggregate_keys = behavior_aggregate_keys(request, &route, kind);
+        let active_aggregate_enforcement = self.active_aggregate_enforcement(&aggregate_keys, now);
+        if active_aggregate_enforcement
+            .as_ref()
+            .is_some_and(|enforcement| {
+                matches!(enforcement.action, AggregateEnforcementAction::Block)
+            })
+        {
+            let enforcement = active_aggregate_enforcement.expect("checked above");
+            request.add_metadata(
+                "l7.behavior.identity".to_string(),
+                enforcement.identity.clone(),
+            );
+            request.add_metadata(
+                "l7.behavior.score".to_string(),
+                enforcement.score.to_string(),
+            );
+            request.add_metadata(
+                "l7.behavior.action".to_string(),
+                enforcement.action.as_str().to_string(),
+            );
+            request.add_metadata(
+                "l7.behavior.aggregate_enforcement".to_string(),
+                "active".to_string(),
+            );
+            request.add_metadata("l7.behavior.flags".to_string(), enforcement.flags.join(","));
+            let reason = format!(
+                "l7 behavior guard aggregate enforcement: identity={} score={} flags={}",
+                enforcement.identity,
+                enforcement.score,
+                enforcement.flags.join("|"),
+            );
+            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+            request.add_metadata(
+                "l7.drop_reason".to_string(),
+                "behavior_aggregate_enforcement".to_string(),
+            );
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
+            return Some(InspectionResult::drop(InspectionLayer::L7, reason));
+        }
         let identity_assessment = request_identity(request).map(|identity| {
             self.observe_and_assess(
                 &identity,
@@ -112,7 +156,7 @@ impl L7BehaviorGuard {
                 bucket_limit,
             )
         });
-        let aggregate_assessment = behavior_aggregate_keys(request, &route, kind)
+        let aggregate_assessment = aggregate_keys
             .into_iter()
             .map(|(key, aggregate_route)| {
                 self.observe_aggregate_and_assess(
@@ -129,7 +173,14 @@ impl L7BehaviorGuard {
                 )
             })
             .max_by_key(|assessment| assessment.score);
-        let mut assessment = select_behavior_assessment(identity_assessment, aggregate_assessment)?;
+        let Some(mut assessment) =
+            select_behavior_assessment(identity_assessment, aggregate_assessment)
+        else {
+            if let Some(enforcement) = active_aggregate_enforcement {
+                return Some(self.respond_to_aggregate_challenge(request, enforcement));
+            }
+            return None;
+        };
         let ai_score_boost = request
             .get_metadata("ai.behavior.score_boost")
             .and_then(|value| value.parse::<u32>().ok())
@@ -236,6 +287,11 @@ impl L7BehaviorGuard {
                 && assessment.recent_challenges >= CHALLENGES_BEFORE_AUTO_BLOCK);
 
         if should_auto_block {
+            self.activate_aggregate_enforcement(
+                &assessment,
+                AggregateEnforcementAction::Block,
+                now,
+            );
             self.record_block(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "block".to_string());
             request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
@@ -261,6 +317,11 @@ impl L7BehaviorGuard {
         }
 
         if assessment.score >= CHALLENGE_SCORE {
+            self.activate_aggregate_enforcement(
+                &assessment,
+                AggregateEnforcementAction::Challenge,
+                now,
+            );
             self.record_challenge(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "challenge".to_string());
             let reason = format!(
@@ -278,6 +339,10 @@ impl L7BehaviorGuard {
                 reason.clone(),
                 build_behavior_response(request, 429, "访问行为异常，请稍后再试", &reason),
             ));
+        }
+
+        if let Some(enforcement) = active_aggregate_enforcement {
+            return Some(self.respond_to_aggregate_challenge(request, enforcement));
         }
 
         if assessment.score >= DELAY_SCORE {
@@ -307,6 +372,41 @@ impl L7BehaviorGuard {
         }
 
         None
+    }
+
+    fn respond_to_aggregate_challenge(
+        &self,
+        request: &mut UnifiedHttpRequest,
+        enforcement: AggregateEnforcement,
+    ) -> InspectionResult {
+        request.add_metadata(
+            "l7.behavior.identity".to_string(),
+            enforcement.identity.clone(),
+        );
+        request.add_metadata(
+            "l7.behavior.score".to_string(),
+            enforcement.score.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.action".to_string(),
+            enforcement.action.as_str().to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.aggregate_enforcement".to_string(),
+            "active".to_string(),
+        );
+        request.add_metadata("l7.behavior.flags".to_string(), enforcement.flags.join(","));
+        let reason = format!(
+            "l7 behavior guard aggregate enforcement: identity={} score={} flags={}",
+            enforcement.identity,
+            enforcement.score,
+            enforcement.flags.join("|"),
+        );
+        InspectionResult::respond(
+            InspectionLayer::L7,
+            reason.clone(),
+            build_behavior_response(request, 429, "访问行为异常，请稍后再试", &reason),
+        )
     }
 
     fn observe_and_assess(
@@ -411,6 +511,71 @@ impl L7BehaviorGuard {
         for key in aggregate_keys {
             self.aggregate_buckets.remove(&key);
         }
+
+        let expired_enforcements = self
+            .aggregate_enforcements
+            .iter()
+            .filter(|entry| entry.value().expires_at <= Instant::now())
+            .take(512)
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        for key in expired_enforcements {
+            self.aggregate_enforcements.remove(&key);
+        }
+    }
+
+    fn active_aggregate_enforcement(
+        &self,
+        aggregate_keys: &[(String, String)],
+        now: Instant,
+    ) -> Option<AggregateEnforcement> {
+        let mut selected = None;
+        for (key, _) in aggregate_keys {
+            let key = aggregate_enforcement_key(key);
+            let Some(entry) = self.aggregate_enforcements.get(&key) else {
+                continue;
+            };
+            if entry.expires_at <= now {
+                drop(entry);
+                self.aggregate_enforcements.remove(&key);
+                continue;
+            }
+            let enforcement = entry.clone();
+            if matches!(enforcement.action, AggregateEnforcementAction::Block) {
+                return Some(enforcement);
+            }
+            selected = Some(enforcement);
+        }
+        selected
+    }
+
+    fn activate_aggregate_enforcement(
+        &self,
+        assessment: &BehaviorAssessment,
+        action: AggregateEnforcementAction,
+        now: Instant,
+    ) {
+        if !assessment_is_aggregate(&assessment.identity) {
+            return;
+        }
+        let ttl = match action {
+            AggregateEnforcementAction::Challenge => AGGREGATE_CHALLENGE_ENFORCEMENT_SECS,
+            AggregateEnforcementAction::Block => AGGREGATE_BLOCK_ENFORCEMENT_SECS,
+        };
+        self.aggregate_enforcements.insert(
+            aggregate_enforcement_key(&assessment.identity),
+            AggregateEnforcement {
+                identity: assessment.identity.clone(),
+                action,
+                score: assessment.score,
+                flags: assessment
+                    .flags
+                    .iter()
+                    .map(|flag| (*flag).to_string())
+                    .collect(),
+                expires_at: now + Duration::from_secs(ttl),
+            },
+        );
     }
 
     fn record_challenge(&self, identity: &str, now: Instant, window: Duration) {
@@ -458,6 +623,30 @@ impl L7BehaviorGuard {
             profiles.truncate(limit);
         }
         profiles
+    }
+}
+
+#[derive(Debug, Clone)]
+struct AggregateEnforcement {
+    identity: String,
+    action: AggregateEnforcementAction,
+    score: u32,
+    flags: Vec<String>,
+    expires_at: Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AggregateEnforcementAction {
+    Challenge,
+    Block,
+}
+
+impl AggregateEnforcementAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Challenge => "aggregate_challenge",
+            Self::Block => "aggregate_block",
+        }
     }
 }
 
@@ -567,6 +756,16 @@ fn normalize_distributed_assessment_score(
         assessment.score = assessment.score.min(CHALLENGE_SCORE);
     }
     assessment
+}
+
+fn assessment_is_aggregate(identity: &str) -> bool {
+    identity.starts_with("site:")
+        || identity.starts_with("aggregate:")
+        || identity.starts_with("__overflow__:behavior-aggregate")
+}
+
+fn aggregate_enforcement_key(identity: &str) -> String {
+    compact_component("aggregate-enforcement", identity, MAX_BEHAVIOR_KEY_LEN)
 }
 
 fn runtime_usize_metadata(request: &UnifiedHttpRequest, key: &str, default: usize) -> usize {
@@ -873,6 +1072,87 @@ mod tests {
             .get_metadata("l7.behavior.distinct_client_ips")
             .and_then(|value| value.parse::<usize>().ok())
             .is_some_and(|count| count >= 4));
+    }
+
+    #[tokio::test]
+    async fn distributed_document_burst_activates_aggregate_block_enforcement() {
+        let guard = L7BehaviorGuard::new();
+
+        for index in 0..12 {
+            let mut request = request("GET", "/", "text/html");
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header(
+                "user-agent".to_string(),
+                format!("DistributedBlockBrowser/{index}"),
+            );
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            let _ = guard.inspect_request(&mut request).await;
+        }
+
+        let mut next = request("GET", "/", "text/html");
+        next.set_client_ip("203.0.113.250".to_string());
+        next.add_header(
+            "user-agent".to_string(),
+            "DistributedBlockBrowser/fresh".to_string(),
+        );
+        next.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        next.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+        let result = guard
+            .inspect_request(&mut next)
+            .await
+            .expect("aggregate enforcement should block fresh source");
+
+        assert_eq!(result.action, crate::core::InspectionAction::Drop);
+        assert!(!result.persist_blocked_ip);
+        assert_eq!(
+            next.get_metadata("l7.behavior.aggregate_enforcement")
+                .map(String::as_str),
+            Some("active")
+        );
+        assert_eq!(
+            next.get_metadata("l7.behavior.action").map(String::as_str),
+            Some("aggregate_block")
+        );
+    }
+
+    #[tokio::test]
+    async fn distributed_document_probe_activates_aggregate_challenge_enforcement() {
+        let guard = L7BehaviorGuard::new();
+
+        for index in 0..8 {
+            let mut request = request("GET", "/", "text/html");
+            request.set_client_ip(format!("198.51.100.{}", index + 1));
+            request.add_header(
+                "user-agent".to_string(),
+                format!("DistributedProbeBrowser/{index}"),
+            );
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            let _ = guard.inspect_request(&mut request).await;
+        }
+
+        let mut next = request("GET", "/", "text/html");
+        next.set_client_ip("198.51.100.250".to_string());
+        next.add_header(
+            "user-agent".to_string(),
+            "DistributedProbeBrowser/fresh".to_string(),
+        );
+        next.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        next.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+        let result = guard
+            .inspect_request(&mut next)
+            .await
+            .expect("aggregate enforcement should challenge fresh source");
+
+        assert_eq!(result.action, crate::core::InspectionAction::Respond);
+        assert!(!result.persist_blocked_ip);
+        assert!(matches!(
+            next.get_metadata("l7.behavior.action").map(String::as_str),
+            Some("challenge" | "aggregate_challenge")
+        ));
     }
 
     #[tokio::test]

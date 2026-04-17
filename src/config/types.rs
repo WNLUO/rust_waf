@@ -378,8 +378,8 @@ pub struct AutoSloTargets {
 #[serde(rename_all = "snake_case")]
 pub enum AutoTuningMode {
     Off,
-    #[default]
     Observe,
+    #[default]
     Active,
 }
 
@@ -419,7 +419,7 @@ impl RuntimeProfile {
 }
 
 const fn default_auto_runtime_adjust_enabled() -> bool {
-    false
+    true
 }
 
 const fn default_auto_bootstrap_secs() -> u64 {

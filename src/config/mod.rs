@@ -236,6 +236,9 @@ mod tests {
         assert!(config.integrations.safeline.auto_sync_events);
         assert!(!config.integrations.safeline.auto_sync_blocked_ips_push);
         assert!(config.integrations.safeline.auto_sync_blocked_ips_pull);
+        assert!(config.adaptive_protection.enabled);
+        assert_eq!(config.auto_tuning.mode, AutoTuningMode::Active);
+        assert!(config.auto_tuning.runtime_adjust_enabled);
         assert_eq!(
             config.http3_config.listen_addr,
             config.gateway_config.https_listen_addr

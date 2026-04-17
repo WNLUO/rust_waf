@@ -57,7 +57,15 @@ pub async fn load_runtime_config() -> Result<Config> {
         config
     };
 
+    let automation_defaults_changed = ensure_startup_automation_defaults(&mut config);
     config = ensure_startup_default_certificate(&bootstrap_store, config).await?;
+    if automation_defaults_changed {
+        bootstrap_store.upsert_app_config(&config).await?;
+        info!(
+            "Upgraded persisted automation defaults in SQLite: {}",
+            sqlite_path
+        );
+    }
 
     config.sqlite_enabled = true;
     config.sqlite_path = sqlite_path;
@@ -135,6 +143,25 @@ async fn ensure_startup_default_certificate(
     );
 
     Ok(config)
+}
+
+fn ensure_startup_automation_defaults(config: &mut Config) -> bool {
+    let mut changed = false;
+
+    if !config.adaptive_protection.enabled {
+        config.adaptive_protection.enabled = true;
+        changed = true;
+    }
+
+    if matches!(config.auto_tuning.mode, config::AutoTuningMode::Observe)
+        && !config.auto_tuning.runtime_adjust_enabled
+    {
+        config.auto_tuning.mode = config::AutoTuningMode::Active;
+        config.auto_tuning.runtime_adjust_enabled = true;
+        changed = true;
+    }
+
+    changed
 }
 
 async fn has_usable_local_certificate(store: &SqliteStore, certificate_id: i64) -> Result<bool> {
@@ -368,5 +395,29 @@ mod tests {
         assert!(domains[0].ends_with(".startup.local"));
         assert!(secret.certificate_pem.contains("BEGIN CERTIFICATE"));
         assert!(secret.private_key_pem.contains("BEGIN PRIVATE KEY"));
+    }
+
+    #[test]
+    fn startup_upgrades_legacy_observe_automation_defaults() {
+        let mut config = Config::default();
+        config.auto_tuning.mode = config::AutoTuningMode::Observe;
+        config.auto_tuning.runtime_adjust_enabled = false;
+        config.adaptive_protection.enabled = false;
+
+        assert!(ensure_startup_automation_defaults(&mut config));
+        assert!(config.adaptive_protection.enabled);
+        assert_eq!(config.auto_tuning.mode, config::AutoTuningMode::Active);
+        assert!(config.auto_tuning.runtime_adjust_enabled);
+    }
+
+    #[test]
+    fn startup_preserves_explicit_auto_tuning_off() {
+        let mut config = Config::default();
+        config.auto_tuning.mode = config::AutoTuningMode::Off;
+        config.auto_tuning.runtime_adjust_enabled = false;
+
+        assert!(!ensure_startup_automation_defaults(&mut config));
+        assert_eq!(config.auto_tuning.mode, config::AutoTuningMode::Off);
+        assert!(!config.auto_tuning.runtime_adjust_enabled);
     }
 }

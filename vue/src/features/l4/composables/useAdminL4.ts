@@ -23,16 +23,6 @@ const clampInteger = (
   return Math.min(Math.max(normalized, min), max)
 }
 
-const clampFloat = (
-  value: number,
-  min: number,
-  max: number,
-  fallback: number,
-) => {
-  const normalized = Number.isFinite(value) ? value : fallback
-  return Math.min(Math.max(Number(normalized.toFixed(2)), min), max)
-}
-
 export function useAdminL4() {
   const loading = ref(true)
   const refreshing = ref(false)
@@ -158,150 +148,6 @@ export function useAdminL4() {
     try {
       const targetForm = configForm
 
-      targetForm.connection_rate_limit = clampInteger(
-        targetForm.connection_rate_limit,
-        1,
-        1_000_000,
-        100,
-      )
-      targetForm.syn_flood_threshold = clampInteger(
-        targetForm.syn_flood_threshold,
-        1,
-        1_000_000,
-        50,
-      )
-      targetForm.max_tracked_ips = clampInteger(
-        targetForm.max_tracked_ips,
-        1,
-        1_000_000,
-        4096,
-      )
-      targetForm.max_blocked_ips = clampInteger(
-        targetForm.max_blocked_ips,
-        1,
-        1_000_000,
-        1024,
-      )
-      targetForm.state_ttl_secs = clampInteger(
-        targetForm.state_ttl_secs,
-        60,
-        86_400,
-        300,
-      )
-      targetForm.bloom_filter_scale = clampFloat(
-        targetForm.bloom_filter_scale,
-        0.1,
-        4,
-        1,
-      )
-      targetForm.behavior_event_channel_capacity = clampInteger(
-        targetForm.behavior_event_channel_capacity,
-        1,
-        1_000_000,
-        4096,
-      )
-      targetForm.behavior_drop_critical_threshold = clampInteger(
-        targetForm.behavior_drop_critical_threshold,
-        1,
-        1_000_000,
-        128,
-      )
-      targetForm.behavior_fallback_ratio_percent = clampInteger(
-        targetForm.behavior_fallback_ratio_percent,
-        1,
-        100,
-        80,
-      )
-      targetForm.behavior_overload_blocked_connections_threshold = clampInteger(
-        targetForm.behavior_overload_blocked_connections_threshold,
-        1,
-        10_000_000,
-        512,
-      )
-      targetForm.behavior_overload_active_connections_threshold = clampInteger(
-        targetForm.behavior_overload_active_connections_threshold,
-        1,
-        10_000_000,
-        2048,
-      )
-      targetForm.behavior_normal_connection_budget_per_minute = clampInteger(
-        targetForm.behavior_normal_connection_budget_per_minute,
-        1,
-        1_000_000,
-        120,
-      )
-      targetForm.behavior_suspicious_connection_budget_per_minute = clampInteger(
-        targetForm.behavior_suspicious_connection_budget_per_minute,
-        1,
-        1_000_000,
-        60,
-      )
-      targetForm.behavior_high_risk_connection_budget_per_minute = clampInteger(
-        targetForm.behavior_high_risk_connection_budget_per_minute,
-        1,
-        1_000_000,
-        20,
-      )
-      targetForm.behavior_high_overload_budget_scale_percent = clampInteger(
-        targetForm.behavior_high_overload_budget_scale_percent,
-        1,
-        100,
-        80,
-      )
-      targetForm.behavior_critical_overload_budget_scale_percent = clampInteger(
-        targetForm.behavior_critical_overload_budget_scale_percent,
-        1,
-        100,
-        50,
-      )
-      targetForm.behavior_high_overload_delay_ms = clampInteger(
-        targetForm.behavior_high_overload_delay_ms,
-        0,
-        60_000,
-        15,
-      )
-      targetForm.behavior_critical_overload_delay_ms = clampInteger(
-        targetForm.behavior_critical_overload_delay_ms,
-        0,
-        60_000,
-        40,
-      )
-      targetForm.behavior_soft_delay_threshold_percent = clampInteger(
-        targetForm.behavior_soft_delay_threshold_percent,
-        1,
-        10_000,
-        100,
-      )
-      targetForm.behavior_hard_delay_threshold_percent = clampInteger(
-        targetForm.behavior_hard_delay_threshold_percent,
-        1,
-        10_000,
-        200,
-      )
-      targetForm.behavior_soft_delay_ms = clampInteger(
-        targetForm.behavior_soft_delay_ms,
-        0,
-        60_000,
-        25,
-      )
-      targetForm.behavior_hard_delay_ms = clampInteger(
-        targetForm.behavior_hard_delay_ms,
-        0,
-        60_000,
-        60,
-      )
-      targetForm.behavior_reject_threshold_percent = clampInteger(
-        targetForm.behavior_reject_threshold_percent,
-        1,
-        10_000,
-        300,
-      )
-      targetForm.behavior_critical_reject_threshold_percent = clampInteger(
-        targetForm.behavior_critical_reject_threshold_percent,
-        1,
-        10_000,
-        200,
-      )
       targetForm.trusted_cdn.sync_interval_value = clampInteger(
         targetForm.trusted_cdn.sync_interval_value,
         1,
@@ -309,7 +155,25 @@ export function useAdminL4() {
         12,
       )
 
-      const response = await updateL4Config({ ...targetForm })
+      const response = await updateL4Config({
+        ddos_protection_enabled: targetForm.ddos_protection_enabled,
+        advanced_ddos_enabled: targetForm.advanced_ddos_enabled,
+        trusted_cdn: {
+          manual_cidrs: [...targetForm.trusted_cdn.manual_cidrs],
+          sync_interval_value: targetForm.trusted_cdn.sync_interval_value,
+          sync_interval_unit: targetForm.trusted_cdn.sync_interval_unit,
+          edgeone_overseas: {
+            enabled: targetForm.trusted_cdn.edgeone_overseas.enabled,
+          },
+          aliyun_esa: {
+            enabled: targetForm.trusted_cdn.aliyun_esa.enabled,
+            site_id: targetForm.trusted_cdn.aliyun_esa.site_id,
+            access_key_id: targetForm.trusted_cdn.aliyun_esa.access_key_id,
+            access_key_secret: targetForm.trusted_cdn.aliyun_esa.access_key_secret,
+            endpoint: targetForm.trusted_cdn.aliyun_esa.endpoint,
+          },
+        },
+      })
       successMessage.value = response.message
       await refreshAll()
       return true

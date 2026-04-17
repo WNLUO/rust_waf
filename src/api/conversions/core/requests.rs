@@ -125,12 +125,6 @@ impl L7ConfigUpdateRequest {
         mut current: Config,
         _allow_compatibility_updates: bool,
     ) -> Result<Config, String> {
-        current.runtime_profile = match self.runtime_profile.as_str() {
-            "minimal" => RuntimeProfile::Minimal,
-            "standard" => RuntimeProfile::Standard,
-            _ => return Err("运行档位仅支持 minimal 或 standard".to_string()),
-        };
-
         let listen_addrs = self
             .listen_addrs
             .into_iter()
@@ -173,18 +167,8 @@ impl L7ConfigUpdateRequest {
         };
         http3_config.validate()?;
 
-        current.l7_config.max_request_size = self.max_request_size;
         current.l7_config.trusted_proxy_cidrs = self.trusted_proxy_cidrs;
-        current.l7_config.first_byte_timeout_ms = self.first_byte_timeout_ms;
-        current.l7_config.read_idle_timeout_ms = self.read_idle_timeout_ms;
-        current.l7_config.tls_handshake_timeout_ms = self.tls_handshake_timeout_ms;
-        current.l7_config.proxy_connect_timeout_ms = self.proxy_connect_timeout_ms;
-        current.l7_config.proxy_write_timeout_ms = self.proxy_write_timeout_ms;
-        current.l7_config.proxy_read_timeout_ms = self.proxy_read_timeout_ms;
         current.l7_config.upstream_healthcheck_enabled = self.upstream_healthcheck_enabled;
-        current.l7_config.upstream_healthcheck_interval_secs =
-            self.upstream_healthcheck_interval_secs;
-        current.l7_config.upstream_healthcheck_timeout_ms = self.upstream_healthcheck_timeout_ms;
         current.l7_config.upstream_failure_mode =
             parse_upstream_failure_mode(&self.upstream_failure_mode)?;
         current.l7_config.upstream_protocol_policy =
@@ -197,10 +181,8 @@ impl L7ConfigUpdateRequest {
             self.reject_http1_transfer_encoding_requests;
         current.l7_config.reject_body_on_safe_http_methods = self.reject_body_on_safe_http_methods;
         current.l7_config.reject_expect_100_continue = self.reject_expect_100_continue;
-        current.l7_config.bloom_filter_scale = self.bloom_filter_scale;
         current.l7_config.http2_config.enabled = self.http2_enabled;
         current.bloom_enabled = self.bloom_enabled;
-        current.l7_bloom_false_positive_verification = self.bloom_false_positive_verification;
         current.listen_addrs = listen_addrs;
         current.tcp_upstream_addr = non_empty_string(upstream_endpoint);
         current.http3_config = http3_config;
@@ -528,17 +510,8 @@ mod tests {
         };
 
         let next = L7ConfigUpdateRequest {
-            max_request_size: 8192,
             trusted_proxy_cidrs: vec![],
-            first_byte_timeout_ms: 2000,
-            read_idle_timeout_ms: 5000,
-            tls_handshake_timeout_ms: 3000,
-            proxy_connect_timeout_ms: 1500,
-            proxy_write_timeout_ms: 3000,
-            proxy_read_timeout_ms: 10000,
             upstream_healthcheck_enabled: true,
-            upstream_healthcheck_interval_secs: 5,
-            upstream_healthcheck_timeout_ms: 1000,
             upstream_failure_mode: "fail_open".to_string(),
             upstream_protocol_policy: "http2_preferred".to_string(),
             upstream_http1_strict_mode: true,
@@ -547,11 +520,8 @@ mod tests {
             reject_http1_transfer_encoding_requests: true,
             reject_body_on_safe_http_methods: true,
             reject_expect_100_continue: true,
-            bloom_filter_scale: 1.0,
             http2_enabled: true,
             bloom_enabled: true,
-            bloom_false_positive_verification: true,
-            runtime_profile: "standard".to_string(),
             listen_addrs: vec!["127.0.0.1:8080".to_string()],
             upstream_endpoint: String::new(),
             http3_enabled: false,

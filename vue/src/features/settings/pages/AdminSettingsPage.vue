@@ -2,12 +2,9 @@
 import { computed, ref } from 'vue'
 import { Save } from 'lucide-vue-next'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import AdminL4ConfigFormCard from '@/features/l4/components/AdminL4ConfigFormCard.vue'
 import AdminTrustedCdnDialog from '@/features/l4/components/AdminTrustedCdnDialog.vue'
 import { useAdminL4 } from '@/features/l4/composables/useAdminL4'
 import AdminL7AdvancedGlobalSection from '@/features/l7/components/AdminL7AdvancedGlobalSection.vue'
-import AdminL7ConfigSection from '@/features/l7/components/AdminL7ConfigSection.vue'
-import { useAdminL7 } from '@/features/l7/composables/useAdminL7'
 import AdminSettingsSystemSection from '@/features/settings/components/AdminSettingsSystemSection.vue'
 import AdminUploadCertificateDialog from '@/features/settings/components/AdminUploadCertificateDialog.vue'
 import { useAdminSettings } from '@/features/settings/composables/useAdminSettings'
@@ -51,17 +48,6 @@ const {
   successMessage: l4SuccessMessage,
 } = useAdminL4()
 
-const {
-  configForm: l7ConfigForm,
-  error: l7Error,
-  loading: l7Loading,
-  saveConfig: saveL7Config,
-  saving: savingL7,
-  stats: l7Stats,
-  successMessage: l7SuccessMessage,
-  trustedProxyCidrsText,
-} = useAdminL7()
-
 const savingAll = ref(false)
 const trustedCdnDialogOpen = ref(false)
 const advancedGlobalSectionRef = ref<{
@@ -73,8 +59,7 @@ const disableSaveAll = computed(
     savingAll.value ||
     saving.value ||
     loading.value ||
-    savingL4.value ||
-    savingL7.value,
+    savingL4.value,
 )
 
 const adaptiveProtectionEnabled = computed(
@@ -90,14 +75,8 @@ async function saveAllSettings() {
     const saveL4Ok = await saveL4Config()
     const saveAdvancedGlobalOk =
       (await advancedGlobalSectionRef.value?.saveSettings()) ?? true
-    const saveL7Ok = await saveL7Config()
 
-    if (
-      !saveSystemOk ||
-      !saveL4Ok ||
-      !saveAdvancedGlobalOk ||
-      !saveL7Ok
-    ) {
+    if (!saveSystemOk || !saveL4Ok || !saveAdvancedGlobalOk) {
       return
     }
   } finally {
@@ -126,15 +105,6 @@ useFlashMessages({
   success: l4SuccessMessage,
   errorTitle: 'L4 管理',
   successTitle: 'L4 管理',
-  errorDuration: 5600,
-  successDuration: 3200,
-})
-
-useFlashMessages({
-  error: l7Error,
-  success: l7SuccessMessage,
-  errorTitle: 'L7 管理',
-  successTitle: 'L7 管理',
   errorDuration: 5600,
   successDuration: 3200,
 })
@@ -237,15 +207,9 @@ useFlashMessages({
               自适应防护已接管 L4 行为引擎预算、过载延迟和拒绝阈值，这一组参数已从主区域收起，避免线上继续依赖手工阈值。
             </p>
             <p>
-              与自动化无关的连接速率、SYN 阈值、跟踪容量、封禁表容量、状态保留和 Bloom 缩放仍然保留在下方主表单中。
+              连接速率、SYN 阈值、跟踪容量、封禁表容量、状态保留和 Bloom 缩放均由系统按运行压力自动管理。
             </p>
           </div>
-          <AdminL4ConfigFormCard
-            v-else
-            :form="l4ConfigForm"
-            :hide-adaptive-managed-sections="adaptiveProtectionEnabled"
-            @update:form="Object.assign(l4ConfigForm, $event)"
-          />
         </section>
 
         <section class="space-y-4">
@@ -255,47 +219,25 @@ useFlashMessages({
             <div
               class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
             >
-            <div>
+              <div>
                 <p class="text-sm tracking-wider text-blue-700">L7 管理</p>
                 <p class="mt-1 text-xs text-slate-500">
-                  主页面保留协议、超时、健康检查和联动运行项；CC 阈值、采样和自动调优细项由系统闭环管理。
+                  主页面保留协议开关、上游策略和联动运行项；CC 阈值、采样、超时和自动调优细项由系统闭环管理。
                 </p>
               </div>
-              <div class="flex items-center gap-2">
-              </div>
+              <div class="flex items-center gap-2"></div>
             </div>
 
-          <div
-            v-if="l7Loading"
-            class="rounded-lg border border-slate-200 bg-white/75 px-4 py-3 text-sm text-slate-500 shadow-[0_10px_25px_rgba(90,60,30,0.05)]"
-          >
-            正在加载 L7 配置...
-          </div>
-          <div
-            v-else-if="adaptiveProtectionEnabled"
-            class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
-          >
-            <p>
-              自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，这一组参数不再建议在主页面人工维护。
-            </p>
-            <p>
-              与自动化无关的 HTTP 协议、上游健康检查、超时、Bloom、SafeLine 接管和 HTTP/3 参数仍然保留在下方主表单中，避免这些运行项被一起隐藏。
-            </p>
-          </div>
-          <AdminL7ConfigSection
-            v-else-if="!l7Loading"
-            :form="l7ConfigForm"
-            :trusted-proxy-cidrs-text="trustedProxyCidrsText"
-            :auto-tuning-runtime="l7Stats?.auto_tuning ?? null"
-            :drop-unmatched-requests="systemSettings.drop_unmatched_requests"
-            :drop-unmatched-requests-disabled="saving || loading"
-            :hide-adaptive-managed-sections="adaptiveProtectionEnabled"
-            @update:form="Object.assign(l7ConfigForm, $event)"
-            @update:drop-unmatched-requests="
-              systemSettings.drop_unmatched_requests = $event
-            "
-            @update:trusted-proxy-cidrs-text="trustedProxyCidrsText = $event"
-            />
+            <div
+              class="space-y-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm leading-6 text-slate-600"
+            >
+              <p>
+                自适应防护已接管 L7 CC 窗口、延迟和 challenge / block 阈值。系统会按当前压力、握手异常、代理延迟和机器资源自动调节，这一组参数不再建议在主页面人工维护。
+              </p>
+              <p>
+                HTTP/2、HTTP/3、真实来源、TLS、转发 Header 和上游策略等业务意图已集中在高级配置、证书和站点动作中维护。
+              </p>
+            </div>
           </div>
 
           <AdminL7AdvancedGlobalSection

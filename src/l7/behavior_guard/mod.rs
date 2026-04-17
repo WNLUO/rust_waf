@@ -1,7 +1,7 @@
 use crate::core::{InspectionLayer, InspectionResult};
 use crate::protocol::UnifiedHttpRequest;
 use dashmap::DashMap;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -37,12 +37,19 @@ const MAX_BEHAVIOR_ROUTE_LEN: usize = 160;
 const OVERFLOW_SHARDS: u64 = 64;
 const AGGREGATE_CHALLENGE_ENFORCEMENT_SECS: u64 = 30;
 const AGGREGATE_BLOCK_ENFORCEMENT_SECS: u64 = 90;
+const ROUTE_BURST_WINDOW_SECS: u64 = 3;
+const ROUTE_BURST_CHALLENGE_TOTAL: usize = 6;
+const ROUTE_BURST_CHALLENGE_DISTINCT_IPS: usize = 4;
+const ROUTE_BURST_BLOCK_TOTAL: usize = 10;
+const ROUTE_BURST_BLOCK_DISTINCT_IPS: usize = 8;
+const MAX_BURST_SAMPLES_PER_ROUTE: usize = 64;
 
 #[derive(Debug)]
 pub struct L7BehaviorGuard {
     buckets: DashMap<String, BehaviorWindow>,
     aggregate_buckets: DashMap<String, BehaviorWindow>,
     aggregate_enforcements: DashMap<String, AggregateEnforcement>,
+    route_burst_buckets: DashMap<String, RouteBurstWindow>,
     request_sequence: AtomicU64,
 }
 
@@ -52,6 +59,7 @@ impl L7BehaviorGuard {
             buckets: DashMap::new(),
             aggregate_buckets: DashMap::new(),
             aggregate_enforcements: DashMap::new(),
+            route_burst_buckets: DashMap::new(),
             request_sequence: AtomicU64::new(0),
         }
     }
@@ -141,6 +149,19 @@ impl L7BehaviorGuard {
             );
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
             return Some(InspectionResult::drop(InspectionLayer::L7, reason));
+        }
+        if let Some(result) = self.inspect_route_burst(
+            request,
+            &route,
+            kind,
+            client_ip.clone(),
+            user_agent.clone(),
+            header_signature.clone(),
+            now,
+            unix_now,
+            bucket_limit,
+        ) {
+            return Some(result);
         }
         let identity_assessment = request_identity(request).map(|identity| {
             self.observe_and_assess(
@@ -512,6 +533,20 @@ impl L7BehaviorGuard {
             self.aggregate_buckets.remove(&key);
         }
 
+        let stale_burst_before = unix_now - (ROUTE_BURST_WINDOW_SECS as i64 * 6).max(30);
+        let route_burst_keys = self
+            .route_burst_buckets
+            .iter()
+            .filter(|entry| {
+                entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_burst_before
+            })
+            .take(512)
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        for key in route_burst_keys {
+            self.route_burst_buckets.remove(&key);
+        }
+
         let expired_enforcements = self
             .aggregate_enforcements
             .iter()
@@ -576,6 +611,123 @@ impl L7BehaviorGuard {
                 expires_at: now + Duration::from_secs(ttl),
             },
         );
+    }
+
+    fn inspect_route_burst(
+        &self,
+        request: &mut UnifiedHttpRequest,
+        route: &str,
+        kind: RequestKind,
+        client_ip: Option<String>,
+        user_agent: Option<String>,
+        header_signature: Option<String>,
+        now: Instant,
+        unix_now: i64,
+        bucket_limit: usize,
+    ) -> Option<InspectionResult> {
+        if !matches!(kind, RequestKind::Document | RequestKind::Api) || route_burst_exempt(route) {
+            return None;
+        }
+        let keys = route_burst_keys(request, route, kind);
+        if keys.is_empty() {
+            return None;
+        }
+        let script_like = request_is_script_like_document(request);
+        let mut selected = None;
+        for key in keys {
+            let key = bounded_dashmap_key(
+                &self.route_burst_buckets,
+                compact_component("route-burst", &key, MAX_BEHAVIOR_KEY_LEN),
+                bucket_limit,
+                "behavior-route-burst",
+                OVERFLOW_SHARDS,
+            );
+            let mut entry = self
+                .route_burst_buckets
+                .entry(key.clone())
+                .or_insert_with(RouteBurstWindow::new);
+            let mut assessment = entry.observe_and_assess(
+                RouteBurstSample {
+                    client_ip: client_ip.clone(),
+                    user_agent: user_agent.clone(),
+                    header_signature: header_signature.clone(),
+                    script_like,
+                    at: now,
+                },
+                unix_now,
+            );
+            assessment.identity = key;
+            if selected
+                .as_ref()
+                .map_or(true, |candidate: &RouteBurstAssessment| {
+                    assessment.rank() > candidate.rank()
+                })
+            {
+                selected = Some(assessment);
+            }
+        }
+        let assessment = selected?;
+        if assessment.action == RouteBurstAction::None {
+            return None;
+        }
+        request.add_metadata(
+            "l7.behavior.identity".to_string(),
+            assessment.identity.clone(),
+        );
+        request.add_metadata(
+            "l7.behavior.score".to_string(),
+            assessment.score.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.action".to_string(),
+            assessment.action.as_str().to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.aggregate_enforcement".to_string(),
+            "route_burst".to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.flags".to_string(),
+            "route_burst_gate".to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.distinct_client_ips".to_string(),
+            assessment.distinct_client_ips.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.distinct_user_agents".to_string(),
+            assessment.distinct_user_agents.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.distinct_header_signatures".to_string(),
+            assessment.distinct_header_signatures.to_string(),
+        );
+        let reason = format!(
+            "l7 behavior route burst gate: identity={} total={} distinct_client_ips={} script_like_ratio={} distinct_user_agents={} distinct_header_signatures={}",
+            assessment.identity,
+            assessment.total,
+            assessment.distinct_client_ips,
+            assessment.script_like_ratio_percent,
+            assessment.distinct_user_agents,
+            assessment.distinct_header_signatures,
+        );
+        match assessment.action {
+            RouteBurstAction::Block => {
+                request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+                request.add_metadata(
+                    "l7.drop_reason".to_string(),
+                    "behavior_route_burst".to_string(),
+                );
+                request.add_metadata("l4.force_close".to_string(), "true".to_string());
+                Some(InspectionResult::drop(InspectionLayer::L7, reason))
+            }
+            RouteBurstAction::Challenge => Some(InspectionResult::respond(
+                InspectionLayer::L7,
+                reason.clone(),
+                build_behavior_response(request, 429, "访问行为异常，请稍后再试", &reason),
+            )),
+            RouteBurstAction::None => None,
+        }
     }
 
     fn record_challenge(&self, identity: &str, now: Instant, window: Duration) {
@@ -650,6 +802,148 @@ impl AggregateEnforcementAction {
     }
 }
 
+#[derive(Debug)]
+struct RouteBurstWindow {
+    samples: Mutex<VecDeque<RouteBurstSample>>,
+    last_seen_unix: AtomicI64,
+}
+
+#[derive(Debug, Clone)]
+struct RouteBurstSample {
+    client_ip: Option<String>,
+    user_agent: Option<String>,
+    header_signature: Option<String>,
+    script_like: bool,
+    at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct RouteBurstAssessment {
+    identity: String,
+    action: RouteBurstAction,
+    score: u32,
+    total: usize,
+    distinct_client_ips: usize,
+    distinct_user_agents: usize,
+    distinct_header_signatures: usize,
+    script_like_ratio_percent: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RouteBurstAction {
+    None,
+    Challenge,
+    Block,
+}
+
+impl RouteBurstAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Challenge => "aggregate_challenge",
+            Self::Block => "aggregate_block",
+        }
+    }
+}
+
+impl RouteBurstAssessment {
+    fn rank(&self) -> u8 {
+        match self.action {
+            RouteBurstAction::Block => 2,
+            RouteBurstAction::Challenge => 1,
+            RouteBurstAction::None => 0,
+        }
+    }
+}
+
+impl RouteBurstWindow {
+    fn new() -> Self {
+        Self {
+            samples: Mutex::new(VecDeque::new()),
+            last_seen_unix: AtomicI64::new(unix_timestamp()),
+        }
+    }
+
+    fn observe_and_assess(
+        &mut self,
+        sample: RouteBurstSample,
+        unix_now: i64,
+    ) -> RouteBurstAssessment {
+        let now = sample.at;
+        let mut samples = self.samples.lock().expect("route burst lock poisoned");
+        while let Some(front) = samples.front() {
+            if now.duration_since(front.at) > Duration::from_secs(ROUTE_BURST_WINDOW_SECS)
+                || samples.len() > MAX_BURST_SAMPLES_PER_ROUTE
+            {
+                samples.pop_front();
+            } else {
+                break;
+            }
+        }
+        samples.push_back(sample);
+        while samples.len() > MAX_BURST_SAMPLES_PER_ROUTE {
+            samples.pop_front();
+        }
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        assess_route_burst(&samples)
+    }
+}
+
+fn assess_route_burst(samples: &VecDeque<RouteBurstSample>) -> RouteBurstAssessment {
+    let total = samples.len();
+    let distinct_client_ips = samples
+        .iter()
+        .filter_map(|sample| sample.client_ip.as_deref())
+        .collect::<HashSet<_>>()
+        .len();
+    let distinct_user_agents = samples
+        .iter()
+        .filter_map(|sample| sample.user_agent.as_deref())
+        .collect::<HashSet<_>>()
+        .len();
+    let distinct_header_signatures = samples
+        .iter()
+        .filter_map(|sample| sample.header_signature.as_deref())
+        .collect::<HashSet<_>>()
+        .len();
+    let script_like_count = samples.iter().filter(|sample| sample.script_like).count();
+    let script_like_ratio_percent = if total == 0 {
+        0
+    } else {
+        ((script_like_count * 100) / total) as u32
+    };
+    let scripted_or_mechanical = script_like_ratio_percent >= 70
+        || (distinct_header_signatures <= 2 && distinct_user_agents <= 4);
+    let action = if total >= ROUTE_BURST_BLOCK_TOTAL
+        && distinct_client_ips >= ROUTE_BURST_BLOCK_DISTINCT_IPS
+        && scripted_or_mechanical
+    {
+        RouteBurstAction::Block
+    } else if total >= ROUTE_BURST_CHALLENGE_TOTAL
+        && distinct_client_ips >= ROUTE_BURST_CHALLENGE_DISTINCT_IPS
+        && scripted_or_mechanical
+    {
+        RouteBurstAction::Challenge
+    } else {
+        RouteBurstAction::None
+    };
+    let score = match action {
+        RouteBurstAction::Block => 100,
+        RouteBurstAction::Challenge => CHALLENGE_SCORE,
+        RouteBurstAction::None => 0,
+    };
+    RouteBurstAssessment {
+        identity: "route_burst".to_string(),
+        action,
+        score,
+        total,
+        distinct_client_ips,
+        distinct_user_agents,
+        distinct_header_signatures,
+        script_like_ratio_percent,
+    }
+}
+
 fn runtime_defense_depth(request: &UnifiedHttpRequest) -> crate::core::DefenseDepth {
     request
         .get_metadata("runtime.defense.depth")
@@ -703,6 +997,30 @@ fn behavior_aggregate_keys(
     keys
 }
 
+fn route_burst_keys(request: &UnifiedHttpRequest, route: &str, kind: RequestKind) -> Vec<String> {
+    let host = behavior_host(request);
+    let mut keys = vec![format!(
+        "site:{host}|route:{route}|kind:{}|burst",
+        kind.as_str()
+    )];
+    if let Some(family) = route_family(&request.uri, route) {
+        keys.push(format!(
+            "site:{host}|family:{family}|kind:{}|burst",
+            kind.as_str()
+        ));
+    }
+    keys
+}
+
+fn route_burst_exempt(route: &str) -> bool {
+    let route = route.to_ascii_lowercase();
+    route == "/robots.txt"
+        || route == "/sitemap.xml"
+        || route.starts_with("/sitemap")
+        || route == "/favicon.ico"
+        || route.starts_with("/.well-known/")
+}
+
 fn behavior_user_agent(request: &UnifiedHttpRequest) -> Option<String> {
     request
         .get_header("user-agent")
@@ -740,6 +1058,45 @@ fn behavior_host(request: &UnifiedHttpRequest) -> String {
         .unwrap_or(raw)
         .to_ascii_lowercase();
     compact_component("host", &normalized, MAX_BEHAVIOR_KEY_LEN)
+}
+
+fn request_is_script_like_document(request: &UnifiedHttpRequest) -> bool {
+    let ua = request
+        .get_header("user-agent")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let accept = request
+        .get_header("accept")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let accept_language_missing = request
+        .get_header("accept-language")
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true);
+    let sec_fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase());
+    let sec_fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase());
+    let browser_navigation = sec_fetch_dest.as_deref() == Some("document")
+        || sec_fetch_mode.as_deref() == Some("navigate");
+    let automation_ua = [
+        "curl",
+        "wget",
+        "python",
+        "go-http-client",
+        "okhttp",
+        "httpclient",
+        "postman",
+        "http_request",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle));
+    automation_ua
+        || (!browser_navigation
+            && (accept.is_empty() || accept == "*/*" || !accept.contains("text/html")))
+        || (!browser_navigation && accept_language_missing && !accept.contains("text/html"))
 }
 
 fn behavior_header_signature(request: &UnifiedHttpRequest) -> Option<String> {
@@ -1139,6 +1496,77 @@ mod tests {
             .get_metadata("l7.behavior.distinct_client_ips")
             .and_then(|value| value.parse::<usize>().ok())
             .is_some_and(|count| count >= 4));
+    }
+
+    #[tokio::test]
+    async fn route_burst_gate_blocks_scripted_multi_source_documents_within_seconds() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+
+        for index in 0..10 {
+            let mut request = request("GET", "/", "*/*");
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header("user-agent".to_string(), "curl/8.0".to_string());
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            last = guard.inspect_request(&mut request).await;
+        }
+
+        let result = last.expect("route burst gate should block scripted burst");
+        assert_eq!(result.action, crate::core::InspectionAction::Drop);
+        assert_eq!(
+            result.persist_blocked_ip, false,
+            "route burst gate should not persistently block rotating IPs"
+        );
+        let mut followup = request("GET", "/", "*/*");
+        followup.set_client_ip("203.0.113.250".to_string());
+        followup.add_header("user-agent".to_string(), "curl/8.0".to_string());
+        followup.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        followup.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        let result = guard
+            .inspect_request(&mut followup)
+            .await
+            .expect("route burst gate should keep blocking during burst window");
+        assert_eq!(result.action, crate::core::InspectionAction::Drop);
+        assert_eq!(
+            followup
+                .get_metadata("l7.behavior.action")
+                .map(String::as_str),
+            Some("aggregate_block")
+        );
+        assert_eq!(
+            followup
+                .get_metadata("l7.behavior.aggregate_enforcement")
+                .map(String::as_str),
+            Some("route_burst")
+        );
+    }
+
+    #[tokio::test]
+    async fn route_burst_gate_does_not_block_browser_like_broad_user_agents() {
+        let guard = L7BehaviorGuard::new();
+
+        for index in 0..10 {
+            let mut request = request("GET", "/", "text/html");
+            request.set_client_ip(format!("198.51.100.{}", index + 1));
+            request.add_header(
+                "user-agent".to_string(),
+                format!("Mozilla/5.0 BrowserBurst/{index}"),
+            );
+            request.add_header("accept-language".to_string(), "zh-CN,zh;q=0.9".to_string());
+            request.add_header("sec-fetch-dest".to_string(), "document".to_string());
+            request.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            let result = guard.inspect_request(&mut request).await;
+            assert!(
+                request
+                    .get_metadata("l7.behavior.aggregate_enforcement")
+                    .map_or(true, |value| value != "route_burst"),
+                "browser-like simultaneous visits should not trigger the route burst gate"
+            );
+            drop(result);
+        }
     }
 
     #[tokio::test]

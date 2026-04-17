@@ -270,6 +270,42 @@ async fn verified_browser_static_burst_does_not_persist_block() {
 }
 
 #[tokio::test]
+async fn first_visit_static_asset_burst_does_not_persist_block_by_ip_or_host() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 200,
+        route_block_threshold: 200,
+        host_challenge_threshold: 20,
+        host_block_threshold: 30,
+        ip_challenge_threshold: 20,
+        ip_block_threshold: 30,
+        delay_ms: 0,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..90 {
+        let mut asset = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            format!("/wp-content/themes/CoreNext/static/js/chunk-{index}.js"),
+        );
+        asset.set_client_ip("203.0.113.10".to_string());
+        asset.add_header("host".to_string(), "example.com".to_string());
+        asset.add_header("sec-fetch-dest".to_string(), "script".to_string());
+        asset.add_header("accept".to_string(), "*/*".to_string());
+
+        let result = guard.inspect_request(&mut asset).await;
+        assert!(
+            result
+                .as_ref()
+                .map(|result| !result.persist_blocked_ip)
+                .unwrap_or(true),
+            "first visit static burst should not persist a local block at request {index}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn api_requests_accumulate_weight_faster_than_documents() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 3,

@@ -338,11 +338,17 @@ impl L7CcGuard {
             matches!(request_kind, RequestKind::ApiLike | RequestKind::Other)
                 && hot_path_client_count >= global_hot_path_client_block_threshold
                 && hot_path_effective >= global_hot_path_effective_block_threshold;
+        let route_specific_static_hard_block =
+            request_kind == RequestKind::StaticAsset && route_count >= hard_route_block_threshold;
+        let static_asset_persist_block =
+            request_kind == RequestKind::StaticAsset && route_specific_static_hard_block;
 
         if !client_identity_unresolved
-            && (hard_block
+            && ((hard_block
+                && (request_kind != RequestKind::StaticAsset || static_asset_persist_block))
                 || global_hot_path_pressure_block
                 || (!low_risk_subresource
+                    && (request_kind != RequestKind::StaticAsset || static_asset_persist_block)
                     && (route_effective >= route_block_threshold
                         || host_effective >= host_block_threshold
                         || ip_effective >= ip_block_threshold

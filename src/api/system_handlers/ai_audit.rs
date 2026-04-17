@@ -223,6 +223,71 @@ pub(crate) async fn list_ai_temp_policies_handler(
     }))
 }
 
+pub(crate) async fn ai_defense_snapshot_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<AiDefenseSnapshotResponse>> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let config = state.context.config_snapshot();
+    let snapshot = state
+        .context
+        .ai_defense_signal_snapshot(now, Some("dashboard_snapshot".to_string()))
+        .await
+        .map_err(ApiError::internal)?;
+    let summary =
+        build_ai_audit_summary(state.context.as_ref(), Some(900), Some(120), Some(0)).await?;
+    let active_policies = state
+        .context
+        .active_ai_temp_policies()
+        .into_iter()
+        .map(|item| ai_temp_policy_response_from_entry(item, &summary))
+        .collect();
+
+    Ok(Json(AiDefenseSnapshotResponse {
+        generated_at: snapshot.generated_at,
+        enabled: config.integrations.ai_audit.auto_defense_enabled,
+        auto_apply: config.integrations.ai_audit.auto_defense_auto_apply,
+        trigger_reason: snapshot.trigger_reason,
+        trigger_pending_secs: snapshot.trigger_pending_secs,
+        runtime_pressure: ai_defense_runtime_pressure_response(snapshot.runtime_pressure),
+        l4_pressure: snapshot.l4_pressure.map(ai_defense_l4_pressure_response),
+        upstream_health: AiDefenseUpstreamHealthResponse {
+            healthy: snapshot.upstream_health.healthy,
+            last_error: snapshot.upstream_health.last_error,
+        },
+        active_temp_policy_count: snapshot.active_temp_policy_count,
+        max_active_temp_policy_count: snapshot.max_active_temp_policy_count,
+        active_policies,
+        route_effects: snapshot
+            .route_effects
+            .into_iter()
+            .map(ai_defense_route_effect_response)
+            .collect(),
+        policy_effects: snapshot
+            .policy_effects
+            .into_iter()
+            .map(ai_defense_policy_effect_response)
+            .collect(),
+        identity_summaries: snapshot
+            .identity_summaries
+            .into_iter()
+            .map(ai_defense_identity_response)
+            .collect(),
+        route_profiles: snapshot
+            .route_profiles
+            .into_iter()
+            .map(ai_defense_route_profile_signal_response)
+            .collect(),
+        local_recommendations: snapshot
+            .local_recommendations
+            .into_iter()
+            .map(local_defense_recommendation_response)
+            .collect(),
+    }))
+}
+
 pub(crate) async fn local_defense_recommendations_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<LocalDefenseRecommendationsResponse>> {
@@ -234,6 +299,135 @@ pub(crate) async fn local_defense_recommendations_handler(
             .map(local_defense_recommendation_response)
             .collect(),
     }))
+}
+
+fn ai_defense_runtime_pressure_response(
+    value: crate::core::AiDefenseRuntimePressureSignal,
+) -> AiDefenseRuntimePressureResponse {
+    AiDefenseRuntimePressureResponse {
+        level: value.level,
+        defense_depth: value.defense_depth,
+        prefer_drop: value.prefer_drop,
+        trim_event_persistence: value.trim_event_persistence,
+        l7_friction_pressure_percent: value.l7_friction_pressure_percent,
+        identity_pressure_percent: value.identity_pressure_percent,
+        avg_proxy_latency_ms: value.avg_proxy_latency_ms,
+    }
+}
+
+fn ai_defense_l4_pressure_response(
+    value: crate::core::AiDefenseL4Signal,
+) -> AiDefenseL4PressureResponse {
+    AiDefenseL4PressureResponse {
+        active_connections: value.active_connections,
+        blocked_connections: value.blocked_connections,
+        rate_limit_hits: value.rate_limit_hits,
+        ddos_events: value.ddos_events,
+        protocol_anomalies: value.protocol_anomalies,
+        defense_actions: value.defense_actions,
+        top_ports: value
+            .top_ports
+            .into_iter()
+            .map(|port| AiDefensePortResponse {
+                port: port.port,
+                connections: port.connections,
+                blocks: port.blocks,
+                ddos_events: port.ddos_events,
+            })
+            .collect(),
+    }
+}
+
+fn ai_defense_route_effect_response(
+    value: crate::core::AiDefenseRouteEffectSignal,
+) -> AiDefenseRouteEffectResponse {
+    AiDefenseRouteEffectResponse {
+        site_id: value.site_id,
+        route: value.route,
+        total_responses: value.total_responses,
+        upstream_successes: value.upstream_successes,
+        upstream_errors: value.upstream_errors,
+        local_responses: value.local_responses,
+        blocked_responses: value.blocked_responses,
+        challenge_issued: value.challenge_issued,
+        challenge_verified: value.challenge_verified,
+        interactive_sessions: value.interactive_sessions,
+        policy_matched_responses: value.policy_matched_responses,
+        suspected_false_positive_events: value.suspected_false_positive_events,
+        status_families: value.status_families,
+        status_codes: value.status_codes,
+        policy_actions: value.policy_actions,
+        avg_latency_ms: value.avg_latency_ms,
+        slow_responses: value.slow_responses,
+        false_positive_risk: value.false_positive_risk,
+        effectiveness_hint: value.effectiveness_hint,
+    }
+}
+
+fn ai_defense_policy_effect_response(
+    value: crate::core::AiDefensePolicyEffectSignal,
+) -> AiDefensePolicyEffectResponse {
+    AiDefensePolicyEffectResponse {
+        policy_key: value.policy_key,
+        scope_type: value.scope_type,
+        scope_value: value.scope_value,
+        action: value.action,
+        hit_count: value.hit_count,
+        outcome_status: value.outcome_status,
+        outcome_score: value.outcome_score,
+        observations: value.observations,
+        upstream_errors: value.upstream_errors,
+        suspected_false_positive_events: value.suspected_false_positive_events,
+        challenge_verified: value.challenge_verified,
+        pressure_after_observations: value.pressure_after_observations,
+    }
+}
+
+fn ai_defense_identity_response(
+    value: crate::core::AiDefenseIdentitySignal,
+) -> AiDefenseIdentityResponse {
+    AiDefenseIdentityResponse {
+        site_id: value.site_id,
+        route: value.route,
+        total_events: value.total_events,
+        distinct_client_count: value.distinct_client_count,
+        unresolved_events: value.unresolved_events,
+        trusted_proxy_events: value.trusted_proxy_events,
+        verified_challenge_events: value.verified_challenge_events,
+        interactive_session_events: value.interactive_session_events,
+        spoofed_forward_header_events: value.spoofed_forward_header_events,
+        top_user_agents: value
+            .top_user_agents
+            .into_iter()
+            .map(|item| AiDefenseUserAgentResponse {
+                value: item.value,
+                count: item.count,
+            })
+            .collect(),
+    }
+}
+
+fn ai_defense_route_profile_signal_response(
+    value: crate::core::AiDefenseRouteProfileSignal,
+) -> AiDefenseRouteProfileSignalResponse {
+    AiDefenseRouteProfileSignalResponse {
+        site_id: value.site_id,
+        route_pattern: value.route_pattern,
+        match_mode: value.match_mode,
+        route_type: value.route_type,
+        sensitivity: value.sensitivity,
+        auth_required: value.auth_required,
+        normal_traffic_pattern: value.normal_traffic_pattern,
+        recommended_actions: value.recommended_actions,
+        avoid_actions: value.avoid_actions,
+        evidence: value.evidence,
+        raw_confidence: value.raw_confidence,
+        staleness_secs: value.staleness_secs,
+        confidence: value.confidence,
+        source: value.source,
+        status: value.status,
+        rationale: value.rationale,
+    }
 }
 
 pub(crate) async fn list_ai_route_profiles_handler(

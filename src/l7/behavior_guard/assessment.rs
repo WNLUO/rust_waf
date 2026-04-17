@@ -246,6 +246,24 @@ pub(super) fn assess_samples(
         score += 20;
         flags.push("low_and_slow");
     }
+    if total >= 8
+        && distinct_client_ips <= 2
+        && repeated_ratio_percent >= 90
+        && document_requests >= 6
+        && document_repeated_ratio_percent >= 90
+        && non_document_requests <= document_requests.saturating_div(2).max(1)
+    {
+        score += 25;
+        flags.push("single_source_document_loop");
+    }
+    if total >= 8
+        && distinct_client_ips <= 2
+        && repeated_ratio_percent >= 90
+        && distinct_user_agents >= 4
+    {
+        score += 20;
+        flags.push("single_source_identity_rotation");
+    }
     if let Some(jitter_ms) = jitter_ms {
         if total >= 6 && jitter_ms <= 250 {
             score += 20;

@@ -555,7 +555,7 @@ impl L7BehaviorGuard {
         action: AggregateEnforcementAction,
         now: Instant,
     ) {
-        if !assessment_is_aggregate(&assessment.identity) {
+        if !assessment_allows_aggregate_enforcement(assessment) {
             return;
         }
         let ttl = match action {
@@ -670,11 +670,35 @@ fn behavior_aggregate_keys(
         format!("site:{host}|route:{route}|kind:{}", kind.as_str()),
         route.to_string(),
     )];
+    let client_ip = request
+        .client_ip
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| compact_component("client", value, MAX_BEHAVIOR_KEY_LEN));
+    if let Some(client_ip) = client_ip.as_ref() {
+        keys.push((
+            format!(
+                "site:{host}|client:{client_ip}|route:{route}|kind:{}",
+                kind.as_str()
+            ),
+            route.to_string(),
+        ));
+    }
     if let Some(family) = route_family(&request.uri, route) {
         keys.push((
             format!("site:{host}|family:{family}|kind:{}", kind.as_str()),
             format!("family:{family}"),
         ));
+        if let Some(client_ip) = client_ip.as_ref() {
+            keys.push((
+                format!(
+                    "site:{host}|client:{client_ip}|family:{family}|kind:{}",
+                    kind.as_str()
+                ),
+                format!("family:{family}"),
+            ));
+        }
     }
     keys
 }
@@ -766,7 +790,11 @@ fn distributed_assessment_is_actionable(assessment: &BehaviorAssessment) -> bool
                 "distributed_document_burst"
                     | "distributed_document_probe"
                     | "distributed_api_burst"
-            )
+            ) || (assessment.identity.contains("|client:")
+                && matches!(
+                    *flag,
+                    "single_source_document_loop" | "single_source_identity_rotation"
+                ))
         })
 }
 
@@ -789,6 +817,18 @@ fn assessment_is_aggregate(identity: &str) -> bool {
     identity.starts_with("site:")
         || identity.starts_with("aggregate:")
         || identity.starts_with("__overflow__:behavior-aggregate")
+}
+
+fn assessment_allows_aggregate_enforcement(assessment: &BehaviorAssessment) -> bool {
+    assessment_is_aggregate(&assessment.identity)
+        && assessment.flags.iter().any(|flag| {
+            matches!(
+                *flag,
+                "distributed_document_burst"
+                    | "distributed_document_probe"
+                    | "distributed_api_burst"
+            )
+        })
 }
 
 fn aggregate_enforcement_key(identity: &str) -> String {
@@ -1180,6 +1220,49 @@ mod tests {
         assert_eq!(
             next.get_metadata("l7.behavior.action").map(String::as_str),
             Some("aggregate_block")
+        );
+    }
+
+    #[tokio::test]
+    async fn single_source_identity_rotation_triggers_behavior_without_route_enforcement() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+
+        for index in 0..8 {
+            let mut request = request("GET", "/", "text/html");
+            request.set_client_ip("203.0.113.80".to_string());
+            request.add_header("user-agent".to_string(), format!("RotatingClient/{index}"));
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            last = guard.inspect_request(&mut request).await;
+        }
+
+        let result = last.expect("single-source rotating identities should be challenged");
+        assert_eq!(result.action, crate::core::InspectionAction::Respond);
+
+        let mut other_ip = request("GET", "/", "text/html");
+        other_ip.set_client_ip("203.0.113.200".to_string());
+        other_ip.add_header("user-agent".to_string(), "NormalBrowser".to_string());
+        other_ip.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        other_ip.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+        let result = guard.inspect_request(&mut other_ip).await;
+        assert!(
+            !matches!(
+                other_ip
+                    .get_metadata("l7.behavior.aggregate_enforcement")
+                    .map(String::as_str),
+                Some("active")
+            ),
+            "single-source identity rotation must not enable route-wide enforcement"
+        );
+        assert!(
+            result.is_none()
+                || other_ip
+                    .get_metadata("l7.behavior.flags")
+                    .map_or(true, |flags| {
+                        !flags.contains("single_source_identity_rotation")
+                    })
         );
     }
 

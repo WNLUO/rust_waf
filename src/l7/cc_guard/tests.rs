@@ -1,4 +1,6 @@
+use super::counters::{cleanup_batch_for_size, cleanup_interval_for_size};
 use super::*;
+use crate::core::InspectionLayer;
 use crate::protocol::HttpVersion;
 
 fn request(uri: &str) -> UnifiedHttpRequest {

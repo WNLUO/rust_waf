@@ -1,3 +1,4 @@
+use super::types::AiAuditModelOutput;
 use super::*;
 
 pub(super) fn model_output_needs_chinese_localization(output: &AiAuditModelOutput) -> bool {

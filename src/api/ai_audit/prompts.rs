@@ -1,3 +1,4 @@
+use super::types::AiAuditModelOutput;
 use super::*;
 
 pub(super) fn build_system_prompt() -> String {

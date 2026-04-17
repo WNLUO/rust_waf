@@ -1,6 +1,5 @@
 use dashmap::DashMap;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
@@ -8,136 +7,23 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
 
+mod types;
+
+use types::{
+    CachedOriginNode, GeoNode, IpSbGeoResponse, IpWhoisResponse, IpipRegionResponse,
+    PublicIpResponse, TrafficObservation,
+};
+pub use types::{
+    TrafficDecision, TrafficDirection, TrafficMapFlowSnapshot, TrafficMapNodeSnapshot,
+    TrafficMapSnapshot, TrafficRealtimeEvent, TrafficRealtimeEventRaw, TrafficRealtimeNode,
+};
+
 const ORIGIN_CACHE_TTL_SUCCESS_MS: i64 = 10 * 60 * 1_000;
 const ORIGIN_CACHE_TTL_PENDING_MS: i64 = 15 * 1_000;
 const EXTERNAL_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 const TRAFFIC_MAP_MAX_OBSERVATIONS: usize = 8_192;
 const TRAFFIC_MAP_MAX_GEO_CACHE_ENTRIES: usize = 2_048;
 const TRAFFIC_MAP_MAX_ACTIVE_IPS_PER_SNAPSHOT: usize = 512;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrafficDirection {
-    Ingress,
-    Egress,
-}
-
-impl TrafficDirection {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Ingress => "ingress",
-            Self::Egress => "egress",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TrafficDecision {
-    Allow,
-    Block,
-}
-
-impl TrafficDecision {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Allow => "allow",
-            Self::Block => "block",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TrafficMapNodeSnapshot {
-    pub id: String,
-    pub name: String,
-    pub region: String,
-    pub role: String,
-    pub lat: Option<f64>,
-    pub lng: Option<f64>,
-    pub traffic_weight: f64,
-    pub request_count: u64,
-    pub blocked_count: u64,
-    pub bandwidth_mbps: f64,
-    pub last_seen_at: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TrafficMapFlowSnapshot {
-    pub id: String,
-    pub node_id: String,
-    pub direction: String,
-    pub decision: String,
-    pub request_count: u64,
-    pub bytes: u64,
-    pub bandwidth_mbps: f64,
-    pub average_latency_ms: u64,
-    pub last_seen_at: i64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TrafficMapSnapshot {
-    pub scope: String,
-    pub window_seconds: u32,
-    pub generated_at: i64,
-    pub origin_node: TrafficMapNodeSnapshot,
-    pub nodes: Vec<TrafficMapNodeSnapshot>,
-    pub flows: Vec<TrafficMapFlowSnapshot>,
-    pub active_node_count: u32,
-    pub peak_bandwidth_mbps: f64,
-    pub allowed_flow_count: u32,
-    pub blocked_flow_count: u32,
-    pub live_traffic_score: f64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TrafficRealtimeEventRaw {
-    pub timestamp_ms: i64,
-    pub source_ip: String,
-    pub direction: String,
-    pub decision: String,
-    pub bytes: u64,
-    pub latency_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TrafficRealtimeNode {
-    pub id: String,
-    pub name: String,
-    pub region: String,
-    pub role: String,
-    pub lat: Option<f64>,
-    pub lng: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct TrafficRealtimeEvent {
-    pub timestamp_ms: i64,
-    pub direction: String,
-    pub decision: String,
-    pub bytes: u64,
-    pub latency_ms: Option<u64>,
-    pub source_ip: String,
-    pub node: TrafficRealtimeNode,
-}
-
-#[derive(Debug, Clone)]
-struct TrafficObservation {
-    timestamp_ms: i64,
-    source_ip: String,
-    direction: TrafficDirection,
-    decision: TrafficDecision,
-    bytes: u64,
-    latency_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-struct GeoNode {
-    id: &'static str,
-    name: &'static str,
-    region: &'static str,
-    lat: f64,
-    lng: f64,
-    traffic_weight: f64,
-}
 
 #[derive(Debug)]
 pub struct TrafficMapCollector {
@@ -147,13 +33,6 @@ pub struct TrafficMapCollector {
     http_client: Client,
     max_window_seconds: u32,
     realtime_tx: broadcast::Sender<TrafficRealtimeEventRaw>,
-}
-
-#[derive(Debug, Clone)]
-struct CachedOriginNode {
-    node: TrafficMapNodeSnapshot,
-    refreshed_at_ms: i64,
-    resolved: bool,
 }
 
 impl Default for TrafficMapCollector {
@@ -678,32 +557,6 @@ impl TrafficMapCollector {
             self.geo_cache.remove(&key);
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct IpWhoisResponse {
-    success: bool,
-    country_code: Option<String>,
-    region: Option<String>,
-    city: Option<String>,
-    latitude: Option<f64>,
-    longitude: Option<f64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PublicIpResponse {
-    ip: String,
-}
-
-type IpipRegionResponse = Vec<String>;
-
-#[derive(Debug, Deserialize)]
-struct IpSbGeoResponse {
-    country_code: Option<String>,
-    region: Option<String>,
-    city: Option<String>,
-    latitude: Option<f64>,
-    longitude: Option<f64>,
 }
 
 fn is_internal_ip(ip: IpAddr) -> bool {

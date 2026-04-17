@@ -61,6 +61,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
                 .post(system_handlers::upsert_ai_route_profile_handler),
         )
         .route(
+            "/dashboard/ai-route-profiles/:id/status",
+            patch(system_handlers::update_ai_route_profile_status_handler),
+        )
+        .route(
             "/dashboard/ai-temp-policies/:id",
             delete(system_handlers::delete_ai_temp_policy_handler),
         )

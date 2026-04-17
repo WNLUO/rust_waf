@@ -255,6 +255,70 @@ async fn test_ai_route_profile_refreshes_into_auto_defense_snapshot() {
 }
 
 #[tokio::test]
+async fn test_ai_route_profile_status_controls_runtime_cache() {
+    let db_path = unique_test_db_path("ai_route_profile_status");
+    let config = Config {
+        interface: "lo0".to_string(),
+        listen_addrs: vec!["127.0.0.1:0".to_string()],
+        tcp_upstream_addr: None,
+        udp_upstream_addr: None,
+        runtime_profile: RuntimeProfile::Standard,
+        api_enabled: false,
+        api_bind: "127.0.0.1:3740".to_string(),
+        bloom_enabled: false,
+        l4_bloom_false_positive_verification: false,
+        l7_bloom_false_positive_verification: false,
+        maintenance_interval_secs: 30,
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        sqlite_rules_enabled: false,
+        max_concurrent_tasks: 128,
+        ..Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+    let store = context.sqlite_store.as_ref().unwrap();
+    store
+        .upsert_ai_route_profile(&crate::storage::AiRouteProfileUpsert {
+            site_id: "site-a".to_string(),
+            route_pattern: "/api/login".to_string(),
+            match_mode: "exact".to_string(),
+            route_type: "authentication".to_string(),
+            sensitivity: "high".to_string(),
+            auth_required: "false".to_string(),
+            normal_traffic_pattern: "interactive".to_string(),
+            recommended_actions: vec!["tighten_route_cc".to_string()],
+            avoid_actions: Vec::new(),
+            confidence: 88,
+            source: "ai_observed".to_string(),
+            status: "candidate".to_string(),
+            rationale: "candidate".to_string(),
+            last_observed_at: Some(unix_timestamp()),
+            reviewed_at: None,
+        })
+        .await
+        .unwrap();
+
+    context.refresh_ai_route_profiles().await.unwrap();
+    assert!(context.active_ai_route_profiles().is_empty());
+
+    let candidate = store
+        .list_ai_route_profiles(Some("site-a"), Some("candidate"), 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
+        .unwrap();
+    store
+        .update_ai_route_profile_status(candidate.id, "active", Some(unix_timestamp()))
+        .await
+        .unwrap();
+    context.refresh_ai_route_profiles().await.unwrap();
+
+    assert_eq!(context.active_ai_route_profiles().len(), 1);
+}
+
+#[tokio::test]
 async fn test_ai_auto_defense_generates_route_profile_candidate() {
     let db_path = unique_test_db_path("ai_route_profile_candidate");
     let config = Config {

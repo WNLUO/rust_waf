@@ -86,4 +86,41 @@ impl SqliteStore {
             .fetch_all(&self.pool)
             .await?)
     }
+
+    pub async fn update_ai_route_profile_status(
+        &self,
+        id: i64,
+        status: &str,
+        reviewed_at: Option<i64>,
+    ) -> Result<Option<AiRouteProfileEntry>> {
+        let now = unix_timestamp();
+        let reviewed_at = reviewed_at.or(Some(now));
+        sqlx::query(
+            r#"
+            UPDATE ai_route_profiles
+            SET status = ?, reviewed_at = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(status)
+        .bind(reviewed_at)
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(sqlx::query_as::<_, AiRouteProfileEntry>(
+            r#"
+            SELECT id, created_at, updated_at, last_observed_at, site_id, route_pattern, match_mode,
+                   route_type, sensitivity, auth_required, normal_traffic_pattern,
+                   recommended_actions_json, avoid_actions_json, confidence, source, status,
+                   rationale, reviewed_at
+            FROM ai_route_profiles
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
 }

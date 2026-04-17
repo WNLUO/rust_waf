@@ -286,6 +286,30 @@ pub(crate) async fn upsert_ai_route_profile_handler(
     Ok(Json(ai_route_profile_response(profile)))
 }
 
+pub(crate) async fn update_ai_route_profile_status_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+    ExtractJson(payload): ExtractJson<AiRouteProfileStatusUpdateRequest>,
+) -> ApiResult<Json<AiRouteProfileResponse>> {
+    let status = normalize_route_profile_enum(
+        payload.status,
+        &["candidate", "active", "approved", "rejected", "disabled"],
+        "candidate",
+    );
+    let store = sqlite_store(&state)?;
+    let profile = store
+        .update_ai_route_profile_status(id, &status, payload.reviewed_at)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found("未找到对应的 AI route profile"))?;
+    state
+        .context
+        .refresh_ai_route_profiles()
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(ai_route_profile_response(profile)))
+}
+
 fn local_defense_recommendation_response(
     item: crate::core::LocalDefenseRecommendation,
 ) -> LocalDefenseRecommendationResponse {

@@ -366,6 +366,12 @@ pub struct AiRouteProfileUpsertRequest {
     pub(crate) reviewed_at: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AiRouteProfileStatusUpdateRequest {
+    pub(crate) status: String,
+    pub(crate) reviewed_at: Option<i64>,
+}
+
 fn default_ai_route_profile_match_mode() -> String {
     "exact".to_string()
 }

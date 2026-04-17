@@ -3,7 +3,10 @@ import type { AutoTuningRuntimePayload } from '@/features/l7/types/l7'
 import type { L7ConfigForm } from '@/features/l7/utils/adminL7'
 import { listFieldClass, numberInputClass } from '@/features/l7/utils/adminL7'
 import { useAdminL7ConfigSection } from '@/features/l7/composables/useAdminL7ConfigSection'
-import L7ContentTypeDialog from '@/features/l7/components/L7ContentTypeDialog.vue'
+import L7SafelineInterceptPanel from '@/features/l7/components/L7SafelineInterceptPanel.vue'
+import L7Http3Panel from '@/features/l7/components/L7Http3Panel.vue'
+import L7SlowAttackPanel from '@/features/l7/components/L7SlowAttackPanel.vue'
+import L7CcDefensePanel from '@/features/l7/components/L7CcDefensePanel.vue'
 
 const props = defineProps<{
   form: L7ConfigForm
@@ -131,6 +134,67 @@ const {
   closeContentTypeDialog,
   safelineResponseBodySource,
 } = useAdminL7ConfigSection(props, emit)
+
+const safelineControls = {
+  safelineInterceptEnabled,
+  safelineInterceptAction,
+  safelineInterceptMatchMode,
+  safelineInterceptMaxBodyBytes,
+  safelineInterceptBlockDuration,
+  safelineResponseStatusCode,
+  safelineResponseContentType,
+  safelineResponseBodySource,
+  contentTypeDialogOpen,
+  contentTypeDraft,
+  contentTypeOptions,
+  openContentTypeDialog,
+  selectContentTypeOption,
+  confirmContentTypeDialog,
+  closeContentTypeDialog,
+}
+
+const http3Controls = {
+  http3ConnectionMigration,
+  http3Tls13Enabled,
+  http3MaxStreams,
+  http3IdleTimeout,
+  http3Mtu,
+  http3MaxFrameSize,
+  http3QpackTableSize,
+  http3CertificatePath,
+  http3PrivateKeyPath,
+}
+
+const slowAttackControls = {
+  slowAttackDefenseEnabled,
+  slowAttackHeaderMinRate,
+  slowAttackBodyMinRate,
+  slowAttackIdleKeepaliveTimeout,
+  slowAttackEventWindow,
+  slowAttackMaxEvents,
+  slowAttackBlockDuration,
+}
+
+const ccDefenseControls = {
+  ccDefenseEnabled,
+  ccRequestWindow,
+  ccIpChallengeThreshold,
+  ccIpBlockThreshold,
+  ccHostChallengeThreshold,
+  ccHostBlockThreshold,
+  ccRouteChallengeThreshold,
+  ccRouteBlockThreshold,
+  ccHotPathChallengeThreshold,
+  ccHotPathBlockThreshold,
+  ccDelayThresholdPercent,
+  ccDelayMs,
+  ccChallengeTtl,
+  ccChallengeCookieName,
+  ccHardRouteBlockMultiplier,
+  ccHardHostBlockMultiplier,
+  ccHardIpBlockMultiplier,
+  ccHardHotPathBlockMultiplier,
+}
 </script>
 
 <template>
@@ -344,88 +408,10 @@ const {
       </div>
     </div>
 
-    <div class="mt-4 border-t border-slate-200 pt-4">
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <p class="text-sm tracking-wider text-blue-700">
-            慢速攻击防护（独立运行项）
-          </p>
-          <p class="mt-1 text-xs leading-5 text-slate-500">
-            覆盖慢速 header、慢速 body 和 idle keep-alive
-            占坑，命中后自动断连、记事件，并在窗口内升级封禁。
-          </p>
-        </div>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>启用慢速攻击防护</span>
-          <input
-            v-model="slowAttackDefenseEnabled"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-      </div>
-
-      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <label class="text-sm text-stone-700">
-          Header 最低速率(B/s)
-          <input
-            v-model.number="slowAttackHeaderMinRate"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          Body 最低速率(B/s)
-          <input
-            v-model.number="slowAttackBodyMinRate"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          Keep-Alive 空闲超时(ms)
-          <input
-            v-model.number="slowAttackIdleKeepaliveTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          统计窗口(s)
-          <input
-            v-model.number="slowAttackEventWindow"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          窗口升级阈值
-          <input
-            v-model.number="slowAttackMaxEvents"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          升级封禁时长(s)
-          <input
-            v-model.number="slowAttackBlockDuration"
-            type="number"
-            min="30"
-            :class="numberInputClass"
-          />
-        </label>
-      </div>
-    </div>
+    <L7SlowAttackPanel
+      :controls="slowAttackControls"
+      :number-input-class="numberInputClass"
+    />
 
     <div class="mt-4 border-t border-slate-200 pt-4">
       <div
@@ -815,339 +801,21 @@ const {
       </div>
     </div>
 
-    <div
+    <L7CcDefensePanel
       v-if="!hideAdaptiveManagedSections"
-      class="mt-3 border-t border-slate-200 pt-6"
-    >
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <p class="text-sm tracking-wider text-blue-700">
-            L7 CC 防护（自动化接管项）
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-3">
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
-          >
-            <span>启用 CC 守卫</span>
-            <input
-              v-model="ccDefenseEnabled"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-        </div>
-      </div>
+      :controls="ccDefenseControls"
+      :number-input-class="numberInputClass"
+    />
 
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700"
-          >滑窗时长(s)<input
-            v-model.number="ccRequestWindow"
-            type="number"
-            min="3"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >延迟触发比例(%)<input
-            v-model.number="ccDelayThresholdPercent"
-            type="number"
-            min="25"
-            max="95"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >延迟时长(ms)<input
-            v-model.number="ccDelayMs"
-            type="number"
-            min="0"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >IP 挑战阈值<input
-            v-model.number="ccIpChallengeThreshold"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >IP 429 阈值<input
-            v-model.number="ccIpBlockThreshold"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >主机挑战阈值<input
-            v-model.number="ccHostChallengeThreshold"
-            type="number"
-            min="5"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >Host 429 阈值<input
-            v-model.number="ccHostBlockThreshold"
-            type="number"
-            min="5"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >路由挑战阈值<input
-            v-model.number="ccRouteChallengeThreshold"
-            type="number"
-            min="3"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >路由 429 阈值<input
-            v-model.number="ccRouteBlockThreshold"
-            type="number"
-            min="3"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >热点路径挑战阈值<input
-            v-model.number="ccHotPathChallengeThreshold"
-            type="number"
-            min="32"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >热点路径 429 阈值<input
-            v-model.number="ccHotPathBlockThreshold"
-            type="number"
-            min="32"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >挑战有效期(秒)<input
-            v-model.number="ccChallengeTtl"
-            type="number"
-            min="30"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >挑战 Cookie 名称<input
-            v-model="ccChallengeCookieName"
-            type="text"
-            placeholder="例如 rwaf_cc"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-路由倍率<input
-            v-model.number="ccHardRouteBlockMultiplier"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-Host 倍率<input
-            v-model.number="ccHardHostBlockMultiplier"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-IP 倍率<input
-            v-model.number="ccHardIpBlockMultiplier"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-热点路径倍率<input
-            v-model.number="ccHardHotPathBlockMultiplier"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-      </div>
-    </div>
+    <L7SafelineInterceptPanel
+      :controls="safelineControls"
+      :number-input-class="numberInputClass"
+    />
 
-    <div class="mt-3 border-t border-slate-200 pt-6">
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <p class="text-sm tracking-wider text-blue-700">
-            SafeLine 响应接管（独立运行项）
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-3">
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
-          >
-            <span>启用响应接管</span>
-            <input
-              v-model="safelineInterceptEnabled"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-        </div>
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700">
-          默认动作
-          <select v-model="safelineInterceptAction" class="l7-inline-select">
-            <option value="replace">替换响应</option>
-            <option value="pass">放行</option>
-            <option value="drop">直接丢弃</option>
-            <option value="replace_and_block_ip">替换并封禁 IP</option>
-          </select>
-        </label>
-        <label class="l7-inline-field text-sm text-stone-700">
-          匹配模式
-          <select v-model="safelineInterceptMatchMode" class="l7-inline-select">
-            <option value="strict">严格匹配</option>
-            <option value="relaxed">宽松匹配</option>
-          </select>
-        </label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >识别最大响应体(bytes)<input
-            v-model.number="safelineInterceptMaxBodyBytes"
-            type="number"
-            min="256"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >本地封禁时长(s)<input
-            v-model.number="safelineInterceptBlockDuration"
-            type="number"
-            min="30"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >替换状态码<input
-            v-model.number="safelineResponseStatusCode"
-            type="number"
-            min="100"
-            max="599"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
-          >替换 Content-Type<button
-            type="button"
-            :class="`${numberInputClass} l7-inline-button`"
-            @click="openContentTypeDialog"
-          >
-            {{ safelineResponseContentType || '点击选择或输入' }}
-          </button>
-        </label>
-        <div class="text-sm text-stone-700">
-          响应体来源
-          <select
-            v-model="safelineResponseBodySource"
-            class="mt-2 w-full rounded-[18px] border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500/40"
-          >
-            <option value="inline_text">内联文本</option>
-            <option value="file">文件</option>
-          </select>
-        </div>
-      </div>
-
-      <L7ContentTypeDialog
-        v-if="contentTypeDialogOpen"
-        v-model:content-type-draft="contentTypeDraft"
-        :content-type-options="contentTypeOptions"
-        :select-content-type-option="selectContentTypeOption"
-        :confirm-content-type-dialog="confirmContentTypeDialog"
-        :close-content-type-dialog="closeContentTypeDialog"
-      />
-    </div>
-
-    <div class="mt-3 border-t border-slate-200 pt-6">
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <p class="text-sm tracking-wider text-blue-700">
-            HTTP/3 配置（独立运行项）
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-3">
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
-          >
-            <span>连接迁移支持</span>
-            <input
-              v-model="http3ConnectionMigration"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
-          >
-            <span>TLS 1.3</span>
-            <input
-              v-model="http3Tls13Enabled"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-        </div>
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700"
-          >最大并发流<input
-            v-model.number="http3MaxStreams"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >空闲超时(s)<input
-            v-model.number="http3IdleTimeout"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >MTU<input
-            v-model.number="http3Mtu"
-            type="number"
-            min="1200"
-            max="1500"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >最大帧大小<input
-            v-model.number="http3MaxFrameSize"
-            type="number"
-            min="65536"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >QPACK 表大小<input
-            v-model.number="http3QpackTableSize"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
-          >证书路径<input
-            v-model="http3CertificatePath"
-            type="text"
-            placeholder="例如 /path/to/cert.pem"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
-          >私钥路径<input
-            v-model="http3PrivateKeyPath"
-            type="text"
-            placeholder="例如 /path/to/key.pem"
-            :class="numberInputClass"
-        /></label>
-      </div>
-    </div>
+    <L7Http3Panel
+      :controls="http3Controls"
+      :number-input-class="numberInputClass"
+    />
   </section>
 </template>
 

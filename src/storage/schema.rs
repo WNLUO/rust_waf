@@ -56,6 +56,58 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_blocked_ips_provider_ip_expires_at
             ON blocked_ips(provider, ip, expires_at DESC);
 
+        CREATE TABLE IF NOT EXISTS ai_visitor_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            identity_key TEXT NOT NULL,
+            identity_source TEXT NOT NULL,
+            site_id TEXT NOT NULL,
+            client_ip TEXT NOT NULL,
+            user_agent TEXT NOT NULL,
+            first_seen_at INTEGER NOT NULL,
+            last_seen_at INTEGER NOT NULL,
+            request_count INTEGER NOT NULL DEFAULT 0,
+            document_count INTEGER NOT NULL DEFAULT 0,
+            api_count INTEGER NOT NULL DEFAULT 0,
+            static_count INTEGER NOT NULL DEFAULT 0,
+            admin_count INTEGER NOT NULL DEFAULT 0,
+            challenge_count INTEGER NOT NULL DEFAULT 0,
+            challenge_verified_count INTEGER NOT NULL DEFAULT 0,
+            fingerprint_seen INTEGER NOT NULL DEFAULT 0,
+            human_confidence INTEGER NOT NULL DEFAULT 0,
+            automation_risk INTEGER NOT NULL DEFAULT 0,
+            probe_risk INTEGER NOT NULL DEFAULT 0,
+            abuse_risk INTEGER NOT NULL DEFAULT 0,
+            false_positive_risk TEXT NOT NULL DEFAULT 'low',
+            state TEXT NOT NULL DEFAULT 'observing',
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            last_ai_review_at INTEGER,
+            ai_rationale TEXT NOT NULL DEFAULT '',
+            expires_at INTEGER NOT NULL,
+            UNIQUE(identity_key, site_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_visitor_profiles_last_seen_at
+            ON ai_visitor_profiles(last_seen_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_ai_visitor_profiles_state
+            ON ai_visitor_profiles(state, last_seen_at DESC);
+
+        CREATE TABLE IF NOT EXISTS ai_visitor_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            decision_key TEXT NOT NULL UNIQUE,
+            identity_key TEXT NOT NULL,
+            site_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            confidence INTEGER NOT NULL,
+            ttl_secs INTEGER NOT NULL,
+            rationale TEXT NOT NULL,
+            applied INTEGER NOT NULL DEFAULT 0,
+            effect_json TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_visitor_decisions_created_at
+            ON ai_visitor_decisions(created_at DESC);
+
         CREATE TABLE IF NOT EXISTS fingerprint_profiles (
             identity TEXT PRIMARY KEY,
             identity_kind TEXT NOT NULL,

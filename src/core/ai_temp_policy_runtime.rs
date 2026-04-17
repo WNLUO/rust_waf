@@ -75,6 +75,7 @@ impl WafContext {
         let mut behavior_score_boost = 0u32;
         let mut force_watch = false;
         let mut force_challenge = false;
+        let mut reduce_friction = false;
         let mut block_reason = None::<String>;
 
         for policy in policies {
@@ -127,6 +128,9 @@ impl WafContext {
                 "add_behavior_watch" => {
                     behavior_score_boost = behavior_score_boost.max(20);
                     force_watch = true;
+                }
+                "reduce_friction" => {
+                    reduce_friction = true;
                 }
                 _ => {}
             }
@@ -190,6 +194,9 @@ impl WafContext {
         }
         if force_watch {
             request.add_metadata("ai.behavior.force_watch".to_string(), "true".to_string());
+        }
+        if reduce_friction {
+            request.add_metadata("ai.visitor.reduce_friction".to_string(), "true".to_string());
         }
 
         None

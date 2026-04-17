@@ -86,6 +86,16 @@ impl L7BehaviorGuard {
             );
             return None;
         }
+        if request
+            .get_metadata("ai.visitor.reduce_friction")
+            .is_some_and(|value| value == "true")
+        {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "visitor_reduce_friction".to_string(),
+            );
+            return None;
+        }
         let defense_depth = runtime_defense_depth(request);
         if defense_depth == crate::core::DefenseDepth::Survival {
             request.add_metadata(

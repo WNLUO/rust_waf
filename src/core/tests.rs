@@ -528,6 +528,113 @@ async fn test_ai_defense_snapshot_includes_route_effect_feedback() {
 }
 
 #[tokio::test]
+async fn test_visitor_intelligence_trusts_verified_browser_session() {
+    let context = WafContext::new(Config {
+        sqlite_enabled: false,
+        ..Config::default()
+    })
+    .await
+    .unwrap();
+
+    for uri in [
+        "/",
+        "/assets/app.css",
+        "/assets/app.js",
+        "/assets/logo.png",
+        "/about",
+        "/assets/site.woff2",
+    ] {
+        let mut request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "GET".to_string(),
+            uri.to_string(),
+        );
+        request.set_client_ip("203.0.113.210".to_string());
+        request.add_header("host".to_string(), "example.test".to_string());
+        request.add_header(
+            "user-agent".to_string(),
+            "Mozilla/5.0 visitor intelligence test".to_string(),
+        );
+        request.add_header("referer".to_string(), "https://example.test/".to_string());
+        request.add_header("cookie".to_string(), "rwaf_fp=verified-browser".to_string());
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        context.note_ai_route_result(
+            &request,
+            AiRouteResultObservation {
+                status_code: 200,
+                latency_ms: Some(18),
+                upstream_error: false,
+                local_response: false,
+                blocked: false,
+            },
+        );
+    }
+
+    let snapshot = context.visitor_intelligence_snapshot(10);
+    let profile = snapshot
+        .profiles
+        .iter()
+        .find(|item| item.identity_key == "fp:verified-browser")
+        .expect("verified browser visitor should be tracked");
+    assert_eq!(profile.state, "trusted_session");
+    assert!(profile.human_confidence >= 75);
+    assert!(snapshot
+        .recommendations
+        .iter()
+        .any(|item| item.action == "mark_trusted_temporarily"));
+}
+
+#[tokio::test]
+async fn test_visitor_intelligence_triggers_ai_after_suspicious_volume() {
+    let context = WafContext::new(Config {
+        sqlite_enabled: false,
+        ..Config::default()
+    })
+    .await
+    .unwrap();
+
+    for _ in 0..8 {
+        let mut request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/wp-login.php".to_string(),
+        );
+        request.set_client_ip("203.0.113.211".to_string());
+        request.add_header("host".to_string(), "example.test".to_string());
+        request.add_header("user-agent".to_string(), "curl/8.0".to_string());
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        context.note_ai_route_result(
+            &request,
+            AiRouteResultObservation {
+                status_code: 404,
+                latency_ms: Some(12),
+                upstream_error: false,
+                local_response: false,
+                blocked: false,
+            },
+        );
+    }
+
+    let snapshot = context.visitor_intelligence_snapshot(10);
+    let profile = snapshot
+        .profiles
+        .iter()
+        .find(|item| item.client_ip == "203.0.113.211")
+        .expect("suspicious visitor should be tracked");
+    assert_eq!(profile.state, "suspected_probe");
+    assert_eq!(profile.tracking_priority, "high");
+    assert!(snapshot
+        .recommendations
+        .iter()
+        .any(|item| item.action == "increase_challenge"));
+
+    let trigger = context.consume_ai_auto_defense_trigger(unix_timestamp());
+    assert!(trigger
+        .as_deref()
+        .is_some_and(|reason| reason.starts_with("visitor_intelligence:increase_challenge")));
+}
+
+#[tokio::test]
 async fn test_ai_defense_snapshot_includes_policy_effect_feedback() {
     let db_path = unique_test_db_path("ai_policy_effect_snapshot");
     let context = WafContext::new(Config {

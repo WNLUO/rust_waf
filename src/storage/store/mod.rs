@@ -9,4 +9,5 @@ include!("events_repo.rs");
 include!("ai_audit_repo.rs");
 include!("ai_temp_policy_repo.rs");
 include!("ai_route_profile_repo.rs");
+include!("ai_visitor_repo.rs");
 include!("ops_repo.rs");

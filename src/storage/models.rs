@@ -236,6 +236,94 @@ pub struct AiTempPolicyOutcomeRecord {
     pub route_still_under_pressure: bool,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiVisitorProfileEntry {
+    pub id: i64,
+    pub identity_key: String,
+    pub identity_source: String,
+    pub site_id: String,
+    pub client_ip: String,
+    pub user_agent: String,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+    pub request_count: i64,
+    pub document_count: i64,
+    pub api_count: i64,
+    pub static_count: i64,
+    pub admin_count: i64,
+    pub challenge_count: i64,
+    pub challenge_verified_count: i64,
+    pub fingerprint_seen: bool,
+    pub human_confidence: i64,
+    pub automation_risk: i64,
+    pub probe_risk: i64,
+    pub abuse_risk: i64,
+    pub false_positive_risk: String,
+    pub state: String,
+    pub summary_json: String,
+    pub last_ai_review_at: Option<i64>,
+    pub ai_rationale: String,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiVisitorProfileUpsert {
+    pub identity_key: String,
+    pub identity_source: String,
+    pub site_id: String,
+    pub client_ip: String,
+    pub user_agent: String,
+    pub first_seen_at: i64,
+    pub last_seen_at: i64,
+    pub request_count: i64,
+    pub document_count: i64,
+    pub api_count: i64,
+    pub static_count: i64,
+    pub admin_count: i64,
+    pub challenge_count: i64,
+    pub challenge_verified_count: i64,
+    pub fingerprint_seen: bool,
+    pub human_confidence: i64,
+    pub automation_risk: i64,
+    pub probe_risk: i64,
+    pub abuse_risk: i64,
+    pub false_positive_risk: String,
+    pub state: String,
+    pub summary_json: String,
+    pub last_ai_review_at: Option<i64>,
+    pub ai_rationale: String,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiVisitorDecisionEntry {
+    pub id: i64,
+    pub decision_key: String,
+    pub identity_key: String,
+    pub site_id: String,
+    pub created_at: i64,
+    pub action: String,
+    pub confidence: i64,
+    pub ttl_secs: i64,
+    pub rationale: String,
+    pub applied: bool,
+    pub effect_json: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiVisitorDecisionUpsert {
+    pub decision_key: String,
+    pub identity_key: String,
+    pub site_id: String,
+    pub created_at: i64,
+    pub action: String,
+    pub confidence: i64,
+    pub ttl_secs: i64,
+    pub rationale: String,
+    pub applied: bool,
+    pub effect_json: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct AiTempPolicyUpsert {
     pub source_report_id: Option<i64>,

@@ -56,6 +56,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(system_handlers::ai_defense_snapshot_handler),
         )
         .route(
+            "/dashboard/ai-visitor-profiles",
+            get(system_handlers::ai_visitor_profiles_handler),
+        )
+        .route(
             "/dashboard/local-defense-recommendations",
             get(system_handlers::local_defense_recommendations_handler),
         )

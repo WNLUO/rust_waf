@@ -147,6 +147,7 @@ fn handle_browser_fingerprint_report(
         .clone()
         .unwrap_or_else(|| packet.source_ip.to_string());
     let provider_event_id = provided_provider_event_id.unwrap_or(derived_provider_event_id);
+    context.note_visitor_fingerprint_report(request, &provider_event_id);
 
     payload_object.insert(
         "fingerprintId".to_string(),

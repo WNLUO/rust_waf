@@ -15,6 +15,7 @@ mod self_protection;
 mod storage_runtime;
 mod system_profile;
 pub mod traffic_map;
+mod visitor_intelligence;
 
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
@@ -45,6 +46,9 @@ pub use packet::{
 };
 pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
 pub use self_protection::ServerPublicIpSnapshot;
+pub use visitor_intelligence::{
+    VisitorDecisionSignal, VisitorIntelligenceSnapshot, VisitorProfileSignal, VisitorRouteSummary,
+};
 
 #[derive(Debug, Clone)]
 pub struct UpstreamHealthSnapshot {
@@ -94,6 +98,8 @@ pub struct WafContext {
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
+    visitor_intelligence_buckets:
+        DashMap<String, std::sync::Mutex<visitor_intelligence::VisitorIntelligenceBucket>>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -217,6 +223,7 @@ pub struct AiDefenseSignalSnapshot {
     pub route_profiles: Vec<AiDefenseRouteProfileSignal>,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
     pub server_public_ips: ServerPublicIpSnapshot,
+    pub visitor_intelligence: VisitorIntelligenceSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -477,6 +484,7 @@ impl WafContext {
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
             server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),
+            visitor_intelligence_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,

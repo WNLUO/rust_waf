@@ -31,6 +31,9 @@ impl L7CcGuard {
             request.add_metadata("l7.cc.skipped".to_string(), "server_public_ip".to_string());
             return None;
         }
+        let reduce_friction = request
+            .get_metadata("ai.visitor.reduce_friction")
+            .is_some_and(|value| value == "true");
         let defense_depth = runtime_defense_depth(request);
         let rich_tracking = matches!(
             defense_depth,
@@ -423,7 +426,7 @@ impl L7CcGuard {
             || (hot_path_effective >= hot_path_challenge_threshold
                 && route_effective >= route_challenge_threshold.saturating_sub(4).max(1));
 
-        if !verified && !low_risk_subresource && challenge_needed {
+        if !reduce_friction && !verified && !low_risk_subresource && challenge_needed {
             if request_kind == RequestKind::StaticAsset {
                 request.add_metadata(
                     "l7.cc.action".to_string(),
@@ -460,7 +463,8 @@ impl L7CcGuard {
         let delay_threshold = u32::from(delay_threshold_percent)
             .saturating_mul(config.route_challenge_threshold.max(1))
             / 100;
-        if config.delay_ms > 0
+        if !reduce_friction
+            && config.delay_ms > 0
             && (route_effective >= delay_threshold.max(1)
                 || host_effective
                     >= u32::from(delay_threshold_percent)

@@ -164,6 +164,7 @@ impl WafContext {
         request: &UnifiedHttpRequest,
         observation: AiRouteResultObservation,
     ) {
+        self.note_visitor_route_result(request, &observation);
         if !self
             .config_snapshot()
             .integrations
@@ -297,6 +298,17 @@ impl WafContext {
                     recommendation.hard_events
                 )
             });
+        let visitor_trigger = self
+            .visitor_intelligence_snapshot(4)
+            .recommendations
+            .into_iter()
+            .find(|decision| decision.confidence >= config.auto_defense_min_confidence as u8)
+            .map(|decision| {
+                format!(
+                    "visitor_intelligence:{}:{}:confidence={}",
+                    decision.action, decision.identity_key, decision.confidence
+                )
+            });
         let mut guard = self
             .ai_defense_trigger_runtime
             .lock()
@@ -310,6 +322,16 @@ impl WafContext {
                 .or_else(|| Some("event_signal_threshold".to_string()));
         }
         if let Some(reason) = recommendation_trigger {
+            if !guard.last_trigger_at.is_some_and(|last| {
+                now.saturating_sub(last) < config.auto_defense_trigger_cooldown_secs as i64
+            }) {
+                guard.last_trigger_at = Some(now);
+                guard.last_run_at = Some(now);
+                guard.pending_since = None;
+                return Some(reason);
+            }
+        }
+        if let Some(reason) = visitor_trigger {
             if !guard.last_trigger_at.is_some_and(|last| {
                 now.saturating_sub(last) < config.auto_defense_trigger_cooldown_secs as i64
             }) {
@@ -391,6 +413,7 @@ impl WafContext {
             route_profiles: self.ai_defense_route_profile_signals(24),
             local_recommendations: self.local_defense_recommendations(24),
             server_public_ips: self.server_public_ip_snapshot(),
+            visitor_intelligence: self.visitor_intelligence_snapshot(24),
         })
     }
 
@@ -545,6 +568,15 @@ impl WafContext {
         if result.applied > 0 {
             self.refresh_ai_temp_policies().await?;
         }
+        let visitor_applied = self
+            .apply_visitor_intelligence_decisions(
+                store.as_ref(),
+                &snapshot.visitor_intelligence.recommendations,
+                now,
+                max_apply.saturating_sub(result.applied),
+            )
+            .await?;
+        result.applied += visitor_applied;
         if result.applied > 0 || result.skipped > 0 {
             let mut guard = self
                 .ai_defense_trigger_runtime
@@ -558,7 +590,85 @@ impl WafContext {
         {
             log::warn!("Failed to generate AI route profile candidates: {}", err);
         }
+        self.persist_visitor_intelligence_snapshot(48);
         Ok(result)
+    }
+
+    async fn apply_visitor_intelligence_decisions(
+        &self,
+        store: &crate::storage::SqliteStore,
+        decisions: &[super::VisitorDecisionSignal],
+        now: i64,
+        max_apply: usize,
+    ) -> Result<usize> {
+        let mut applied = 0usize;
+        for decision in decisions {
+            store
+                .upsert_ai_visitor_decision(&crate::storage::AiVisitorDecisionUpsert {
+                    decision_key: decision.decision_key.clone(),
+                    identity_key: decision.identity_key.clone(),
+                    site_id: decision.site_id.clone(),
+                    created_at: now,
+                    action: decision.action.clone(),
+                    confidence: i64::from(decision.confidence),
+                    ttl_secs: decision.ttl_secs as i64,
+                    rationale: decision.rationale.clone(),
+                    applied: false,
+                    effect_json: serde_json::json!({"status":"observed"}).to_string(),
+                })
+                .await?;
+            if applied >= max_apply {
+                continue;
+            }
+            let Some((policy_action, suggested_value)) =
+                visitor_decision_policy_action(&decision.action)
+            else {
+                continue;
+            };
+            store
+                .upsert_ai_temp_policy(&AiTempPolicyUpsert {
+                    source_report_id: None,
+                    policy_key: format!("ai_visitor:{}", decision.decision_key),
+                    title: format!("AI visitor intelligence: {}", decision.action),
+                    policy_type: policy_action.to_string(),
+                    layer: "L7".to_string(),
+                    scope_type: "identity".to_string(),
+                    scope_value: decision.identity_key.clone(),
+                    action: policy_action.to_string(),
+                    operator: "exact".to_string(),
+                    suggested_value: suggested_value.to_string(),
+                    rationale: decision.rationale.clone(),
+                    confidence: i64::from(decision.confidence),
+                    auto_applied: true,
+                    expires_at: now.saturating_add(decision.ttl_secs as i64),
+                    effect_stats: Some(AiTempPolicyEffectStats {
+                        last_effectiveness_check_at: Some(now),
+                        ..AiTempPolicyEffectStats::default()
+                    }),
+                })
+                .await?;
+            store
+                .upsert_ai_visitor_decision(&crate::storage::AiVisitorDecisionUpsert {
+                    decision_key: decision.decision_key.clone(),
+                    identity_key: decision.identity_key.clone(),
+                    site_id: decision.site_id.clone(),
+                    created_at: now,
+                    action: decision.action.clone(),
+                    confidence: i64::from(decision.confidence),
+                    ttl_secs: decision.ttl_secs as i64,
+                    rationale: decision.rationale.clone(),
+                    applied: true,
+                    effect_json:
+                        serde_json::json!({"status":"applied","policy_action":policy_action})
+                            .to_string(),
+                })
+                .await?;
+            applied += 1;
+        }
+        if applied > 0 {
+            self.refresh_ai_temp_policies().await?;
+        }
+        Ok(applied)
     }
 
     async fn auto_revoke_harmful_ai_temp_policies(
@@ -1069,6 +1179,15 @@ fn best_policy_effect_for_recommendation<'a>(
             && effect.scope_value == recommendation.route
             && effect.action == recommendation.action
     })
+}
+
+fn visitor_decision_policy_action(action: &str) -> Option<(&'static str, &'static str)> {
+    match action {
+        "watch_visitor" => Some(("add_behavior_watch", "20")),
+        "increase_challenge" => Some(("increase_challenge", "challenge")),
+        "reduce_friction" | "mark_trusted_temporarily" => Some(("reduce_friction", "trusted")),
+        _ => None,
+    }
 }
 
 fn route_profile_matches(profile: &AiDefenseRouteProfileSignal, route: &str) -> bool {

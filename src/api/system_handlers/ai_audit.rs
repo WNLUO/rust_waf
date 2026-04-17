@@ -291,7 +291,16 @@ pub(crate) async fn ai_defense_snapshot_handler(
             last_success_at: snapshot.server_public_ips.last_success_at,
             last_error: snapshot.server_public_ips.last_error,
         },
+        visitor_intelligence: visitor_intelligence_response(snapshot.visitor_intelligence),
     }))
+}
+
+pub(crate) async fn ai_visitor_profiles_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<AiVisitorIntelligenceResponse>> {
+    Ok(Json(visitor_intelligence_response(
+        state.context.visitor_intelligence_snapshot(50),
+    )))
 }
 
 pub(crate) async fn local_defense_recommendations_handler(
@@ -433,6 +442,83 @@ fn ai_defense_route_profile_signal_response(
         source: value.source,
         status: value.status,
         rationale: value.rationale,
+    }
+}
+
+fn visitor_intelligence_response(
+    value: crate::core::VisitorIntelligenceSnapshot,
+) -> AiVisitorIntelligenceResponse {
+    AiVisitorIntelligenceResponse {
+        generated_at: value.generated_at,
+        enabled: value.enabled,
+        degraded_reason: value.degraded_reason,
+        active_profile_count: value.active_profile_count,
+        profiles: value
+            .profiles
+            .into_iter()
+            .map(visitor_profile_signal_response)
+            .collect(),
+        recommendations: value
+            .recommendations
+            .into_iter()
+            .map(visitor_decision_signal_response)
+            .collect(),
+    }
+}
+
+fn visitor_profile_signal_response(
+    value: crate::core::VisitorProfileSignal,
+) -> AiVisitorProfileSignalResponse {
+    AiVisitorProfileSignalResponse {
+        identity_key: value.identity_key,
+        identity_source: value.identity_source,
+        site_id: value.site_id,
+        client_ip: value.client_ip,
+        user_agent: value.user_agent,
+        state: value.state,
+        first_seen_at: value.first_seen_at,
+        last_seen_at: value.last_seen_at,
+        request_count: value.request_count,
+        document_count: value.document_count,
+        api_count: value.api_count,
+        static_count: value.static_count,
+        admin_count: value.admin_count,
+        challenge_count: value.challenge_count,
+        challenge_verified_count: value.challenge_verified_count,
+        fingerprint_seen: value.fingerprint_seen,
+        human_confidence: value.human_confidence,
+        automation_risk: value.automation_risk,
+        probe_risk: value.probe_risk,
+        abuse_risk: value.abuse_risk,
+        false_positive_risk: value.false_positive_risk,
+        tracking_priority: value.tracking_priority,
+        route_summary: value
+            .route_summary
+            .into_iter()
+            .map(|item| AiVisitorRouteSummaryResponse {
+                route: item.route,
+                count: item.count,
+            })
+            .collect(),
+        status_codes: value.status_codes,
+        flags: value.flags,
+        ai_rationale: value.ai_rationale,
+    }
+}
+
+fn visitor_decision_signal_response(
+    value: crate::core::VisitorDecisionSignal,
+) -> AiVisitorDecisionSignalResponse {
+    AiVisitorDecisionSignalResponse {
+        decision_key: value.decision_key,
+        identity_key: value.identity_key,
+        site_id: value.site_id,
+        action: value.action,
+        confidence: value.confidence,
+        ttl_secs: value.ttl_secs,
+        rationale: value.rationale,
+        applied: value.applied,
+        effect_status: value.effect_status,
     }
 }
 

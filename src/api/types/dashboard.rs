@@ -299,6 +299,15 @@ pub struct AiDefenseSnapshotResponse {
     pub(crate) identity_summaries: Vec<AiDefenseIdentityResponse>,
     pub(crate) route_profiles: Vec<AiDefenseRouteProfileSignalResponse>,
     pub(crate) local_recommendations: Vec<LocalDefenseRecommendationResponse>,
+    pub(crate) server_public_ips: ServerPublicIpSnapshotResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServerPublicIpSnapshotResponse {
+    pub(crate) ips: Vec<String>,
+    pub(crate) last_refresh_at: Option<i64>,
+    pub(crate) last_success_at: Option<i64>,
+    pub(crate) last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

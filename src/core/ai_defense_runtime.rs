@@ -279,6 +279,24 @@ impl WafContext {
         if !config.auto_defense_enabled || !config.auto_defense_auto_apply {
             return None;
         }
+        let recommendation_trigger = self
+            .local_defense_recommendations(1)
+            .into_iter()
+            .find(|recommendation| {
+                recommendation.confidence >= config.auto_defense_min_confidence as u8
+                    && recommendation.total_events >= 12
+                    && (recommendation.hard_events >= 4 || recommendation.total_events >= 24)
+            })
+            .map(|recommendation| {
+                format!(
+                    "local_recommendation_threshold:{}:{}:confidence={}:total={}:hard={}",
+                    recommendation.site_id,
+                    recommendation.route,
+                    recommendation.confidence,
+                    recommendation.total_events,
+                    recommendation.hard_events
+                )
+            });
         let mut guard = self
             .ai_defense_trigger_runtime
             .lock()
@@ -290,6 +308,16 @@ impl WafContext {
                 .pending_reason
                 .take()
                 .or_else(|| Some("event_signal_threshold".to_string()));
+        }
+        if let Some(reason) = recommendation_trigger {
+            if !guard.last_trigger_at.is_some_and(|last| {
+                now.saturating_sub(last) < config.auto_defense_trigger_cooldown_secs as i64
+            }) {
+                guard.last_trigger_at = Some(now);
+                guard.last_run_at = Some(now);
+                guard.pending_since = None;
+                return Some(reason);
+            }
         }
         let fallback_due = guard.last_run_at.is_some_and(|last| {
             now.saturating_sub(last) >= config.auto_defense_fallback_interval_secs as i64
@@ -362,6 +390,7 @@ impl WafContext {
                 .collect(),
             route_profiles: self.ai_defense_route_profile_signals(24),
             local_recommendations: self.local_defense_recommendations(24),
+            server_public_ips: self.server_public_ip_snapshot(),
         })
     }
 

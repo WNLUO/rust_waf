@@ -216,6 +216,7 @@ pub struct AiDefenseSignalSnapshot {
     pub policy_effects: Vec<AiDefensePolicyEffectSignal>,
     pub route_profiles: Vec<AiDefenseRouteProfileSignal>,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
+    pub server_public_ips: ServerPublicIpSnapshot,
 }
 
 #[derive(Debug, Clone)]

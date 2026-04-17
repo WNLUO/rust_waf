@@ -285,6 +285,12 @@ pub(crate) async fn ai_defense_snapshot_handler(
             .into_iter()
             .map(local_defense_recommendation_response)
             .collect(),
+        server_public_ips: ServerPublicIpSnapshotResponse {
+            ips: snapshot.server_public_ips.ips,
+            last_refresh_at: snapshot.server_public_ips.last_refresh_at,
+            last_success_at: snapshot.server_public_ips.last_success_at,
+            last_error: snapshot.server_public_ips.last_error,
+        },
     }))
 }
 

@@ -1,19 +1,21 @@
 use super::{
     unix_timestamp, AiDefenseDecision, AiDefenseIdentitySignal, AiDefenseL4Signal,
-    AiDefensePolicySignal, AiDefensePortSignal, AiDefenseRouteProfileSignal, AiDefenseRunResult,
+    AiDefensePolicyEffectSignal, AiDefensePolicySignal, AiDefensePortSignal,
+    AiDefenseRouteEffectSignal, AiDefenseRouteProfileSignal, AiDefenseRunResult,
     AiDefenseRuntimePressureSignal, AiDefenseSignalSnapshot, AiDefenseUpstreamSignal,
-    AiDefenseUserAgentSignal, LocalDefenseRecommendation, WafContext,
+    AiDefenseUserAgentSignal, AiRouteResultObservation, LocalDefenseRecommendation, WafContext,
 };
 use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{
     AiRouteProfileEntry, AiRouteProfileUpsert, AiTempPolicyEffectStats, AiTempPolicyEntry,
-    AiTempPolicyUpsert,
+    AiTempPolicyOutcomeRecord, AiTempPolicyUpsert,
 };
 use anyhow::Result;
 
 const MAX_AI_DEFENSE_IDENTITY_BUCKETS: usize = 8_192;
 const MAX_AI_DEFENSE_DISTINCT_CLIENTS_PER_BUCKET: usize = 256;
 const MAX_AI_DEFENSE_USER_AGENTS_PER_BUCKET: usize = 16;
+const MAX_AI_ROUTE_RESULT_BUCKETS: usize = 8_192;
 
 impl WafContext {
     pub fn active_ai_route_profiles(&self) -> Vec<AiRouteProfileEntry> {
@@ -157,6 +159,121 @@ impl WafContext {
         }
     }
 
+    pub fn note_ai_route_result(
+        &self,
+        request: &UnifiedHttpRequest,
+        observation: AiRouteResultObservation,
+    ) {
+        if !self
+            .config_snapshot()
+            .integrations
+            .ai_audit
+            .auto_defense_enabled
+        {
+            return;
+        }
+        let Some(site_id) = request.get_metadata("gateway.site_id").cloned() else {
+            return;
+        };
+        let route = ai_runtime_route_path(&request.uri);
+        if !ai_defense_route_allowed(&route) {
+            return;
+        }
+        let now = unix_timestamp();
+        let window_start = now.div_euclid(60) * 60;
+        let key = ai_defense_identity_key(&site_id, &route);
+        if !self.ensure_ai_route_result_capacity(&key, window_start) {
+            return;
+        }
+        let entry = self
+            .ai_route_result_buckets
+            .entry(key)
+            .or_insert_with(|| std::sync::Mutex::new(super::AiRouteResultBucket::default()));
+        let mut bucket = entry.lock().expect("ai route result bucket lock poisoned");
+        if bucket.window_start != window_start {
+            *bucket = super::AiRouteResultBucket {
+                window_start,
+                ..super::AiRouteResultBucket::default()
+            };
+        }
+        bucket.total_responses = bucket.total_responses.saturating_add(1);
+        if observation.upstream_error {
+            bucket.upstream_errors = bucket.upstream_errors.saturating_add(1);
+        } else if !observation.local_response {
+            bucket.upstream_successes = bucket.upstream_successes.saturating_add(1);
+        }
+        if observation.local_response {
+            bucket.local_responses = bucket.local_responses.saturating_add(1);
+        }
+        if observation.blocked {
+            bucket.blocked_responses = bucket.blocked_responses.saturating_add(1);
+        }
+        let challenge_issued = metadata_true(request, "ai.cc.force_challenge")
+            || request
+                .get_metadata("l7.enforcement")
+                .is_some_and(|value| value == "challenge")
+            || request
+                .get_metadata("ai.policy.matched_actions")
+                .is_some_and(|value| {
+                    value
+                        .split(',')
+                        .any(|action| action == "increase_challenge")
+                });
+        let challenge_verified = metadata_true(request, "l7.cc.challenge_verified");
+        let interactive_session = metadata_true(request, "l7.cc.interactive_session");
+        if challenge_issued {
+            bucket.challenge_issued = bucket.challenge_issued.saturating_add(1);
+        }
+        if challenge_verified {
+            bucket.challenge_verified = bucket.challenge_verified.saturating_add(1);
+        }
+        if interactive_session {
+            bucket.interactive_sessions = bucket.interactive_sessions.saturating_add(1);
+        }
+        let policy_matched = request.get_metadata("ai.policy.matched_ids").is_some();
+        if policy_matched {
+            bucket.policy_matched_responses = bucket.policy_matched_responses.saturating_add(1);
+            if let Some(actions) = request.get_metadata("ai.policy.matched_actions") {
+                for action in actions.split(',').filter(|value| !value.trim().is_empty()) {
+                    *bucket
+                        .policy_actions
+                        .entry(action.trim().to_string())
+                        .or_insert(0) += 1;
+                }
+            }
+        }
+        let suspected_false_positive = policy_matched
+            && (challenge_verified || interactive_session)
+            && matches!(observation.status_code, 401 | 403 | 429);
+        if suspected_false_positive {
+            bucket.suspected_false_positive_events =
+                bucket.suspected_false_positive_events.saturating_add(1);
+        }
+        let family = format!("{}xx", observation.status_code / 100);
+        *bucket.status_families.entry(family).or_insert(0) += 1;
+        *bucket
+            .status_codes
+            .entry(observation.status_code.to_string())
+            .or_insert(0) += 1;
+        if let Some(latency_ms) = observation.latency_ms {
+            bucket.latency_samples = bucket.latency_samples.saturating_add(1);
+            bucket.latency_ms_total = bucket.latency_ms_total.saturating_add(latency_ms);
+            if latency_ms >= 1_000 {
+                bucket.slow_responses = bucket.slow_responses.saturating_add(1);
+            }
+        }
+        drop(bucket);
+
+        self.record_ai_temp_policy_outcomes(
+            request,
+            observation,
+            challenge_issued,
+            challenge_verified,
+            interactive_session,
+            suspected_false_positive,
+        );
+    }
+
     pub(crate) fn consume_ai_auto_defense_trigger(&self, now: i64) -> Option<String> {
         let config = self.config_snapshot().integrations.ai_audit;
         if !config.auto_defense_enabled || !config.auto_defense_auto_apply {
@@ -237,6 +354,12 @@ impl WafContext {
                 .take(12)
                 .collect(),
             identity_summaries: self.ai_defense_identity_summaries(now, 24),
+            route_effects: self.ai_defense_route_effect_signals(now, 24),
+            policy_effects: active_policies
+                .iter()
+                .filter_map(ai_defense_policy_effect_signal)
+                .take(24)
+                .collect(),
             route_profiles: self.ai_defense_route_profile_signals(24),
             local_recommendations: self.local_defense_recommendations(24),
         })
@@ -286,7 +409,18 @@ impl WafContext {
                 ..AiDefenseRunResult::default()
             });
         }
-        if snapshot.active_temp_policy_count >= snapshot.max_active_temp_policy_count {
+        let active_policies = store.list_active_ai_temp_policies(now).await?;
+        let revoked = self
+            .auto_revoke_harmful_ai_temp_policies(store.as_ref(), &active_policies, now)
+            .await?;
+        let active_policies = if revoked > 0 {
+            self.refresh_ai_temp_policies().await?;
+            store.list_active_ai_temp_policies(now).await?
+        } else {
+            active_policies
+        };
+        let active_count = active_policies.len() as u32;
+        if active_count >= snapshot.max_active_temp_policy_count {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
                 trigger_reason,
@@ -294,9 +428,6 @@ impl WafContext {
                 ..AiDefenseRunResult::default()
             });
         }
-
-        let active_policies = store.list_active_ai_temp_policies(now).await?;
-        let active_count = active_policies.len() as u32;
         let remaining_capacity = snapshot
             .max_active_temp_policy_count
             .saturating_sub(active_count);
@@ -401,6 +532,45 @@ impl WafContext {
         Ok(result)
     }
 
+    async fn auto_revoke_harmful_ai_temp_policies(
+        &self,
+        store: &crate::storage::SqliteStore,
+        policies: &[AiTempPolicyEntry],
+        now: i64,
+    ) -> Result<usize> {
+        let mut revoked = 0usize;
+        for policy in policies {
+            if !policy.auto_applied {
+                continue;
+            }
+            let mut effect = serde_json::from_str::<AiTempPolicyEffectStats>(&policy.effect_json)
+                .unwrap_or_default();
+            let harmful = effect.outcome_status.as_deref() == Some("harmful")
+                || effect.suspected_false_positive_events >= 3
+                || (effect.post_policy_observations >= 5
+                    && effect.post_policy_upstream_errors.saturating_mul(2)
+                        >= effect.post_policy_observations);
+            if !harmful {
+                continue;
+            }
+            effect.auto_revoked = true;
+            effect.auto_revoke_reason = Some(format!(
+                "AI effect feedback marked policy harmful: false_positive_events={}, upstream_errors={}, observations={}",
+                effect.suspected_false_positive_events,
+                effect.post_policy_upstream_errors,
+                effect.post_policy_observations
+            ));
+            effect.outcome_status = Some("harmful".to_string());
+            if store
+                .revoke_ai_temp_policy_with_effect(policy.id, &effect, now)
+                .await?
+            {
+                revoked += 1;
+            }
+        }
+        Ok(revoked)
+    }
+
     async fn generate_ai_route_profile_candidates_from_snapshot(
         &self,
         store: &crate::storage::SqliteStore,
@@ -448,9 +618,13 @@ impl WafContext {
             let identity = snapshot.identity_summaries.iter().find(|identity| {
                 identity.site_id == recommendation.site_id && identity.route == recommendation.route
             });
+            let route_effect = snapshot.route_effects.iter().find(|effect| {
+                effect.site_id == recommendation.site_id && effect.route == recommendation.route
+            });
             let candidate = infer_route_profile_candidate(
                 recommendation,
                 identity,
+                route_effect,
                 now,
                 relearn_after_rejected,
             );
@@ -550,6 +724,66 @@ impl WafContext {
             .collect()
     }
 
+    fn ai_defense_route_effect_signals(
+        &self,
+        now: i64,
+        limit: usize,
+    ) -> Vec<AiDefenseRouteEffectSignal> {
+        let mut signals = self
+            .ai_route_result_buckets
+            .iter()
+            .filter_map(|entry| {
+                let (site_id, route) = split_ai_defense_identity_key(entry.key())?;
+                let bucket = entry
+                    .value()
+                    .lock()
+                    .expect("ai route result bucket lock poisoned");
+                if now.saturating_sub(bucket.window_start) > 75 {
+                    return None;
+                }
+                let false_positive_risk = classify_false_positive_risk(
+                    bucket.total_responses,
+                    bucket.suspected_false_positive_events,
+                    bucket.challenge_verified,
+                    bucket.interactive_sessions,
+                    bucket.blocked_responses,
+                );
+                let effectiveness_hint = classify_route_effectiveness(&bucket);
+                Some(AiDefenseRouteEffectSignal {
+                    site_id,
+                    route,
+                    total_responses: bucket.total_responses,
+                    upstream_successes: bucket.upstream_successes,
+                    upstream_errors: bucket.upstream_errors,
+                    local_responses: bucket.local_responses,
+                    blocked_responses: bucket.blocked_responses,
+                    challenge_issued: bucket.challenge_issued,
+                    challenge_verified: bucket.challenge_verified,
+                    interactive_sessions: bucket.interactive_sessions,
+                    policy_matched_responses: bucket.policy_matched_responses,
+                    suspected_false_positive_events: bucket.suspected_false_positive_events,
+                    status_families: bucket.status_families.clone(),
+                    status_codes: bucket.status_codes.clone(),
+                    policy_actions: bucket.policy_actions.clone(),
+                    avg_latency_ms: (bucket.latency_samples > 0)
+                        .then(|| bucket.latency_ms_total / bucket.latency_samples),
+                    slow_responses: bucket.slow_responses,
+                    false_positive_risk: false_positive_risk.to_string(),
+                    effectiveness_hint: effectiveness_hint.to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+        signals.sort_by(|left, right| {
+            right
+                .suspected_false_positive_events
+                .cmp(&left.suspected_false_positive_events)
+                .then_with(|| right.upstream_errors.cmp(&left.upstream_errors))
+                .then_with(|| right.total_responses.cmp(&left.total_responses))
+        });
+        signals.truncate(limit);
+        signals
+    }
+
     fn ensure_ai_defense_identity_capacity(&self, key: &str, window_start: i64) -> bool {
         if self.ai_defense_identity_buckets.contains_key(key)
             || self.ai_defense_identity_buckets.len() < MAX_AI_DEFENSE_IDENTITY_BUCKETS
@@ -573,6 +807,75 @@ impl WafContext {
             self.ai_defense_identity_buckets.remove(&stale_key);
         }
         self.ai_defense_identity_buckets.len() < MAX_AI_DEFENSE_IDENTITY_BUCKETS
+    }
+
+    fn ensure_ai_route_result_capacity(&self, key: &str, window_start: i64) -> bool {
+        if self.ai_route_result_buckets.contains_key(key)
+            || self.ai_route_result_buckets.len() < MAX_AI_ROUTE_RESULT_BUCKETS
+        {
+            return true;
+        }
+        let stale_before = window_start.saturating_sub(120);
+        let stale_keys = self
+            .ai_route_result_buckets
+            .iter()
+            .filter_map(|entry| {
+                let bucket = entry
+                    .value()
+                    .lock()
+                    .expect("ai route result bucket lock poisoned");
+                (bucket.window_start < stale_before).then(|| entry.key().clone())
+            })
+            .take(256)
+            .collect::<Vec<_>>();
+        for stale_key in stale_keys {
+            self.ai_route_result_buckets.remove(&stale_key);
+        }
+        self.ai_route_result_buckets.len() < MAX_AI_ROUTE_RESULT_BUCKETS
+    }
+
+    fn record_ai_temp_policy_outcomes(
+        &self,
+        request: &UnifiedHttpRequest,
+        observation: AiRouteResultObservation,
+        challenge_issued: bool,
+        challenge_verified: bool,
+        interactive_session: bool,
+        suspected_false_positive: bool,
+    ) {
+        let Some(ids) = request.get_metadata("ai.policy.matched_ids").cloned() else {
+            return;
+        };
+        let Some(store) = self.sqlite_store.as_ref().cloned() else {
+            return;
+        };
+        let route_still_under_pressure = request
+            .get_metadata("runtime.route.defense_depth")
+            .is_some_and(|value| matches!(value.as_str(), "lean" | "survival"));
+        let outcomes = ids
+            .split(',')
+            .filter_map(|value| value.trim().parse::<i64>().ok())
+            .map(|id| AiTempPolicyOutcomeRecord {
+                id,
+                status_code: observation.status_code,
+                latency_ms: observation.latency_ms,
+                upstream_error: observation.upstream_error,
+                challenge_issued,
+                challenge_verified,
+                interactive_session,
+                suspected_false_positive,
+                route_still_under_pressure,
+            })
+            .collect::<Vec<_>>();
+        if outcomes.is_empty() {
+            return;
+        }
+        tokio::spawn(async move {
+            let now = unix_timestamp();
+            for outcome in outcomes {
+                let _ = store.record_ai_temp_policy_outcome(&outcome, now).await;
+            }
+        });
     }
 }
 
@@ -635,6 +938,33 @@ fn ai_defense_decision_from_local_recommendation(
             confidence = confidence.saturating_add(2).min(100);
         }
     }
+    let route_effect = best_route_effect_for_recommendation(snapshot, recommendation);
+    if let Some(effect) = route_effect {
+        match effect.false_positive_risk.as_str() {
+            "high" => confidence = confidence.saturating_sub(25),
+            "medium" => confidence = confidence.saturating_sub(10),
+            _ => {}
+        }
+        if effect.upstream_errors >= 5 {
+            confidence = confidence.saturating_sub(8);
+        }
+        if effect
+            .policy_actions
+            .get(&recommendation.action)
+            .is_some_and(|count| *count >= 3)
+            && effect.effectiveness_hint == "effective"
+        {
+            confidence = confidence.saturating_add(5).min(100);
+        }
+    }
+    if let Some(policy_effect) = best_policy_effect_for_recommendation(snapshot, recommendation) {
+        match policy_effect.outcome_status.as_str() {
+            "effective" => confidence = confidence.saturating_add(8).min(100),
+            "harmful" => confidence = confidence.saturating_sub(30),
+            "neutral" => confidence = confidence.saturating_sub(4),
+            _ => {}
+        }
+    }
     if !snapshot.upstream_health.healthy {
         confidence = confidence.saturating_sub(8);
     }
@@ -652,7 +982,7 @@ fn ai_defense_decision_from_local_recommendation(
         confidence,
         auto_apply: true,
         rationale: format!(
-            "{}; auto-applied by local AI defense guardrails for site {}; trigger={}; runtime_depth={}; upstream_healthy={}; route_profile={}",
+            "{}; auto-applied by local AI defense guardrails for site {}; trigger={}; runtime_depth={}; upstream_healthy={}; route_profile={}; effect_hint={}; false_positive_risk={}",
             recommendation.rationale,
             recommendation.site_id,
             snapshot
@@ -663,6 +993,12 @@ fn ai_defense_decision_from_local_recommendation(
             snapshot.upstream_health.healthy,
             route_profile
                 .map(|profile| profile.route_type.as_str())
+                .unwrap_or("unknown"),
+            route_effect
+                .map(|effect| effect.effectiveness_hint.as_str())
+                .unwrap_or("unknown"),
+            route_effect
+                .map(|effect| effect.false_positive_risk.as_str())
                 .unwrap_or("unknown")
         ),
     })
@@ -684,6 +1020,26 @@ fn best_route_profile_for_recommendation<'a>(
                 .cmp(&profile_match_rank(right))
                 .then_with(|| left.confidence.cmp(&right.confidence))
         })
+}
+
+fn best_route_effect_for_recommendation<'a>(
+    snapshot: &'a AiDefenseSignalSnapshot,
+    recommendation: &LocalDefenseRecommendation,
+) -> Option<&'a AiDefenseRouteEffectSignal> {
+    snapshot.route_effects.iter().find(|effect| {
+        effect.site_id == recommendation.site_id && effect.route == recommendation.route
+    })
+}
+
+fn best_policy_effect_for_recommendation<'a>(
+    snapshot: &'a AiDefenseSignalSnapshot,
+    recommendation: &LocalDefenseRecommendation,
+) -> Option<&'a AiDefensePolicyEffectSignal> {
+    snapshot.policy_effects.iter().find(|effect| {
+        effect.scope_type == "route"
+            && effect.scope_value == recommendation.route
+            && effect.action == recommendation.action
+    })
 }
 
 fn route_profile_matches(profile: &AiDefenseRouteProfileSignal, route: &str) -> bool {
@@ -708,6 +1064,7 @@ fn profile_match_rank(profile: &AiDefenseRouteProfileSignal) -> u8 {
 fn infer_route_profile_candidate(
     recommendation: &LocalDefenseRecommendation,
     identity: Option<&AiDefenseIdentitySignal>,
+    route_effect: Option<&AiDefenseRouteEffectSignal>,
     now: i64,
     relearn_after_rejected: bool,
 ) -> AiRouteProfileUpsert {
@@ -787,6 +1144,19 @@ fn infer_route_profile_candidate(
     if relearn_after_rejected {
         confidence -= 6;
     }
+    if let Some(effect) = route_effect {
+        match effect.false_positive_risk.as_str() {
+            "high" => {
+                avoid_actions.push("add_temp_block".to_string());
+                confidence -= 10;
+            }
+            "medium" => confidence -= 4,
+            _ => {}
+        }
+        if effect.effectiveness_hint == "effective" {
+            confidence += 4;
+        }
+    }
 
     recommended_actions.sort();
     recommended_actions.dedup();
@@ -823,6 +1193,24 @@ fn infer_route_profile_candidate(
                 "value": &ua.value,
                 "count": ua.count,
             })).collect::<Vec<_>>(),
+        })),
+        "route_effect": route_effect.map(|effect| serde_json::json!({
+            "total_responses": effect.total_responses,
+            "upstream_errors": effect.upstream_errors,
+            "local_responses": effect.local_responses,
+            "blocked_responses": effect.blocked_responses,
+            "challenge_issued": effect.challenge_issued,
+            "challenge_verified": effect.challenge_verified,
+            "interactive_sessions": effect.interactive_sessions,
+            "policy_matched_responses": effect.policy_matched_responses,
+            "suspected_false_positive_events": effect.suspected_false_positive_events,
+            "status_families": &effect.status_families,
+            "status_codes": &effect.status_codes,
+            "policy_actions": &effect.policy_actions,
+            "avg_latency_ms": effect.avg_latency_ms,
+            "slow_responses": effect.slow_responses,
+            "false_positive_risk": &effect.false_positive_risk,
+            "effectiveness_hint": &effect.effectiveness_hint,
         })),
         "confidence_inputs": {
             "route_name_heuristic": route_type,
@@ -876,10 +1264,60 @@ fn split_ai_defense_identity_key(value: &str) -> Option<(String, String)> {
     Some((site_id.to_string(), route.to_string()))
 }
 
+fn ai_runtime_route_path(uri: &str) -> String {
+    uri.split('?').next().unwrap_or(uri).to_string()
+}
+
 fn metadata_true(request: &UnifiedHttpRequest, key: &str) -> bool {
     request
         .get_metadata(key)
         .is_some_and(|value| value == "true" || value == "1")
+}
+
+fn classify_false_positive_risk(
+    total_responses: u64,
+    suspected_false_positive_events: u64,
+    challenge_verified: u64,
+    interactive_sessions: u64,
+    blocked_responses: u64,
+) -> &'static str {
+    if total_responses == 0 {
+        return "unknown";
+    }
+    if suspected_false_positive_events >= 3
+        || (blocked_responses > 0
+            && challenge_verified
+                .saturating_add(interactive_sessions)
+                .saturating_mul(2)
+                >= total_responses)
+    {
+        "high"
+    } else if suspected_false_positive_events > 0
+        || challenge_verified
+            .saturating_add(interactive_sessions)
+            .saturating_mul(3)
+            >= total_responses
+    {
+        "medium"
+    } else {
+        "low"
+    }
+}
+
+fn classify_route_effectiveness(bucket: &super::AiRouteResultBucket) -> &'static str {
+    if bucket.total_responses < 5 {
+        return "warming";
+    }
+    if bucket.suspected_false_positive_events >= 3 || bucket.upstream_errors >= 5 {
+        return "harmful";
+    }
+    if bucket.policy_matched_responses >= 3
+        && bucket.upstream_errors.saturating_mul(3) < bucket.total_responses
+        && bucket.suspected_false_positive_events == 0
+    {
+        return "effective";
+    }
+    "neutral"
 }
 
 fn compact_identity_value(value: &str) -> String {
@@ -904,6 +1342,32 @@ fn ai_defense_policy_signal(policy: &AiTempPolicyEntry) -> AiDefensePolicySignal
         hit_count: policy.hit_count,
         expires_at: policy.expires_at,
     }
+}
+
+fn ai_defense_policy_effect_signal(
+    policy: &AiTempPolicyEntry,
+) -> Option<AiDefensePolicyEffectSignal> {
+    let effect =
+        serde_json::from_str::<AiTempPolicyEffectStats>(&policy.effect_json).unwrap_or_default();
+    if effect.post_policy_observations == 0 && effect.total_hits == 0 {
+        return None;
+    }
+    Some(AiDefensePolicyEffectSignal {
+        policy_key: policy.policy_key.clone(),
+        scope_type: policy.scope_type.clone(),
+        scope_value: policy.scope_value.clone(),
+        action: policy.action.clone(),
+        hit_count: policy.hit_count,
+        outcome_status: effect
+            .outcome_status
+            .unwrap_or_else(|| "warming".to_string()),
+        outcome_score: effect.outcome_score,
+        observations: effect.post_policy_observations,
+        upstream_errors: effect.post_policy_upstream_errors,
+        suspected_false_positive_events: effect.suspected_false_positive_events,
+        challenge_verified: effect.post_policy_challenge_verified,
+        pressure_after_observations: effect.pressure_after_observations,
+    })
 }
 
 fn ai_defense_route_profile_signal(profile: AiRouteProfileEntry) -> AiDefenseRouteProfileSignal {

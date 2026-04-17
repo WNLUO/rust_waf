@@ -358,6 +358,16 @@ async fn test_ai_auto_defense_generates_route_profile_candidate() {
         request.set_client_ip(format!("203.0.113.{}", idx + 10));
         request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
         context.note_site_defense_signal(&request, &result);
+        context.note_ai_route_result(
+            &request,
+            AiRouteResultObservation {
+                status_code: 429,
+                latency_ms: Some(20),
+                upstream_error: false,
+                local_response: true,
+                blocked: true,
+            },
+        );
     }
 
     let now = unix_timestamp();
@@ -385,6 +395,8 @@ async fn test_ai_auto_defense_generates_route_profile_candidate() {
     assert_eq!(evidence["learning_mode"], "observed_candidate");
     assert_eq!(evidence["route_pressure"]["total_events"], 5);
     assert_eq!(evidence["identity"]["distinct_client_count"], 5);
+    assert_eq!(evidence["route_effect"]["total_responses"], 5);
+    assert_eq!(evidence["route_effect"]["status_families"]["4xx"], 5);
 }
 
 #[tokio::test]
@@ -462,6 +474,163 @@ async fn test_ai_auto_defense_can_relearn_rejected_route_profile() {
     assert_eq!(profile.source, "local_ai_relearned");
     let evidence: serde_json::Value = serde_json::from_str(&profile.evidence_json).unwrap();
     assert_eq!(evidence["learning_mode"], "relearn_after_rejected");
+}
+
+#[tokio::test]
+async fn test_ai_defense_snapshot_includes_route_effect_feedback() {
+    let context = WafContext::new(Config {
+        sqlite_enabled: false,
+        ..Config::default()
+    })
+    .await
+    .unwrap();
+
+    for idx in 0..5 {
+        let mut request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/api/login".to_string(),
+        );
+        request.set_client_ip(format!("203.0.113.{}", idx + 70));
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        request.add_metadata("ai.policy.matched_ids".to_string(), "42".to_string());
+        request.add_metadata(
+            "ai.policy.matched_actions".to_string(),
+            "increase_challenge".to_string(),
+        );
+        request.add_metadata("l7.cc.challenge_verified".to_string(), "true".to_string());
+        context.note_ai_route_result(
+            &request,
+            AiRouteResultObservation {
+                status_code: 429,
+                latency_ms: Some(25),
+                upstream_error: false,
+                local_response: true,
+                blocked: true,
+            },
+        );
+    }
+
+    let snapshot = context
+        .ai_defense_signal_snapshot(unix_timestamp(), Some("test".to_string()))
+        .await
+        .unwrap();
+    let effect = snapshot
+        .route_effects
+        .iter()
+        .find(|item| item.site_id == "site-a" && item.route == "/api/login")
+        .expect("route effect should be present");
+
+    assert_eq!(effect.total_responses, 5);
+    assert_eq!(effect.policy_matched_responses, 5);
+    assert_eq!(effect.challenge_verified, 5);
+    assert_eq!(effect.false_positive_risk, "high");
+}
+
+#[tokio::test]
+async fn test_ai_defense_snapshot_includes_policy_effect_feedback() {
+    let db_path = unique_test_db_path("ai_policy_effect_snapshot");
+    let context = WafContext::new(Config {
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        ..Config::default()
+    })
+    .await
+    .unwrap();
+    let store = context.sqlite_store.as_ref().unwrap();
+    store
+        .upsert_ai_temp_policy(&crate::storage::AiTempPolicyUpsert {
+            source_report_id: None,
+            policy_key: "policy-effect".to_string(),
+            title: "policy effect".to_string(),
+            policy_type: "tighten_route_cc".to_string(),
+            layer: "l7".to_string(),
+            scope_type: "route".to_string(),
+            scope_value: "/api/login".to_string(),
+            action: "tighten_route_cc".to_string(),
+            operator: "exact".to_string(),
+            suggested_value: "45".to_string(),
+            rationale: "test".to_string(),
+            confidence: 90,
+            auto_applied: true,
+            expires_at: unix_timestamp() + 600,
+            effect_stats: Some(crate::storage::AiTempPolicyEffectStats {
+                total_hits: 8,
+                post_policy_observations: 8,
+                outcome_status: Some("effective".to_string()),
+                outcome_score: 24,
+                ..crate::storage::AiTempPolicyEffectStats::default()
+            }),
+        })
+        .await
+        .unwrap();
+
+    let snapshot = context
+        .ai_defense_signal_snapshot(unix_timestamp(), Some("test".to_string()))
+        .await
+        .unwrap();
+    let effect = snapshot
+        .policy_effects
+        .iter()
+        .find(|item| item.policy_key == "policy-effect")
+        .expect("policy effect should be present");
+
+    assert_eq!(effect.outcome_status, "effective");
+    assert_eq!(effect.outcome_score, 24);
+    assert_eq!(effect.observations, 8);
+}
+
+#[tokio::test]
+async fn test_ai_auto_defense_revokes_harmful_temp_policy() {
+    let db_path = unique_test_db_path("ai_policy_effect_revoke");
+    let context = WafContext::new(Config {
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        ..Config::default()
+    })
+    .await
+    .unwrap();
+    let store = context.sqlite_store.as_ref().unwrap();
+    store
+        .upsert_ai_temp_policy(&crate::storage::AiTempPolicyUpsert {
+            source_report_id: None,
+            policy_key: "harmful-policy".to_string(),
+            title: "harmful policy".to_string(),
+            policy_type: "tighten_route_cc".to_string(),
+            layer: "l7".to_string(),
+            scope_type: "route".to_string(),
+            scope_value: "/api/login".to_string(),
+            action: "tighten_route_cc".to_string(),
+            operator: "exact".to_string(),
+            suggested_value: "45".to_string(),
+            rationale: "test".to_string(),
+            confidence: 90,
+            auto_applied: true,
+            expires_at: unix_timestamp() + 600,
+            effect_stats: Some(crate::storage::AiTempPolicyEffectStats {
+                post_policy_observations: 6,
+                post_policy_upstream_errors: 5,
+                suspected_false_positive_events: 3,
+                outcome_status: Some("harmful".to_string()),
+                outcome_score: -40,
+                ..crate::storage::AiTempPolicyEffectStats::default()
+            }),
+        })
+        .await
+        .unwrap();
+
+    context
+        .run_ai_auto_defense(unix_timestamp(), Some("test".to_string()))
+        .await
+        .unwrap();
+
+    let active = store
+        .list_active_ai_temp_policies(unix_timestamp())
+        .await
+        .unwrap();
+    assert!(active.is_empty());
 }
 
 fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {

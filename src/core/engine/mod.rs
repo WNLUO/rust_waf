@@ -44,7 +44,8 @@ use crate::core::gateway::{
     normalize_hostname, parse_upstream_endpoint, GatewaySiteRuntime, UpstreamScheme,
 };
 use crate::core::{
-    CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
+    AiRouteResultObservation, CustomHttpResponse, InspectionAction, InspectionLayer,
+    InspectionResult, PacketInfo, Protocol,
 };
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::protocol::{

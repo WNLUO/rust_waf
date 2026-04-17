@@ -183,6 +183,79 @@ impl SqliteStore {
         Ok(result.rows_affected() > 0)
     }
 
+    pub async fn record_ai_temp_policy_outcome(
+        &self,
+        outcome: &crate::storage::AiTempPolicyOutcomeRecord,
+        now: i64,
+    ) -> Result<bool> {
+        let existing = sqlx::query_scalar::<_, String>(
+            "SELECT effect_json FROM ai_temp_policies WHERE id = ? AND status = 'active'",
+        )
+        .bind(outcome.id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(effect_json) = existing else {
+            return Ok(false);
+        };
+
+        let mut effect =
+            serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&effect_json)
+                .unwrap_or_default();
+        effect.post_policy_observations += 1;
+        effect.last_effectiveness_check_at = Some(now);
+        if outcome.upstream_error || outcome.status_code >= 500 {
+            effect.post_policy_upstream_errors += 1;
+        }
+        let family = format!("{}xx", outcome.status_code / 100);
+        *effect.post_policy_status_families.entry(family).or_insert(0) += 1;
+        *effect
+            .post_policy_status_codes
+            .entry(outcome.status_code.to_string())
+            .or_insert(0) += 1;
+        if let Some(latency_ms) = outcome.latency_ms {
+            effect.post_policy_latency_samples += 1;
+            effect.post_policy_latency_ms_total = effect
+                .post_policy_latency_ms_total
+                .saturating_add(latency_ms.min(i64::MAX as u64) as i64);
+            if latency_ms >= 1_000 {
+                effect.post_policy_slow_responses += 1;
+            }
+        }
+        if outcome.challenge_issued {
+            effect.post_policy_challenge_issued += 1;
+        }
+        if outcome.challenge_verified {
+            effect.post_policy_challenge_verified += 1;
+        }
+        if outcome.interactive_session {
+            effect.post_policy_interactive_sessions += 1;
+        }
+        if outcome.suspected_false_positive {
+            effect.suspected_false_positive_events += 1;
+        }
+        if outcome.route_still_under_pressure {
+            effect.pressure_after_observations += 1;
+        }
+        effect.outcome_score = score_ai_temp_policy_effect(&effect);
+        effect.outcome_status = Some(classify_ai_temp_policy_effect(&effect).to_string());
+
+        let result = sqlx::query(
+            r#"
+            UPDATE ai_temp_policies
+            SET updated_at = ?,
+                effect_json = ?
+            WHERE id = ? AND status = 'active'
+            "#,
+        )
+        .bind(now)
+        .bind(serde_json::to_string(&effect)?)
+        .bind(outcome.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn purge_inactive_ai_temp_policies(&self, updated_before: i64) -> Result<u64> {
         let result = sqlx::query(
             "DELETE FROM ai_temp_policies WHERE status != 'active' AND updated_at < ?",
@@ -191,5 +264,42 @@ impl SqliteStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+}
+
+fn score_ai_temp_policy_effect(effect: &crate::storage::AiTempPolicyEffectStats) -> i64 {
+    let observations = effect.post_policy_observations.max(1);
+    let mut score = 0i64;
+    score += effect.total_hits.min(50);
+    score -= effect.pressure_after_observations.saturating_mul(3);
+    score -= effect.post_policy_upstream_errors.saturating_mul(4);
+    score -= effect.suspected_false_positive_events.saturating_mul(8);
+    if effect.post_policy_challenge_issued > 0 {
+        let verified_ratio =
+            effect.post_policy_challenge_verified.saturating_mul(100) / effect.post_policy_challenge_issued.max(1);
+        if verified_ratio >= 60 {
+            score -= 12;
+        } else if verified_ratio <= 20 {
+            score += 6;
+        }
+    }
+    if effect.post_policy_slow_responses.saturating_mul(100) / observations >= 30 {
+        score -= 8;
+    }
+    score.clamp(-100, 100)
+}
+
+fn classify_ai_temp_policy_effect(effect: &crate::storage::AiTempPolicyEffectStats) -> &'static str {
+    if effect.suspected_false_positive_events >= 3
+        || effect.post_policy_upstream_errors >= 5
+        || effect.outcome_score <= -20
+    {
+        "harmful"
+    } else if effect.post_policy_observations >= 5 && effect.outcome_score >= 12 {
+        "effective"
+    } else if effect.post_policy_observations >= 5 {
+        "neutral"
+    } else {
+        "warming"
     }
 }

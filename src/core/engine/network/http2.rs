@@ -187,6 +187,16 @@ pub(crate) async fn handle_http2_connection(
                         if result_should_drop_http2(&result, &request) {
                             return Err(drop_http2_result(&result.reason));
                         }
+                        context.note_ai_route_result(
+                            &request,
+                            AiRouteResultObservation {
+                                status_code: 403,
+                                latency_ms: None,
+                                upstream_error: false,
+                                local_response: true,
+                                blocked: true,
+                            },
+                        );
                         return Ok(Http2Response {
                             status_code: 403,
                             headers: vec![],
@@ -710,10 +720,30 @@ pub(crate) async fn handle_http2_connection(
                             metrics.record_block(inspection_result.layer.clone());
                         }
                         if result_should_drop_http2(&inspection_result, &request) {
+                            context.note_ai_route_result(
+                                &request,
+                                AiRouteResultObservation {
+                                    status_code: 499,
+                                    latency_ms: None,
+                                    upstream_error: false,
+                                    local_response: true,
+                                    blocked: true,
+                                },
+                            );
                             return Err(drop_http2_result(&inspection_result.reason));
                         }
                         if let Some(response) = inspection_result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
+                            context.note_ai_route_result(
+                                &request,
+                                AiRouteResultObservation {
+                                    status_code: response.status_code,
+                                    latency_ms: None,
+                                    upstream_error: false,
+                                    local_response: true,
+                                    blocked: true,
+                                },
+                            );
                             let body = body_for_request(&request, &response.body);
                             let mut headers = response.headers.clone();
                             apply_response_policies(
@@ -803,6 +833,18 @@ pub(crate) async fn handle_http2_connection(
                                             request_dump.len(),
                                             false,
                                         );
+                                        context.note_ai_route_result(
+                                            &request,
+                                            AiRouteResultObservation {
+                                                status_code: response.status_code,
+                                                latency_ms: Some(
+                                                    proxy_started_at.elapsed().as_millis() as u64,
+                                                ),
+                                                upstream_error: response.status_code >= 500,
+                                                local_response: false,
+                                                blocked: false,
+                                            },
+                                        );
                                         let mut headers = response.headers.clone();
                                         apply_response_policies(
                                             context.as_ref(),
@@ -822,6 +864,18 @@ pub(crate) async fn handle_http2_connection(
                                             true,
                                         );
                                         let response = resolve_runtime_custom_response(&response);
+                                        context.note_ai_route_result(
+                                            &request,
+                                            AiRouteResultObservation {
+                                                status_code: response.status_code,
+                                                latency_ms: Some(
+                                                    proxy_started_at.elapsed().as_millis() as u64,
+                                                ),
+                                                upstream_error: false,
+                                                local_response: true,
+                                                blocked: response.status_code >= 400,
+                                            },
+                                        );
                                         let body = body_for_request(&request, &response.body);
                                         let mut headers = response.headers.clone();
                                         apply_response_policies(
@@ -840,6 +894,18 @@ pub(crate) async fn handle_http2_connection(
                                             traffic_source_ip.clone(),
                                             request_dump.len(),
                                             true,
+                                        );
+                                        context.note_ai_route_result(
+                                            &request,
+                                            AiRouteResultObservation {
+                                                status_code: 499,
+                                                latency_ms: Some(
+                                                    proxy_started_at.elapsed().as_millis() as u64,
+                                                ),
+                                                upstream_error: false,
+                                                local_response: true,
+                                                blocked: true,
+                                            },
                                         );
                                         Err(crate::protocol::ProtocolError::ParseError(
                                             "SafeLine blocked upstream response dropped"
@@ -867,6 +933,18 @@ pub(crate) async fn handle_http2_connection(
                                     request.client_ip.as_deref().unwrap_or("unknown"),
                                     upstream_addr,
                                     err
+                                );
+                                context.note_ai_route_result(
+                                    &request,
+                                    AiRouteResultObservation {
+                                        status_code: 502,
+                                        latency_ms: Some(
+                                            proxy_started_at.elapsed().as_millis() as u64,
+                                        ),
+                                        upstream_error: true,
+                                        local_response: false,
+                                        blocked: false,
+                                    },
                                 );
                                 return Ok(Http2Response {
                                     status_code: 502,

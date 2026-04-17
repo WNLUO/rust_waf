@@ -162,6 +162,10 @@ pub struct AiTempPolicyEffectStats {
     #[serde(default)]
     pub last_effectiveness_check_at: Option<i64>,
     #[serde(default)]
+    pub outcome_status: Option<String>,
+    #[serde(default)]
+    pub outcome_score: i64,
+    #[serde(default)]
     pub total_hits: i64,
     #[serde(default)]
     pub first_hit_at: Option<i64>,
@@ -183,6 +187,30 @@ pub struct AiTempPolicyEffectStats {
     pub scope_hits: std::collections::BTreeMap<String, i64>,
     #[serde(default)]
     pub matched_value_hits: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub post_policy_observations: i64,
+    #[serde(default)]
+    pub post_policy_upstream_errors: i64,
+    #[serde(default)]
+    pub post_policy_status_families: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub post_policy_status_codes: std::collections::BTreeMap<String, i64>,
+    #[serde(default)]
+    pub post_policy_latency_samples: i64,
+    #[serde(default)]
+    pub post_policy_latency_ms_total: i64,
+    #[serde(default)]
+    pub post_policy_slow_responses: i64,
+    #[serde(default)]
+    pub post_policy_challenge_issued: i64,
+    #[serde(default)]
+    pub post_policy_challenge_verified: i64,
+    #[serde(default)]
+    pub post_policy_interactive_sessions: i64,
+    #[serde(default)]
+    pub suspected_false_positive_events: i64,
+    #[serde(default)]
+    pub pressure_after_observations: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +221,19 @@ pub struct AiTempPolicyHitRecord {
     pub scope_value: String,
     pub matched_value: String,
     pub match_mode: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiTempPolicyOutcomeRecord {
+    pub id: i64,
+    pub status_code: u16,
+    pub latency_ms: Option<u64>,
+    pub upstream_error: bool,
+    pub challenge_issued: bool,
+    pub challenge_verified: bool,
+    pub interactive_session: bool,
+    pub suspected_false_positive: bool,
+    pub route_still_under_pressure: bool,
 }
 
 #[derive(Debug, Clone)]

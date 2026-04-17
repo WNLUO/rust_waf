@@ -88,6 +88,7 @@ pub struct WafContext {
     ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
     ai_defense_trigger_runtime: std::sync::Mutex<AiDefenseTriggerState>,
     ai_defense_identity_buckets: DashMap<String, std::sync::Mutex<AiDefenseIdentityBucket>>,
+    ai_route_result_buckets: DashMap<String, std::sync::Mutex<AiRouteResultBucket>>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     rule_count: AtomicU64,
@@ -152,6 +153,27 @@ struct AiDefenseIdentityBucket {
 }
 
 #[derive(Debug, Default)]
+struct AiRouteResultBucket {
+    window_start: i64,
+    total_responses: u64,
+    upstream_successes: u64,
+    upstream_errors: u64,
+    local_responses: u64,
+    blocked_responses: u64,
+    challenge_issued: u64,
+    challenge_verified: u64,
+    interactive_sessions: u64,
+    policy_matched_responses: u64,
+    suspected_false_positive_events: u64,
+    status_families: std::collections::BTreeMap<String, u64>,
+    status_codes: std::collections::BTreeMap<String, u64>,
+    policy_actions: std::collections::BTreeMap<String, u64>,
+    latency_ms_total: u64,
+    latency_samples: u64,
+    slow_responses: u64,
+}
+
+#[derive(Debug, Default)]
 struct SiteDefenseBucket {
     window_start: i64,
     soft_events: u64,
@@ -187,6 +209,8 @@ pub struct AiDefenseSignalSnapshot {
     pub upstream_health: AiDefenseUpstreamSignal,
     pub active_policy_summaries: Vec<AiDefensePolicySignal>,
     pub identity_summaries: Vec<AiDefenseIdentitySignal>,
+    pub route_effects: Vec<AiDefenseRouteEffectSignal>,
+    pub policy_effects: Vec<AiDefensePolicyEffectSignal>,
     pub route_profiles: Vec<AiDefenseRouteProfileSignal>,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
 }
@@ -255,6 +279,54 @@ pub struct AiDefenseIdentitySignal {
 pub struct AiDefenseUserAgentSignal {
     pub value: String,
     pub count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiRouteResultObservation {
+    pub status_code: u16,
+    pub latency_ms: Option<u64>,
+    pub upstream_error: bool,
+    pub local_response: bool,
+    pub blocked: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseRouteEffectSignal {
+    pub site_id: String,
+    pub route: String,
+    pub total_responses: u64,
+    pub upstream_successes: u64,
+    pub upstream_errors: u64,
+    pub local_responses: u64,
+    pub blocked_responses: u64,
+    pub challenge_issued: u64,
+    pub challenge_verified: u64,
+    pub interactive_sessions: u64,
+    pub policy_matched_responses: u64,
+    pub suspected_false_positive_events: u64,
+    pub status_families: std::collections::BTreeMap<String, u64>,
+    pub status_codes: std::collections::BTreeMap<String, u64>,
+    pub policy_actions: std::collections::BTreeMap<String, u64>,
+    pub avg_latency_ms: Option<u64>,
+    pub slow_responses: u64,
+    pub false_positive_risk: String,
+    pub effectiveness_hint: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefensePolicyEffectSignal {
+    pub policy_key: String,
+    pub scope_type: String,
+    pub scope_value: String,
+    pub action: String,
+    pub hit_count: i64,
+    pub outcome_status: String,
+    pub outcome_score: i64,
+    pub observations: i64,
+    pub upstream_errors: i64,
+    pub suspected_false_positive_events: i64,
+    pub challenge_verified: i64,
+    pub pressure_after_observations: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +469,7 @@ impl WafContext {
             ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
             ai_defense_trigger_runtime: std::sync::Mutex::new(AiDefenseTriggerState::default()),
             ai_defense_identity_buckets: DashMap::new(),
+            ai_route_result_buckets: DashMap::new(),
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),

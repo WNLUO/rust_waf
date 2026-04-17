@@ -307,6 +307,16 @@ pub(crate) async fn handle_http1_connection(
                         context.as_ref(),
                         &resolve_runtime_custom_response(response),
                     );
+                context.note_ai_route_result(
+                    &request,
+                    AiRouteResultObservation {
+                        status_code: response.status_code,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: true,
+                    },
+                );
                 let body = body_for_request(&request, &response.body);
                 if let Some(tarpit) = response.tarpit.as_ref() {
                     http1_handler
@@ -746,6 +756,16 @@ pub(crate) async fn handle_http1_connection(
                             .await?;
                     }
                 } else {
+                    context.note_ai_route_result(
+                        &request,
+                        AiRouteResultObservation {
+                            status_code: 429,
+                            latency_ms: None,
+                            upstream_error: false,
+                            local_response: true,
+                            blocked: true,
+                        },
+                    );
                     http1_handler
                         .write_response(
                             &mut stream,
@@ -816,6 +836,16 @@ pub(crate) async fn handle_http1_connection(
                 metrics.record_block(inspection_result.layer.clone());
             }
             if result_should_drop_http1(&inspection_result, &request) {
+                context.note_ai_route_result(
+                    &request,
+                    AiRouteResultObservation {
+                        status_code: 499,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: true,
+                    },
+                );
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
@@ -849,6 +879,16 @@ pub(crate) async fn handle_http1_connection(
                         .await?;
                 }
             } else {
+                context.note_ai_route_result(
+                    &request,
+                    AiRouteResultObservation {
+                        status_code: 403,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: true,
+                    },
+                );
                 http1_handler
                     .write_response(
                         &mut stream,
@@ -939,6 +979,18 @@ pub(crate) async fn handle_http1_connection(
                                     request_dump.len(),
                                     false,
                                 );
+                                context.note_ai_route_result(
+                                    &request,
+                                    AiRouteResultObservation {
+                                        status_code: response.status_code,
+                                        latency_ms: Some(
+                                            proxy_started_at.elapsed().as_millis() as u64
+                                        ),
+                                        upstream_error: response.status_code >= 500,
+                                        local_response: false,
+                                        blocked: false,
+                                    },
+                                );
                                 write_http1_upstream_response(
                                     context.as_ref(),
                                     &mut stream,
@@ -962,6 +1014,18 @@ pub(crate) async fn handle_http1_connection(
                                     context.as_ref(),
                                     &mut headers,
                                     response.status_code,
+                                );
+                                context.note_ai_route_result(
+                                    &request,
+                                    AiRouteResultObservation {
+                                        status_code: response.status_code,
+                                        latency_ms: Some(
+                                            proxy_started_at.elapsed().as_millis() as u64
+                                        ),
+                                        upstream_error: false,
+                                        local_response: true,
+                                        blocked: response.status_code >= 400,
+                                    },
                                 );
                                 if let Some(tarpit) = response.tarpit.as_ref() {
                                     http1_handler
@@ -991,6 +1055,18 @@ pub(crate) async fn handle_http1_connection(
                                     traffic_source_ip.clone(),
                                     request_dump.len(),
                                     true,
+                                );
+                                context.note_ai_route_result(
+                                    &request,
+                                    AiRouteResultObservation {
+                                        status_code: 499,
+                                        latency_ms: Some(
+                                            proxy_started_at.elapsed().as_millis() as u64
+                                        ),
+                                        upstream_error: false,
+                                        local_response: true,
+                                        blocked: true,
+                                    },
                                 );
                                 let _ = stream.shutdown().await;
                                 return Ok(());
@@ -1023,6 +1099,16 @@ pub(crate) async fn handle_http1_connection(
                                 b"upstream proxy failed",
                             )
                             .await?;
+                        context.note_ai_route_result(
+                            &request,
+                            AiRouteResultObservation {
+                                status_code: 502,
+                                latency_ms: Some(proxy_started_at.elapsed().as_millis() as u64),
+                                upstream_error: true,
+                                local_response: false,
+                                blocked: false,
+                            },
+                        );
                     }
                 }
             } else if matched_site.is_some() {

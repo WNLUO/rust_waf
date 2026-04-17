@@ -228,10 +228,7 @@ onMounted(loadSettings)
             </select>
           </label>
 
-          <label
-            v-if="false"
-            class="flex items-center justify-start gap-2 text-sm text-stone-700"
-          >
+          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
             <span class="font-medium whitespace-nowrap">真实来源 IP Header</span>
             <input
               v-model="form.custom_source_ip_header"

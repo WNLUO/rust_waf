@@ -245,6 +245,55 @@ impl WafContext {
         self.refresh_http3_runtime_metadata();
     }
 
+    pub fn learn_trusted_cdn_peer(&self, peer_ip: std::net::IpAddr, evidence_header: &str) -> bool {
+        if peer_ip.is_unspecified() || peer_ip.is_loopback() {
+            return false;
+        }
+
+        let cidr = match peer_ip {
+            std::net::IpAddr::V4(ip) => format!("{ip}/32"),
+            std::net::IpAddr::V6(ip) => format!("{ip}/128"),
+        };
+        let mut next = self.config_snapshot();
+        if next
+            .effective_trusted_proxy_cidrs()
+            .iter()
+            .filter_map(|item| item.parse::<ipnet::IpNet>().ok())
+            .any(|network| network.contains(&peer_ip))
+        {
+            return false;
+        }
+        if next
+            .l4_config
+            .trusted_cdn
+            .manual_cidrs
+            .iter()
+            .any(|item| item == &cidr)
+        {
+            return false;
+        }
+
+        next.l4_config.trusted_cdn.manual_cidrs.push(cidr.clone());
+        let next = next.normalized();
+        self.apply_runtime_config(next.clone());
+
+        if let Some(store) = self.sqlite_store.as_ref().cloned() {
+            let evidence_header = evidence_header.to_string();
+            tokio::spawn(async move {
+                if let Err(err) = store.upsert_app_config(&next).await {
+                    log::warn!(
+                        "Failed to persist learned trusted CDN peer {} from header {}: {}",
+                        cidr,
+                        evidence_header,
+                        err
+                    );
+                }
+            });
+        }
+
+        true
+    }
+
     pub fn l4_inspector(&self) -> Option<Arc<L4Inspector>> {
         self.l4_inspector
             .read()

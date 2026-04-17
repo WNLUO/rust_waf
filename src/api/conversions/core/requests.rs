@@ -1,7 +1,7 @@
 use super::helpers::{
     normalize_https_listen_addr_input, parse_adaptive_protection_goal,
-    parse_adaptive_protection_mode, parse_auto_tuning_intent, parse_auto_tuning_mode,
-    parse_safeline_intercept_action, parse_safeline_intercept_match_mode, parse_source_ip_strategy,
+    parse_adaptive_protection_mode, parse_safeline_intercept_action,
+    parse_safeline_intercept_match_mode, parse_source_ip_strategy,
     parse_trusted_cdn_sync_interval_unit, parse_upstream_failure_mode,
     parse_upstream_protocol_policy,
 };
@@ -46,7 +46,6 @@ impl L4ConfigUpdateRequest {
         mut current: Config,
         _allow_compatibility_updates: bool,
     ) -> Config {
-        let adaptive_managed_fields = true;
         let previous_trusted_cdn = current.l4_config.trusted_cdn.clone();
         let previous_l4 = current.l4_config.clone();
         let previous_edgeone = previous_trusted_cdn.edgeone_overseas;
@@ -60,96 +59,34 @@ impl L4ConfigUpdateRequest {
             max_blocked_ips: self.max_blocked_ips,
             state_ttl_secs: self.state_ttl_secs,
             bloom_filter_scale: self.bloom_filter_scale,
-            behavior_event_channel_capacity: if adaptive_managed_fields {
-                previous_l4.behavior_event_channel_capacity
-            } else {
-                self.behavior_event_channel_capacity
-            },
-            behavior_drop_critical_threshold: if adaptive_managed_fields {
-                previous_l4.behavior_drop_critical_threshold
-            } else {
-                self.behavior_drop_critical_threshold
-            },
-            behavior_fallback_ratio_percent: if adaptive_managed_fields {
-                previous_l4.behavior_fallback_ratio_percent
-            } else {
-                self.behavior_fallback_ratio_percent
-            },
-            behavior_overload_blocked_connections_threshold: if adaptive_managed_fields {
-                previous_l4.behavior_overload_blocked_connections_threshold
-            } else {
-                self.behavior_overload_blocked_connections_threshold
-            },
-            behavior_overload_active_connections_threshold: if adaptive_managed_fields {
-                previous_l4.behavior_overload_active_connections_threshold
-            } else {
-                self.behavior_overload_active_connections_threshold
-            },
-            behavior_normal_connection_budget_per_minute: if adaptive_managed_fields {
-                previous_l4.behavior_normal_connection_budget_per_minute
-            } else {
-                self.behavior_normal_connection_budget_per_minute
-            },
-            behavior_suspicious_connection_budget_per_minute: if adaptive_managed_fields {
-                previous_l4.behavior_suspicious_connection_budget_per_minute
-            } else {
-                self.behavior_suspicious_connection_budget_per_minute
-            },
-            behavior_high_risk_connection_budget_per_minute: if adaptive_managed_fields {
-                previous_l4.behavior_high_risk_connection_budget_per_minute
-            } else {
-                self.behavior_high_risk_connection_budget_per_minute
-            },
-            behavior_high_overload_budget_scale_percent: if adaptive_managed_fields {
-                previous_l4.behavior_high_overload_budget_scale_percent
-            } else {
-                self.behavior_high_overload_budget_scale_percent
-            },
-            behavior_critical_overload_budget_scale_percent: if adaptive_managed_fields {
-                previous_l4.behavior_critical_overload_budget_scale_percent
-            } else {
-                self.behavior_critical_overload_budget_scale_percent
-            },
-            behavior_high_overload_delay_ms: if adaptive_managed_fields {
-                previous_l4.behavior_high_overload_delay_ms
-            } else {
-                self.behavior_high_overload_delay_ms
-            },
-            behavior_critical_overload_delay_ms: if adaptive_managed_fields {
-                previous_l4.behavior_critical_overload_delay_ms
-            } else {
-                self.behavior_critical_overload_delay_ms
-            },
-            behavior_soft_delay_threshold_percent: if adaptive_managed_fields {
-                previous_l4.behavior_soft_delay_threshold_percent
-            } else {
-                self.behavior_soft_delay_threshold_percent
-            },
-            behavior_hard_delay_threshold_percent: if adaptive_managed_fields {
-                previous_l4.behavior_hard_delay_threshold_percent
-            } else {
-                self.behavior_hard_delay_threshold_percent
-            },
-            behavior_soft_delay_ms: if adaptive_managed_fields {
-                previous_l4.behavior_soft_delay_ms
-            } else {
-                self.behavior_soft_delay_ms
-            },
-            behavior_hard_delay_ms: if adaptive_managed_fields {
-                previous_l4.behavior_hard_delay_ms
-            } else {
-                self.behavior_hard_delay_ms
-            },
-            behavior_reject_threshold_percent: if adaptive_managed_fields {
-                previous_l4.behavior_reject_threshold_percent
-            } else {
-                self.behavior_reject_threshold_percent
-            },
-            behavior_critical_reject_threshold_percent: if adaptive_managed_fields {
-                previous_l4.behavior_critical_reject_threshold_percent
-            } else {
-                self.behavior_critical_reject_threshold_percent
-            },
+            behavior_event_channel_capacity: previous_l4.behavior_event_channel_capacity,
+            behavior_drop_critical_threshold: previous_l4.behavior_drop_critical_threshold,
+            behavior_fallback_ratio_percent: previous_l4.behavior_fallback_ratio_percent,
+            behavior_overload_blocked_connections_threshold: previous_l4
+                .behavior_overload_blocked_connections_threshold,
+            behavior_overload_active_connections_threshold: previous_l4
+                .behavior_overload_active_connections_threshold,
+            behavior_normal_connection_budget_per_minute: previous_l4
+                .behavior_normal_connection_budget_per_minute,
+            behavior_suspicious_connection_budget_per_minute: previous_l4
+                .behavior_suspicious_connection_budget_per_minute,
+            behavior_high_risk_connection_budget_per_minute: previous_l4
+                .behavior_high_risk_connection_budget_per_minute,
+            behavior_high_overload_budget_scale_percent: previous_l4
+                .behavior_high_overload_budget_scale_percent,
+            behavior_critical_overload_budget_scale_percent: previous_l4
+                .behavior_critical_overload_budget_scale_percent,
+            behavior_high_overload_delay_ms: previous_l4.behavior_high_overload_delay_ms,
+            behavior_critical_overload_delay_ms: previous_l4.behavior_critical_overload_delay_ms,
+            behavior_soft_delay_threshold_percent: previous_l4
+                .behavior_soft_delay_threshold_percent,
+            behavior_hard_delay_threshold_percent: previous_l4
+                .behavior_hard_delay_threshold_percent,
+            behavior_soft_delay_ms: previous_l4.behavior_soft_delay_ms,
+            behavior_hard_delay_ms: previous_l4.behavior_hard_delay_ms,
+            behavior_reject_threshold_percent: previous_l4.behavior_reject_threshold_percent,
+            behavior_critical_reject_threshold_percent: previous_l4
+                .behavior_critical_reject_threshold_percent,
             trusted_cdn: crate::config::l4::TrustedCdnConfig {
                 manual_cidrs: self.trusted_cdn.manual_cidrs,
                 sync_interval_value: self.trusted_cdn.sync_interval_value,
@@ -188,7 +125,6 @@ impl L7ConfigUpdateRequest {
         mut current: Config,
         _allow_compatibility_updates: bool,
     ) -> Result<Config, String> {
-        let adaptive_managed_fields = true;
         current.runtime_profile = match self.runtime_profile.as_str() {
             "minimal" => RuntimeProfile::Minimal,
             "standard" => RuntimeProfile::Standard,
@@ -271,96 +207,8 @@ impl L7ConfigUpdateRequest {
         current.listen_addrs = listen_addrs;
         current.tcp_upstream_addr = non_empty_string(upstream_endpoint);
         current.http3_config = http3_config;
-        if let Some(cc_defense) = self.cc_defense {
-            if adaptive_managed_fields {
-                log::debug!(
-                    "Ignoring manual L7 CC threshold update because adaptive protection is enabled"
-                );
-            } else {
-                current.l7_config.cc_defense = cc_defense.into_config();
-            }
-        }
-        if !adaptive_managed_fields {
-            current.l7_config.slow_attack_defense = self.slow_attack_defense.into_config();
-        }
-        if let Some(safeline_intercept) = self.safeline_intercept {
-            if adaptive_managed_fields {
-                let mut next = current.l7_config.safeline_intercept.clone();
-                next.enabled = safeline_intercept.enabled;
-                next.action = crate::config::l7::SafeLineInterceptAction::Drop;
-                current.l7_config.safeline_intercept = next;
-            } else {
-                current.l7_config.safeline_intercept = safeline_intercept.into_config()?;
-            }
-        }
-        if let Some(auto_tuning) = self.auto_tuning {
-            if adaptive_managed_fields {
-                log::debug!(
-                    "Ignoring manual auto tuning update because adaptive protection owns runtime tuning"
-                );
-            } else {
-                current.auto_tuning = auto_tuning.into_config()?;
-            }
-        }
 
         Ok(current.normalized())
-    }
-}
-
-impl CcDefenseConfigRequest {
-    pub(crate) fn into_config(self) -> crate::config::l7::CcDefenseConfig {
-        let defaults = crate::config::l7::CcDefenseConfig::default();
-        crate::config::l7::CcDefenseConfig {
-            enabled: self.enabled,
-            request_window_secs: self.request_window_secs,
-            ip_challenge_threshold: self.ip_challenge_threshold,
-            ip_block_threshold: self.ip_block_threshold,
-            host_challenge_threshold: self.host_challenge_threshold,
-            host_block_threshold: self.host_block_threshold,
-            route_challenge_threshold: self.route_challenge_threshold,
-            route_block_threshold: self.route_block_threshold,
-            hot_path_challenge_threshold: self.hot_path_challenge_threshold,
-            hot_path_block_threshold: self.hot_path_block_threshold,
-            delay_threshold_percent: self.delay_threshold_percent,
-            delay_ms: self.delay_ms,
-            challenge_ttl_secs: self.challenge_ttl_secs,
-            challenge_cookie_name: self.challenge_cookie_name,
-            static_request_weight_percent: self
-                .static_request_weight_percent
-                .unwrap_or(defaults.static_request_weight_percent),
-            page_subresource_weight_percent: self
-                .page_subresource_weight_percent
-                .unwrap_or(defaults.page_subresource_weight_percent),
-            page_load_grace_secs: self
-                .page_load_grace_secs
-                .unwrap_or(defaults.page_load_grace_secs),
-            hard_route_block_multiplier: self
-                .hard_route_block_multiplier
-                .unwrap_or(defaults.hard_route_block_multiplier),
-            hard_host_block_multiplier: self
-                .hard_host_block_multiplier
-                .unwrap_or(defaults.hard_host_block_multiplier),
-            hard_ip_block_multiplier: self
-                .hard_ip_block_multiplier
-                .unwrap_or(defaults.hard_ip_block_multiplier),
-            hard_hot_path_block_multiplier: self
-                .hard_hot_path_block_multiplier
-                .unwrap_or(defaults.hard_hot_path_block_multiplier),
-        }
-    }
-}
-
-impl SlowAttackDefenseConfigRequest {
-    pub(crate) fn into_config(self) -> crate::config::l7::SlowAttackDefenseConfig {
-        crate::config::l7::SlowAttackDefenseConfig {
-            enabled: self.enabled,
-            header_min_bytes_per_sec: self.header_min_bytes_per_sec,
-            body_min_bytes_per_sec: self.body_min_bytes_per_sec,
-            idle_keepalive_timeout_ms: self.idle_keepalive_timeout_ms,
-            event_window_secs: self.event_window_secs,
-            max_events_per_window: self.max_events_per_window,
-            block_duration_secs: self.block_duration_secs,
-        }
     }
 }
 
@@ -379,27 +227,6 @@ impl SafeLineInterceptConfigRequest {
             .map_err(|err| format!("SafeLine 自定义响应模板无效: {}", err))?;
 
         Ok(config)
-    }
-}
-
-impl AutoTuningConfigRequest {
-    pub(crate) fn into_config(self) -> Result<crate::config::AutoTuningConfig, String> {
-        Ok(crate::config::AutoTuningConfig {
-            mode: parse_auto_tuning_mode(&self.mode)?,
-            intent: parse_auto_tuning_intent(&self.intent)?,
-            runtime_adjust_enabled: self.runtime_adjust_enabled,
-            bootstrap_secs: self.bootstrap_secs,
-            control_interval_secs: self.control_interval_secs,
-            cooldown_secs: self.cooldown_secs,
-            max_step_percent: self.max_step_percent,
-            rollback_window_minutes: self.rollback_window_minutes,
-            pinned_fields: self.pinned_fields,
-            slo: crate::config::AutoSloTargets {
-                tls_handshake_timeout_rate_percent: self.slo.tls_handshake_timeout_rate_percent,
-                bucket_reject_rate_percent: self.slo.bucket_reject_rate_percent,
-                p95_proxy_latency_ms: self.slo.p95_proxy_latency_ms,
-            },
-        })
     }
 }
 
@@ -666,24 +493,6 @@ mod tests {
             max_blocked_ips: 666,
             state_ttl_secs: 555,
             bloom_filter_scale: 1.2,
-            behavior_event_channel_capacity: 1234,
-            behavior_drop_critical_threshold: 222,
-            behavior_fallback_ratio_percent: 33,
-            behavior_overload_blocked_connections_threshold: 444,
-            behavior_overload_active_connections_threshold: 555,
-            behavior_normal_connection_budget_per_minute: 9999,
-            behavior_suspicious_connection_budget_per_minute: 8888,
-            behavior_high_risk_connection_budget_per_minute: 7777,
-            behavior_high_overload_budget_scale_percent: 44,
-            behavior_critical_overload_budget_scale_percent: 22,
-            behavior_high_overload_delay_ms: 111,
-            behavior_critical_overload_delay_ms: 222,
-            behavior_soft_delay_threshold_percent: 333,
-            behavior_hard_delay_threshold_percent: 444,
-            behavior_soft_delay_ms: 999,
-            behavior_hard_delay_ms: 888,
-            behavior_reject_threshold_percent: 777,
-            behavior_critical_reject_threshold_percent: 666,
             trusted_cdn: TrustedCdnConfigRequest::default(),
         }
         .into_config(current, false);
@@ -756,40 +565,6 @@ mod tests {
             http3_certificate_path: String::new(),
             http3_private_key_path: String::new(),
             http3_enable_tls13: true,
-            cc_defense: Some(CcDefenseConfigRequest {
-                enabled: true,
-                request_window_secs: 10,
-                ip_challenge_threshold: 999,
-                ip_block_threshold: 1000,
-                host_challenge_threshold: 200,
-                host_block_threshold: 400,
-                route_challenge_threshold: 100,
-                route_block_threshold: 200,
-                hot_path_challenge_threshold: 800,
-                hot_path_block_threshold: 1600,
-                delay_threshold_percent: 70,
-                delay_ms: 999,
-                challenge_ttl_secs: 1800,
-                challenge_cookie_name: "rwaf_cc".to_string(),
-                static_request_weight_percent: None,
-                page_subresource_weight_percent: None,
-                page_load_grace_secs: None,
-                hard_route_block_multiplier: None,
-                hard_host_block_multiplier: None,
-                hard_ip_block_multiplier: None,
-                hard_hot_path_block_multiplier: None,
-            }),
-            slow_attack_defense: SlowAttackDefenseConfigRequest {
-                enabled: true,
-                header_min_bytes_per_sec: 64,
-                body_min_bytes_per_sec: 256,
-                idle_keepalive_timeout_ms: 5000,
-                event_window_secs: 300,
-                max_events_per_window: 6,
-                block_duration_secs: 900,
-            },
-            safeline_intercept: None,
-            auto_tuning: None,
         }
         .into_config(current, false)
         .expect("l7 update should succeed");

@@ -181,6 +181,9 @@ pub(crate) async fn handle_http2_connection(
                                 crate::l4::behavior::FeedbackSource::L7Block,
                             );
                         }
+                        if result_should_drop_http2(&result, &request) {
+                            return Err(drop_http2_result(&result.reason));
+                        }
                         return Ok(Http2Response {
                             status_code: 403,
                             headers: vec![],
@@ -213,6 +216,9 @@ pub(crate) async fn handle_http2_connection(
                                 &request,
                                 crate::l4::behavior::FeedbackSource::L7Block,
                             );
+                        }
+                        if result_should_drop_http2(&early_inspection_result, &request) {
+                            return Err(drop_http2_result(&early_inspection_result.reason));
                         }
                         if let Some(response) = early_inspection_result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
@@ -272,6 +278,9 @@ pub(crate) async fn handle_http2_connection(
                                 crate::l4::behavior::FeedbackSource::L7Block,
                             );
                         }
+                        if result_should_drop_http2(&result, &request) {
+                            return Err(drop_http2_result(&result.reason));
+                        }
                         if let Some(response) = result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
                             let body = body_for_request(&request, &response.body);
@@ -324,6 +333,9 @@ pub(crate) async fn handle_http2_connection(
                                 &request,
                                 crate::l4::behavior::FeedbackSource::L7Block,
                             );
+                        }
+                        if result_should_drop_http2(&result, &request) {
+                            return Err(drop_http2_result(&result.reason));
                         }
                         if let Some(response) = result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
@@ -419,6 +431,9 @@ pub(crate) async fn handle_http2_connection(
                                 crate::l4::behavior::FeedbackSource::L7Block,
                             );
                         }
+                        if result_should_drop_http2(&result, &request) {
+                            return Err(drop_http2_result(&result.reason));
+                        }
                         if let Some(response) = result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
                             let body = body_for_request(&request, &response.body);
@@ -472,6 +487,9 @@ pub(crate) async fn handle_http2_connection(
                                     &request,
                                     crate::l4::behavior::FeedbackSource::L7Block,
                                 );
+                            }
+                            if result_should_drop_http2(&result, &request) {
+                                return Err(drop_http2_result(&result.reason));
                             }
                             if let Some(response) = result.custom_response.as_ref() {
                                 let response = resolve_runtime_custom_response(response);
@@ -534,6 +552,9 @@ pub(crate) async fn handle_http2_connection(
                                     &request,
                                     crate::l4::behavior::FeedbackSource::L7Block,
                                 );
+                            }
+                            if result_should_drop_http2(&result, &request) {
+                                return Err(drop_http2_result(&result.reason));
                             }
                             if let Some(response) = result.custom_response.as_ref() {
                                 let response = resolve_runtime_custom_response(response);
@@ -622,6 +643,9 @@ pub(crate) async fn handle_http2_connection(
                         );
                         if let Some(metrics) = context.metrics.as_ref() {
                             metrics.record_block(inspection_result.layer.clone());
+                        }
+                        if result_should_drop_http2(&inspection_result, &request) {
+                            return Err(drop_http2_result(&inspection_result.reason));
                         }
                         if let Some(response) = inspection_result.custom_response.as_ref() {
                             let response = resolve_runtime_custom_response(response);
@@ -866,6 +890,21 @@ pub(crate) async fn handle_http2_connection(
     }
 
     Ok(())
+}
+
+fn result_should_drop_http2(
+    result: &crate::core::InspectionResult,
+    request: &UnifiedHttpRequest,
+) -> bool {
+    matches!(result.action, crate::core::InspectionAction::Drop)
+        || request
+            .get_metadata("l7.enforcement")
+            .map(|value| value == "drop")
+            .unwrap_or(false)
+}
+
+fn drop_http2_result(reason: &str) -> crate::protocol::ProtocolError {
+    crate::protocol::ProtocolError::ParseError(format!("HTTP/2 request dropped: {reason}"))
 }
 
 async fn handle_http2_slow_attack_error(

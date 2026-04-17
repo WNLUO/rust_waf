@@ -203,6 +203,22 @@ pub(crate) fn resolve_client_identity(
     let forwarded_header_present = forwarded_identity_header_present(request, gateway);
 
     if !trusted_proxy_peer {
+        if let Some((ip, header)) = configured_forwarded_client_ip(request, gateway) {
+            let header_trusted = configured_forwarded_header_authorized(request, gateway);
+            if header_trusted {
+                context.learn_trusted_cdn_peer(peer_addr.ip(), header.as_deref().unwrap_or("-"));
+                return ClientIdentityResolution {
+                    resolved_client_ip: ip,
+                    source_label: "forwarded_header",
+                    source_header_name: header,
+                    trusted_proxy_peer: true,
+                    forwarded_header_present,
+                    forwarded_header_valid: true,
+                    identity_state: "trusted_cdn_forwarded",
+                };
+            }
+        }
+
         return ClientIdentityResolution {
             resolved_client_ip: peer_addr.ip(),
             source_label: "socket_peer",
@@ -276,6 +292,10 @@ fn auto_forwarded_client_ip(
     request: &UnifiedHttpRequest,
     gateway: &crate::config::GatewayConfig,
 ) -> Option<(std::net::IpAddr, Option<String>)> {
+    if let Some(resolved) = configured_forwarded_client_ip(request, gateway) {
+        return Some(resolved);
+    }
+
     for header in ["cf-connecting-ip", "true-client-ip", "x-real-ip"] {
         if let Some(ip) = request
             .get_header(header)
@@ -292,17 +312,43 @@ fn auto_forwarded_client_ip(
         return Some((ip, Some("x-forwarded-for".to_string())));
     }
 
+    None
+}
+
+fn configured_forwarded_client_ip(
+    request: &UnifiedHttpRequest,
+    gateway: &crate::config::GatewayConfig,
+) -> Option<(std::net::IpAddr, Option<String>)> {
     let custom_header = gateway.custom_source_ip_header.trim();
-    if !custom_header.is_empty() {
-        if let Some(ip) = request
-            .get_header(custom_header)
-            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
-        {
-            return Some((ip, Some(custom_header.to_string())));
-        }
+    if custom_header.is_empty() {
+        return None;
     }
 
-    None
+    request
+        .get_header(custom_header)
+        .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+        .map(|ip| (ip, Some(custom_header.to_string())))
+}
+
+fn configured_forwarded_header_authorized(
+    request: &UnifiedHttpRequest,
+    gateway: &crate::config::GatewayConfig,
+) -> bool {
+    if gateway.custom_source_ip_header.trim().is_empty() {
+        return false;
+    }
+    if !gateway.custom_source_ip_header_auth_enabled {
+        return true;
+    }
+
+    let auth_header = gateway.custom_source_ip_header_auth_header.trim();
+    if auth_header.is_empty() {
+        return false;
+    }
+    request
+        .get_header(auth_header)
+        .map(|value| value.trim() == gateway.custom_source_ip_header_auth_secret.trim())
+        .unwrap_or(false)
 }
 
 fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> bool {

@@ -178,10 +178,7 @@ onMounted(loadSettings)
             </p>
           </div>
 
-          <div
-            v-if="false"
-            class="mt-3 grid gap-3 lg:grid-cols-[15rem_minmax(0,1fr)]"
-          >
+          <div class="mt-3 grid gap-3 lg:grid-cols-[15rem_minmax(0,1fr)]">
             <label class="space-y-1">
               <span class="text-xs font-medium text-slate-500">获取方式</span>
               <select

@@ -184,6 +184,9 @@ async fn handle_http3_request(
                 crate::l4::behavior::FeedbackSource::L7Block,
             );
         }
+        if result_should_drop_http3(&result, &unified) {
+            return Ok(());
+        }
         send_http3_response(
             &mut stream,
             403,
@@ -216,6 +219,9 @@ async fn handle_http3_request(
                 &unified,
                 crate::l4::behavior::FeedbackSource::L7Block,
             );
+        }
+        if result_should_drop_http3(&early_inspection_result, &unified) {
+            return Ok(());
         }
         if let Some(response) = early_inspection_result.custom_response.as_ref() {
             let response =
@@ -272,6 +278,9 @@ async fn handle_http3_request(
                 crate::l4::behavior::FeedbackSource::L7Block,
             );
         }
+        if result_should_drop_http3(&result, &unified) {
+            return Ok(());
+        }
         if let Some(response) = result.custom_response.as_ref() {
             let response =
                 crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
@@ -317,6 +326,9 @@ async fn handle_http3_request(
                 &unified,
                 crate::l4::behavior::FeedbackSource::L7Block,
             );
+        }
+        if result_should_drop_http3(&result, &unified) {
+            return Ok(());
         }
         if let Some(response) = result.custom_response.as_ref() {
             let response =
@@ -398,6 +410,9 @@ async fn handle_http3_request(
                 crate::l4::behavior::FeedbackSource::L7Block,
             );
         }
+        if result_should_drop_http3(&result, &unified) {
+            return Ok(());
+        }
         if let Some(response) = result.custom_response.as_ref() {
             let response =
                 crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
@@ -448,6 +463,9 @@ async fn handle_http3_request(
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
             }
+            if result_should_drop_http3(&result, &unified) {
+                return Ok(());
+            }
             if let Some(response) = result.custom_response.as_ref() {
                 let response =
                     crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
@@ -496,6 +514,9 @@ async fn handle_http3_request(
                     &unified,
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
+            }
+            if result_should_drop_http3(&result, &unified) {
+                return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
                 let response =
@@ -567,6 +588,9 @@ async fn handle_http3_request(
             .record_ingress(traffic_source_ip.clone(), request_dump.len(), true);
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
+        }
+        if result_should_drop_http3(&inspection_result, &unified) {
+            return Ok(());
         }
         if let Some(response) = inspection_result.custom_response.as_ref() {
             let response =
@@ -711,6 +735,18 @@ async fn handle_http3_request(
     )
     .await?;
     Ok(())
+}
+
+#[cfg(feature = "http3")]
+fn result_should_drop_http3(
+    result: &crate::core::InspectionResult,
+    request: &UnifiedHttpRequest,
+) -> bool {
+    matches!(result.action, crate::core::InspectionAction::Drop)
+        || request
+            .get_metadata("l7.enforcement")
+            .map(|value| value == "drop")
+            .unwrap_or(false)
 }
 
 #[cfg(feature = "http3")]

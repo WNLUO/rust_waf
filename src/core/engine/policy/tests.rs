@@ -93,7 +93,8 @@ async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
 }
 
 #[tokio::test]
-async fn apply_client_identity_trusts_custom_source_ip_header_when_auth_is_disabled() {
+async fn apply_client_identity_learns_cdn_peer_from_custom_source_ip_header_when_auth_is_disabled()
+{
     let mut config = crate::config::Config::default();
     config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
     config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
@@ -104,18 +105,18 @@ async fn apply_client_identity_trusts_custom_source_ip_header_when_auth_is_disab
 
     apply_client_identity(&context, "198.18.0.10:443".parse().unwrap(), &mut request);
 
-    assert_eq!(request.client_ip.as_deref(), Some("198.18.0.10"));
+    assert_eq!(request.client_ip.as_deref(), Some("198.51.100.8"));
     assert_eq!(
         request
             .get_metadata("network.trusted_proxy_peer")
             .map(String::as_str),
-        Some("false")
+        Some("true")
     );
     assert_eq!(
         request
             .get_metadata("network.client_ip_source")
             .map(String::as_str),
-        Some("socket_peer")
+        Some("forwarded_header")
     );
     assert_eq!(
         request
@@ -127,14 +128,21 @@ async fn apply_client_identity_trusts_custom_source_ip_header_when_auth_is_disab
         request
             .get_metadata("network.identity_state")
             .map(String::as_str),
-        Some("spoofed_forward_header")
+        Some("trusted_cdn_forwarded")
     );
     assert_eq!(
         request
             .get_metadata("network.forward_header_valid")
             .map(String::as_str),
-        Some("false")
+        Some("true")
     );
+    assert!(context
+        .config_snapshot()
+        .l4_config
+        .trusted_cdn
+        .manual_cidrs
+        .iter()
+        .any(|cidr| cidr == "198.18.0.10/32"));
 }
 
 #[tokio::test]

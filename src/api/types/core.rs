@@ -192,24 +192,6 @@ pub struct L4ConfigUpdateRequest {
     pub(crate) max_blocked_ips: usize,
     pub(crate) state_ttl_secs: u64,
     pub(crate) bloom_filter_scale: f64,
-    pub(crate) behavior_event_channel_capacity: usize,
-    pub(crate) behavior_drop_critical_threshold: u64,
-    pub(crate) behavior_fallback_ratio_percent: u8,
-    pub(crate) behavior_overload_blocked_connections_threshold: u64,
-    pub(crate) behavior_overload_active_connections_threshold: u64,
-    pub(crate) behavior_normal_connection_budget_per_minute: u32,
-    pub(crate) behavior_suspicious_connection_budget_per_minute: u32,
-    pub(crate) behavior_high_risk_connection_budget_per_minute: u32,
-    pub(crate) behavior_high_overload_budget_scale_percent: u8,
-    pub(crate) behavior_critical_overload_budget_scale_percent: u8,
-    pub(crate) behavior_high_overload_delay_ms: u64,
-    pub(crate) behavior_critical_overload_delay_ms: u64,
-    pub(crate) behavior_soft_delay_threshold_percent: u16,
-    pub(crate) behavior_hard_delay_threshold_percent: u16,
-    pub(crate) behavior_soft_delay_ms: u64,
-    pub(crate) behavior_hard_delay_ms: u64,
-    pub(crate) behavior_reject_threshold_percent: u16,
-    pub(crate) behavior_critical_reject_threshold_percent: u16,
     #[serde(default)]
     pub(crate) trusted_cdn: TrustedCdnConfigRequest,
 }
@@ -386,24 +368,6 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) http3_certificate_path: String,
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
-    #[serde(default)]
-    pub(crate) cc_defense: Option<CcDefenseConfigRequest>,
-    pub(crate) slow_attack_defense: SlowAttackDefenseConfigRequest,
-    #[serde(default)]
-    pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
-    #[serde(default)]
-    pub(crate) auto_tuning: Option<AutoTuningConfigRequest>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct SlowAttackDefenseConfigRequest {
-    pub(crate) enabled: bool,
-    pub(crate) header_min_bytes_per_sec: u32,
-    pub(crate) body_min_bytes_per_sec: u32,
-    pub(crate) idle_keepalive_timeout_ms: u64,
-    pub(crate) event_window_secs: u64,
-    pub(crate) max_events_per_window: u32,
-    pub(crate) block_duration_secs: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -422,28 +386,6 @@ pub struct AutoTuningConfigResponse {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AutoSloTargetsResponse {
-    pub(crate) tls_handshake_timeout_rate_percent: f64,
-    pub(crate) bucket_reject_rate_percent: f64,
-    pub(crate) p95_proxy_latency_ms: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AutoTuningConfigRequest {
-    pub(crate) mode: String,
-    pub(crate) intent: String,
-    pub(crate) runtime_adjust_enabled: bool,
-    pub(crate) bootstrap_secs: u64,
-    pub(crate) control_interval_secs: u64,
-    pub(crate) cooldown_secs: u64,
-    pub(crate) max_step_percent: u8,
-    pub(crate) rollback_window_minutes: u64,
-    #[serde(default)]
-    pub(crate) pinned_fields: Vec<String>,
-    pub(crate) slo: AutoSloTargetsRequest,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct AutoSloTargetsRequest {
     pub(crate) tls_handshake_timeout_rate_percent: f64,
     pub(crate) bucket_reject_rate_percent: f64,
     pub(crate) p95_proxy_latency_ms: u64,
@@ -472,31 +414,6 @@ pub struct CcDefenseConfigResponse {
     pub(crate) hard_host_block_multiplier: u8,
     pub(crate) hard_ip_block_multiplier: u8,
     pub(crate) hard_hot_path_block_multiplier: u8,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CcDefenseConfigRequest {
-    pub(crate) enabled: bool,
-    pub(crate) request_window_secs: u64,
-    pub(crate) ip_challenge_threshold: u32,
-    pub(crate) ip_block_threshold: u32,
-    pub(crate) host_challenge_threshold: u32,
-    pub(crate) host_block_threshold: u32,
-    pub(crate) route_challenge_threshold: u32,
-    pub(crate) route_block_threshold: u32,
-    pub(crate) hot_path_challenge_threshold: u32,
-    pub(crate) hot_path_block_threshold: u32,
-    pub(crate) delay_threshold_percent: u8,
-    pub(crate) delay_ms: u64,
-    pub(crate) challenge_ttl_secs: u64,
-    pub(crate) challenge_cookie_name: String,
-    pub(crate) static_request_weight_percent: Option<u8>,
-    pub(crate) page_subresource_weight_percent: Option<u8>,
-    pub(crate) page_load_grace_secs: Option<u64>,
-    pub(crate) hard_route_block_multiplier: Option<u8>,
-    pub(crate) hard_host_block_multiplier: Option<u8>,
-    pub(crate) hard_ip_block_multiplier: Option<u8>,
-    pub(crate) hard_hot_path_block_multiplier: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]

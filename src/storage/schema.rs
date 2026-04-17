@@ -200,6 +200,35 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON ai_temp_policies(status);
         CREATE INDEX IF NOT EXISTS idx_ai_temp_policies_scope
             ON ai_temp_policies(scope_type, scope_value);
+
+        CREATE TABLE IF NOT EXISTS ai_route_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_observed_at INTEGER,
+            site_id TEXT NOT NULL,
+            route_pattern TEXT NOT NULL,
+            match_mode TEXT NOT NULL DEFAULT 'exact',
+            route_type TEXT NOT NULL DEFAULT 'unknown',
+            sensitivity TEXT NOT NULL DEFAULT 'unknown',
+            auth_required TEXT NOT NULL DEFAULT 'unknown',
+            normal_traffic_pattern TEXT NOT NULL DEFAULT 'unknown',
+            recommended_actions_json TEXT NOT NULL DEFAULT '[]',
+            avoid_actions_json TEXT NOT NULL DEFAULT '[]',
+            confidence INTEGER NOT NULL DEFAULT 0,
+            source TEXT NOT NULL DEFAULT 'ai_observed',
+            status TEXT NOT NULL DEFAULT 'candidate',
+            rationale TEXT NOT NULL DEFAULT '',
+            reviewed_at INTEGER,
+            UNIQUE(site_id, route_pattern, match_mode)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_route_profiles_site_status
+            ON ai_route_profiles(site_id, status);
+        CREATE INDEX IF NOT EXISTS idx_ai_route_profiles_route
+            ON ai_route_profiles(route_pattern, match_mode);
+        CREATE INDEX IF NOT EXISTS idx_ai_route_profiles_updated_at
+            ON ai_route_profiles(updated_at DESC);
         CREATE TABLE IF NOT EXISTS rules (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

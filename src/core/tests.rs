@@ -189,6 +189,71 @@ async fn test_ai_auto_defense_applies_hot_route_temp_policy() {
     assert!(policy.auto_applied);
 }
 
+#[tokio::test]
+async fn test_ai_route_profile_refreshes_into_auto_defense_snapshot() {
+    let db_path = unique_test_db_path("ai_route_profile");
+    let config = Config {
+        interface: "lo0".to_string(),
+        listen_addrs: vec!["127.0.0.1:0".to_string()],
+        tcp_upstream_addr: None,
+        udp_upstream_addr: None,
+        runtime_profile: RuntimeProfile::Standard,
+        api_enabled: false,
+        api_bind: "127.0.0.1:3740".to_string(),
+        bloom_enabled: false,
+        l4_bloom_false_positive_verification: false,
+        l7_bloom_false_positive_verification: false,
+        maintenance_interval_secs: 30,
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        sqlite_rules_enabled: false,
+        max_concurrent_tasks: 128,
+        ..Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+    let store = context.sqlite_store.as_ref().unwrap();
+    store
+        .upsert_ai_route_profile(&crate::storage::AiRouteProfileUpsert {
+            site_id: "site-a".to_string(),
+            route_pattern: "/api/login".to_string(),
+            match_mode: "exact".to_string(),
+            route_type: "authentication".to_string(),
+            sensitivity: "high".to_string(),
+            auth_required: "false".to_string(),
+            normal_traffic_pattern: "interactive".to_string(),
+            recommended_actions: vec![
+                "increase_challenge".to_string(),
+                "tighten_route_cc".to_string(),
+            ],
+            avoid_actions: vec!["add_temp_block".to_string()],
+            confidence: 88,
+            source: "ai_observed".to_string(),
+            status: "active".to_string(),
+            rationale: "AI inferred login semantics".to_string(),
+            last_observed_at: Some(unix_timestamp()),
+            reviewed_at: None,
+        })
+        .await
+        .unwrap();
+
+    context.refresh_ai_route_profiles().await.unwrap();
+    let snapshot = context
+        .ai_defense_signal_snapshot(unix_timestamp(), Some("test".to_string()))
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.route_profiles.len(), 1);
+    let profile = &snapshot.route_profiles[0];
+    assert_eq!(profile.site_id, "site-a");
+    assert_eq!(profile.route_pattern, "/api/login");
+    assert_eq!(profile.route_type, "authentication");
+    assert!(profile
+        .recommended_actions
+        .iter()
+        .any(|item| item == "tighten_route_cc"));
+}
+
 fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {
     AiTempPolicyEntry {
         id: 1,

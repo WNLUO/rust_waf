@@ -1,11 +1,13 @@
 use super::{
     unix_timestamp, AiDefenseDecision, AiDefenseIdentitySignal, AiDefenseL4Signal,
-    AiDefensePolicySignal, AiDefensePortSignal, AiDefenseRunResult, AiDefenseRuntimePressureSignal,
-    AiDefenseSignalSnapshot, AiDefenseUpstreamSignal, AiDefenseUserAgentSignal,
-    LocalDefenseRecommendation, WafContext,
+    AiDefensePolicySignal, AiDefensePortSignal, AiDefenseRouteProfileSignal, AiDefenseRunResult,
+    AiDefenseRuntimePressureSignal, AiDefenseSignalSnapshot, AiDefenseUpstreamSignal,
+    AiDefenseUserAgentSignal, LocalDefenseRecommendation, WafContext,
 };
 use crate::protocol::UnifiedHttpRequest;
-use crate::storage::{AiTempPolicyEffectStats, AiTempPolicyEntry, AiTempPolicyUpsert};
+use crate::storage::{
+    AiRouteProfileEntry, AiTempPolicyEffectStats, AiTempPolicyEntry, AiTempPolicyUpsert,
+};
 use anyhow::Result;
 
 const MAX_AI_DEFENSE_IDENTITY_BUCKETS: usize = 8_192;
@@ -13,6 +15,33 @@ const MAX_AI_DEFENSE_DISTINCT_CLIENTS_PER_BUCKET: usize = 256;
 const MAX_AI_DEFENSE_USER_AGENTS_PER_BUCKET: usize = 16;
 
 impl WafContext {
+    pub fn active_ai_route_profiles(&self) -> Vec<AiRouteProfileEntry> {
+        self.ai_route_profiles
+            .read()
+            .expect("ai_route_profiles lock poisoned")
+            .clone()
+    }
+
+    pub async fn refresh_ai_route_profiles(&self) -> Result<()> {
+        let Some(store) = self.sqlite_store.as_ref() else {
+            return Ok(());
+        };
+        let mut profiles = store
+            .list_ai_route_profiles(None, Some("active"), 1_000)
+            .await?;
+        profiles.extend(
+            store
+                .list_ai_route_profiles(None, Some("approved"), 1_000)
+                .await?,
+        );
+        let mut guard = self
+            .ai_route_profiles
+            .write()
+            .expect("ai_route_profiles lock poisoned");
+        *guard = profiles;
+        Ok(())
+    }
+
     pub(crate) fn note_ai_defense_route_trigger(
         &self,
         site_id: &str,
@@ -207,6 +236,7 @@ impl WafContext {
                 .take(12)
                 .collect(),
             identity_summaries: self.ai_defense_identity_summaries(now, 24),
+            route_profiles: self.ai_defense_route_profile_signals(24),
             local_recommendations: self.local_defense_recommendations(24),
         })
     }
@@ -446,6 +476,14 @@ impl WafContext {
         summaries
     }
 
+    fn ai_defense_route_profile_signals(&self, limit: usize) -> Vec<AiDefenseRouteProfileSignal> {
+        self.active_ai_route_profiles()
+            .into_iter()
+            .take(limit)
+            .map(ai_defense_route_profile_signal)
+            .collect()
+    }
+
     fn ensure_ai_defense_identity_capacity(&self, key: &str, window_start: i64) -> bool {
         if self.ai_defense_identity_buckets.contains_key(key)
             || self.ai_defense_identity_buckets.len() < MAX_AI_DEFENSE_IDENTITY_BUCKETS
@@ -511,6 +549,26 @@ fn ai_defense_decision_from_local_recommendation(
             confidence = confidence.saturating_sub(6);
         }
     }
+    let route_profile = best_route_profile_for_recommendation(snapshot, recommendation);
+    if let Some(profile) = route_profile {
+        if profile
+            .avoid_actions
+            .iter()
+            .any(|action| action == &recommendation.action)
+        {
+            confidence = confidence.saturating_sub(20);
+        }
+        if profile
+            .recommended_actions
+            .iter()
+            .any(|action| action == &recommendation.action)
+        {
+            confidence = confidence.saturating_add(4).min(100);
+        }
+        if matches!(profile.sensitivity.as_str(), "critical" | "high") {
+            confidence = confidence.saturating_add(2).min(100);
+        }
+    }
     if !snapshot.upstream_health.healthy {
         confidence = confidence.saturating_sub(8);
     }
@@ -528,7 +586,7 @@ fn ai_defense_decision_from_local_recommendation(
         confidence,
         auto_apply: true,
         rationale: format!(
-            "{}; auto-applied by local AI defense guardrails for site {}; trigger={}; runtime_depth={}; upstream_healthy={}",
+            "{}; auto-applied by local AI defense guardrails for site {}; trigger={}; runtime_depth={}; upstream_healthy={}; route_profile={}",
             recommendation.rationale,
             recommendation.site_id,
             snapshot
@@ -536,9 +594,49 @@ fn ai_defense_decision_from_local_recommendation(
                 .as_deref()
                 .unwrap_or("unknown"),
             snapshot.runtime_pressure.defense_depth,
-            snapshot.upstream_health.healthy
+            snapshot.upstream_health.healthy,
+            route_profile
+                .map(|profile| profile.route_type.as_str())
+                .unwrap_or("unknown")
         ),
     })
+}
+
+fn best_route_profile_for_recommendation<'a>(
+    snapshot: &'a AiDefenseSignalSnapshot,
+    recommendation: &LocalDefenseRecommendation,
+) -> Option<&'a AiDefenseRouteProfileSignal> {
+    snapshot
+        .route_profiles
+        .iter()
+        .filter(|profile| {
+            profile.site_id == recommendation.site_id
+                && route_profile_matches(profile, &recommendation.route)
+        })
+        .max_by(|left, right| {
+            profile_match_rank(left)
+                .cmp(&profile_match_rank(right))
+                .then_with(|| left.confidence.cmp(&right.confidence))
+        })
+}
+
+fn route_profile_matches(profile: &AiDefenseRouteProfileSignal, route: &str) -> bool {
+    match profile.match_mode.as_str() {
+        "prefix" | "starts_with" => route.starts_with(&profile.route_pattern),
+        "wildcard" if profile.route_pattern.ends_with('*') => {
+            route.starts_with(profile.route_pattern.trim_end_matches('*'))
+        }
+        _ => route == profile.route_pattern,
+    }
+}
+
+fn profile_match_rank(profile: &AiDefenseRouteProfileSignal) -> u8 {
+    match profile.match_mode.as_str() {
+        "exact" => 3,
+        "prefix" | "starts_with" => 2,
+        "wildcard" => 1,
+        _ => 0,
+    }
 }
 
 fn ai_defense_identity_key(site_id: &str, route: &str) -> String {
@@ -577,6 +675,25 @@ fn ai_defense_policy_signal(policy: &AiTempPolicyEntry) -> AiDefensePolicySignal
         action: policy.action.clone(),
         hit_count: policy.hit_count,
         expires_at: policy.expires_at,
+    }
+}
+
+fn ai_defense_route_profile_signal(profile: AiRouteProfileEntry) -> AiDefenseRouteProfileSignal {
+    AiDefenseRouteProfileSignal {
+        site_id: profile.site_id,
+        route_pattern: profile.route_pattern,
+        match_mode: profile.match_mode,
+        route_type: profile.route_type,
+        sensitivity: profile.sensitivity,
+        auth_required: profile.auth_required,
+        normal_traffic_pattern: profile.normal_traffic_pattern,
+        recommended_actions: serde_json::from_str(&profile.recommended_actions_json)
+            .unwrap_or_default(),
+        avoid_actions: serde_json::from_str(&profile.avoid_actions_json).unwrap_or_default(),
+        confidence: profile.confidence,
+        source: profile.source,
+        status: profile.status,
+        rationale: profile.rationale,
     }
 }
 

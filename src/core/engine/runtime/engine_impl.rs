@@ -46,6 +46,7 @@ impl WafEngine {
             .start(self.context.as_ref())
             .await?;
         self.context.refresh_ai_temp_policies().await?;
+        self.context.refresh_ai_route_profiles().await?;
 
         #[cfg(feature = "api")]
         if startup_config.api_enabled {
@@ -335,6 +336,9 @@ impl WafEngine {
 
         if let Err(err) = self.context.refresh_ai_temp_policies().await {
             warn!("Failed to refresh AI temp policies: {}", err);
+        }
+        if let Err(err) = self.context.refresh_ai_route_profiles().await {
+            warn!("Failed to refresh AI route profiles: {}", err);
         }
 
         #[cfg(feature = "api")]

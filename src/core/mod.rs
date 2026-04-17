@@ -23,7 +23,7 @@ use crate::l7::{
 };
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
-use crate::storage::{AiTempPolicyEntry, SqliteStore};
+use crate::storage::{AiRouteProfileEntry, AiTempPolicyEntry, SqliteStore};
 use anyhow::Result;
 use dashmap::DashMap;
 use rule_engine::load_rule_engine_state;
@@ -84,6 +84,7 @@ pub struct WafContext {
     auto_tuning_controller: Mutex<AutoTuningControllerState>,
     adaptive_protection_runtime: RwLock<AdaptiveProtectionRuntimeSnapshot>,
     ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
+    ai_route_profiles: RwLock<Vec<AiRouteProfileEntry>>,
     ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
     ai_defense_trigger_runtime: std::sync::Mutex<AiDefenseTriggerState>,
     ai_defense_identity_buckets: DashMap<String, std::sync::Mutex<AiDefenseIdentityBucket>>,
@@ -186,6 +187,7 @@ pub struct AiDefenseSignalSnapshot {
     pub upstream_health: AiDefenseUpstreamSignal,
     pub active_policy_summaries: Vec<AiDefensePolicySignal>,
     pub identity_summaries: Vec<AiDefenseIdentitySignal>,
+    pub route_profiles: Vec<AiDefenseRouteProfileSignal>,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
 }
 
@@ -253,6 +255,23 @@ pub struct AiDefenseIdentitySignal {
 pub struct AiDefenseUserAgentSignal {
     pub value: String,
     pub count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseRouteProfileSignal {
+    pub site_id: String,
+    pub route_pattern: String,
+    pub match_mode: String,
+    pub route_type: String,
+    pub sensitivity: String,
+    pub auth_required: String,
+    pub normal_traffic_pattern: String,
+    pub recommended_actions: Vec<String>,
+    pub avoid_actions: Vec<String>,
+    pub confidence: i64,
+    pub source: String,
+    pub status: String,
+    pub rationale: String,
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +390,7 @@ impl WafContext {
             auto_tuning_controller: Mutex::new(AutoTuningControllerState::default()),
             adaptive_protection_runtime: RwLock::new(adaptive_protection_runtime),
             ai_temp_policies: RwLock::new(Vec::new()),
+            ai_route_profiles: RwLock::new(Vec::new()),
             ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
             ai_defense_trigger_runtime: std::sync::Mutex::new(AiDefenseTriggerState::default()),
             ai_defense_identity_buckets: DashMap::new(),

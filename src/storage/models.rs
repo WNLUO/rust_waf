@@ -216,6 +216,48 @@ pub struct AiTempPolicyUpsert {
 
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
+pub struct AiRouteProfileEntry {
+    pub id: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub last_observed_at: Option<i64>,
+    pub site_id: String,
+    pub route_pattern: String,
+    pub match_mode: String,
+    pub route_type: String,
+    pub sensitivity: String,
+    pub auth_required: String,
+    pub normal_traffic_pattern: String,
+    pub recommended_actions_json: String,
+    pub avoid_actions_json: String,
+    pub confidence: i64,
+    pub source: String,
+    pub status: String,
+    pub rationale: String,
+    pub reviewed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiRouteProfileUpsert {
+    pub site_id: String,
+    pub route_pattern: String,
+    pub match_mode: String,
+    pub route_type: String,
+    pub sensitivity: String,
+    pub auth_required: String,
+    pub normal_traffic_pattern: String,
+    pub recommended_actions: Vec<String>,
+    pub avoid_actions: Vec<String>,
+    pub confidence: i64,
+    pub source: String,
+    pub status: String,
+    pub rationale: String,
+    pub last_observed_at: Option<i64>,
+    pub reviewed_at: Option<i64>,
+}
+
+#[cfg_attr(not(feature = "api"), allow(dead_code))]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct BlockedIpEntry {
     pub id: i64,
     pub provider: Option<String>,

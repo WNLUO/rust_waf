@@ -56,6 +56,11 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(system_handlers::local_defense_recommendations_handler),
         )
         .route(
+            "/dashboard/ai-route-profiles",
+            get(system_handlers::list_ai_route_profiles_handler)
+                .post(system_handlers::upsert_ai_route_profile_handler),
+        )
+        .route(
             "/dashboard/ai-temp-policies/:id",
             delete(system_handlers::delete_ai_temp_policy_handler),
         )

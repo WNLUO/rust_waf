@@ -592,6 +592,8 @@ impl AiAuditSettingsResponse {
             auto_defense_auto_apply: config.auto_defense_auto_apply,
             auto_defense_min_confidence: config.auto_defense_min_confidence,
             auto_defense_max_apply_per_tick: config.auto_defense_max_apply_per_tick,
+            auto_defense_trigger_cooldown_secs: config.auto_defense_trigger_cooldown_secs,
+            auto_defense_fallback_interval_secs: config.auto_defense_fallback_interval_secs,
             auto_audit_enabled: config.auto_audit_enabled,
             auto_audit_interval_secs: config.auto_audit_interval_secs,
             auto_audit_cooldown_secs: config.auto_audit_cooldown_secs,

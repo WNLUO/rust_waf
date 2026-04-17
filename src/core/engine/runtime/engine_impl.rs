@@ -309,21 +309,27 @@ impl WafEngine {
             if let Err(err) = self.auto_govern_ai_temp_policies(store.as_ref(), now).await {
                 warn!("Failed to auto-govern AI temp policies: {}", err);
             }
-            match self.context.run_ai_auto_defense(now).await {
-                Ok(result) if result.applied > 0 => {
-                    info!(
-                        "AI auto defense applied {} temporary policy decision(s), skipped={}",
-                        result.applied, result.skipped
-                    );
+            if let Some(trigger_reason) = self.context.consume_ai_auto_defense_trigger(now) {
+                match self
+                    .context
+                    .run_ai_auto_defense(now, Some(trigger_reason.clone()))
+                    .await
+                {
+                    Ok(result) if result.applied > 0 => {
+                        info!(
+                            "AI auto defense applied {} temporary policy decision(s), skipped={}, trigger={}",
+                            result.applied, result.skipped, trigger_reason
+                        );
+                    }
+                    Ok(result) if result.disabled_reason.is_some() => {
+                        debug!(
+                            "AI auto defense skipped: {}",
+                            result.disabled_reason.unwrap_or_default()
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(err) => warn!("Failed to run AI auto defense: {}", err),
                 }
-                Ok(result) if result.disabled_reason.is_some() => {
-                    debug!(
-                        "AI auto defense skipped: {}",
-                        result.disabled_reason.unwrap_or_default()
-                    );
-                }
-                Ok(_) => {}
-                Err(err) => warn!("Failed to run AI auto defense: {}", err),
             }
         }
 

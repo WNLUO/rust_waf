@@ -304,5 +304,7 @@ mod tests {
         assert!(config.auto_defense_auto_apply);
         assert_eq!(config.auto_defense_min_confidence, 82);
         assert_eq!(config.auto_defense_max_apply_per_tick, 2);
+        assert_eq!(config.auto_defense_trigger_cooldown_secs, 45);
+        assert_eq!(config.auto_defense_fallback_interval_secs, 300);
     }
 }

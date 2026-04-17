@@ -171,6 +171,8 @@ pub struct AiAuditSettingsResponse {
     pub(crate) auto_defense_auto_apply: bool,
     pub(crate) auto_defense_min_confidence: u32,
     pub(crate) auto_defense_max_apply_per_tick: u32,
+    pub(crate) auto_defense_trigger_cooldown_secs: u64,
+    pub(crate) auto_defense_fallback_interval_secs: u64,
     pub(crate) auto_audit_enabled: bool,
     pub(crate) auto_audit_interval_secs: u64,
     pub(crate) auto_audit_cooldown_secs: u64,
@@ -219,6 +221,10 @@ pub struct AiAuditSettingsRequest {
     pub(crate) auto_defense_min_confidence: u32,
     #[serde(default = "default_auto_defense_max_apply_per_tick")]
     pub(crate) auto_defense_max_apply_per_tick: u32,
+    #[serde(default = "default_auto_defense_trigger_cooldown_secs")]
+    pub(crate) auto_defense_trigger_cooldown_secs: u64,
+    #[serde(default = "default_auto_defense_fallback_interval_secs")]
+    pub(crate) auto_defense_fallback_interval_secs: u64,
     #[serde(default)]
     pub(crate) auto_audit_enabled: bool,
     #[serde(default)]
@@ -249,6 +255,14 @@ fn default_auto_defense_min_confidence() -> u32 {
 
 fn default_auto_defense_max_apply_per_tick() -> u32 {
     2
+}
+
+fn default_auto_defense_trigger_cooldown_secs() -> u64 {
+    45
+}
+
+fn default_auto_defense_fallback_interval_secs() -> u64 {
+    5 * 60
 }
 
 #[derive(Debug, Serialize)]

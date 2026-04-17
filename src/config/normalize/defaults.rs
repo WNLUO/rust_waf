@@ -133,6 +133,8 @@ impl Default for AiAuditConfig {
             auto_defense_auto_apply: true,
             auto_defense_min_confidence: 82,
             auto_defense_max_apply_per_tick: 2,
+            auto_defense_trigger_cooldown_secs: 45,
+            auto_defense_fallback_interval_secs: 5 * 60,
             auto_audit_enabled: false,
             auto_audit_interval_secs: 5 * 60,
             auto_audit_cooldown_secs: 10 * 60,

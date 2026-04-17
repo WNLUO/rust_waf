@@ -85,6 +85,7 @@ pub struct WafContext {
     adaptive_protection_runtime: RwLock<AdaptiveProtectionRuntimeSnapshot>,
     ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
     ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
+    ai_defense_trigger_runtime: std::sync::Mutex<AiDefenseTriggerState>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     rule_count: AtomicU64,
@@ -127,6 +128,15 @@ struct AiAutoAuditRuntimeState {
 }
 
 #[derive(Debug, Default)]
+struct AiDefenseTriggerState {
+    pending: bool,
+    pending_since: Option<i64>,
+    pending_reason: Option<String>,
+    last_trigger_at: Option<i64>,
+    last_run_at: Option<i64>,
+}
+
+#[derive(Debug, Default)]
 struct SiteDefenseBucket {
     window_start: i64,
     soft_events: u64,
@@ -155,6 +165,8 @@ pub struct AiDefenseSignalSnapshot {
     pub sqlite_available: bool,
     pub active_temp_policy_count: u32,
     pub max_active_temp_policy_count: u32,
+    pub trigger_reason: Option<String>,
+    pub trigger_pending_secs: u64,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
 }
 
@@ -177,6 +189,7 @@ pub struct AiDefenseDecision {
 #[derive(Debug, Clone, Default)]
 pub struct AiDefenseRunResult {
     pub generated_at: i64,
+    pub trigger_reason: Option<String>,
     pub decisions: Vec<AiDefenseDecision>,
     pub applied: usize,
     pub skipped: usize,
@@ -274,6 +287,7 @@ impl WafContext {
             adaptive_protection_runtime: RwLock::new(adaptive_protection_runtime),
             ai_temp_policies: RwLock::new(Vec::new()),
             ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
+            ai_defense_trigger_runtime: std::sync::Mutex::new(AiDefenseTriggerState::default()),
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),

@@ -283,6 +283,17 @@ impl WafContext {
         if is_hard {
             bucket.hard_events = bucket.hard_events.saturating_add(1);
         }
+        if let Some(depth) = route_defense_depth_for_counts(bucket.soft_events, bucket.hard_events)
+        {
+            self.note_ai_defense_route_trigger(
+                site_id,
+                route,
+                depth.as_str(),
+                bucket.soft_events,
+                bucket.hard_events,
+                now,
+            );
+        }
     }
 
     pub fn effective_http2_max_concurrent_streams(&self, configured: usize) -> usize {
@@ -924,5 +935,34 @@ mod tests {
         assert_eq!(recommendation.suggested_value, "45");
         assert_eq!(recommendation.ttl_secs, 900);
         assert!(recommendation.confidence >= 90);
+    }
+
+    #[tokio::test]
+    async fn ai_defense_trigger_waits_for_enough_route_signals() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        let result = InspectionResult::drop(InspectionLayer::L7, "route pressure");
+
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/login".to_string(),
+        );
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        context.note_site_defense_signal(&request, &result);
+
+        assert!(context
+            .consume_ai_auto_defense_trigger(unix_timestamp())
+            .is_none());
+
+        context.note_site_defense_signal(&request, &result);
+
+        assert!(context
+            .consume_ai_auto_defense_trigger(unix_timestamp())
+            .as_deref()
+            .is_some_and(|reason| reason.starts_with("route_pressure:site-a:/api/login")));
     }
 }

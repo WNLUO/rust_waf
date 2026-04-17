@@ -476,6 +476,30 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
         8,
         2,
     ) as u32;
+    config
+        .integrations
+        .ai_audit
+        .auto_defense_trigger_cooldown_secs = clamp_u64(
+        config
+            .integrations
+            .ai_audit
+            .auto_defense_trigger_cooldown_secs,
+        5,
+        15 * 60,
+        45,
+    );
+    config
+        .integrations
+        .ai_audit
+        .auto_defense_fallback_interval_secs = clamp_u64(
+        config
+            .integrations
+            .ai_audit
+            .auto_defense_fallback_interval_secs,
+        60,
+        24 * 3600,
+        5 * 60,
+    );
     config.integrations.ai_audit.auto_audit_interval_secs = clamp_u64(
         config.integrations.ai_audit.auto_audit_interval_secs,
         60,

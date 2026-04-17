@@ -168,7 +168,14 @@ async fn test_ai_auto_defense_applies_hot_route_temp_policy() {
     }
 
     let now = unix_timestamp();
-    let run = context.run_ai_auto_defense(now).await.unwrap();
+    let trigger_reason = context.consume_ai_auto_defense_trigger(now);
+    assert!(trigger_reason
+        .as_deref()
+        .is_some_and(|reason| reason.starts_with("route_pressure:site-a:/api/login")));
+    let run = context
+        .run_ai_auto_defense(now, trigger_reason)
+        .await
+        .unwrap();
 
     assert_eq!(run.applied, 1);
     let active = context.active_ai_temp_policies();

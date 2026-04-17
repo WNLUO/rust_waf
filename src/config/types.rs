@@ -166,6 +166,10 @@ pub struct AiAuditConfig {
     pub auto_defense_min_confidence: u32,
     #[serde(default = "default_ai_audit_auto_defense_max_apply_per_tick")]
     pub auto_defense_max_apply_per_tick: u32,
+    #[serde(default = "default_ai_audit_auto_defense_trigger_cooldown_secs")]
+    pub auto_defense_trigger_cooldown_secs: u64,
+    #[serde(default = "default_ai_audit_auto_defense_fallback_interval_secs")]
+    pub auto_defense_fallback_interval_secs: u64,
     #[serde(default = "default_ai_audit_auto_audit_enabled")]
     pub auto_audit_enabled: bool,
     #[serde(default = "default_ai_audit_auto_audit_interval_secs")]
@@ -334,6 +338,14 @@ const fn default_ai_audit_auto_defense_min_confidence() -> u32 {
 
 const fn default_ai_audit_auto_defense_max_apply_per_tick() -> u32 {
     2
+}
+
+const fn default_ai_audit_auto_defense_trigger_cooldown_secs() -> u64 {
+    45
+}
+
+const fn default_ai_audit_auto_defense_fallback_interval_secs() -> u64 {
+    5 * 60
 }
 
 const fn default_ai_audit_auto_audit_enabled() -> bool {

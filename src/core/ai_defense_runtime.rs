@@ -6,7 +6,69 @@ use crate::storage::{AiTempPolicyEffectStats, AiTempPolicyUpsert};
 use anyhow::Result;
 
 impl WafContext {
-    pub async fn ai_defense_signal_snapshot(&self, now: i64) -> Result<AiDefenseSignalSnapshot> {
+    pub(crate) fn note_ai_defense_route_trigger(
+        &self,
+        site_id: &str,
+        route: &str,
+        depth: &str,
+        soft_events: u64,
+        hard_events: u64,
+        now: i64,
+    ) {
+        let config = self.config_snapshot().integrations.ai_audit;
+        if !config.auto_defense_enabled || !config.auto_defense_auto_apply {
+            return;
+        }
+        let mut guard = self
+            .ai_defense_trigger_runtime
+            .lock()
+            .expect("ai_defense_trigger_runtime lock poisoned");
+        if guard.last_trigger_at.is_some_and(|last| {
+            now.saturating_sub(last) < config.auto_defense_trigger_cooldown_secs as i64
+        }) {
+            return;
+        }
+        guard.pending = true;
+        guard.pending_since.get_or_insert(now);
+        guard.last_trigger_at = Some(now);
+        guard.pending_reason = Some(format!(
+            "route_pressure:{}:{}:{}:soft={}:hard={}",
+            site_id, route, depth, soft_events, hard_events
+        ));
+    }
+
+    pub(crate) fn consume_ai_auto_defense_trigger(&self, now: i64) -> Option<String> {
+        let config = self.config_snapshot().integrations.ai_audit;
+        if !config.auto_defense_enabled || !config.auto_defense_auto_apply {
+            return None;
+        }
+        let mut guard = self
+            .ai_defense_trigger_runtime
+            .lock()
+            .expect("ai_defense_trigger_runtime lock poisoned");
+        if guard.pending {
+            guard.pending = false;
+            guard.last_run_at = Some(now);
+            return guard
+                .pending_reason
+                .take()
+                .or_else(|| Some("event_signal_threshold".to_string()));
+        }
+        let fallback_due = guard.last_run_at.is_some_and(|last| {
+            now.saturating_sub(last) >= config.auto_defense_fallback_interval_secs as i64
+        });
+        if fallback_due {
+            guard.last_run_at = Some(now);
+            return Some("fallback_sweep".to_string());
+        }
+        None
+    }
+
+    pub async fn ai_defense_signal_snapshot(
+        &self,
+        now: i64,
+        trigger_reason: Option<String>,
+    ) -> Result<AiDefenseSignalSnapshot> {
         let config = self.config_snapshot();
         let max_active_temp_policy_count =
             config.integrations.ai_audit.max_active_temp_policies.max(1);
@@ -14,22 +76,36 @@ impl WafContext {
             Some(store) => store.list_active_ai_temp_policies(now).await?.len() as u32,
             None => 0,
         };
+        let trigger_pending_secs = self
+            .ai_defense_trigger_runtime
+            .lock()
+            .expect("ai_defense_trigger_runtime lock poisoned")
+            .pending_since
+            .map(|pending_since| now.saturating_sub(pending_since).max(0) as u64)
+            .unwrap_or(0);
 
         Ok(AiDefenseSignalSnapshot {
             generated_at: now,
             sqlite_available: self.sqlite_store.is_some(),
             active_temp_policy_count,
             max_active_temp_policy_count,
+            trigger_reason,
+            trigger_pending_secs,
             local_recommendations: self.local_defense_recommendations(24),
         })
     }
 
-    pub async fn run_ai_auto_defense(&self, now: i64) -> Result<AiDefenseRunResult> {
+    pub async fn run_ai_auto_defense(
+        &self,
+        now: i64,
+        trigger_reason: Option<String>,
+    ) -> Result<AiDefenseRunResult> {
         let config = self.config_snapshot();
         let ai_config = config.integrations.ai_audit;
         if !ai_config.auto_defense_enabled {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
+                trigger_reason,
                 disabled_reason: Some("auto_defense_disabled".to_string()),
                 ..AiDefenseRunResult::default()
             });
@@ -37,6 +113,7 @@ impl WafContext {
         if !ai_config.auto_defense_auto_apply {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
+                trigger_reason,
                 disabled_reason: Some("auto_defense_auto_apply_disabled".to_string()),
                 ..AiDefenseRunResult::default()
             });
@@ -45,15 +122,19 @@ impl WafContext {
         let Some(store) = self.sqlite_store.as_ref() else {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
+                trigger_reason,
                 disabled_reason: Some("sqlite_unavailable".to_string()),
                 ..AiDefenseRunResult::default()
             });
         };
 
-        let snapshot = self.ai_defense_signal_snapshot(now).await?;
+        let snapshot = self
+            .ai_defense_signal_snapshot(now, trigger_reason.clone())
+            .await?;
         if !snapshot.sqlite_available {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
+                trigger_reason,
                 disabled_reason: Some("sqlite_unavailable".to_string()),
                 ..AiDefenseRunResult::default()
             });
@@ -61,6 +142,7 @@ impl WafContext {
         if snapshot.active_temp_policy_count >= snapshot.max_active_temp_policy_count {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
+                trigger_reason,
                 disabled_reason: Some("max_active_temp_policies_reached".to_string()),
                 ..AiDefenseRunResult::default()
             });
@@ -78,6 +160,7 @@ impl WafContext {
         if max_apply == 0 {
             return Ok(AiDefenseRunResult {
                 generated_at: now,
+                trigger_reason,
                 disabled_reason: Some("auto_defense_apply_budget_empty".to_string()),
                 ..AiDefenseRunResult::default()
             });
@@ -85,6 +168,7 @@ impl WafContext {
 
         let mut result = AiDefenseRunResult {
             generated_at: now,
+            trigger_reason,
             ..AiDefenseRunResult::default()
         };
         let baseline = self.auto_tuning_snapshot();
@@ -152,6 +236,13 @@ impl WafContext {
 
         if result.applied > 0 {
             self.refresh_ai_temp_policies().await?;
+        }
+        if result.applied > 0 || result.skipped > 0 {
+            let mut guard = self
+                .ai_defense_trigger_runtime
+                .lock()
+                .expect("ai_defense_trigger_runtime lock poisoned");
+            guard.pending_since = None;
         }
         Ok(result)
     }

@@ -84,9 +84,7 @@ function sameResponseTemplate(
   )
 }
 
-export function useAdminSiteActionFlow(
-  options: UseAdminSiteActionFlowOptions,
-) {
+export function useAdminSiteActionFlow(options: UseAdminSiteActionFlowOptions) {
   const activeNode = ref<FlowNode>('response')
   const previewLoading = ref(false)
   const previewError = ref('')
@@ -104,8 +102,9 @@ export function useAdminSiteActionFlow(
 
   const selectedTemplate = computed(
     () =>
-      options.templates.find((item) => item.template_id === flowDraft.templateId) ??
-      null,
+      options.templates.find(
+        (item) => item.template_id === flowDraft.templateId,
+      ) ?? null,
   )
 
   const matchedTemplate = computed(() => {
@@ -114,7 +113,10 @@ export function useAdminSiteActionFlow(
     if (!site || !config?.enabled) return null
     return (
       options.templates.find((template) =>
-        sameResponseTemplate(template.response_template, config.response_template),
+        sameResponseTemplate(
+          template.response_template,
+          config.response_template,
+        ),
       ) ?? null
     )
   })
@@ -139,7 +141,7 @@ export function useAdminSiteActionFlow(
     }
 
     const blockIp = config.action === 'replace_and_block_ip'
-    let response = ''
+    let response = config.action
     let template = '-'
 
     if (config.action === 'pass') {
@@ -162,8 +164,6 @@ export function useAdminSiteActionFlow(
       } else {
         template = matchedTemplate.value?.name ?? '历史自定义动作'
       }
-    } else {
-      response = config.action
     }
 
     return {
@@ -361,7 +361,10 @@ export function useAdminSiteActionFlow(
       return
     }
 
-    if (config.action === 'replace' || config.action === 'replace_and_block_ip') {
+    if (
+      config.action === 'replace' ||
+      config.action === 'replace_and_block_ip'
+    ) {
       const sameAsGlobal =
         options.l7Config &&
         sameResponseTemplate(

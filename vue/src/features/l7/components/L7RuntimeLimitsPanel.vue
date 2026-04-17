@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/* eslint-disable vue/no-mutating-props */
 import type { Ref, WritableComputedRef } from 'vue'
 
 type ModelRef<T> = Ref<T> | WritableComputedRef<T>
@@ -24,102 +25,102 @@ defineProps<{
 </script>
 
 <template>
-    <div class="mt-4 border-t border-slate-200 pt-4">
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700"
-          >最大请求体大小<input
-            v-model.number="controls.maxRequestSize.value"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >首字节超时(ms)<input
-            v-model.number="controls.firstByteTimeout.value"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >空闲读取超时(ms)<input
-            v-model.number="controls.readIdleTimeout.value"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >TLS 握手超时(ms)<input
-            v-model.number="controls.tlsHandshakeTimeout.value"
-            type="number"
-            min="500"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >代理连接超时(ms)<input
-            v-model.number="controls.proxyConnectTimeout.value"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >代理写超时(ms)<input
-            v-model.number="controls.proxyWriteTimeout.value"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >代理读超时(ms)<input
-            v-model.number="controls.proxyReadTimeout.value"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >Bloom 缩放系数<input
-            v-model.number="controls.bloomFilterScale.value"
-            type="number"
-            min="0.1"
-            step="0.1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >健康检查间隔(s)<input
-            v-model.number="controls.healthcheckInterval.value"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >健康检查超时(ms)<input
-            v-model.number="controls.healthcheckTimeout.value"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >HTTP/2 最大并发流<input
-            v-model.number="controls.http2MaxStreams.value"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >HTTP/2 最大帧<input
-            v-model.number="controls.http2MaxFrameSize.value"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
-          >HTTP/2 初始窗口<input
-            v-model.number="controls.http2InitialWindowSize.value"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-      </div>
+  <div class="mt-4 border-t border-slate-200 pt-4">
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <label class="l7-inline-field text-sm text-stone-700"
+        >最大请求体大小<input
+          v-model.number="controls.maxRequestSize.value"
+          type="number"
+          min="1024"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >首字节超时(ms)<input
+          v-model.number="controls.firstByteTimeout.value"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >空闲读取超时(ms)<input
+          v-model.number="controls.readIdleTimeout.value"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >TLS 握手超时(ms)<input
+          v-model.number="controls.tlsHandshakeTimeout.value"
+          type="number"
+          min="500"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >代理连接超时(ms)<input
+          v-model.number="controls.proxyConnectTimeout.value"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >代理写超时(ms)<input
+          v-model.number="controls.proxyWriteTimeout.value"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >代理读超时(ms)<input
+          v-model.number="controls.proxyReadTimeout.value"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >Bloom 缩放系数<input
+          v-model.number="controls.bloomFilterScale.value"
+          type="number"
+          min="0.1"
+          step="0.1"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >健康检查间隔(s)<input
+          v-model.number="controls.healthcheckInterval.value"
+          type="number"
+          min="1"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >健康检查超时(ms)<input
+          v-model.number="controls.healthcheckTimeout.value"
+          type="number"
+          min="100"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >HTTP/2 最大并发流<input
+          v-model.number="controls.http2MaxStreams.value"
+          type="number"
+          min="1"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >HTTP/2 最大帧<input
+          v-model.number="controls.http2MaxFrameSize.value"
+          type="number"
+          min="1024"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
+        >HTTP/2 初始窗口<input
+          v-model.number="controls.http2InitialWindowSize.value"
+          type="number"
+          min="1024"
+          :class="numberInputClass"
+      /></label>
     </div>
+  </div>
 </template>
 
 <style scoped>

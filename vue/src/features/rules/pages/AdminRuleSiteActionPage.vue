@@ -489,8 +489,8 @@ onMounted(loadPage)
       </div>
 
       <div
-        class="rounded-xl border border-slate-200 bg-white p-5"
         v-if="!loading && site"
+        class="rounded-xl border border-slate-200 bg-white p-5"
       >
         <div class="overflow-x-auto">
           <div class="min-w-[760px]">

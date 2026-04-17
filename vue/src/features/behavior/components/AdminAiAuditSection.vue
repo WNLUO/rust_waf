@@ -127,8 +127,8 @@ const {
         class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.25fr)]"
       >
         <AiAuditSettingsPanel
-          :form="form"
           v-model:window-seconds="windowSeconds"
+          :form="form"
         />
 
         <AiAuditReportOverview

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/* eslint-disable vue/no-mutating-props */
 import type { Ref, WritableComputedRef } from 'vue'
 
 type ModelRef<T> = Ref<T> | WritableComputedRef<T>
@@ -29,156 +30,156 @@ defineProps<{
 </script>
 
 <template>
-    <div class="mt-3 border-t border-slate-200 pt-6">
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <p class="text-sm tracking-wider text-blue-700">
-            L7 CC 防护（自动化接管项）
-          </p>
-        </div>
-        <div class="flex flex-wrap gap-3">
-          <label
-            class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
-          >
-            <span>启用 CC 守卫</span>
-            <input
-              v-model="controls.ccDefenseEnabled.value"
-              type="checkbox"
-              class="ui-switch"
-            />
-          </label>
-        </div>
+  <div class="mt-3 border-t border-slate-200 pt-6">
+    <div
+      class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+    >
+      <div>
+        <p class="text-sm tracking-wider text-blue-700">
+          L7 CC 防护（自动化接管项）
+        </p>
       </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700"
-          >滑窗时长(s)<input
-            v-model.number="controls.ccRequestWindow.value"
-            type="number"
-            min="3"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >延迟触发比例(%)<input
-            v-model.number="controls.ccDelayThresholdPercent.value"
-            type="number"
-            min="25"
-            max="95"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >延迟时长(ms)<input
-            v-model.number="controls.ccDelayMs.value"
-            type="number"
-            min="0"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >IP 挑战阈值<input
-            v-model.number="controls.ccIpChallengeThreshold.value"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >IP 429 阈值<input
-            v-model.number="controls.ccIpBlockThreshold.value"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >主机挑战阈值<input
-            v-model.number="controls.ccHostChallengeThreshold.value"
-            type="number"
-            min="5"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >Host 429 阈值<input
-            v-model.number="controls.ccHostBlockThreshold.value"
-            type="number"
-            min="5"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >路由挑战阈值<input
-            v-model.number="controls.ccRouteChallengeThreshold.value"
-            type="number"
-            min="3"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >路由 429 阈值<input
-            v-model.number="controls.ccRouteBlockThreshold.value"
-            type="number"
-            min="3"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >热点路径挑战阈值<input
-            v-model.number="controls.ccHotPathChallengeThreshold.value"
-            type="number"
-            min="32"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >热点路径 429 阈值<input
-            v-model.number="controls.ccHotPathBlockThreshold.value"
-            type="number"
-            min="32"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >挑战有效期(秒)<input
-            v-model.number="controls.ccChallengeTtl.value"
-            type="number"
-            min="30"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >挑战 Cookie 名称<input
-            v-model="controls.ccChallengeCookieName.value"
-            type="text"
-            placeholder="例如 rwaf_cc"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-路由倍率<input
-            v-model.number="controls.ccHardRouteBlockMultiplier.value"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-Host 倍率<input
-            v-model.number="controls.ccHardHostBlockMultiplier.value"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-IP 倍率<input
-            v-model.number="controls.ccHardIpBlockMultiplier.value"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >硬阈值-热点路径倍率<input
-            v-model.number="controls.ccHardHotPathBlockMultiplier.value"
-            type="number"
-            min="1"
-            max="20"
-            :class="numberInputClass"
-        /></label>
+      <div class="flex flex-wrap gap-3">
+        <label
+          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-xs text-stone-700"
+        >
+          <span>启用 CC 守卫</span>
+          <input
+            v-model="controls.ccDefenseEnabled.value"
+            type="checkbox"
+            class="ui-switch"
+          />
+        </label>
       </div>
     </div>
+
+    <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+      <label class="l7-inline-field text-sm text-stone-700"
+        >滑窗时长(s)<input
+          v-model.number="controls.ccRequestWindow.value"
+          type="number"
+          min="3"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >延迟触发比例(%)<input
+          v-model.number="controls.ccDelayThresholdPercent.value"
+          type="number"
+          min="25"
+          max="95"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >延迟时长(ms)<input
+          v-model.number="controls.ccDelayMs.value"
+          type="number"
+          min="0"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >IP 挑战阈值<input
+          v-model.number="controls.ccIpChallengeThreshold.value"
+          type="number"
+          min="10"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >IP 429 阈值<input
+          v-model.number="controls.ccIpBlockThreshold.value"
+          type="number"
+          min="10"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >主机挑战阈值<input
+          v-model.number="controls.ccHostChallengeThreshold.value"
+          type="number"
+          min="5"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >Host 429 阈值<input
+          v-model.number="controls.ccHostBlockThreshold.value"
+          type="number"
+          min="5"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >路由挑战阈值<input
+          v-model.number="controls.ccRouteChallengeThreshold.value"
+          type="number"
+          min="3"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >路由 429 阈值<input
+          v-model.number="controls.ccRouteBlockThreshold.value"
+          type="number"
+          min="3"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >热点路径挑战阈值<input
+          v-model.number="controls.ccHotPathChallengeThreshold.value"
+          type="number"
+          min="32"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >热点路径 429 阈值<input
+          v-model.number="controls.ccHotPathBlockThreshold.value"
+          type="number"
+          min="32"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >挑战有效期(秒)<input
+          v-model.number="controls.ccChallengeTtl.value"
+          type="number"
+          min="30"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >挑战 Cookie 名称<input
+          v-model="controls.ccChallengeCookieName.value"
+          type="text"
+          placeholder="例如 rwaf_cc"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >硬阈值-路由倍率<input
+          v-model.number="controls.ccHardRouteBlockMultiplier.value"
+          type="number"
+          min="1"
+          max="20"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >硬阈值-Host 倍率<input
+          v-model.number="controls.ccHardHostBlockMultiplier.value"
+          type="number"
+          min="1"
+          max="20"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >硬阈值-IP 倍率<input
+          v-model.number="controls.ccHardIpBlockMultiplier.value"
+          type="number"
+          min="1"
+          max="20"
+          :class="numberInputClass"
+      /></label>
+      <label class="l7-inline-field text-sm text-stone-700"
+        >硬阈值-热点路径倍率<input
+          v-model.number="controls.ccHardHotPathBlockMultiplier.value"
+          type="number"
+          min="1"
+          max="20"
+          :class="numberInputClass"
+      /></label>
+    </div>
+  </div>
 </template>
 
 <style scoped>

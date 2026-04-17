@@ -320,7 +320,7 @@ export function wrapInlineJsContent(script: string, title: string) {
   </main>
   <script>
 ${script}
-  <\/script>
+  </script>
 </body>
 </html>`
 }

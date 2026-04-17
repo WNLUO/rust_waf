@@ -4,7 +4,7 @@ import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import type { FlowNode } from '@/features/rules/composables/useAdminSiteActionFlow'
 import type { LocalSiteItem } from '@/shared/types'
 
-const props = defineProps<{
+defineProps<{
   activeNode: FlowNode
   currentSummary: {
     response: string
@@ -25,7 +25,9 @@ function activate(node: FlowNode) {
 </script>
 
 <template>
-  <section class="rounded-[28px] border border-white/80 bg-white/72 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
+  <section
+    class="rounded-[28px] border border-white/80 bg-white/72 p-5 shadow-[0_18px_50px_rgba(15,23,42,0.06)]"
+  >
     <div class="flex items-center justify-between gap-3">
       <div>
         <p class="text-sm font-semibold text-slate-900">网络流程图</p>
@@ -38,7 +40,9 @@ function activate(node: FlowNode) {
 
     <div class="mt-5 overflow-x-auto">
       <div class="min-w-[760px]">
-        <div class="grid gap-4 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-center">
+        <div
+          class="grid gap-4 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] md:items-center"
+        >
           <button
             class="rounded-[24px] border px-4 py-4 text-left transition"
             :class="
@@ -53,12 +57,15 @@ function activate(node: FlowNode) {
                 <Network :size="18" />
               </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">入口</p>
+                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  入口
+                </p>
                 <p class="mt-1 font-semibold text-slate-900">请求命中站点</p>
               </div>
             </div>
             <p class="mt-3 text-sm leading-6 text-slate-600">
-              用户请求进入当前站点匹配流程，主域名为 {{ site.primary_hostname }}。
+              用户请求进入当前站点匹配流程，主域名为
+              {{ site.primary_hostname }}。
             </p>
           </button>
 
@@ -80,7 +87,9 @@ function activate(node: FlowNode) {
                 <Shield :size="18" />
               </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">判定</p>
+                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  判定
+                </p>
                 <p class="mt-1 font-semibold text-slate-900">雷池拦截决策</p>
               </div>
             </div>
@@ -107,7 +116,9 @@ function activate(node: FlowNode) {
                 <Zap :size="18" />
               </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">主动作</p>
+                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  主动作
+                </p>
                 <p class="mt-1 font-semibold text-slate-900">响应动作</p>
               </div>
             </div>
@@ -134,12 +145,15 @@ function activate(node: FlowNode) {
                 <ShieldBan :size="18" />
               </div>
               <div>
-                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">附加动作</p>
+                <p class="text-xs uppercase tracking-[0.2em] text-slate-400">
+                  附加动作
+                </p>
                 <p class="mt-1 font-semibold text-slate-900">扩展能力</p>
               </div>
             </div>
             <p class="mt-3 text-sm leading-6 text-slate-600">
-              先保留“封禁来源 IP”作为独立开关，后续可继续加 webhook、标签、事件等。
+              先保留“封禁来源 IP”作为独立开关，后续可继续加
+              webhook、标签、事件等。
             </p>
           </button>
         </div>
@@ -151,21 +165,29 @@ function activate(node: FlowNode) {
         <p class="text-sm font-semibold text-slate-900">当前生效配置</p>
         <div class="mt-3 space-y-3 text-sm text-slate-600">
           <div>
-            <p class="text-xs uppercase tracking-[0.16em] text-slate-400">响应动作</p>
+            <p class="text-xs uppercase tracking-[0.16em] text-slate-400">
+              响应动作
+            </p>
             <p class="mt-1 text-slate-900">{{ currentSummary.response }}</p>
           </div>
           <div>
-            <p class="text-xs uppercase tracking-[0.16em] text-slate-400">模板来源</p>
+            <p class="text-xs uppercase tracking-[0.16em] text-slate-400">
+              模板来源
+            </p>
             <p class="mt-1 text-slate-900">{{ currentSummary.template }}</p>
           </div>
           <div>
-            <p class="text-xs uppercase tracking-[0.16em] text-slate-400">附加动作</p>
+            <p class="text-xs uppercase tracking-[0.16em] text-slate-400">
+              附加动作
+            </p>
             <p class="mt-1 text-slate-900">{{ currentSummary.extra }}</p>
           </div>
         </div>
       </div>
 
-      <div class="rounded-2xl border border-slate-200 bg-slate-900 p-4 text-slate-100">
+      <div
+        class="rounded-2xl border border-slate-200 bg-slate-900 p-4 text-slate-100"
+      >
         <p class="text-sm font-semibold">保存后将生效</p>
         <p class="mt-3 text-lg font-semibold">{{ pendingSummary }}</p>
         <p class="mt-2 text-sm leading-6 text-slate-300">

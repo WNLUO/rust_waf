@@ -1,4 +1,5 @@
 <script setup lang="ts">
+/* eslint-disable vue/no-mutating-props */
 import { computed } from 'vue'
 import { BrainCircuit } from 'lucide-vue-next'
 import type { AiAuditSettingsPayload } from '@/shared/types'
@@ -118,7 +119,9 @@ const windowSecondsModel = computed({
         />
       </label>
       <label class="space-y-1">
-        <span class="text-xs font-medium text-slate-500">临时策略 TTL（秒）</span>
+        <span class="text-xs font-medium text-slate-500"
+          >临时策略 TTL（秒）</span
+        >
         <input
           v-model.number="form.temp_policy_ttl_secs"
           class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
@@ -128,7 +131,9 @@ const windowSecondsModel = computed({
         />
       </label>
       <label class="space-y-1">
-        <span class="text-xs font-medium text-slate-500">临时封禁 TTL（秒）</span>
+        <span class="text-xs font-medium text-slate-500"
+          >临时封禁 TTL（秒）</span
+        >
         <input
           v-model.number="form.temp_block_ttl_secs"
           class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
@@ -138,7 +143,9 @@ const windowSecondsModel = computed({
         />
       </label>
       <label class="space-y-1">
-        <span class="text-xs font-medium text-slate-500">最低自动执行置信度</span>
+        <span class="text-xs font-medium text-slate-500"
+          >最低自动执行置信度</span
+        >
         <input
           v-model.number="form.auto_apply_min_confidence"
           class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"
@@ -185,7 +192,9 @@ const windowSecondsModel = computed({
         />
       </label>
       <label class="space-y-1">
-        <span class="text-xs font-medium text-slate-500">自动审计冷却（秒）</span>
+        <span class="text-xs font-medium text-slate-500"
+          >自动审计冷却（秒）</span
+        >
         <input
           v-model.number="form.auto_audit_cooldown_secs"
           class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-cyan-500"

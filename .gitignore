@@ -20,12 +20,17 @@
 *.log
 *.cache
 
+# Python 本地虚拟环境
+/.venv/
+
 # SQLite WAL/SHM 临时文件
 /data/*.db-wal
 /data/*.db-shm
 
 # 本地运行数据
+/data.db
 /data/*.db
+/data/*.corrupt.*
 /data/backups/
 /data/http3/managed/
 

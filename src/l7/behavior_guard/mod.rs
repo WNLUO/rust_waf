@@ -14,7 +14,7 @@ mod types;
 use assessment::assess_samples;
 use request_utils::{
     bounded_dashmap_key, compact_component, normalized_route_path, request_identity, request_kind,
-    request_path, should_drop_delay_under_pressure, unix_timestamp,
+    request_path, route_family, should_drop_delay_under_pressure, unix_timestamp,
 };
 use response::build_behavior_response;
 use types::{BehaviorAssessment, BehaviorWindow, RequestKind, RequestSample};
@@ -39,6 +39,7 @@ const OVERFLOW_SHARDS: u64 = 64;
 #[derive(Debug)]
 pub struct L7BehaviorGuard {
     buckets: DashMap<String, BehaviorWindow>,
+    aggregate_buckets: DashMap<String, BehaviorWindow>,
     request_sequence: AtomicU64,
 }
 
@@ -46,6 +47,7 @@ impl L7BehaviorGuard {
     pub fn new() -> Self {
         Self {
             buckets: DashMap::new(),
+            aggregate_buckets: DashMap::new(),
             request_sequence: AtomicU64::new(0),
         }
     }
@@ -80,9 +82,6 @@ impl L7BehaviorGuard {
             MAX_BEHAVIOR_BUCKETS,
         )
         .clamp(512, MAX_BEHAVIOR_BUCKETS);
-        let Some(identity) = request_identity(request) else {
-            return None;
-        };
         let route = request
             .get_metadata("l7.cc.route")
             .cloned()
@@ -94,19 +93,43 @@ impl L7BehaviorGuard {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string);
+        let user_agent = behavior_user_agent(request);
+        let header_signature = behavior_header_signature(request);
         let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(BEHAVIOR_WINDOW_SECS);
-        let mut assessment = self.observe_and_assess(
-            &identity,
-            route,
-            kind,
-            client_ip,
-            now,
-            unix_now,
-            window,
-            bucket_limit,
-        );
+        let identity_assessment = request_identity(request).map(|identity| {
+            self.observe_and_assess(
+                &identity,
+                route.clone(),
+                kind,
+                client_ip.clone(),
+                user_agent.clone(),
+                header_signature.clone(),
+                now,
+                unix_now,
+                window,
+                bucket_limit,
+            )
+        });
+        let aggregate_assessment = behavior_aggregate_keys(request, &route, kind)
+            .into_iter()
+            .map(|(key, aggregate_route)| {
+                self.observe_aggregate_and_assess(
+                    &key,
+                    aggregate_route,
+                    kind,
+                    client_ip.clone(),
+                    user_agent.clone(),
+                    header_signature.clone(),
+                    now,
+                    unix_now,
+                    window,
+                    bucket_limit,
+                )
+            })
+            .max_by_key(|assessment| assessment.score);
+        let mut assessment = select_behavior_assessment(identity_assessment, aggregate_assessment)?;
         let ai_score_boost = request
             .get_metadata("ai.behavior.score_boost")
             .and_then(|value| value.parse::<u32>().ok())
@@ -137,8 +160,24 @@ impl L7BehaviorGuard {
             assessment.distinct_routes.to_string(),
         );
         request.add_metadata(
+            "l7.behavior.distinct_client_ips".to_string(),
+            assessment.distinct_client_ips.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.distinct_user_agents".to_string(),
+            assessment.distinct_user_agents.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.distinct_header_signatures".to_string(),
+            assessment.distinct_header_signatures.to_string(),
+        );
+        request.add_metadata(
             "l7.behavior.repeated_ratio".to_string(),
             assessment.repeated_ratio_percent.to_string(),
+        );
+        request.add_metadata(
+            "l7.behavior.client_ip_repeated_ratio".to_string(),
+            assessment.client_ip_repeated_ratio_percent.to_string(),
         );
         request.add_metadata(
             "l7.behavior.document_repeated_ratio".to_string(),
@@ -276,6 +315,8 @@ impl L7BehaviorGuard {
         route: String,
         kind: RequestKind,
         client_ip: Option<String>,
+        user_agent: Option<String>,
+        header_signature: Option<String>,
         now: Instant,
         unix_now: i64,
         window: Duration,
@@ -292,7 +333,54 @@ impl L7BehaviorGuard {
             .buckets
             .entry(identity.clone())
             .or_insert_with(BehaviorWindow::new);
-        entry.observe_and_assess(identity, route, kind, client_ip, now, unix_now, window)
+        entry.observe_and_assess(
+            identity,
+            route,
+            kind,
+            client_ip,
+            user_agent,
+            header_signature,
+            now,
+            unix_now,
+            window,
+        )
+    }
+
+    fn observe_aggregate_and_assess(
+        &self,
+        identity: &str,
+        route: String,
+        kind: RequestKind,
+        client_ip: Option<String>,
+        user_agent: Option<String>,
+        header_signature: Option<String>,
+        now: Instant,
+        unix_now: i64,
+        window: Duration,
+        bucket_limit: usize,
+    ) -> BehaviorAssessment {
+        let identity = bounded_dashmap_key(
+            &self.aggregate_buckets,
+            compact_component("aggregate", identity, MAX_BEHAVIOR_KEY_LEN),
+            bucket_limit,
+            "behavior-aggregate",
+            OVERFLOW_SHARDS,
+        );
+        let mut entry = self
+            .aggregate_buckets
+            .entry(identity.clone())
+            .or_insert_with(BehaviorWindow::new);
+        entry.observe_and_assess(
+            identity,
+            route,
+            kind,
+            client_ip,
+            user_agent,
+            header_signature,
+            now,
+            unix_now,
+            window,
+        )
     }
 
     fn maybe_cleanup(&self, unix_now: i64) {
@@ -312,16 +400,35 @@ impl L7BehaviorGuard {
         for key in keys {
             self.buckets.remove(&key);
         }
+
+        let aggregate_keys = self
+            .aggregate_buckets
+            .iter()
+            .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
+            .take(512)
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        for key in aggregate_keys {
+            self.aggregate_buckets.remove(&key);
+        }
     }
 
     fn record_challenge(&self, identity: &str, now: Instant, window: Duration) {
         if let Some(mut entry) = self.buckets.get_mut(identity) {
+            entry.record_challenge(now, window);
+            return;
+        }
+        if let Some(mut entry) = self.aggregate_buckets.get_mut(identity) {
             entry.record_challenge(now, window);
         }
     }
 
     fn record_block(&self, identity: &str, now: Instant, window: Duration) {
         if let Some(mut entry) = self.buckets.get_mut(identity) {
+            entry.record_block(now, window);
+            return;
+        }
+        if let Some(mut entry) = self.aggregate_buckets.get_mut(identity) {
             entry.record_block(now, window);
         }
     }
@@ -361,6 +468,107 @@ fn runtime_defense_depth(request: &UnifiedHttpRequest) -> crate::core::DefenseDe
         .unwrap_or(crate::core::DefenseDepth::Balanced)
 }
 
+fn behavior_aggregate_keys(
+    request: &UnifiedHttpRequest,
+    route: &str,
+    kind: RequestKind,
+) -> Vec<(String, String)> {
+    if matches!(kind, RequestKind::Static) {
+        return Vec::new();
+    }
+    let host = request
+        .get_header("host")
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "-".to_string());
+    let mut keys = vec![(
+        format!("site:{host}|route:{route}|kind:{}", kind.as_str()),
+        route.to_string(),
+    )];
+    if let Some(family) = route_family(&request.uri, route) {
+        keys.push((
+            format!("site:{host}|family:{family}|kind:{}", kind.as_str()),
+            format!("family:{family}"),
+        ));
+    }
+    keys
+}
+
+fn behavior_user_agent(request: &UnifiedHttpRequest) -> Option<String> {
+    request
+        .get_header("user-agent")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| compact_component("ua", value, MAX_BEHAVIOR_KEY_LEN))
+}
+
+fn behavior_header_signature(request: &UnifiedHttpRequest) -> Option<String> {
+    let fields = [
+        "accept",
+        "accept-language",
+        "accept-encoding",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+        "x-requested-with",
+    ];
+    let signature = fields
+        .iter()
+        .map(|key| {
+            request
+                .get_header(key)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "-".to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    (signature != "-|-|-|-|-|-|-")
+        .then(|| compact_component("hdr", &signature, MAX_BEHAVIOR_KEY_LEN))
+}
+
+fn select_behavior_assessment(
+    identity_assessment: Option<BehaviorAssessment>,
+    aggregate_assessment: Option<BehaviorAssessment>,
+) -> Option<BehaviorAssessment> {
+    let aggregate_assessment = aggregate_assessment
+        .filter(distributed_assessment_is_actionable)
+        .map(normalize_distributed_assessment_score);
+    match (identity_assessment, aggregate_assessment) {
+        (Some(identity), Some(aggregate)) if aggregate.score > identity.score => Some(aggregate),
+        (Some(identity), _) => Some(identity),
+        (None, Some(aggregate)) => Some(aggregate),
+        (None, None) => None,
+    }
+}
+
+fn distributed_assessment_is_actionable(assessment: &BehaviorAssessment) -> bool {
+    assessment.score >= DELAY_SCORE
+        && assessment.flags.iter().any(|flag| {
+            matches!(
+                *flag,
+                "distributed_document_burst"
+                    | "distributed_document_probe"
+                    | "distributed_api_burst"
+            )
+        })
+}
+
+fn normalize_distributed_assessment_score(
+    mut assessment: BehaviorAssessment,
+) -> BehaviorAssessment {
+    let has_burst_flag = assessment.flags.iter().any(|flag| {
+        matches!(
+            *flag,
+            "distributed_document_burst" | "distributed_api_burst"
+        )
+    });
+    if !has_burst_flag {
+        assessment.score = assessment.score.min(CHALLENGE_SCORE);
+    }
+    assessment
+}
+
 fn runtime_usize_metadata(request: &UnifiedHttpRequest, key: &str, default: usize) -> usize {
     request
         .get_metadata(key)
@@ -390,6 +598,8 @@ impl BehaviorWindow {
         route: String,
         kind: RequestKind,
         client_ip: Option<String>,
+        user_agent: Option<String>,
+        header_signature: Option<String>,
         now: Instant,
         unix_now: i64,
         window: Duration,
@@ -406,6 +616,8 @@ impl BehaviorWindow {
             route: route.clone(),
             kind,
             client_ip,
+            user_agent,
+            header_signature,
             at: now,
         });
         while samples.len() > MAX_SAMPLES_PER_IDENTITY {
@@ -498,7 +710,11 @@ impl BehaviorWindow {
             focused_document_route: assessment.focused_document_route,
             focused_api_route: assessment.focused_api_route,
             distinct_routes: assessment.distinct_routes,
+            distinct_client_ips: assessment.distinct_client_ips,
+            distinct_user_agents: assessment.distinct_user_agents,
+            distinct_header_signatures: assessment.distinct_header_signatures,
             repeated_ratio_percent: assessment.repeated_ratio_percent,
+            client_ip_repeated_ratio_percent: assessment.client_ip_repeated_ratio_percent,
             document_repeated_ratio_percent: assessment.document_repeated_ratio_percent,
             api_repeated_ratio_percent: assessment.api_repeated_ratio_percent,
             jitter_ms: assessment.jitter_ms,
@@ -623,6 +839,135 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn distributed_document_burst_triggers_aggregate_behavior_response() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+
+        for index in 0..8 {
+            let mut request = request("GET", "/", "text/html");
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header(
+                "user-agent".to_string(),
+                format!("DistributedTestBrowser/{index}"),
+            );
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+            last = guard.inspect_request(&mut request).await;
+        }
+
+        assert!(last.is_some());
+        let mut request = request("GET", "/", "text/html");
+        request.set_client_ip("203.0.113.99".to_string());
+        request.add_header(
+            "user-agent".to_string(),
+            "DistributedTestBrowser/final".to_string(),
+        );
+        request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        let _ = guard.inspect_request(&mut request).await;
+
+        assert!(request
+            .get_metadata("l7.behavior.flags")
+            .is_some_and(|flags| flags.contains("distributed_document")));
+        assert!(request
+            .get_metadata("l7.behavior.distinct_client_ips")
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(|count| count >= 4));
+    }
+
+    #[tokio::test]
+    async fn distributed_broad_navigation_stays_below_aggregate_behavior_response() {
+        let guard = L7BehaviorGuard::new();
+
+        for index in 0..12 {
+            let mut request = request("GET", &format!("/article-{index}.html"), "text/html");
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header(
+                "user-agent".to_string(),
+                format!("DistributedNormalBrowser/{index}"),
+            );
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), format!("/article-{index}.html"));
+
+            assert!(guard.inspect_request(&mut request).await.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn distributed_article_family_burst_triggers_behavior_response() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+
+        for index in 0..8 {
+            let mut request = request(
+                "GET",
+                &format!("/20260214{:04}.html", 1900 + index),
+                "text/html",
+            );
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header("user-agent".to_string(), format!("ArticleProbe/{index}"));
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata(
+                "l7.cc.route".to_string(),
+                format!("/20260214{:04}.html", 1900 + index),
+            );
+            last = guard.inspect_request(&mut request).await;
+        }
+
+        assert!(last.is_some());
+    }
+
+    #[tokio::test]
+    async fn distributed_wordpress_plugin_family_burst_triggers_behavior_response() {
+        let guard = L7BehaviorGuard::new();
+        let mut last = None;
+
+        for (index, plugin) in [
+            "tabs-responsive",
+            "woodly-core",
+            "pods",
+            "wc-spod",
+            "multisafepay",
+            "jc-importer",
+            "block-slider",
+            "mailchimp-forms-by-mailmunch",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let path = format!("/wp-content/plugins/{plugin}/readme.txt");
+            let mut request = request("GET", &path, "text/html");
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header("user-agent".to_string(), format!("PluginProbe/{index}"));
+            request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+            request.add_metadata("l7.cc.route".to_string(), path);
+            last = guard.inspect_request(&mut request).await;
+        }
+
+        assert!(last.is_some());
+    }
+
+    #[tokio::test]
+    async fn crawler_well_known_routes_do_not_trigger_aggregate_behavior_response() {
+        let guard = L7BehaviorGuard::new();
+
+        for index in 0..12 {
+            let path = if index % 2 == 0 {
+                "/robots.txt"
+            } else {
+                "/sitemap.xml"
+            };
+            let mut request = request("GET", path, "text/plain");
+            request.set_client_ip(format!("203.0.113.{}", index + 1));
+            request.add_header("user-agent".to_string(), format!("Crawler/{index}"));
+            request.add_metadata("l7.cc.request_kind".to_string(), "other".to_string());
+            request.add_metadata("l7.cc.route".to_string(), path.to_string());
+
+            assert!(guard.inspect_request(&mut request).await.is_none());
+        }
+    }
+
+    #[tokio::test]
     async fn broad_navigation_with_many_assets_stays_below_challenge() {
         let guard = L7BehaviorGuard::new();
 
@@ -714,6 +1059,8 @@ mod tests {
                 route: "/stale".to_string(),
                 kind: RequestKind::Document,
                 client_ip: Some("203.0.113.10".to_string()),
+                user_agent: None,
+                header_signature: None,
                 at: Instant::now(),
             });
         }
@@ -732,6 +1079,8 @@ mod tests {
                 route: "/fresh".to_string(),
                 kind: RequestKind::Document,
                 client_ip: Some("203.0.113.11".to_string()),
+                user_agent: None,
+                header_signature: None,
                 at: Instant::now(),
             });
         }

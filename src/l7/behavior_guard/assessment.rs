@@ -1,6 +1,6 @@
 use super::request_utils::is_high_value_route;
 use super::*;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub(super) fn assess_samples(
     identity: String,
@@ -11,11 +11,23 @@ pub(super) fn assess_samples(
     let mut route_counts: HashMap<&str, usize> = HashMap::new();
     let mut document_route_counts: HashMap<&str, usize> = HashMap::new();
     let mut api_route_counts: HashMap<&str, usize> = HashMap::new();
+    let mut client_ip_counts: HashMap<&str, usize> = HashMap::new();
+    let mut user_agent_counts: HashMap<&str, usize> = HashMap::new();
+    let mut header_signature_counts: HashMap<&str, usize> = HashMap::new();
     let mut api_requests = 0usize;
     let mut document_requests = 0usize;
     let mut non_document_requests = 0usize;
     for sample in samples.iter() {
         *route_counts.entry(sample.route.as_str()).or_insert(0) += 1;
+        if let Some(client_ip) = sample.client_ip.as_deref() {
+            *client_ip_counts.entry(client_ip).or_insert(0) += 1;
+        }
+        if let Some(user_agent) = sample.user_agent.as_deref() {
+            *user_agent_counts.entry(user_agent).or_insert(0) += 1;
+        }
+        if let Some(header_signature) = sample.header_signature.as_deref() {
+            *header_signature_counts.entry(header_signature).or_insert(0) += 1;
+        }
         if matches!(sample.kind, RequestKind::Document) {
             document_requests += 1;
             *document_route_counts
@@ -37,6 +49,27 @@ pub(super) fn assess_samples(
         .unwrap_or_else(|| ("-".to_string(), 1));
     let repeated_ratio_percent = ((dominant.1 * 100) / total) as u32;
     let distinct_routes = route_counts.len();
+    let distinct_client_ips = samples
+        .iter()
+        .filter_map(|sample| sample.client_ip.as_deref())
+        .collect::<HashSet<_>>()
+        .len();
+    let distinct_user_agents = samples
+        .iter()
+        .filter_map(|sample| sample.user_agent.as_deref())
+        .collect::<HashSet<_>>()
+        .len();
+    let distinct_header_signatures = samples
+        .iter()
+        .filter_map(|sample| sample.header_signature.as_deref())
+        .collect::<HashSet<_>>()
+        .len();
+    let dominant_client_ip_count = client_ip_counts.values().copied().max().unwrap_or(0);
+    let client_ip_repeated_ratio_percent = if distinct_client_ips == 0 {
+        0
+    } else {
+        ((dominant_client_ip_count * 100) / total) as u32
+    };
     let jitter_ms = interval_jitter_ms(samples);
     let document_dominant = document_route_counts
         .iter()
@@ -144,6 +177,60 @@ pub(super) fn assess_samples(
         score += 25;
         flags.push("single_query_endpoint");
     }
+    if total >= 12
+        && distinct_client_ips >= 5
+        && repeated_ratio_percent >= 90
+        && document_requests >= 8
+        && document_repeated_ratio_percent >= 90
+        && non_document_requests <= document_requests.saturating_div(2).max(1)
+        && session_span_secs <= 120
+    {
+        score += 75;
+        flags.push("distributed_document_burst");
+    } else if total >= 8
+        && distinct_client_ips >= 4
+        && repeated_ratio_percent >= 90
+        && document_requests >= 6
+        && document_repeated_ratio_percent >= 90
+        && non_document_requests <= document_requests.saturating_div(2).max(1)
+        && session_span_secs <= 60
+    {
+        score += 55;
+        flags.push("distributed_document_probe");
+    }
+    if total >= 12
+        && distinct_client_ips >= 4
+        && api_requests >= 8
+        && api_repeated_ratio_percent >= 85
+        && distinct_routes <= 2
+        && session_span_secs <= 90
+    {
+        score += 65;
+        flags.push("distributed_api_burst");
+    }
+    if distinct_client_ips >= 4
+        && client_ip_repeated_ratio_percent <= 40
+        && repeated_ratio_percent >= 90
+    {
+        score += 15;
+        flags.push("source_rotation");
+    }
+    if total >= 10
+        && distinct_client_ips >= 4
+        && distinct_user_agents >= 4
+        && distinct_header_signatures <= 2
+    {
+        score += 20;
+        flags.push("ua_pool_header_reuse");
+    }
+    if total >= 8
+        && distinct_client_ips >= 4
+        && document_requests >= 6
+        && non_document_requests == 0
+    {
+        score += 25;
+        flags.push("aggregate_document_without_assets");
+    }
     if is_high_value_route(dominant.0.as_str()) && dominant.1 >= 4 {
         score += 15;
         flags.push("high_value_route_bias");
@@ -178,7 +265,11 @@ pub(super) fn assess_samples(
         score: score.min(100),
         dominant_route: Some(dominant.0),
         distinct_routes,
+        distinct_client_ips,
+        distinct_user_agents,
+        distinct_header_signatures,
         repeated_ratio_percent,
+        client_ip_repeated_ratio_percent,
         document_repeated_ratio_percent,
         focused_document_route: document_dominant.map(|(route, _)| route),
         focused_api_route: api_dominant.map(|(route, _)| route),

@@ -133,6 +133,63 @@ pub(super) fn is_high_value_route(route: &str) -> bool {
     .any(|segment| route.contains(segment))
 }
 
+pub(super) fn route_family(uri: &str, route: &str) -> Option<&'static str> {
+    let route = route.to_ascii_lowercase();
+    let uri = uri.to_ascii_lowercase();
+    if route == "/robots.txt"
+        || route == "/sitemap.xml"
+        || route.starts_with("/sitemap")
+        || route == "/favicon.ico"
+        || route.starts_with("/.well-known/")
+    {
+        return None;
+    }
+    if route == "/" && (uri.contains("?p=") || uri.contains("&p=")) {
+        return Some("wp_post_query");
+    }
+    if route == "/" {
+        return Some("root");
+    }
+    if route == "/wp-login.php" {
+        return Some("wp_login");
+    }
+    if route.starts_with("/wp-admin") {
+        return Some("wp_admin");
+    }
+    if route == "/wp-cron.php" || route == "/xmlrpc.php" {
+        return Some("wp_system_probe");
+    }
+    if route.starts_with("/wp-content/plugins/") {
+        return Some("wp_plugin_probe");
+    }
+    if route.starts_with("/wp-content/themes/") {
+        return Some("wp_theme_probe");
+    }
+    if route.starts_with("/tag/") || route.starts_with("/category/") {
+        return Some("taxonomy_page");
+    }
+    if route.starts_with("/search") || uri.contains("?s=") || uri.contains("&s=") {
+        return Some("search_page");
+    }
+    if looks_like_article_path(&route) {
+        return Some("article_page");
+    }
+    if route.starts_with("/api/") {
+        return Some("api_endpoint");
+    }
+    None
+}
+
+fn looks_like_article_path(route: &str) -> bool {
+    let without_suffix = route
+        .strip_suffix(".html")
+        .or_else(|| route.strip_suffix(".htm"))
+        .unwrap_or(route);
+    let tail = without_suffix.rsplit('/').next().unwrap_or(without_suffix);
+    let digit_count = tail.chars().filter(|ch| ch.is_ascii_digit()).count();
+    digit_count >= 4 && digit_count.saturating_mul(2) >= tail.chars().count().max(1)
+}
+
 pub(super) fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
     if let Some(kind) = request
         .get_metadata("l7.cc.request_kind")

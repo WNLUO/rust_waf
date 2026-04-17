@@ -53,12 +53,12 @@ impl L4ConfigUpdateRequest {
         current.l4_config = L4Config {
             ddos_protection_enabled: self.ddos_protection_enabled,
             advanced_ddos_enabled: self.advanced_ddos_enabled,
-            connection_rate_limit: self.connection_rate_limit,
-            syn_flood_threshold: self.syn_flood_threshold,
-            max_tracked_ips: self.max_tracked_ips,
-            max_blocked_ips: self.max_blocked_ips,
-            state_ttl_secs: self.state_ttl_secs,
-            bloom_filter_scale: self.bloom_filter_scale,
+            connection_rate_limit: previous_l4.connection_rate_limit,
+            syn_flood_threshold: previous_l4.syn_flood_threshold,
+            max_tracked_ips: previous_l4.max_tracked_ips,
+            max_blocked_ips: previous_l4.max_blocked_ips,
+            state_ttl_secs: previous_l4.state_ttl_secs,
+            bloom_filter_scale: previous_l4.bloom_filter_scale,
             behavior_event_channel_capacity: previous_l4.behavior_event_channel_capacity,
             behavior_drop_critical_threshold: previous_l4.behavior_drop_critical_threshold,
             behavior_fallback_ratio_percent: previous_l4.behavior_fallback_ratio_percent,
@@ -157,15 +157,16 @@ impl L7ConfigUpdateRequest {
             return Err("启用 HTTP/3 前需要先配置 HTTPS 全局入口端口".to_string());
         }
 
+        let previous_http3 = current.http3_config.clone();
         let http3_config = Http3Config {
             enabled: self.http3_enabled,
             listen_addr: http3_listen_addr,
-            max_concurrent_streams: self.http3_max_concurrent_streams,
-            idle_timeout_secs: self.http3_idle_timeout_secs,
-            mtu: self.http3_mtu,
-            max_frame_size: self.http3_max_frame_size,
-            enable_connection_migration: self.http3_enable_connection_migration,
-            qpack_table_size: self.http3_qpack_table_size,
+            max_concurrent_streams: previous_http3.max_concurrent_streams,
+            idle_timeout_secs: previous_http3.idle_timeout_secs,
+            mtu: previous_http3.mtu,
+            max_frame_size: previous_http3.max_frame_size,
+            enable_connection_migration: previous_http3.enable_connection_migration,
+            qpack_table_size: previous_http3.qpack_table_size,
             certificate_path: non_empty_string(self.http3_certificate_path),
             private_key_path: non_empty_string(self.http3_private_key_path),
             enable_tls13: self.http3_enable_tls13,
@@ -198,10 +199,6 @@ impl L7ConfigUpdateRequest {
         current.l7_config.reject_expect_100_continue = self.reject_expect_100_continue;
         current.l7_config.bloom_filter_scale = self.bloom_filter_scale;
         current.l7_config.http2_config.enabled = self.http2_enabled;
-        current.l7_config.http2_config.max_concurrent_streams = self.http2_max_concurrent_streams;
-        current.l7_config.http2_config.max_frame_size = self.http2_max_frame_size;
-        current.l7_config.http2_config.enable_priorities = self.http2_enable_priorities;
-        current.l7_config.http2_config.initial_window_size = self.http2_initial_window_size;
         current.bloom_enabled = self.bloom_enabled;
         current.l7_bloom_false_positive_verification = self.bloom_false_positive_verification;
         current.listen_addrs = listen_addrs;
@@ -487,17 +484,11 @@ mod tests {
         let next = L4ConfigUpdateRequest {
             ddos_protection_enabled: true,
             advanced_ddos_enabled: true,
-            connection_rate_limit: 999,
-            syn_flood_threshold: 888,
-            max_tracked_ips: 777,
-            max_blocked_ips: 666,
-            state_ttl_secs: 555,
-            bloom_filter_scale: 1.2,
             trusted_cdn: TrustedCdnConfigRequest::default(),
         }
         .into_config(current, false);
 
-        assert_eq!(next.l4_config.connection_rate_limit, 999);
+        assert_eq!(next.l4_config.connection_rate_limit, 100);
         assert_eq!(next.l4_config.behavior_soft_delay_ms, 25);
         assert_eq!(next.l4_config.behavior_hard_delay_ms, 60);
         assert_eq!(
@@ -519,7 +510,19 @@ mod tests {
                     delay_ms: 150,
                     ..crate::config::l7::CcDefenseConfig::default()
                 },
+                http2_config: crate::config::l7::Http2Config {
+                    max_concurrent_streams: 42,
+                    max_frame_size: 32_768,
+                    enable_priorities: false,
+                    initial_window_size: 32_000,
+                    ..crate::config::l7::Http2Config::default()
+                },
                 ..crate::config::L7Config::default()
+            },
+            http3_config: crate::config::Http3Config {
+                max_concurrent_streams: 24,
+                mtu: 1200,
+                ..crate::config::Http3Config::default()
             },
             ..Config::default()
         };
@@ -546,22 +549,12 @@ mod tests {
             reject_expect_100_continue: true,
             bloom_filter_scale: 1.0,
             http2_enabled: true,
-            http2_max_concurrent_streams: 100,
-            http2_max_frame_size: 16384,
-            http2_enable_priorities: true,
-            http2_initial_window_size: 65535,
             bloom_enabled: true,
             bloom_false_positive_verification: true,
             runtime_profile: "standard".to_string(),
             listen_addrs: vec!["127.0.0.1:8080".to_string()],
             upstream_endpoint: String::new(),
             http3_enabled: false,
-            http3_max_concurrent_streams: 100,
-            http3_idle_timeout_secs: 300,
-            http3_mtu: 1350,
-            http3_max_frame_size: 65536,
-            http3_enable_connection_migration: true,
-            http3_qpack_table_size: 4096,
             http3_certificate_path: String::new(),
             http3_private_key_path: String::new(),
             http3_enable_tls13: true,
@@ -571,6 +564,11 @@ mod tests {
 
         assert_eq!(next.l7_config.cc_defense.ip_challenge_threshold, 60);
         assert_eq!(next.l7_config.cc_defense.delay_ms, 150);
+        assert_eq!(next.l7_config.http2_config.max_concurrent_streams, 42);
+        assert_eq!(next.l7_config.http2_config.max_frame_size, 32_768);
+        assert!(!next.l7_config.http2_config.enable_priorities);
+        assert_eq!(next.http3_config.max_concurrent_streams, 24);
+        assert_eq!(next.http3_config.mtu, 1200);
     }
 }
 

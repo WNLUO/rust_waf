@@ -210,11 +210,19 @@ impl WafContext {
             return;
         }
 
+        self.note_site_defense_event(&site_id, is_soft, is_hard);
+    }
+
+    pub fn note_site_hard_defense_signal(&self, site_id: &str) {
+        self.note_site_defense_event(site_id, false, true);
+    }
+
+    fn note_site_defense_event(&self, site_id: &str, is_soft: bool, is_hard: bool) {
         let now = unix_timestamp();
         let window_start = now.div_euclid(60) * 60;
         let entry = self
             .site_defense_buckets
-            .entry(site_id)
+            .entry(site_id.to_string())
             .or_insert_with(|| std::sync::Mutex::new(SiteDefenseBucket::default()));
         let mut bucket = entry.lock().expect("site defense bucket lock poisoned");
         if bucket.window_start != window_start {

@@ -2,7 +2,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import {
   fetchL7Config,
   fetchL7Stats,
-  updateL7CompatibilityConfig,
   updateL7Config,
 } from '@/shared/api/l7'
 import { fetchRulesList } from '@/shared/api/rules'
@@ -62,7 +61,6 @@ export function useAdminL7() {
   })
 
   const configForm = reactive<L7ConfigForm>(createDefaultL7ConfigForm())
-  const compatibilityForm = reactive<L7ConfigForm>(createDefaultL7ConfigForm())
 
   const assignBaseFields = (target: L7ConfigForm, payload: L7ConfigPayload) => {
     Object.assign(target, {
@@ -96,22 +94,6 @@ export function useAdminL7() {
         },
       },
     })
-    assignBaseFields(compatibilityForm, payload)
-    Object.assign(compatibilityForm, {
-      cc_defense: {
-        ...payload.advanced_compatibility.persisted_cc_defense,
-      },
-      auto_tuning: {
-        ...payload.advanced_compatibility.persisted_auto_tuning,
-        pinned_fields: [
-          ...payload.advanced_compatibility.persisted_auto_tuning.pinned_fields,
-        ],
-        slo: {
-          ...payload.advanced_compatibility.persisted_auto_tuning.slo,
-        },
-      },
-    })
-
     meta.value = {
       runtime_enabled: payload.runtime_enabled,
       adaptive_managed_fields: payload.adaptive_managed_fields,
@@ -152,20 +134,16 @@ export function useAdminL7() {
   }
 
   const saveConfig = async () => {
-    return saveConfigInternal(false)
+    return saveConfigInternal()
   }
 
-  const saveCompatibilityConfig = async () => {
-    return saveConfigInternal(true)
-  }
-
-  const saveConfigInternal = async (compatibilityMode: boolean) => {
+  const saveConfigInternal = async () => {
     saving.value = true
     error.value = ''
     successMessage.value = ''
 
     try {
-      const targetForm = compatibilityMode ? compatibilityForm : configForm
+      const targetForm = configForm
 
       targetForm.max_request_size = clampInteger(
         targetForm.max_request_size,
@@ -500,9 +478,7 @@ export function useAdminL7() {
         targetForm.bloom_false_positive_verification = false
       }
 
-      const response = compatibilityMode
-        ? await updateL7CompatibilityConfig({ ...targetForm })
-        : await updateL7Config({ ...targetForm })
+      const response = await updateL7Config({ ...targetForm })
       successMessage.value = response.message
       await refreshAll()
       return true
@@ -635,7 +611,6 @@ export function useAdminL7() {
 
   return {
     blockL7Rules,
-    compatibilityForm,
     configForm,
     enabledL7Rules,
     error,
@@ -656,7 +631,6 @@ export function useAdminL7() {
     runtimeProfileLabel,
     runtimeStatus,
     saveConfig,
-    saveCompatibilityConfig,
     saving,
     stats,
     successMessage,

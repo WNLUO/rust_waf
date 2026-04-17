@@ -180,11 +180,11 @@ pub(crate) fn persist_http_inspection_event(
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
-    event.details_json = build_request_identity_details(context, request, packet);
 
     if should_aggregate_runtime_event(request, result) {
         store.enqueue_security_event_aggregated(event, "runtime_budget");
     } else {
+        event.details_json = build_request_identity_details(context, request, packet);
         store.enqueue_security_event(event);
     }
 
@@ -319,6 +319,9 @@ pub(crate) fn persist_safeline_intercept_event(
     upstream_status_code: u16,
     local_action: &str,
 ) {
+    if let Some(site) = matched_site {
+        context.note_site_hard_defense_signal(&site.id.to_string());
+    }
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };
@@ -348,9 +351,18 @@ pub(crate) fn persist_safeline_intercept_event(
     event.http_method = Some(request.method.clone());
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
-    event.details_json = build_request_identity_details(context, request, packet);
 
-    store.enqueue_security_event(event);
+    if request
+        .get_metadata("runtime.aggregate_events")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+        || context.runtime_pressure_snapshot().trim_event_persistence
+    {
+        store.enqueue_security_event_aggregated(event, "runtime_budget_safeline");
+    } else {
+        event.details_json = build_request_identity_details(context, request, packet);
+        store.enqueue_security_event(event);
+    }
 }
 
 pub(crate) fn persist_safeline_intercept_blocked_ip(

@@ -2,7 +2,6 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import {
   fetchL4Config,
   fetchL4Stats,
-  updateL4CompatibilityConfig,
   updateL4Config,
 } from '@/shared/api/l4'
 import { createDefaultL4ConfigForm, type L4ConfigForm } from '@/features/l4/utils/adminL4'
@@ -52,7 +51,6 @@ export function useAdminL4() {
   })
 
   const configForm = reactive<L4ConfigForm>(createDefaultL4ConfigForm())
-  const compatibilityForm = reactive<L4ConfigForm>(createDefaultL4ConfigForm())
 
   const assignBaseFields = (target: L4ConfigForm, payload: L4ConfigPayload) => {
     Object.assign(target, {
@@ -115,58 +113,6 @@ export function useAdminL4() {
       behavior_critical_reject_threshold_percent:
         payload.behavior_critical_reject_threshold_percent,
     })
-    assignBaseFields(compatibilityForm, payload)
-    Object.assign(compatibilityForm, {
-      behavior_event_channel_capacity:
-        payload.advanced_compatibility.persisted_behavior_event_channel_capacity,
-      behavior_drop_critical_threshold:
-        payload.advanced_compatibility.persisted_behavior_drop_critical_threshold,
-      behavior_fallback_ratio_percent:
-        payload.advanced_compatibility.persisted_behavior_fallback_ratio_percent,
-      behavior_overload_blocked_connections_threshold:
-        payload.advanced_compatibility
-          .persisted_behavior_overload_blocked_connections_threshold,
-      behavior_overload_active_connections_threshold:
-        payload.advanced_compatibility
-          .persisted_behavior_overload_active_connections_threshold,
-      behavior_normal_connection_budget_per_minute:
-        payload.advanced_compatibility
-          .persisted_behavior_normal_connection_budget_per_minute,
-      behavior_suspicious_connection_budget_per_minute:
-        payload.advanced_compatibility
-          .persisted_behavior_suspicious_connection_budget_per_minute,
-      behavior_high_risk_connection_budget_per_minute:
-        payload.advanced_compatibility
-          .persisted_behavior_high_risk_connection_budget_per_minute,
-      behavior_high_overload_budget_scale_percent:
-        payload.advanced_compatibility
-          .persisted_behavior_high_overload_budget_scale_percent,
-      behavior_critical_overload_budget_scale_percent:
-        payload.advanced_compatibility
-          .persisted_behavior_critical_overload_budget_scale_percent,
-      behavior_high_overload_delay_ms:
-        payload.advanced_compatibility.persisted_behavior_high_overload_delay_ms,
-      behavior_critical_overload_delay_ms:
-        payload.advanced_compatibility
-          .persisted_behavior_critical_overload_delay_ms,
-      behavior_soft_delay_threshold_percent:
-        payload.advanced_compatibility
-          .persisted_behavior_soft_delay_threshold_percent,
-      behavior_hard_delay_threshold_percent:
-        payload.advanced_compatibility
-          .persisted_behavior_hard_delay_threshold_percent,
-      behavior_soft_delay_ms:
-        payload.advanced_compatibility.persisted_behavior_soft_delay_ms,
-      behavior_hard_delay_ms:
-        payload.advanced_compatibility.persisted_behavior_hard_delay_ms,
-      behavior_reject_threshold_percent:
-        payload.advanced_compatibility
-          .persisted_behavior_reject_threshold_percent,
-      behavior_critical_reject_threshold_percent:
-        payload.advanced_compatibility
-          .persisted_behavior_critical_reject_threshold_percent,
-    })
-
     meta.value = {
       runtime_enabled: payload.runtime_enabled,
       bloom_enabled: payload.bloom_enabled,
@@ -201,20 +147,16 @@ export function useAdminL4() {
   }
 
   const saveConfig = async () => {
-    return saveConfigInternal(false)
+    return saveConfigInternal()
   }
 
-  const saveCompatibilityConfig = async () => {
-    return saveConfigInternal(true)
-  }
-
-  const saveConfigInternal = async (compatibilityMode: boolean) => {
+  const saveConfigInternal = async () => {
     saving.value = true
     error.value = ''
     successMessage.value = ''
 
     try {
-      const targetForm = compatibilityMode ? compatibilityForm : configForm
+      const targetForm = configForm
 
       targetForm.connection_rate_limit = clampInteger(
         targetForm.connection_rate_limit,
@@ -367,9 +309,7 @@ export function useAdminL4() {
         12,
       )
 
-      const response = compatibilityMode
-        ? await updateL4CompatibilityConfig({ ...targetForm })
-        : await updateL4Config({ ...targetForm })
+      const response = await updateL4Config({ ...targetForm })
       successMessage.value = response.message
       await refreshAll()
       return true
@@ -461,7 +401,6 @@ export function useAdminL4() {
     blockedCapacityLabel,
     blockedCapacityTone,
     bloomPanels,
-    compatibilityForm,
     configForm,
     error,
     falsePositivePanels,
@@ -473,7 +412,6 @@ export function useAdminL4() {
     runtimeProfileLabel,
     runtimeStatus,
     saveConfig,
-    saveCompatibilityConfig,
     saving,
     stats,
     successMessage,

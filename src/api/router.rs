@@ -60,19 +60,11 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(settings_handlers::get_l4_config_handler)
                 .put(settings_handlers::update_l4_config_handler),
         )
-        .route(
-            "/l4/config/compatibility",
-            post(settings_handlers::update_l4_compatibility_config_handler),
-        )
         .route("/l4/stats", get(settings_handlers::get_l4_stats_handler))
         .route(
             "/l7/config",
             get(settings_handlers::get_l7_config_handler)
                 .put(settings_handlers::update_l7_config_handler),
-        )
-        .route(
-            "/l7/config/compatibility",
-            post(settings_handlers::update_l7_compatibility_config_handler),
         )
         .route("/l7/stats", get(settings_handlers::get_l7_stats_handler))
         .route(

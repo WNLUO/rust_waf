@@ -16,6 +16,11 @@
 # 系统文件
 .DS_Store
 
+# 本地环境与资料
+/.env
+/paper/
+/data/
+
 # 常见日志与缓存
 *.log
 *.cache

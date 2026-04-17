@@ -85,6 +85,7 @@ pub struct WafContext {
     ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
     ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
+    route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -223,6 +224,7 @@ impl WafContext {
             ai_temp_policies: RwLock::new(Vec::new()),
             ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
             site_defense_buckets: DashMap::new(),
+            route_defense_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,

@@ -598,6 +598,9 @@ fn build_request_identity_details_with_header(
             "runtime_defense_depth": request.get_metadata("runtime.defense.depth").cloned(),
             "runtime_site_defense_depth": request.get_metadata("runtime.site.defense_depth").cloned(),
             "runtime_site_defense_reason": request.get_metadata("runtime.site.defense_reason").cloned(),
+            "runtime_route_defense_depth": request.get_metadata("runtime.route.defense_depth").cloned(),
+            "runtime_route_defense_route": request.get_metadata("runtime.route.defense_route").cloned(),
+            "runtime_route_cc_threshold_scale_percent": request.get_metadata("runtime.route.cc_threshold_scale_percent").cloned(),
             "runtime_aggregate_events": request.get_metadata("runtime.aggregate_events").cloned(),
         }
     });

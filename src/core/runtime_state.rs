@@ -10,6 +10,8 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
+const MAX_ROUTE_DEFENSE_BUCKETS: usize = 8_192;
+
 impl WafContext {
     pub fn runtime_pressure_snapshot(&self) -> RuntimePressureSnapshot {
         let auto = self.auto_tuning_snapshot();
@@ -130,7 +132,10 @@ impl WafContext {
         let Some(site_id) = request.get_metadata("gateway.site_id").cloned() else {
             return;
         };
-        let Some(site_depth) = self.site_defense_depth(&site_id) else {
+        let site_depth = self.site_defense_depth(&site_id);
+        let route = runtime_route_path(&request.uri);
+        let route_depth = self.route_defense_depth(&site_id, &route);
+        let Some(site_depth) = select_strictest_depth(site_depth, route_depth) else {
             return;
         };
         let current_depth = request
@@ -160,6 +165,14 @@ impl WafContext {
             "runtime.site.defense_depth".to_string(),
             site_depth.as_str().to_string(),
         );
+        if let Some(route_depth) = route_depth {
+            request.add_metadata(
+                "runtime.route.defense_depth".to_string(),
+                route_depth.as_str().to_string(),
+            );
+            request.add_metadata("runtime.route.defense_route".to_string(), route);
+            apply_route_local_cc_tightening(request, route_depth);
+        }
         request.add_metadata(
             "runtime.site.defense_reason".to_string(),
             "site_local_attack_pressure".to_string(),
@@ -210,14 +223,21 @@ impl WafContext {
             return;
         }
 
-        self.note_site_defense_event(&site_id, is_soft, is_hard);
+        let route = runtime_route_path(&request.uri);
+        self.note_site_defense_event(&site_id, Some(&route), is_soft, is_hard);
     }
 
     pub fn note_site_hard_defense_signal(&self, site_id: &str) {
-        self.note_site_defense_event(site_id, false, true);
+        self.note_site_defense_event(site_id, None, false, true);
     }
 
-    fn note_site_defense_event(&self, site_id: &str, is_soft: bool, is_hard: bool) {
+    fn note_site_defense_event(
+        &self,
+        site_id: &str,
+        route: Option<&str>,
+        is_soft: bool,
+        is_hard: bool,
+    ) {
         let now = unix_timestamp();
         let window_start = now.div_euclid(60) * 60;
         let entry = self
@@ -225,6 +245,33 @@ impl WafContext {
             .entry(site_id.to_string())
             .or_insert_with(|| std::sync::Mutex::new(SiteDefenseBucket::default()));
         let mut bucket = entry.lock().expect("site defense bucket lock poisoned");
+        if bucket.window_start != window_start {
+            bucket.window_start = window_start;
+            bucket.soft_events = 0;
+            bucket.hard_events = 0;
+        }
+        if is_soft {
+            bucket.soft_events = bucket.soft_events.saturating_add(1);
+        }
+        if is_hard {
+            bucket.hard_events = bucket.hard_events.saturating_add(1);
+        }
+
+        let Some(route) = route else {
+            return;
+        };
+        if route_defense_exempt(route) {
+            return;
+        }
+        let route_key = route_defense_key(site_id, route);
+        if !self.ensure_route_defense_capacity(&route_key, window_start) {
+            return;
+        }
+        let entry = self
+            .route_defense_buckets
+            .entry(route_key)
+            .or_insert_with(|| std::sync::Mutex::new(SiteDefenseBucket::default()));
+        let mut bucket = entry.lock().expect("route defense bucket lock poisoned");
         if bucket.window_start != window_start {
             bucket.window_start = window_start;
             bucket.soft_events = 0;
@@ -549,5 +596,200 @@ impl WafContext {
             return Some(DefenseDepth::Lean);
         }
         None
+    }
+
+    fn route_defense_depth(&self, site_id: &str, route: &str) -> Option<DefenseDepth> {
+        if route_defense_exempt(route) {
+            return None;
+        }
+        let entry = self
+            .route_defense_buckets
+            .get(&route_defense_key(site_id, route))?;
+        let bucket = entry.lock().expect("route defense bucket lock poisoned");
+        let now = unix_timestamp();
+        if now.saturating_sub(bucket.window_start) > 75 {
+            return None;
+        }
+        let total = bucket.soft_events.saturating_add(bucket.hard_events);
+        if bucket.hard_events >= 5 || total >= 18 {
+            return Some(DefenseDepth::Survival);
+        }
+        if bucket.hard_events >= 2 || total >= 8 {
+            return Some(DefenseDepth::Lean);
+        }
+        None
+    }
+
+    fn ensure_route_defense_capacity(&self, route_key: &str, window_start: i64) -> bool {
+        if self.route_defense_buckets.contains_key(route_key)
+            || self.route_defense_buckets.len() < MAX_ROUTE_DEFENSE_BUCKETS
+        {
+            return true;
+        }
+
+        let stale_before = window_start.saturating_sub(120);
+        let stale_keys = self
+            .route_defense_buckets
+            .iter()
+            .filter_map(|entry| {
+                let bucket = entry
+                    .value()
+                    .lock()
+                    .expect("route defense bucket lock poisoned");
+                (bucket.window_start < stale_before).then(|| entry.key().clone())
+            })
+            .take(256)
+            .collect::<Vec<_>>();
+        for key in stale_keys {
+            self.route_defense_buckets.remove(&key);
+        }
+
+        self.route_defense_buckets.len() < MAX_ROUTE_DEFENSE_BUCKETS
+    }
+}
+
+fn select_strictest_depth(
+    left: Option<DefenseDepth>,
+    right: Option<DefenseDepth>,
+) -> Option<DefenseDepth> {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            if defense_depth_is_stricter(left, right) {
+                Some(left)
+            } else {
+                Some(right)
+            }
+        }
+        (Some(depth), None) | (None, Some(depth)) => Some(depth),
+        (None, None) => None,
+    }
+}
+
+fn apply_route_local_cc_tightening(request: &mut UnifiedHttpRequest, depth: DefenseDepth) {
+    let (route_scale, host_scale, force_challenge) = match depth {
+        DefenseDepth::Survival => (45, 70, true),
+        DefenseDepth::Lean => (70, 85, false),
+        DefenseDepth::Full | DefenseDepth::Balanced => return,
+    };
+    set_min_percent_metadata(request, "ai.cc.route_threshold_scale_percent", route_scale);
+    set_min_percent_metadata(request, "ai.cc.host_threshold_scale_percent", host_scale);
+    request.add_metadata(
+        "runtime.route.cc_threshold_scale_percent".to_string(),
+        route_scale.to_string(),
+    );
+    if force_challenge {
+        request.add_metadata("ai.cc.force_challenge".to_string(), "true".to_string());
+    }
+}
+
+fn set_min_percent_metadata(request: &mut UnifiedHttpRequest, key: &str, value: u32) {
+    let current = request
+        .get_metadata(key)
+        .and_then(|item| item.parse::<u32>().ok())
+        .unwrap_or(100);
+    if value < current {
+        request.add_metadata(key.to_string(), value.to_string());
+    }
+}
+
+fn runtime_route_path(uri: &str) -> String {
+    let path = uri.split('?').next().unwrap_or(uri).trim();
+    let path = if path.is_empty() { "/" } else { path };
+    let trimmed = if path != "/" {
+        path.trim_end_matches('/')
+    } else {
+        path
+    };
+    if trimmed.len() <= 160 {
+        trimmed.to_ascii_lowercase()
+    } else {
+        let digest = stable_hash_hex(trimmed);
+        format!("route:{digest}")
+    }
+}
+
+fn route_defense_key(site_id: &str, route: &str) -> String {
+    format!("{site_id}|{route}")
+}
+
+fn route_defense_exempt(route: &str) -> bool {
+    route == "/favicon.ico"
+        || route == "/robots.txt"
+        || route == "/sitemap.xml"
+        || route.starts_with("/.well-known/")
+        || route.starts_with("/assets/")
+        || route.starts_with("/static/")
+}
+
+fn stable_hash_hex(value: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::InspectionLayer;
+    use crate::protocol::{HttpVersion, UnifiedHttpRequest};
+
+    #[tokio::test]
+    async fn route_defense_tightens_only_the_hot_route() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        let result = InspectionResult::drop(InspectionLayer::L7, "route pressure");
+
+        for _ in 0..2 {
+            let mut request = UnifiedHttpRequest::new(
+                HttpVersion::Http1_1,
+                "GET".to_string(),
+                "/api/login?from=test".to_string(),
+            );
+            request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+            context.note_site_defense_signal(&request, &result);
+        }
+
+        let mut hot = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/api/login".to_string(),
+        );
+        hot.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        hot.add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+        context.annotate_site_runtime_budget(&mut hot);
+
+        assert_eq!(
+            hot.get_metadata("runtime.route.defense_depth")
+                .map(String::as_str),
+            Some("lean")
+        );
+        assert_eq!(
+            hot.get_metadata("ai.cc.route_threshold_scale_percent")
+                .map(String::as_str),
+            Some("70")
+        );
+        assert_eq!(
+            hot.get_metadata("ai.cc.host_threshold_scale_percent")
+                .map(String::as_str),
+            Some("85")
+        );
+
+        let mut cold = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/api/profile".to_string(),
+        );
+        cold.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        cold.add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+        context.annotate_site_runtime_budget(&mut cold);
+
+        assert!(cold.get_metadata("runtime.route.defense_depth").is_none());
+        assert!(cold
+            .get_metadata("ai.cc.route_threshold_scale_percent")
+            .is_none());
     }
 }

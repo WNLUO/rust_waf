@@ -1,745 +1,61 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { fetchSecurityEvents } from '@/shared/api/events'
-import { syncSafeLineEvents } from '@/shared/api/safeline'
-import type {
-  SecurityEventItem,
-  SecurityEventsResponse,
-  StoragePressureSummaryDetails,
-} from '@/shared/types'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
-import { useFormatters } from '@/shared/composables/useFormatters'
-import { useFlashMessages } from '@/shared/composables/useNotifications'
-import {
-  useAdminRealtimeState,
-  useAdminRealtimeTopic,
-} from '@/shared/realtime/adminRealtime'
 import { Eye, RefreshCw, X } from 'lucide-vue-next'
-
-const PAGE_SIZE = 30
-const route = useRoute()
-
-const { formatTimestamp, actionLabel, layerLabel } = useFormatters()
-const loading = ref(true)
-const refreshing = ref(false)
-const syncing = ref(false)
-const error = ref('')
-const successMessage = ref('')
-const filtersReady = ref(false)
-const currentPage = ref(1)
-const previewTitle = ref('')
-const previewContent = ref('')
-const pendingRealtimeCount = ref(0)
-const syncingFiltersFromRoute = ref(false)
-const realtimeState = useAdminRealtimeState()
-const eventsPayload = ref<SecurityEventsResponse>({
-  total: 0,
-  limit: 0,
-  offset: 0,
-  events: [],
-})
-
-useFlashMessages({
-  error,
-  success: successMessage,
-  errorTitle: '事件记录',
-  successTitle: '事件记录',
-  errorDuration: 5600,
-  successDuration: 3200,
-})
-
-const eventsFilters = reactive({
-  layer: 'all',
-  provider: 'all',
-  provider_site_id: 'all',
-  action: 'all',
-  identity_state: 'all',
-  primary_signal: '',
-  blocked_only: false,
-  handled: 'all' as 'all' | 'handled' | 'unhandled',
-  source_ip: '',
-  labels: '',
-  created_from: '',
-  created_to: '',
-  sort_by: 'created_at',
-  sort_direction: 'desc' as 'asc' | 'desc',
-})
-const showAdvancedFiltersDialog = ref(false)
-const advancedFiltersDraft = reactive({
-  provider: 'all',
-  provider_site_id: 'all',
-  identity_state: 'all',
-  primary_signal: '',
-  labels: '',
-  blocked_only: false,
-  created_from: '',
-  created_to: '',
-  sort_by: 'created_at',
-  sort_direction: 'desc' as 'asc' | 'desc',
-})
-
-const openAdvancedFilters = () => {
-  advancedFiltersDraft.provider = eventsFilters.provider
-  advancedFiltersDraft.provider_site_id = eventsFilters.provider_site_id
-  advancedFiltersDraft.identity_state = eventsFilters.identity_state
-  advancedFiltersDraft.primary_signal = eventsFilters.primary_signal
-  advancedFiltersDraft.labels = eventsFilters.labels
-  advancedFiltersDraft.blocked_only = eventsFilters.blocked_only
-  advancedFiltersDraft.created_from = eventsFilters.created_from
-  advancedFiltersDraft.created_to = eventsFilters.created_to
-  advancedFiltersDraft.sort_by = eventsFilters.sort_by
-  advancedFiltersDraft.sort_direction = eventsFilters.sort_direction
-  showAdvancedFiltersDialog.value = true
-}
-
-const closeAdvancedFilters = () => {
-  showAdvancedFiltersDialog.value = false
-}
-
-const resetAdvancedFilters = () => {
-  advancedFiltersDraft.provider = 'all'
-  advancedFiltersDraft.provider_site_id = 'all'
-  advancedFiltersDraft.identity_state = 'all'
-  advancedFiltersDraft.primary_signal = ''
-  advancedFiltersDraft.labels = ''
-  advancedFiltersDraft.blocked_only = false
-  advancedFiltersDraft.created_from = ''
-  advancedFiltersDraft.created_to = ''
-  advancedFiltersDraft.sort_by = 'created_at'
-  advancedFiltersDraft.sort_direction = 'desc'
-}
-
-const applyAdvancedFilters = () => {
-  eventsFilters.provider = advancedFiltersDraft.provider
-  eventsFilters.provider_site_id = advancedFiltersDraft.provider_site_id
-  eventsFilters.identity_state = advancedFiltersDraft.identity_state
-  eventsFilters.primary_signal = advancedFiltersDraft.primary_signal
-  eventsFilters.labels = advancedFiltersDraft.labels
-  eventsFilters.blocked_only = advancedFiltersDraft.blocked_only
-  eventsFilters.created_from = advancedFiltersDraft.created_from
-  eventsFilters.created_to = advancedFiltersDraft.created_to
-  eventsFilters.sort_by = advancedFiltersDraft.sort_by
-  eventsFilters.sort_direction = advancedFiltersDraft.sort_direction
-  closeAdvancedFilters()
-}
-
-const toUnixTimestamp = (value: string) => {
-  if (!value) return undefined
-  const parsed = new Date(value).getTime()
-  if (Number.isNaN(parsed)) return undefined
-  return Math.floor(parsed / 1000)
-}
-
-const toDatetimeLocalString = (unix: number) => {
-  const date = new Date(unix * 1000)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil((eventsPayload.value.total || 0) / PAGE_SIZE)),
-)
-const pageStart = computed(() =>
-  eventsPayload.value.total ? eventsPayload.value.offset + 1 : 0,
-)
-const pageEnd = computed(
-  () => eventsPayload.value.offset + eventsPayload.value.events.length,
-)
-const canInlineRefresh = computed(
-  () =>
-    currentPage.value === 1 &&
-    eventsFilters.sort_by === 'created_at' &&
-    eventsFilters.sort_direction === 'desc',
-)
-
-const matchesRealtimeFilters = (event: SecurityEventItem) => {
-  if (
-    eventsFilters.layer !== 'all' &&
-    event.layer.toLowerCase() !== eventsFilters.layer.toLowerCase()
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.provider !== 'all' &&
-    (event.provider || '').toLowerCase() !== eventsFilters.provider.toLowerCase()
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.provider_site_id !== 'all' &&
-    event.provider_site_id !== eventsFilters.provider_site_id
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.action !== 'all' &&
-    event.action.toLowerCase() !== eventsFilters.action.toLowerCase()
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.identity_state !== 'all' &&
-    (event.decision_summary?.identity_state || 'unknown') !==
-      eventsFilters.identity_state
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.primary_signal.trim() &&
-    (event.decision_summary?.primary_signal || '') !==
-      eventsFilters.primary_signal.trim()
-  ) {
-    return false
-  }
-  if (eventsFilters.blocked_only && event.action.toLowerCase() !== 'block') {
-    return false
-  }
-  if (
-    eventsFilters.handled === 'handled' &&
-    !event.handled
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.handled === 'unhandled' &&
-    event.handled
-  ) {
-    return false
-  }
-  if (
-    eventsFilters.source_ip.trim() &&
-    event.source_ip !== eventsFilters.source_ip.trim()
-  ) {
-    return false
-  }
-  if (eventsFilters.labels.trim()) {
-    const labels = event.decision_summary?.labels || []
-    const expected = eventsFilters.labels
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-    if (!expected.every((label) => labels.includes(label))) {
-      return false
-    }
-  }
-  const createdFrom = toUnixTimestamp(eventsFilters.created_from)
-  if (createdFrom !== undefined && event.created_at < createdFrom) {
-    return false
-  }
-  const createdTo = toUnixTimestamp(eventsFilters.created_to)
-  if (createdTo !== undefined && event.created_at > createdTo) {
-    return false
-  }
-  return true
-}
-
-const mergeRealtimeEvents = (incoming: SecurityEventItem[]) => {
-  const matched = incoming.filter(matchesRealtimeFilters)
-  if (!matched.length) return
-
-  const existingIds = new Set(eventsPayload.value.events.map((event) => event.id))
-  const newUniqueCount = matched.filter((event) => !existingIds.has(event.id)).length
-  const merged = [...matched, ...eventsPayload.value.events]
-  const deduped = merged.filter(
-    (event, index, items) => items.findIndex((item) => item.id === event.id) === index,
-  )
-
-  eventsPayload.value = {
-    ...eventsPayload.value,
-    total: eventsPayload.value.total + newUniqueCount,
-    events: deduped.slice(0, PAGE_SIZE),
-  }
-}
-
-const loadEvents = async (showLoader = false) => {
-  if (showLoader) loading.value = true
-  refreshing.value = true
-  try {
-    eventsPayload.value = await fetchSecurityEvents({
-      limit: PAGE_SIZE,
-      offset: (currentPage.value - 1) * PAGE_SIZE,
-      sort_by: eventsFilters.sort_by,
-      sort_direction: eventsFilters.sort_direction,
-      blocked_only: eventsFilters.blocked_only,
-      layer: eventsFilters.layer === 'all' ? undefined : eventsFilters.layer,
-      provider:
-        eventsFilters.provider === 'all' ? undefined : eventsFilters.provider,
-      provider_site_id:
-        eventsFilters.provider_site_id === 'all'
-          ? undefined
-          : eventsFilters.provider_site_id,
-      action: eventsFilters.action === 'all' ? undefined : eventsFilters.action,
-      identity_state:
-        eventsFilters.identity_state === 'all'
-          ? undefined
-          : eventsFilters.identity_state,
-      primary_signal: eventsFilters.primary_signal.trim() || undefined,
-      labels: eventsFilters.labels.trim() || undefined,
-      handled_only:
-        eventsFilters.handled === 'all'
-          ? undefined
-          : eventsFilters.handled === 'handled',
-      source_ip: eventsFilters.source_ip.trim() || undefined,
-      created_from: toUnixTimestamp(eventsFilters.created_from),
-      created_to: toUnixTimestamp(eventsFilters.created_to),
-    })
-    error.value = ''
-
-    if (currentPage.value > totalPages.value) {
-      currentPage.value = totalPages.value
-    }
-    pendingRealtimeCount.value = 0
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '读取事件失败'
-  } finally {
-    if (showLoader) loading.value = false
-    refreshing.value = false
-  }
-}
-
-const runSafeLineSync = async () => {
-  syncing.value = true
-  error.value = ''
-  successMessage.value = ''
-
-  try {
-    const response = await syncSafeLineEvents()
-    successMessage.value = response.message
-    currentPage.value = 1
-    await loadEvents()
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '同步雷池事件失败'
-  } finally {
-    syncing.value = false
-  }
-}
-
-const openPreview = (title: string, content: string | null | undefined) => {
-  if (!content) return
-  previewTitle.value = title
-  previewContent.value = content
-}
-
-const closePreview = () => {
-  previewTitle.value = ''
-  previewContent.value = ''
-}
-
-const safeLineActionMap: Record<string, string> = {
-  '0': '检测',
-  '1': '拦截',
-}
-
-const safeLineAttackTypeMap: Record<string, string> = {
-  '7': '漏洞利用',
-  '8': '代码注入',
-  '10': '文件上传',
-}
-const REASON_PREVIEW_LIMIT = 72
-const PATH_PREVIEW_LIMIT = 48
-
-const getSafeLineAttackTypeCode = (event: SecurityEventItem) => {
-  if (event.layer.toLowerCase() !== 'safeline') return null
-  const matched = event.reason.match(/^safeline:([^:]+):/)
-  return matched?.[1] ?? null
-}
-
-const eventActionLabel = (action: string) => {
-  const normalized = action.trim().toLowerCase()
-  if (normalized === 'summary') {
-    return '摘要'
-  }
-  if (normalized in safeLineActionMap) {
-    return safeLineActionMap[normalized]
-  }
-  if (['block', 'allow', 'alert', 'log'].includes(normalized)) {
-    return actionLabel(normalized)
-  }
-  return `未知动作(${action})`
-}
-
-const eventActionBadgeType = (action: string) => {
-  const normalized = action.trim().toLowerCase()
-  if (normalized === '1' || normalized === 'block') return 'error'
-  if (normalized === 'allow') return 'success'
-  if (normalized === 'summary') return 'warning'
-  if (normalized === '0' || normalized === 'alert' || normalized === 'log') {
-    return 'warning'
-  }
-  return 'warning'
-}
-
-const shouldShowActionBadge = (action: string) =>
-  action.trim().toLowerCase() !== 'respond'
-
-const eventAttackTypeLabel = (event: SecurityEventItem) => {
-  const code = getSafeLineAttackTypeCode(event)
-  if (!code) return ''
-  return safeLineAttackTypeMap[code] || `未知类型(${code})`
-}
-
-const eventReasonLabel = (event: SecurityEventItem) => {
-  if (event.layer.toLowerCase() !== 'safeline') return event.reason
-
-  const attackTypeCode = getSafeLineAttackTypeCode(event)
-  const attackTypeLabel = attackTypeCode
-    ? safeLineAttackTypeMap[attackTypeCode]
-    : ''
-  const normalized = event.reason.replace(/^safeline:[^:]+:/, '').trim()
-
-  if (attackTypeCode && normalized === `检测到 ${attackTypeCode} 攻击`) {
-    return attackTypeLabel || normalized
-  }
-
-  return normalized || event.reason
-}
-
-const truncateText = (value: string, limit: number) =>
-  value.length > limit ? `${value.slice(0, limit)}…` : value
-
-const eventReasonPreview = (event: SecurityEventItem) =>
-  truncateText(eventReasonLabel(event), REASON_PREVIEW_LIMIT)
-
-const isReasonTruncated = (event: SecurityEventItem) =>
-  eventReasonLabel(event).length > REASON_PREVIEW_LIMIT
-
-const eventPathText = (event: SecurityEventItem) =>
-  `${event.http_method || '-'}${event.uri ? ` ${event.uri}` : ''}`
-
-const eventPathPreview = (event: SecurityEventItem) =>
-  truncateText(eventPathText(event), PATH_PREVIEW_LIMIT)
-
-const isPathTruncated = (event: SecurityEventItem) =>
-  eventPathText(event).length > PATH_PREVIEW_LIMIT
-
-const identityStateLabelMap: Record<string, string> = {
-  trusted_cdn_forwarded: '可信 CDN',
-  trusted_cdn_unresolved: 'CDN 未解析',
-  direct_client: '直连客户端',
-  spoofed_forward_header: '伪造头部',
-}
-
-const primarySignalLabelMap: Record<string, string> = {
-  slow_attack: '慢速攻击',
-  safeline: '雷池',
-  rule_engine: '规则引擎',
-}
-
-const eventIdentityStateLabel = (event: SecurityEventItem) => {
-  const value = event.decision_summary?.identity_state
-  if (!value) return ''
-  return identityStateLabelMap[value] || value
-}
-
-const eventPrimarySignalLabel = (event: SecurityEventItem) => {
-  const value = event.decision_summary?.primary_signal
-  if (!value) return ''
-  return primarySignalLabelMap[value] || value
-}
-
-const eventLabelsPreview = (event: SecurityEventItem) =>
-  (event.decision_summary?.labels || []).slice(0, 3)
-
-const parseStorageSummaryDetails = (
-  event: SecurityEventItem,
-): StoragePressureSummaryDetails | null => {
-  if (event.action.toLowerCase() !== 'summary' || !event.details_json) return null
-  try {
-    const payload = JSON.parse(event.details_json) as {
-      storage_pressure?: Partial<StoragePressureSummaryDetails>
-    }
-    const summary = payload.storage_pressure
-    if (!summary || summary.mode !== 'aggregated') return null
-    return {
-      mode: String(summary.mode || 'aggregated'),
-      action:
-        typeof summary.action === 'string' && summary.action.trim()
-          ? summary.action.trim()
-          : null,
-      original_reason:
-        typeof summary.original_reason === 'string' && summary.original_reason.trim()
-          ? summary.original_reason.trim()
-          : null,
-      count: Number(summary.count || 0),
-      source_scope:
-        typeof summary.source_scope === 'string' && summary.source_scope.trim()
-          ? summary.source_scope.trim()
-          : null,
-      route:
-        typeof summary.route === 'string' && summary.route.trim()
-          ? summary.route.trim()
-          : null,
-      time_window_start:
-        typeof summary.time_window_start === 'number'
-          ? summary.time_window_start
-          : null,
-      time_window_end:
-        typeof summary.time_window_end === 'number' ? summary.time_window_end : null,
-      first_created_at:
-        typeof summary.first_created_at === 'number'
-          ? summary.first_created_at
-          : null,
-      last_created_at:
-        typeof summary.last_created_at === 'number' ? summary.last_created_at : null,
-    }
-  } catch {
-    return null
-  }
-}
-
-const isStorageSummaryEvent = (event: SecurityEventItem) =>
-  parseStorageSummaryDetails(event) !== null
-
-const storageSummaryScopeLabel = (event: SecurityEventItem) => {
-  const details = parseStorageSummaryDetails(event)
-  if (!details?.source_scope) return ''
-  return details.source_scope === 'long_tail' ? '长尾汇总' : '热点摘要'
-}
-
-const storageSummaryCountLabel = (event: SecurityEventItem) => {
-  const details = parseStorageSummaryDetails(event)
-  if (!details || !details.count) return ''
-  return `${details.count} 次`
-}
-
-const storageSummaryWindowLabel = (event: SecurityEventItem) => {
-  const details = parseStorageSummaryDetails(event)
-  if (!details?.time_window_start || !details?.time_window_end) return ''
-  return `${formatTimestamp(details.time_window_start)} - ${formatTimestamp(details.time_window_end)}`
-}
-
-const storageSummaryRouteLabel = (event: SecurityEventItem) =>
-  parseStorageSummaryDetails(event)?.route || ''
-
-const openStorageSummaryPreview = (event: SecurityEventItem) => {
-  const details = parseStorageSummaryDetails(event)
-  if (!details) return
-  openPreview(
-    '攻击摘要',
-    JSON.stringify(
-      {
-        source_ip: event.source_ip,
-        action: details.action,
-        source_scope: details.source_scope,
-        count: details.count,
-        route: details.route,
-        time_window_start: details.time_window_start,
-        time_window_end: details.time_window_end,
-        original_reason: details.original_reason,
-        first_created_at: details.first_created_at,
-        last_created_at: details.last_created_at,
-      },
-      null,
-      2,
-    ),
-  )
-}
-
-const parseEventDetails = (event: SecurityEventItem) => {
-  if (!event.details_json) return null
-  try {
-    return JSON.parse(event.details_json) as {
-      client_identity?: Record<string, unknown>
-      connect_target?: string
-      host?: string
-      sni?: string
-      status?: number
-      reason?: string | null
-      stage?: string
-      error?: string
-    }
-  } catch {
-    return null
-  }
-}
-
-const hasClientIdentityDebug = (event: SecurityEventItem) =>
-  Boolean(parseEventDetails(event)?.client_identity) &&
-  event.layer.toLowerCase() === 'l7'
-
-const hasUpstreamHttp2Debug = (event: SecurityEventItem) =>
-  event.reason.startsWith('upstream http2 debug (') &&
-  event.layer.toLowerCase() === 'l7'
-
-const openClientIdentityDebug = (event: SecurityEventItem) => {
-  const details = parseEventDetails(event)
-  const payload = details?.client_identity ?? details
-  if (!payload) return
-  openPreview('客户端身份调试', JSON.stringify(payload, null, 2))
-}
-
-const openUpstreamHttp2Debug = (event: SecurityEventItem) => {
-  const details = parseEventDetails(event)
-  if (!details) return
-  openPreview('上游 HTTP/2 调试', JSON.stringify(details, null, 2))
-}
-
-const siteOptions = computed(() => {
-  const seen = new Map<string, string>()
-  for (const event of eventsPayload.value.events) {
-    if (!event.provider_site_id) continue
-    seen.set(
-      event.provider_site_id,
-      event.provider_site_name ||
-        event.provider_site_domain ||
-        event.provider_site_id,
-    )
-  }
-  return Array.from(seen.entries()).map(([id, label]) => ({ id, label }))
-})
-
-const goToPage = (page: number) => {
-  currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
-}
-
-const resetRouteDrivenFilters = () => {
-  eventsFilters.source_ip = ''
-  eventsFilters.action = 'all'
-  eventsFilters.identity_state = 'all'
-  eventsFilters.primary_signal = ''
-  eventsFilters.labels = ''
-  eventsFilters.blocked_only = false
-  eventsFilters.created_from = ''
-  eventsFilters.created_to = ''
-  eventsFilters.sort_by = 'created_at'
-  eventsFilters.sort_direction = 'desc'
-}
-
-const applyFiltersFromRouteQuery = () => {
-  resetRouteDrivenFilters()
-  const query = route.query
-  const getValue = (key: string) => {
-    const value = query[key]
-    if (Array.isArray(value)) return value[0]
-    return value
-  }
-
-  const sourceIp = getValue('source_ip')
-  if (typeof sourceIp === 'string' && sourceIp.trim()) {
-    eventsFilters.source_ip = sourceIp.trim()
-  }
-
-  const action = getValue('action')
-  if (
-    action === 'block' ||
-    action === 'allow' ||
-    action === 'alert' ||
-    action === 'log' ||
-    action === 'summary'
-  ) {
-    eventsFilters.action = action
-  }
-
-  const identityState = getValue('identity_state')
-  if (typeof identityState === 'string' && identityState.trim()) {
-    eventsFilters.identity_state = identityState.trim()
-  }
-
-  const primarySignal = getValue('primary_signal')
-  if (typeof primarySignal === 'string' && primarySignal.trim()) {
-    eventsFilters.primary_signal = primarySignal.trim()
-  }
-
-  const labels = getValue('labels')
-  if (typeof labels === 'string' && labels.trim()) {
-    eventsFilters.labels = labels.trim()
-  }
-
-  const blockedOnly = getValue('blocked_only')
-  if (typeof blockedOnly === 'string') {
-    const normalized = blockedOnly.trim().toLowerCase()
-    eventsFilters.blocked_only = ['1', 'true', 'yes', 'on'].includes(normalized)
-  }
-
-  const createdFrom = getValue('created_from')
-  if (typeof createdFrom === 'string') {
-    const unix = Number(createdFrom)
-    if (Number.isFinite(unix) && unix > 0) {
-      eventsFilters.created_from = toDatetimeLocalString(unix)
-    }
-  }
-
-  const createdTo = getValue('created_to')
-  if (typeof createdTo === 'string') {
-    const unix = Number(createdTo)
-    if (Number.isFinite(unix) && unix > 0) {
-      eventsFilters.created_to = toDatetimeLocalString(unix)
-    }
-  }
-
-  const sortBy = getValue('sort_by')
-  if (sortBy === 'created_at' || sortBy === 'source_ip' || sortBy === 'dest_port') {
-    eventsFilters.sort_by = sortBy
-  }
-
-  const sortDirection = getValue('sort_direction')
-  if (sortDirection === 'asc' || sortDirection === 'desc') {
-    eventsFilters.sort_direction = sortDirection
-  }
-}
-
-useAdminRealtimeTopic<SecurityEventsResponse>('recent_events', (payload) => {
-  if (!payload.events.length) return
-  if (canInlineRefresh.value) {
-    mergeRealtimeEvents(payload.events)
-    pendingRealtimeCount.value = 0
-    return
-  }
-
-  const matchedCount = payload.events.filter(matchesRealtimeFilters).length
-  if (matchedCount > 0) {
-    pendingRealtimeCount.value = matchedCount
-  }
-})
-
-useAdminRealtimeTopic<SecurityEventItem>('security_event_delta', (payload) => {
-  if (!matchesRealtimeFilters(payload)) return
-  if (canInlineRefresh.value) {
-    mergeRealtimeEvents([payload])
-    pendingRealtimeCount.value = 0
-    return
-  }
-  pendingRealtimeCount.value += 1
-})
-
-onMounted(async () => {
-  applyFiltersFromRouteQuery()
-  await loadEvents(true)
-  filtersReady.value = true
-})
-
-watch(
-  () => route.query,
-  () => {
-    syncingFiltersFromRoute.value = true
-    applyFiltersFromRouteQuery()
-    syncingFiltersFromRoute.value = false
-    if (!filtersReady.value) return
-    currentPage.value = 1
-    pendingRealtimeCount.value = 0
-    loadEvents()
-  },
-)
-
-watch(
-  () => ({ ...eventsFilters }),
-  () => {
-    if (!filtersReady.value) return
-    if (syncingFiltersFromRoute.value) return
-    currentPage.value = 1
-    pendingRealtimeCount.value = 0
-    loadEvents()
-  },
-  { deep: true },
-)
-
-watch(currentPage, () => {
-  if (!filtersReady.value) return
-  pendingRealtimeCount.value = 0
-  loadEvents()
-})
+import { useAdminEventsPage } from '@/features/events/composables/useAdminEventsPage'
+
+const {
+  formatTimestamp,
+  layerLabel,
+  loading,
+  refreshing,
+  syncing,
+  currentPage,
+  previewTitle,
+  previewContent,
+  pendingRealtimeCount,
+  realtimeState,
+  eventsPayload,
+  eventsFilters,
+  showAdvancedFiltersDialog,
+  advancedFiltersDraft,
+  openAdvancedFilters,
+  closeAdvancedFilters,
+  resetAdvancedFilters,
+  applyAdvancedFilters,
+  totalPages,
+  pageStart,
+  pageEnd,
+  loadEvents,
+  runSafeLineSync,
+  openPreview,
+  closePreview,
+  eventActionLabel,
+  eventActionBadgeType,
+  shouldShowActionBadge,
+  eventAttackTypeLabel,
+  eventReasonLabel,
+  eventReasonPreview,
+  isReasonTruncated,
+  eventPathText,
+  eventPathPreview,
+  isPathTruncated,
+  eventIdentityStateLabel,
+  eventPrimarySignalLabel,
+  eventLabelsPreview,
+  isStorageSummaryEvent,
+  storageSummaryScopeLabel,
+  storageSummaryCountLabel,
+  storageSummaryWindowLabel,
+  storageSummaryRouteLabel,
+  openStorageSummaryPreview,
+  hasClientIdentityDebug,
+  hasUpstreamHttp2Debug,
+  openClientIdentityDebug,
+  openUpstreamHttp2Debug,
+  siteOptions,
+  goToPage,
+} = useAdminEventsPage()
 </script>
 
 <template>
@@ -847,7 +163,9 @@ watch(currentPage, () => {
         class="overflow-hidden rounded-md border border-slate-200 bg-white"
       >
         <div class="overflow-x-auto">
-          <table class="min-w-max w-full border-collapse text-sm whitespace-nowrap">
+          <table
+            class="min-w-max w-full border-collapse text-sm whitespace-nowrap"
+          >
             <thead class="bg-slate-50 text-slate-600">
               <tr>
                 <th class="px-3 py-2 text-center font-medium">时间</th>
@@ -878,7 +196,9 @@ watch(currentPage, () => {
                   <div class="flex flex-nowrap justify-center gap-1">
                     <StatusBadge
                       :text="layerLabel(event.layer)"
-                      :type="event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'"
+                      :type="
+                        event.layer.toLowerCase() === 'l7' ? 'info' : 'warning'
+                      "
                       compact
                     />
                     <StatusBadge
@@ -928,7 +248,9 @@ watch(currentPage, () => {
                       </template>
                       <template v-else>
                         {{ event.protocol }}
-                        <span v-if="event.http_version"> / {{ event.http_version }}</span>
+                        <span v-if="event.http_version">
+                          / {{ event.http_version }}</span
+                        >
                       </template>
                     </div>
                     <div
@@ -962,7 +284,9 @@ watch(currentPage, () => {
                         v-if="isReasonTruncated(event)"
                         class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
                         title="查看完整原因"
-                        @click="openPreview('完整原因', eventReasonLabel(event))"
+                        @click="
+                          openPreview('完整原因', eventReasonLabel(event))
+                        "
                       >
                         更多
                       </button>
@@ -1009,16 +333,24 @@ watch(currentPage, () => {
                   <div class="flex items-center justify-center gap-2">
                     <div
                       class="event-path-text font-mono text-xs text-slate-700"
-                      :title="isStorageSummaryEvent(event) ? storageSummaryRouteLabel(event) || eventPathText(event) : eventPathText(event)"
+                      :title="
+                        isStorageSummaryEvent(event)
+                          ? storageSummaryRouteLabel(event) ||
+                            eventPathText(event)
+                          : eventPathText(event)
+                      "
                     >
                       {{
                         isStorageSummaryEvent(event)
-                          ? storageSummaryRouteLabel(event) || eventPathPreview(event)
+                          ? storageSummaryRouteLabel(event) ||
+                            eventPathPreview(event)
                           : eventPathPreview(event)
                       }}
                     </div>
                     <button
-                      v-if="!isStorageSummaryEvent(event) && isPathTruncated(event)"
+                      v-if="
+                        !isStorageSummaryEvent(event) && isPathTruncated(event)
+                      "
                       class="inline-flex h-7 items-center justify-center whitespace-nowrap rounded-md border border-slate-300 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50"
                       title="查看完整路径"
                       @click="openPreview('完整路径', eventPathText(event))"
@@ -1029,7 +361,10 @@ watch(currentPage, () => {
                 </td>
               </tr>
               <tr v-if="!eventsPayload.events.length">
-                <td colspan="6" class="px-3 py-6 text-center text-sm text-slate-500">
+                <td
+                  colspan="6"
+                  class="px-3 py-6 text-center text-sm text-slate-500"
+                >
                   无数据
                 </td>
               </tr>
@@ -1040,9 +375,7 @@ watch(currentPage, () => {
         <div
           class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-600"
         >
-          <div>
-            {{ pageStart }}-{{ pageEnd }} / {{ eventsPayload.total }}
-          </div>
+          <div>{{ pageStart }}-{{ pageEnd }} / {{ eventsPayload.total }}</div>
           <div class="flex items-center gap-2">
             <button
               class="rounded-md border border-slate-300 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
@@ -1068,14 +401,13 @@ watch(currentPage, () => {
       v-if="showAdvancedFiltersDialog"
       class="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/30 px-4"
     >
-      <div
-        class="absolute inset-0"
-        @click="closeAdvancedFilters"
-      ></div>
+      <div class="absolute inset-0" @click="closeAdvancedFilters"></div>
       <div
         class="relative z-[96] w-full max-w-2xl rounded-md border border-slate-300 bg-white"
       >
-        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <div
+          class="flex items-center justify-between border-b border-slate-200 px-4 py-3"
+        >
           <div class="text-sm font-medium text-slate-900">高级筛选</div>
           <button
             class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
@@ -1189,15 +521,16 @@ watch(currentPage, () => {
       v-if="previewContent"
       class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 px-4"
     >
-      <div
-        class="absolute inset-0"
-        @click="closePreview"
-      ></div>
+      <div class="absolute inset-0" @click="closePreview"></div>
       <div
         class="relative z-[101] w-full max-w-5xl rounded-md border border-slate-300 bg-white"
       >
-        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <div class="text-sm font-medium text-slate-900">{{ previewTitle }}</div>
+        <div
+          class="flex items-center justify-between border-b border-slate-200 px-4 py-3"
+        >
+          <div class="text-sm font-medium text-slate-900">
+            {{ previewTitle }}
+          </div>
           <button
             class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
             @click="closePreview"
@@ -1207,7 +540,8 @@ watch(currentPage, () => {
         </div>
         <pre
           class="max-h-[70vh] overflow-auto whitespace-pre-wrap break-all px-4 py-3 text-xs text-slate-800"
-        >{{ previewContent }}</pre>
+          >{{ previewContent }}</pre
+        >
       </div>
     </div>
   </AppLayout>

@@ -153,6 +153,7 @@ pub(crate) async fn handle_http1_connection(
         if let Some(site) = matched_site.as_ref() {
             apply_gateway_site_metadata(&mut request, site);
         }
+        context.annotate_site_runtime_budget(&mut request);
         if let Some(inspector) = context.l4_inspector() {
             let policy = inspector.apply_request_policy(packet, &mut request);
             if skip_l4_connection_budget

@@ -153,6 +153,7 @@ pub(crate) fn persist_http_inspection_event(
     request: &UnifiedHttpRequest,
     result: &InspectionResult,
 ) {
+    context.note_site_defense_signal(request, result);
     if should_skip_persisting_result_event(context, result, Some(request)) {
         return;
     }
@@ -181,7 +182,11 @@ pub(crate) fn persist_http_inspection_event(
     event.http_version = Some(request.version.to_string());
     event.details_json = build_request_identity_details(context, request, packet);
 
-    store.enqueue_security_event(event);
+    if should_aggregate_runtime_event(request, result) {
+        store.enqueue_security_event_aggregated(event, "runtime_budget");
+    } else {
+        store.enqueue_security_event(event);
+    }
 
     if result.persist_blocked_ip {
         let blocked_at = unix_timestamp();
@@ -196,6 +201,24 @@ pub(crate) fn persist_http_inspection_event(
             blocked_at + crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS as i64,
         ));
     }
+}
+
+fn should_aggregate_runtime_event(request: &UnifiedHttpRequest, result: &InspectionResult) -> bool {
+    if !request
+        .get_metadata("runtime.aggregate_events")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        return false;
+    }
+
+    matches!(
+        result.action,
+        InspectionAction::Alert
+            | InspectionAction::Respond
+            | InspectionAction::Block
+            | InspectionAction::Drop
+    )
 }
 
 pub(crate) fn persist_http_identity_debug_event(
@@ -534,6 +557,11 @@ fn build_request_identity_details_with_header(
             "runtime_pressure_storage_queue_percent": request.get_metadata("runtime.pressure.storage_queue_percent").cloned(),
             "runtime_pressure_drop_delay": request.get_metadata("runtime.pressure.drop_delay").cloned(),
             "runtime_pressure_trim_event_persistence": request.get_metadata("runtime.pressure.trim_event_persistence").cloned(),
+            "runtime_capacity_class": request.get_metadata("runtime.capacity.class").cloned(),
+            "runtime_defense_depth": request.get_metadata("runtime.defense.depth").cloned(),
+            "runtime_site_defense_depth": request.get_metadata("runtime.site.defense_depth").cloned(),
+            "runtime_site_defense_reason": request.get_metadata("runtime.site.defense_reason").cloned(),
+            "runtime_aggregate_events": request.get_metadata("runtime.aggregate_events").cloned(),
         }
     });
 

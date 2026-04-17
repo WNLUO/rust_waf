@@ -335,7 +335,9 @@ impl Http3ListenerRuntime {
         request_semaphore: Arc<Semaphore>,
     ) -> Result<()> {
         let config = context.config_snapshot();
-        let http3 = &config.http3_config;
+        let mut effective_http3 = config.http3_config.clone();
+        context.apply_http3_runtime_budget(&mut effective_http3);
+        let http3 = &effective_http3;
         let mut guard = self.state.lock().await;
         let previous = guard.listener.take();
         drop(guard);

@@ -200,6 +200,14 @@ impl SqliteStore {
         }
     }
 
+    pub fn enqueue_security_event_aggregated(
+        &self,
+        event: SecurityEventRecord,
+        trigger: &'static str,
+    ) {
+        self.aggregate_security_event(event, self.queue_depth(), trigger);
+    }
+
     pub fn enqueue_blocked_ip(&self, record: BlockedIpRecord) {
         let queue_depth = self.queue_depth();
         let queue_capacity = self.queue_capacity();

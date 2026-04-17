@@ -39,8 +39,13 @@ pub(crate) async fn handle_udp_datagram(
     );
 
     if config.http3_config.enabled {
-        let http3_handler = Http3Handler::new(config.http3_config.clone());
-        if let Some(request) = http3_handler.inspect_datagram(&payload, peer_addr, local_addr)? {
+        let mut http3_config = config.http3_config.clone();
+        context.apply_http3_runtime_budget(&mut http3_config);
+        let http3_handler = Http3Handler::new(http3_config);
+        if let Some(mut request) =
+            http3_handler.inspect_datagram(&payload, peer_addr, local_addr)?
+        {
+            context.annotate_runtime_pressure(&mut request);
             debug!("Detected QUIC/HTTP3 datagram from {}", peer_addr);
             let request_dump = request.to_inspection_string();
             let inspection_result =

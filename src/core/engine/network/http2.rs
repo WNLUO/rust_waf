@@ -13,7 +13,9 @@ pub(crate) async fn handle_http2_connection(
     let config = context.config_snapshot();
     let http2_config = &config.l7_config.http2_config;
     let http2_handler = Http2Handler::new()
-        .with_max_concurrent_streams(http2_config.max_concurrent_streams)
+        .with_max_concurrent_streams(
+            context.effective_http2_max_concurrent_streams(http2_config.max_concurrent_streams),
+        )
         .with_max_frame_size(http2_config.max_frame_size)
         .with_priorities(http2_config.enable_priorities)
         .with_initial_window_size(http2_config.initial_window_size);
@@ -126,6 +128,7 @@ pub(crate) async fn handle_http2_connection(
                     if let Some(site) = matched_site.as_ref() {
                         apply_gateway_site_metadata(&mut request, site);
                     }
+                    context.annotate_site_runtime_budget(&mut request);
                     if let Some(inspector) = context.l4_inspector() {
                         let policy = inspector.apply_request_policy(&packet, &mut request);
                         if skip_l4_connection_budget

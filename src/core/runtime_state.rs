@@ -1,8 +1,9 @@
 use super::{
     adaptive_protection, auto_tuning, resource_budget, traffic_map, unix_timestamp,
-    AiAutoAuditRuntimeSnapshot, Http3RuntimeSnapshot, RuntimePressureSnapshot,
-    UpstreamHealthSnapshot, WafContext,
+    AiAutoAuditRuntimeSnapshot, DefenseDepth, Http3RuntimeSnapshot, RuntimePressureSnapshot,
+    SiteDefenseBucket, UpstreamHealthSnapshot, WafContext,
 };
+use crate::core::InspectionResult;
 use crate::l4::L4Inspector;
 use crate::protocol::UnifiedHttpRequest;
 use anyhow::Result;
@@ -121,6 +122,129 @@ impl WafContext {
                 "runtime.pressure.trim_event_persistence".to_string(),
                 "true".to_string(),
             );
+            request.add_metadata("runtime.aggregate_events".to_string(), "true".to_string());
+        }
+    }
+
+    pub fn annotate_site_runtime_budget(&self, request: &mut UnifiedHttpRequest) {
+        let Some(site_id) = request.get_metadata("gateway.site_id").cloned() else {
+            return;
+        };
+        let Some(site_depth) = self.site_defense_depth(&site_id) else {
+            return;
+        };
+        let current_depth = request
+            .get_metadata("runtime.defense.depth")
+            .map(|value| DefenseDepth::from_str(value))
+            .unwrap_or(DefenseDepth::Balanced);
+        if !defense_depth_is_stricter(site_depth, current_depth) {
+            return;
+        }
+
+        let pseudo_pressure = match site_depth {
+            DefenseDepth::Survival => "attack",
+            DefenseDepth::Lean => "high",
+            _ => "elevated",
+        };
+        let current_queue = request
+            .get_metadata("runtime.pressure.storage_queue_percent")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let budget =
+            resource_budget::current_runtime_resource_budget(pseudo_pressure, current_queue);
+        request.add_metadata(
+            "runtime.defense.depth".to_string(),
+            site_depth.as_str().to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.defense_depth".to_string(),
+            site_depth.as_str().to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.defense_reason".to_string(),
+            "site_local_attack_pressure".to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.l7_bucket_limit".to_string(),
+            budget.l7_bucket_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.l7_page_window_limit".to_string(),
+            budget.l7_page_window_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.behavior_bucket_limit".to_string(),
+            budget.behavior_bucket_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.budget.behavior_sample_stride".to_string(),
+            budget.behavior_sample_stride.to_string(),
+        );
+        if budget.prefer_drop {
+            request.add_metadata("runtime.prefer_drop".to_string(), "true".to_string());
+        }
+        if budget.aggregate_events {
+            request.add_metadata("runtime.aggregate_events".to_string(), "true".to_string());
+        }
+    }
+
+    pub fn note_site_defense_signal(
+        &self,
+        request: &UnifiedHttpRequest,
+        result: &InspectionResult,
+    ) {
+        let Some(site_id) = request.get_metadata("gateway.site_id").cloned() else {
+            return;
+        };
+        let is_soft = matches!(
+            result.action,
+            crate::core::InspectionAction::Respond | crate::core::InspectionAction::Alert
+        );
+        let is_hard = result.blocked
+            || result.persist_blocked_ip
+            || matches!(
+                result.action,
+                crate::core::InspectionAction::Block | crate::core::InspectionAction::Drop
+            );
+        if !is_soft && !is_hard {
+            return;
+        }
+
+        let now = unix_timestamp();
+        let window_start = now.div_euclid(60) * 60;
+        let entry = self
+            .site_defense_buckets
+            .entry(site_id)
+            .or_insert_with(|| std::sync::Mutex::new(SiteDefenseBucket::default()));
+        let mut bucket = entry.lock().expect("site defense bucket lock poisoned");
+        if bucket.window_start != window_start {
+            bucket.window_start = window_start;
+            bucket.soft_events = 0;
+            bucket.hard_events = 0;
+        }
+        if is_soft {
+            bucket.soft_events = bucket.soft_events.saturating_add(1);
+        }
+        if is_hard {
+            bucket.hard_events = bucket.hard_events.saturating_add(1);
+        }
+    }
+
+    pub fn effective_http2_max_concurrent_streams(&self, configured: usize) -> usize {
+        let pressure = self.runtime_pressure_snapshot();
+        protocol_stream_budget(configured, pressure.defense_depth)
+    }
+
+    pub fn apply_http3_runtime_budget(&self, config: &mut crate::config::Http3Config) {
+        let pressure = self.runtime_pressure_snapshot();
+        config.max_concurrent_streams =
+            protocol_stream_budget(config.max_concurrent_streams, pressure.defense_depth);
+        if matches!(pressure.defense_depth, "lean" | "survival") {
+            config.enable_connection_migration = false;
+            config.qpack_table_size = config.qpack_table_size.min(1024);
+        }
+        if pressure.defense_depth == "survival" {
+            config.idle_timeout_secs = config.idle_timeout_secs.min(30).max(5);
         }
     }
 
@@ -360,5 +484,46 @@ impl WafContext {
             .write()
             .expect("adaptive_protection_runtime lock poisoned");
         *guard = snapshot;
+    }
+}
+
+fn protocol_stream_budget(configured: usize, defense_depth: &str) -> usize {
+    let configured = configured.max(1);
+    match defense_depth {
+        "survival" => configured.min(8),
+        "lean" => configured.min(24),
+        "balanced" => configured.min(64),
+        _ => configured,
+    }
+}
+
+fn defense_depth_is_stricter(left: DefenseDepth, right: DefenseDepth) -> bool {
+    defense_depth_rank(left) > defense_depth_rank(right)
+}
+
+fn defense_depth_rank(depth: DefenseDepth) -> u8 {
+    match depth {
+        DefenseDepth::Full => 0,
+        DefenseDepth::Balanced => 1,
+        DefenseDepth::Lean => 2,
+        DefenseDepth::Survival => 3,
+    }
+}
+
+impl WafContext {
+    fn site_defense_depth(&self, site_id: &str) -> Option<DefenseDepth> {
+        let entry = self.site_defense_buckets.get(site_id)?;
+        let bucket = entry.lock().expect("site defense bucket lock poisoned");
+        let now = unix_timestamp();
+        if now.saturating_sub(bucket.window_start) > 75 {
+            return None;
+        }
+        if bucket.hard_events >= 12 || bucket.soft_events.saturating_add(bucket.hard_events) >= 80 {
+            return Some(DefenseDepth::Survival);
+        }
+        if bucket.hard_events >= 4 || bucket.soft_events.saturating_add(bucket.hard_events) >= 24 {
+            return Some(DefenseDepth::Lean);
+        }
+        None
     }
 }

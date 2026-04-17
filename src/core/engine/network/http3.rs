@@ -73,7 +73,9 @@ pub(crate) async fn handle_http3_quic_connection(
             Ok(Some(resolver)) => {
                 let context = Arc::clone(&context);
                 let packet = packet.clone();
-                let http3_handler = Http3Handler::new(context.config_snapshot().http3_config);
+                let mut http3_config = context.config_snapshot().http3_config;
+                context.apply_http3_runtime_budget(&mut http3_config);
+                let http3_handler = Http3Handler::new(http3_config);
                 let request_semaphore = Arc::clone(&request_semaphore);
                 tokio::spawn(async move {
                     if let Err(err) = handle_http3_request(
@@ -150,6 +152,7 @@ async fn handle_http3_request(
     if let Some(site) = matched_site.as_ref() {
         apply_gateway_site_metadata(&mut unified, site);
     }
+    context.annotate_site_runtime_budget(&mut unified);
     if let Some(inspector) = context.l4_inspector() {
         let policy = inspector.apply_request_policy(&packet, &mut unified);
         if skip_l4_connection_budget && (policy.suggested_delay_ms > 0 || policy.disable_keepalive)

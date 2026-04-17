@@ -22,6 +22,7 @@ use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::{AiTempPolicyEntry, SqliteStore};
 use anyhow::Result;
+use dashmap::DashMap;
 use rule_engine::load_rule_engine_state;
 use std::sync::atomic::{AtomicI64, AtomicU64};
 use std::sync::{Arc, RwLock};
@@ -80,6 +81,7 @@ pub struct WafContext {
     adaptive_protection_runtime: RwLock<AdaptiveProtectionRuntimeSnapshot>,
     ai_temp_policies: RwLock<Vec<AiTempPolicyEntry>>,
     ai_auto_audit_runtime: Mutex<AiAutoAuditRuntimeState>,
+    site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     rule_count: AtomicU64,
     rule_version: AtomicI64,
 }
@@ -117,6 +119,13 @@ struct AiAutoAuditRuntimeState {
     last_observed_signature: Option<String>,
     last_trigger_reason: Option<String>,
     last_report_id: Option<i64>,
+}
+
+#[derive(Debug, Default)]
+struct SiteDefenseBucket {
+    window_start: i64,
+    soft_events: u64,
+    hard_events: u64,
 }
 
 impl WafContext {
@@ -202,6 +211,7 @@ impl WafContext {
             adaptive_protection_runtime: RwLock::new(adaptive_protection_runtime),
             ai_temp_policies: RwLock::new(Vec::new()),
             ai_auto_audit_runtime: Mutex::new(AiAutoAuditRuntimeState::default()),
+            site_defense_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
             config,

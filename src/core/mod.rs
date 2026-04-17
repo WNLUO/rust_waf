@@ -167,7 +167,57 @@ pub struct AiDefenseSignalSnapshot {
     pub max_active_temp_policy_count: u32,
     pub trigger_reason: Option<String>,
     pub trigger_pending_secs: u64,
+    pub runtime_pressure: AiDefenseRuntimePressureSignal,
+    pub l4_pressure: Option<AiDefenseL4Signal>,
+    pub upstream_health: AiDefenseUpstreamSignal,
+    pub active_policy_summaries: Vec<AiDefensePolicySignal>,
     pub local_recommendations: Vec<LocalDefenseRecommendation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseRuntimePressureSignal {
+    pub level: String,
+    pub defense_depth: String,
+    pub prefer_drop: bool,
+    pub trim_event_persistence: bool,
+    pub l7_friction_pressure_percent: f64,
+    pub identity_pressure_percent: f64,
+    pub avg_proxy_latency_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseL4Signal {
+    pub active_connections: u64,
+    pub blocked_connections: u64,
+    pub rate_limit_hits: u64,
+    pub ddos_events: u64,
+    pub protocol_anomalies: u64,
+    pub defense_actions: u64,
+    pub top_ports: Vec<AiDefensePortSignal>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefensePortSignal {
+    pub port: String,
+    pub connections: u64,
+    pub blocks: u64,
+    pub ddos_events: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseUpstreamSignal {
+    pub healthy: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefensePolicySignal {
+    pub policy_key: String,
+    pub scope_type: String,
+    pub scope_value: String,
+    pub action: String,
+    pub hit_count: i64,
+    pub expires_at: i64,
 }
 
 #[derive(Debug, Clone)]

@@ -1,8 +1,9 @@
 use super::{
-    unix_timestamp, AiDefenseDecision, AiDefenseRunResult, AiDefenseSignalSnapshot,
-    LocalDefenseRecommendation, WafContext,
+    unix_timestamp, AiDefenseDecision, AiDefenseL4Signal, AiDefensePolicySignal,
+    AiDefensePortSignal, AiDefenseRunResult, AiDefenseRuntimePressureSignal,
+    AiDefenseSignalSnapshot, AiDefenseUpstreamSignal, LocalDefenseRecommendation, WafContext,
 };
-use crate::storage::{AiTempPolicyEffectStats, AiTempPolicyUpsert};
+use crate::storage::{AiTempPolicyEffectStats, AiTempPolicyEntry, AiTempPolicyUpsert};
 use anyhow::Result;
 
 impl WafContext {
@@ -72,10 +73,11 @@ impl WafContext {
         let config = self.config_snapshot();
         let max_active_temp_policy_count =
             config.integrations.ai_audit.max_active_temp_policies.max(1);
-        let active_temp_policy_count = match self.sqlite_store.as_ref() {
-            Some(store) => store.list_active_ai_temp_policies(now).await?.len() as u32,
-            None => 0,
+        let active_policies = match self.sqlite_store.as_ref() {
+            Some(store) => store.list_active_ai_temp_policies(now).await?,
+            None => Vec::new(),
         };
+        let active_temp_policy_count = active_policies.len() as u32;
         let trigger_pending_secs = self
             .ai_defense_trigger_runtime
             .lock()
@@ -83,6 +85,9 @@ impl WafContext {
             .pending_since
             .map(|pending_since| now.saturating_sub(pending_since).max(0) as u64)
             .unwrap_or(0);
+        let runtime_pressure = self.runtime_pressure_snapshot();
+        let auto_tuning = self.auto_tuning_snapshot();
+        let upstream = self.upstream_health_snapshot();
 
         Ok(AiDefenseSignalSnapshot {
             generated_at: now,
@@ -91,6 +96,27 @@ impl WafContext {
             max_active_temp_policy_count,
             trigger_reason,
             trigger_pending_secs,
+            runtime_pressure: AiDefenseRuntimePressureSignal {
+                level: runtime_pressure.level.to_string(),
+                defense_depth: runtime_pressure.defense_depth.to_string(),
+                prefer_drop: runtime_pressure.prefer_drop,
+                trim_event_persistence: runtime_pressure.trim_event_persistence,
+                l7_friction_pressure_percent: auto_tuning
+                    .last_observed_l7_friction_pressure_percent,
+                identity_pressure_percent: auto_tuning
+                    .last_observed_identity_resolution_pressure_percent,
+                avg_proxy_latency_ms: auto_tuning.last_observed_avg_proxy_latency_ms,
+            },
+            l4_pressure: self.ai_defense_l4_signal(),
+            upstream_health: AiDefenseUpstreamSignal {
+                healthy: upstream.healthy,
+                last_error: upstream.last_error,
+            },
+            active_policy_summaries: active_policies
+                .iter()
+                .map(ai_defense_policy_signal)
+                .take(12)
+                .collect(),
             local_recommendations: self.local_defense_recommendations(24),
         })
     }
@@ -173,8 +199,9 @@ impl WafContext {
         };
         let baseline = self.auto_tuning_snapshot();
 
-        for recommendation in snapshot.local_recommendations {
-            let Some(decision) = ai_defense_decision_from_local_recommendation(&recommendation)
+        for recommendation in &snapshot.local_recommendations {
+            let Some(decision) =
+                ai_defense_decision_from_local_recommendation(&snapshot, recommendation)
             else {
                 result.skipped += 1;
                 continue;
@@ -246,9 +273,41 @@ impl WafContext {
         }
         Ok(result)
     }
+
+    fn ai_defense_l4_signal(&self) -> Option<AiDefenseL4Signal> {
+        let stats = self.l4_inspector()?.get_statistics();
+        let mut ports = stats
+            .per_port_stats
+            .values()
+            .map(|port| AiDefensePortSignal {
+                port: port.port.clone(),
+                connections: port.connections,
+                blocks: port.blocks,
+                ddos_events: port.ddos_events,
+            })
+            .collect::<Vec<_>>();
+        ports.sort_by(|left, right| {
+            right
+                .blocks
+                .cmp(&left.blocks)
+                .then_with(|| right.ddos_events.cmp(&left.ddos_events))
+                .then_with(|| right.connections.cmp(&left.connections))
+        });
+        ports.truncate(5);
+        Some(AiDefenseL4Signal {
+            active_connections: stats.connections.active_connections,
+            blocked_connections: stats.connections.blocked_connections,
+            rate_limit_hits: stats.connections.rate_limit_hits,
+            ddos_events: stats.ddos_events,
+            protocol_anomalies: stats.protocol_anomalies,
+            defense_actions: stats.defense_actions,
+            top_ports: ports,
+        })
+    }
 }
 
 fn ai_defense_decision_from_local_recommendation(
+    snapshot: &AiDefenseSignalSnapshot,
     recommendation: &LocalDefenseRecommendation,
 ) -> Option<AiDefenseDecision> {
     if recommendation.action != "tighten_route_cc" {
@@ -257,6 +316,19 @@ fn ai_defense_decision_from_local_recommendation(
     if !ai_defense_route_allowed(&recommendation.route) {
         return None;
     }
+    let mut confidence = recommendation.confidence;
+    if snapshot.l4_pressure.as_ref().is_some_and(|l4| {
+        l4.blocked_connections > 0 || l4.rate_limit_hits > 0 || l4.ddos_events > 0
+    }) {
+        confidence = confidence.saturating_add(4).min(100);
+    }
+    if snapshot.runtime_pressure.defense_depth == "survival" {
+        confidence = confidence.saturating_add(3).min(100);
+    }
+    if !snapshot.upstream_health.healthy {
+        confidence = confidence.saturating_sub(8);
+    }
+
     Some(AiDefenseDecision {
         key: format!("ai_auto_defense:{}", recommendation.key),
         title: format!("AI auto defense for {}", recommendation.route),
@@ -267,13 +339,31 @@ fn ai_defense_decision_from_local_recommendation(
         operator: "exact".to_string(),
         suggested_value: recommendation.suggested_value.clone(),
         ttl_secs: recommendation.ttl_secs,
-        confidence: recommendation.confidence,
+        confidence,
         auto_apply: true,
         rationale: format!(
-            "{}; auto-applied by local AI defense guardrails for site {}",
-            recommendation.rationale, recommendation.site_id
+            "{}; auto-applied by local AI defense guardrails for site {}; trigger={}; runtime_depth={}; upstream_healthy={}",
+            recommendation.rationale,
+            recommendation.site_id,
+            snapshot
+                .trigger_reason
+                .as_deref()
+                .unwrap_or("unknown"),
+            snapshot.runtime_pressure.defense_depth,
+            snapshot.upstream_health.healthy
         ),
     })
+}
+
+fn ai_defense_policy_signal(policy: &AiTempPolicyEntry) -> AiDefensePolicySignal {
+    AiDefensePolicySignal {
+        policy_key: policy.policy_key.clone(),
+        scope_type: policy.scope_type.clone(),
+        scope_value: policy.scope_value.clone(),
+        action: policy.action.clone(),
+        hit_count: policy.hit_count,
+        expires_at: policy.expires_at,
+    }
 }
 
 fn ai_defense_decision_allowed(decision: &AiDefenseDecision, min_confidence: u32) -> bool {
@@ -341,5 +431,30 @@ mod tests {
         assert!(ai_defense_decision_allowed(&decision, 82));
         decision.action = "add_temp_block".to_string();
         assert!(!ai_defense_decision_allowed(&decision, 82));
+    }
+
+    #[tokio::test]
+    async fn ai_defense_snapshot_includes_operational_context() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        context.set_upstream_health(false, Some("timeout".to_string()));
+
+        let snapshot = context
+            .ai_defense_signal_snapshot(123, Some("test_trigger".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.generated_at, 123);
+        assert_eq!(snapshot.trigger_reason.as_deref(), Some("test_trigger"));
+        assert_eq!(snapshot.runtime_pressure.level, "normal");
+        assert!(!snapshot.upstream_health.healthy);
+        assert_eq!(
+            snapshot.upstream_health.last_error.as_deref(),
+            Some("timeout")
+        );
+        assert!(snapshot.active_policy_summaries.is_empty());
     }
 }

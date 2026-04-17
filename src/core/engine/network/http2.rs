@@ -1272,4 +1272,25 @@ mod tests {
         let _ = client_task.await;
         server_task.await.unwrap().unwrap();
     }
+
+    #[test]
+    fn drop_decision_resets_http2_request_path() {
+        let request =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        let drop = crate::core::InspectionResult::drop(InspectionLayer::L7, "drop it");
+        assert!(result_should_drop_http2(&drop, &request));
+
+        let block = crate::core::InspectionResult::block(InspectionLayer::L7, "block");
+        assert!(!result_should_drop_http2(&block, &request));
+
+        let mut metadata_drop =
+            UnifiedHttpRequest::new(HttpVersion::Http2_0, "GET".to_string(), "/".to_string());
+        metadata_drop.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+        let alert = crate::core::InspectionResult::alert(InspectionLayer::L7, "alert");
+        assert!(result_should_drop_http2(&alert, &metadata_drop));
+
+        let err = drop_http2_result("unit-test drop");
+        assert!(err.to_string().contains("HTTP/2 request dropped"));
+        assert!(err.to_string().contains("unit-test drop"));
+    }
 }

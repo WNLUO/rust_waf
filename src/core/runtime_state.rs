@@ -907,6 +907,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn site_defense_tightens_all_routes_without_cross_site_leakage() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        let result = InspectionResult::drop(InspectionLayer::L7, "site pressure");
+
+        for _ in 0..4 {
+            let mut request = UnifiedHttpRequest::new(
+                HttpVersion::Http1_1,
+                "POST".to_string(),
+                "/api/login".to_string(),
+            );
+            request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+            context.note_site_defense_signal(&request, &result);
+        }
+
+        let mut same_site_cold_route = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/products".to_string(),
+        );
+        same_site_cold_route.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        same_site_cold_route
+            .add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+        context.annotate_site_runtime_budget(&mut same_site_cold_route);
+
+        assert_eq!(
+            same_site_cold_route
+                .get_metadata("runtime.site.defense_depth")
+                .map(String::as_str),
+            Some("lean")
+        );
+        assert!(same_site_cold_route
+            .get_metadata("runtime.route.defense_depth")
+            .is_none());
+
+        let mut other_site = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/products".to_string(),
+        );
+        other_site.add_metadata("gateway.site_id".to_string(), "site-b".to_string());
+        other_site.add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+        context.annotate_site_runtime_budget(&mut other_site);
+
+        assert!(other_site
+            .get_metadata("runtime.site.defense_depth")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn site_survival_budget_enables_runtime_event_aggregation_metadata() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        let result = InspectionResult::drop(InspectionLayer::L7, "site pressure");
+
+        for _ in 0..12 {
+            let mut request = UnifiedHttpRequest::new(
+                HttpVersion::Http1_1,
+                "POST".to_string(),
+                "/api/login".to_string(),
+            );
+            request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+            context.note_site_defense_signal(&request, &result);
+        }
+
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/checkout".to_string(),
+        );
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        request.add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+        context.annotate_site_runtime_budget(&mut request);
+
+        assert_eq!(
+            request
+                .get_metadata("runtime.site.defense_depth")
+                .map(String::as_str),
+            Some("survival")
+        );
+        assert_eq!(
+            request
+                .get_metadata("runtime.aggregate_events")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            request
+                .get_metadata("runtime.prefer_drop")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            request
+                .get_metadata("runtime.budget.behavior_sample_stride")
+                .map(String::as_str),
+            Some("18446744073709551615")
+        );
+    }
+
+    #[test]
+    fn protocol_stream_budgets_shrink_under_runtime_depth() {
+        assert_eq!(protocol_stream_budget(128, "survival"), 8);
+        assert_eq!(protocol_stream_budget(128, "lean"), 24);
+        assert_eq!(protocol_stream_budget(128, "balanced"), 64);
+        assert_eq!(protocol_stream_budget(4, "survival"), 4);
+        assert_eq!(protocol_stream_budget(128, "full"), 128);
+    }
+
+    #[tokio::test]
     async fn local_defense_recommendations_preview_hot_routes() {
         let config = crate::config::Config {
             sqlite_enabled: false,

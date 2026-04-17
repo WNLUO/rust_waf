@@ -198,3 +198,60 @@ impl InspectionResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inspection_actions_report_event_and_persistence_contract() {
+        let allow = InspectionResult::allow(InspectionLayer::L4);
+        assert!(!allow.blocked);
+        assert_eq!(allow.event_action(), "allow");
+        assert!(!allow.should_persist_event());
+
+        let alert = InspectionResult::alert(InspectionLayer::L7, "watch");
+        assert!(!alert.blocked);
+        assert_eq!(alert.event_action(), "alert");
+        assert!(alert.should_persist_event());
+
+        let block = InspectionResult::block(InspectionLayer::L4, "block");
+        assert!(block.blocked);
+        assert_eq!(block.event_action(), "block");
+        assert!(!block.persist_blocked_ip);
+        assert!(block.should_persist_event());
+
+        let block_and_persist =
+            InspectionResult::block_and_persist_ip(InspectionLayer::L4, "block ip");
+        assert!(block_and_persist.blocked);
+        assert_eq!(block_and_persist.event_action(), "block");
+        assert!(block_and_persist.persist_blocked_ip);
+
+        let response = CustomHttpResponse {
+            status_code: 403,
+            headers: Vec::new(),
+            body: b"blocked".to_vec(),
+            tarpit: None,
+            random_status: None,
+        };
+        let respond = InspectionResult::respond(InspectionLayer::L7, "respond", response);
+        assert!(respond.blocked);
+        assert_eq!(respond.event_action(), "respond");
+        assert!(respond.custom_response.is_some());
+        assert!(respond.should_persist_event());
+
+        let drop = InspectionResult::drop(InspectionLayer::L7, "drop");
+        assert!(drop.blocked);
+        assert_eq!(drop.event_action(), "drop");
+        assert!(drop.custom_response.is_none());
+        assert!(!drop.persist_blocked_ip);
+        assert!(drop.should_persist_event());
+
+        let drop_and_persist =
+            InspectionResult::drop_and_persist_ip(InspectionLayer::L7, "drop ip");
+        assert!(drop_and_persist.blocked);
+        assert_eq!(drop_and_persist.event_action(), "drop");
+        assert!(drop_and_persist.custom_response.is_none());
+        assert!(drop_and_persist.persist_blocked_ip);
+    }
+}

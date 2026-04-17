@@ -230,4 +230,35 @@ mod tests {
         assert_eq!(high.defense_depth, DefenseDepth::Lean);
         assert!(high.l7_bucket_limit < normal.l7_bucket_limit);
     }
+
+    #[test]
+    fn storage_queue_pressure_forces_event_aggregation_and_survival() {
+        let lean =
+            RuntimeResourceBudget::from_system_and_pressure(&profile(4, Some(4096)), "normal", 75);
+        let survival =
+            RuntimeResourceBudget::from_system_and_pressure(&profile(4, Some(4096)), "normal", 90);
+
+        assert_eq!(lean.defense_depth, DefenseDepth::Lean);
+        assert!(lean.aggregate_events);
+        assert!(lean.prefer_drop);
+        assert_eq!(survival.defense_depth, DefenseDepth::Survival);
+        assert!(survival.aggregate_events);
+        assert!(survival.prefer_drop);
+        assert_eq!(survival.behavior_sample_stride, u64::MAX);
+    }
+
+    #[test]
+    fn tiny_attack_profile_uses_survival_budget_for_low_config_hosts() {
+        let budget =
+            RuntimeResourceBudget::from_system_and_pressure(&profile(1, Some(512)), "attack", 0);
+
+        assert_eq!(budget.capacity_class, RuntimeCapacityClass::Tiny);
+        assert_eq!(budget.defense_depth, DefenseDepth::Survival);
+        assert_eq!(budget.l7_bucket_limit, 2_048);
+        assert_eq!(budget.l7_page_window_limit, 512);
+        assert_eq!(budget.behavior_bucket_limit, 1_024);
+        assert_eq!(budget.trusted_cdn_auto_learn_limit, 64);
+        assert!(budget.aggregate_events);
+        assert!(budget.prefer_drop);
+    }
 }

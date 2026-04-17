@@ -436,6 +436,70 @@ mod tests {
     }
 
     #[test]
+    fn test_rule_engine_action_matrix_for_l4_and_l7_rules() {
+        let packet = PacketInfo {
+            source_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)),
+            dest_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            source_port: 40000,
+            dest_port: 22,
+            protocol: Protocol::TCP,
+            timestamp: 0,
+        };
+
+        for (action, expected, blocked, event_action) in [
+            (RuleAction::Allow, InspectionAction::Allow, false, "allow"),
+            (RuleAction::Alert, InspectionAction::Alert, false, "alert"),
+            (RuleAction::Block, InspectionAction::Block, true, "block"),
+        ] {
+            let engine = RuleEngine::new(vec![Rule {
+                id: format!("l4-{}", action.as_str()),
+                name: format!("L4 {}", action.as_str()),
+                enabled: true,
+                layer: RuleLayer::L4,
+                pattern: r"dest_port=22".to_string(),
+                action,
+                severity: Severity::High,
+                plugin_template_id: None,
+                response_template: None,
+            }])
+            .unwrap();
+
+            let result = engine.inspect(&packet, None);
+            assert_eq!(result.layer, InspectionLayer::L4);
+            assert_eq!(result.action, expected);
+            assert_eq!(result.blocked, blocked);
+            assert_eq!(result.event_action(), event_action);
+            assert!(result.custom_response.is_none());
+        }
+
+        for (action, expected, blocked, event_action) in [
+            (RuleAction::Allow, InspectionAction::Allow, false, "allow"),
+            (RuleAction::Alert, InspectionAction::Alert, false, "alert"),
+            (RuleAction::Block, InspectionAction::Block, true, "block"),
+        ] {
+            let engine = RuleEngine::new(vec![Rule {
+                id: format!("l7-{}", action.as_str()),
+                name: format!("L7 {}", action.as_str()),
+                enabled: true,
+                layer: RuleLayer::L7,
+                pattern: "attack".to_string(),
+                action,
+                severity: Severity::High,
+                plugin_template_id: None,
+                response_template: None,
+            }])
+            .unwrap();
+
+            let result = engine.inspect(&packet, Some("GET /attack"));
+            assert_eq!(result.layer, InspectionLayer::L7);
+            assert_eq!(result.action, expected);
+            assert_eq!(result.blocked, blocked);
+            assert_eq!(result.event_action(), event_action);
+            assert!(result.custom_response.is_none());
+        }
+    }
+
+    #[test]
     fn test_l7_respond_rule_builds_gzip_response() {
         let engine = RuleEngine::new(vec![Rule {
             id: "respond-1".to_string(),

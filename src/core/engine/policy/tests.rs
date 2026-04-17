@@ -286,8 +286,76 @@ async fn apply_client_identity_requires_auth_header_when_enabled() {
         spoofed_request
             .get_metadata("network.identity_state")
             .map(String::as_str),
+        Some("trusted_cdn_unresolved")
+    );
+    assert_eq!(
+        spoofed_request
+            .get_metadata("network.forward_header_valid")
+            .map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        spoofed_request
+            .get_metadata("network.client_ip_unresolved")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(spoofed_request.client_ip.as_deref(), Some("43.168.34.114"));
+}
+
+#[tokio::test]
+async fn apply_client_identity_learns_unknown_cdn_peer_only_with_valid_auth_header() {
+    let mut config = crate::config::Config::default();
+    config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
+    config.gateway_config.custom_source_ip_header = "x-cdn-real-ip".to_string();
+    config.gateway_config.custom_source_ip_header_auth_enabled = true;
+    config.gateway_config.custom_source_ip_header_auth_header = "x-cdn-auth".to_string();
+    config.gateway_config.custom_source_ip_header_auth_secret = "secret-token".to_string();
+    let context = WafContext::new(config).await.unwrap();
+
+    let mut rejected =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    rejected.add_header("x-cdn-real-ip".to_string(), "198.51.100.10".to_string());
+    rejected.add_header("x-cdn-auth".to_string(), "wrong".to_string());
+
+    apply_client_identity(&context, "198.18.0.20:443".parse().unwrap(), &mut rejected);
+
+    assert_eq!(
+        rejected
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
+        Some("spoofed_forward_header")
+    );
+    assert_eq!(rejected.client_ip.as_deref(), Some("198.18.0.20"));
+    assert!(!context
+        .config_snapshot()
+        .l4_config
+        .trusted_cdn
+        .manual_cidrs
+        .iter()
+        .any(|cidr| cidr == "198.18.0.20/32"));
+
+    let mut accepted =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    accepted.add_header("x-cdn-real-ip".to_string(), "198.51.100.10".to_string());
+    accepted.add_header("x-cdn-auth".to_string(), "secret-token".to_string());
+
+    apply_client_identity(&context, "198.18.0.20:443".parse().unwrap(), &mut accepted);
+
+    assert_eq!(
+        accepted
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
         Some("trusted_cdn_forwarded")
     );
+    assert_eq!(accepted.client_ip.as_deref(), Some("198.51.100.10"));
+    assert!(context
+        .config_snapshot()
+        .l4_config
+        .trusted_cdn
+        .manual_cidrs
+        .iter()
+        .any(|cidr| cidr == "198.18.0.20/32"));
 }
 
 #[tokio::test]

@@ -281,6 +281,26 @@ pub struct AiTempPoliciesResponse {
     pub(crate) policies: Vec<AiTempPolicyResponse>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct LocalDefenseRecommendationsResponse {
+    pub(crate) total: u32,
+    pub(crate) recommendations: Vec<LocalDefenseRecommendationResponse>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LocalDefenseRecommendationResponse {
+    pub(crate) key: String,
+    pub(crate) title: String,
+    pub(crate) site_id: String,
+    pub(crate) route: String,
+    pub(crate) defense_depth: String,
+    pub(crate) soft_events: u64,
+    pub(crate) hard_events: u64,
+    pub(crate) total_events: u64,
+    pub(crate) confidence: u8,
+    pub(crate) suggested_rule: AiAuditSuggestedRuleResponse,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AiTempPolicyEffectResponse {
     pub(crate) baseline_l7_friction_percent: Option<f64>,

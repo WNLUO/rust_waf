@@ -223,6 +223,51 @@ pub(crate) async fn list_ai_temp_policies_handler(
     }))
 }
 
+pub(crate) async fn local_defense_recommendations_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<LocalDefenseRecommendationsResponse>> {
+    let recommendations = state.context.local_defense_recommendations(20);
+    Ok(Json(LocalDefenseRecommendationsResponse {
+        total: recommendations.len() as u32,
+        recommendations: recommendations
+            .into_iter()
+            .map(local_defense_recommendation_response)
+            .collect(),
+    }))
+}
+
+fn local_defense_recommendation_response(
+    item: crate::core::LocalDefenseRecommendation,
+) -> LocalDefenseRecommendationResponse {
+    let title = format!("Tighten route CC for {}", item.route);
+    LocalDefenseRecommendationResponse {
+        key: item.key.clone(),
+        title: title.clone(),
+        site_id: item.site_id.clone(),
+        route: item.route.clone(),
+        defense_depth: item.defense_depth.clone(),
+        soft_events: item.soft_events,
+        hard_events: item.hard_events,
+        total_events: item.total_events,
+        confidence: item.confidence,
+        suggested_rule: AiAuditSuggestedRuleResponse {
+            key: item.key,
+            title,
+            policy_type: "tighten_route_cc".to_string(),
+            layer: "L7".to_string(),
+            scope_type: "route".to_string(),
+            scope_value: item.route,
+            target: format!("site:{}", item.site_id),
+            action: item.action,
+            operator: "exact".to_string(),
+            suggested_value: item.suggested_value,
+            ttl_secs: item.ttl_secs,
+            auto_apply: false,
+            rationale: item.rationale,
+        },
+    }
+}
+
 pub(crate) async fn delete_ai_temp_policy_handler(
     State(state): State<ApiState>,
     Path(id): Path<i64>,

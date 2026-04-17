@@ -1,7 +1,7 @@
 use super::{
     adaptive_protection, auto_tuning, resource_budget, traffic_map, unix_timestamp,
-    AiAutoAuditRuntimeSnapshot, DefenseDepth, Http3RuntimeSnapshot, RuntimePressureSnapshot,
-    SiteDefenseBucket, UpstreamHealthSnapshot, WafContext,
+    AiAutoAuditRuntimeSnapshot, DefenseDepth, Http3RuntimeSnapshot, LocalDefenseRecommendation,
+    RuntimePressureSnapshot, SiteDefenseBucket, UpstreamHealthSnapshot, WafContext,
 };
 use crate::core::InspectionResult;
 use crate::l4::L4Inspector;
@@ -316,6 +316,67 @@ impl WafContext {
         self.traffic_map.subscribe_realtime()
     }
 
+    pub fn local_defense_recommendations(&self, limit: usize) -> Vec<LocalDefenseRecommendation> {
+        let now = unix_timestamp();
+        let mut recommendations = self
+            .route_defense_buckets
+            .iter()
+            .filter_map(|entry| {
+                let (site_id, route) = split_route_defense_key(entry.key())?;
+                let bucket = entry.value().lock().expect("route defense bucket lock poisoned");
+                if now.saturating_sub(bucket.window_start) > 75 {
+                    return None;
+                }
+                let total = bucket.soft_events.saturating_add(bucket.hard_events);
+                let depth = route_defense_depth_for_counts(bucket.soft_events, bucket.hard_events)?;
+                let suggested_value = match depth {
+                    DefenseDepth::Survival => "45",
+                    DefenseDepth::Lean => "70",
+                    DefenseDepth::Full | DefenseDepth::Balanced => return None,
+                };
+                let ttl_secs = match depth {
+                    DefenseDepth::Survival => 900,
+                    DefenseDepth::Lean => 600,
+                    DefenseDepth::Full | DefenseDepth::Balanced => 300,
+                };
+                let confidence = route_defense_confidence(total, bucket.hard_events, depth);
+                Some(LocalDefenseRecommendation {
+                    key: format!(
+                        "local_route_pressure:{}:{}",
+                        compact_recommendation_key(&site_id),
+                        compact_recommendation_key(&route)
+                    ),
+                    site_id,
+                    route: route.clone(),
+                    defense_depth: depth.as_str().to_string(),
+                    soft_events: bucket.soft_events,
+                    hard_events: bucket.hard_events,
+                    total_events: total,
+                    action: "tighten_route_cc".to_string(),
+                    suggested_value: suggested_value.to_string(),
+                    ttl_secs,
+                    confidence,
+                    rationale: format!(
+                        "route local defense is {} after {} soft and {} hard events in the current window",
+                        depth.as_str(),
+                        bucket.soft_events,
+                        bucket.hard_events
+                    ),
+                })
+            })
+            .collect::<Vec<_>>();
+
+        recommendations.sort_by(|left, right| {
+            right
+                .hard_events
+                .cmp(&left.hard_events)
+                .then_with(|| right.total_events.cmp(&left.total_events))
+                .then_with(|| right.confidence.cmp(&left.confidence))
+        });
+        recommendations.truncate(limit);
+        recommendations
+    }
+
     pub async fn enrich_traffic_realtime_event(
         &self,
         event: traffic_map::TrafficRealtimeEventRaw,
@@ -610,14 +671,7 @@ impl WafContext {
         if now.saturating_sub(bucket.window_start) > 75 {
             return None;
         }
-        let total = bucket.soft_events.saturating_add(bucket.hard_events);
-        if bucket.hard_events >= 5 || total >= 18 {
-            return Some(DefenseDepth::Survival);
-        }
-        if bucket.hard_events >= 2 || total >= 8 {
-            return Some(DefenseDepth::Lean);
-        }
-        None
+        route_defense_depth_for_counts(bucket.soft_events, bucket.hard_events)
     }
 
     fn ensure_route_defense_capacity(&self, route_key: &str, window_start: i64) -> bool {
@@ -712,6 +766,53 @@ fn route_defense_key(site_id: &str, route: &str) -> String {
     format!("{site_id}|{route}")
 }
 
+fn split_route_defense_key(value: &str) -> Option<(String, String)> {
+    let (site_id, route) = value.split_once('|')?;
+    Some((site_id.to_string(), route.to_string()))
+}
+
+fn route_defense_depth_for_counts(soft_events: u64, hard_events: u64) -> Option<DefenseDepth> {
+    let total = soft_events.saturating_add(hard_events);
+    if hard_events >= 5 || total >= 18 {
+        return Some(DefenseDepth::Survival);
+    }
+    if hard_events >= 2 || total >= 8 {
+        return Some(DefenseDepth::Lean);
+    }
+    None
+}
+
+fn route_defense_confidence(total_events: u64, hard_events: u64, depth: DefenseDepth) -> u8 {
+    let base = match depth {
+        DefenseDepth::Survival => 82,
+        DefenseDepth::Lean => 68,
+        DefenseDepth::Full | DefenseDepth::Balanced => 50,
+    };
+    let hard_bonus = hard_events.saturating_mul(3).min(12) as u8;
+    let volume_bonus = total_events.saturating_sub(8).min(10) as u8;
+    (base + hard_bonus + volume_bonus).min(100)
+}
+
+fn compact_recommendation_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+        .chars()
+        .take(96)
+        .collect()
+}
+
 fn route_defense_exempt(route: &str) -> bool {
     route == "/favicon.ico"
         || route == "/robots.txt"
@@ -791,5 +892,37 @@ mod tests {
         assert!(cold
             .get_metadata("ai.cc.route_threshold_scale_percent")
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn local_defense_recommendations_preview_hot_routes() {
+        let config = crate::config::Config {
+            sqlite_enabled: false,
+            ..crate::config::Config::default()
+        };
+        let context = WafContext::new(config).await.unwrap();
+        let result = InspectionResult::drop(InspectionLayer::L7, "route pressure");
+
+        for _ in 0..5 {
+            let mut request = UnifiedHttpRequest::new(
+                HttpVersion::Http1_1,
+                "POST".to_string(),
+                "/api/login".to_string(),
+            );
+            request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+            context.note_site_defense_signal(&request, &result);
+        }
+
+        let recommendations = context.local_defense_recommendations(10);
+
+        assert_eq!(recommendations.len(), 1);
+        let recommendation = &recommendations[0];
+        assert_eq!(recommendation.site_id, "site-a");
+        assert_eq!(recommendation.route, "/api/login");
+        assert_eq!(recommendation.defense_depth, "survival");
+        assert_eq!(recommendation.action, "tighten_route_cc");
+        assert_eq!(recommendation.suggested_value, "45");
+        assert_eq!(recommendation.ttl_secs, 900);
+        assert!(recommendation.confidence >= 90);
     }
 }

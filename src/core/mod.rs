@@ -132,6 +132,22 @@ struct SiteDefenseBucket {
     hard_events: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalDefenseRecommendation {
+    pub key: String,
+    pub site_id: String,
+    pub route: String,
+    pub defense_depth: String,
+    pub soft_events: u64,
+    pub hard_events: u64,
+    pub total_events: u64,
+    pub action: String,
+    pub suggested_value: String,
+    pub ttl_secs: u64,
+    pub confidence: u8,
+    pub rationale: String,
+}
+
 impl WafContext {
     pub async fn new(config: Config) -> Result<Self> {
         let l4_enabled =

@@ -155,7 +155,7 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
         .page_subresource_weight_percent
         .clamp(1, config.l7_config.cc_defense.static_request_weight_percent);
     config.l7_config.cc_defense.page_load_grace_secs =
-        clamp_u64(config.l7_config.cc_defense.page_load_grace_secs, 1, 15, 3);
+        clamp_u64(config.l7_config.cc_defense.page_load_grace_secs, 1, 15, 8);
     config.l7_config.cc_defense.hard_route_block_multiplier = config
         .l7_config
         .cc_defense

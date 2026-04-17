@@ -396,3 +396,7 @@ pub(super) fn should_drop_delay_under_pressure(request: &UnifiedHttpRequest) -> 
         .map(|value| value == "true")
         .unwrap_or(false)
 }
+
+pub(super) fn effective_page_load_grace_secs(config: &CcDefenseConfig) -> u64 {
+    config.page_load_grace_secs.max(8)
+}

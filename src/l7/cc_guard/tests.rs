@@ -98,6 +98,102 @@ async fn page_subresources_are_not_challenged_aggressively() {
 }
 
 #[tokio::test]
+async fn long_static_page_subresources_match_host_window() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 2,
+        route_block_threshold: 3,
+        page_load_grace_secs: 5,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut doc = request("/202604162080.html");
+    doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+    assert!(guard.inspect_request(&mut doc).await.is_none());
+
+    let mut asset = UnifiedHttpRequest::new(
+        HttpVersion::Http1_1,
+        "GET".to_string(),
+        "/wp-content/uploads/2026/04/rocky-9-e7b3bbe7bb9fe4b8ade5a682e4bd95e690ade5bbba-podman-e697a0e5ae88e68aa4e8bf9be7a88b-k3s-e99b86e7bea4efbc8ce5ae9ee78eb0e8beb9e7bc98.webp".to_string(),
+    );
+    asset.set_client_ip("203.0.113.10".to_string());
+    asset.add_header("host".to_string(), "example.com".to_string());
+    asset.add_header("sec-fetch-dest".to_string(), "image".to_string());
+    asset.add_header(
+        "referer".to_string(),
+        "https://example.com/202604162080.html".to_string(),
+    );
+
+    assert!(guard.inspect_request(&mut asset).await.is_none());
+    assert_eq!(
+        asset
+            .get_metadata("l7.cc.page_subresource")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn verified_browser_static_burst_does_not_persist_block() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 2,
+        route_block_threshold: 200,
+        host_challenge_threshold: 2,
+        host_block_threshold: 80,
+        ip_challenge_threshold: 2,
+        ip_block_threshold: 80,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/article");
+    assert!(guard.inspect_request(&mut first).await.is_none());
+    let mut second = request("/article");
+    let challenge = guard
+        .inspect_request(&mut second)
+        .await
+        .expect("challenge response");
+    let cookie = challenge
+        .custom_response
+        .as_ref()
+        .and_then(|response| {
+            response
+                .headers
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case("set-cookie"))
+                .map(|(_, value)| value.split(';').next().unwrap_or(value).to_string())
+        })
+        .expect("challenge should set cookie");
+
+    for index in 0..120 {
+        let mut asset = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            format!("/wp-content/uploads/2026/04/image-{index}.webp"),
+        );
+        asset.set_client_ip("203.0.113.10".to_string());
+        asset.add_header("host".to_string(), "example.com".to_string());
+        asset.add_header("sec-fetch-dest".to_string(), "image".to_string());
+        asset.add_header("cookie".to_string(), cookie.clone());
+
+        let result = guard.inspect_request(&mut asset).await;
+        assert!(
+            result
+                .as_ref()
+                .map(|result| !result.persist_blocked_ip)
+                .unwrap_or(true),
+            "verified static asset burst should not persist a local block at request {index}"
+        );
+        assert_eq!(
+            asset
+                .get_metadata("l7.cc.verified_static_asset")
+                .map(String::as_str),
+            Some("true")
+        );
+    }
+}
+
+#[tokio::test]
 async fn api_requests_accumulate_weight_faster_than_documents() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 3,

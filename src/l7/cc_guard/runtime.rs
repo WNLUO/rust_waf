@@ -42,16 +42,16 @@ impl L7CcGuard {
         .clamp(128, MAX_PAGE_WINDOW_BUCKETS);
 
         let client_ip = request_client_ip(request)?;
-        let path = request_path(&request.uri);
-        if BYPASS_PATHS.contains(&path) {
+        let raw_path = request_path(&request.uri).to_string();
+        if BYPASS_PATHS.contains(&raw_path.as_str()) {
             return None;
         }
 
         let host = normalized_host(request);
-        let route_path = normalized_route_path(path);
+        let route_path = normalized_route_path(&raw_path);
         let method = request.method.to_ascii_uppercase();
-        let request_kind = classify_request(request, &route_path);
-        let html_mode = challenge_mode(request, &route_path);
+        let request_kind = classify_request(request, &raw_path);
+        let html_mode = challenge_mode(request, &raw_path);
         let identity_state = request
             .get_metadata("network.identity_state")
             .cloned()
@@ -100,13 +100,15 @@ impl L7CcGuard {
                 request,
                 client_ip,
                 &host,
-                &route_path,
+                &raw_path,
                 unix_now,
                 page_window_limit,
             );
+        let verified_static_asset = verified && request_kind == RequestKind::StaticAsset;
+        let effective_page_subresource = is_page_subresource || verified_static_asset;
         let weight_percent = self.request_weight_percent(
             request_kind,
-            is_page_subresource,
+            effective_page_subresource,
             interactive_session,
             &config,
         );
@@ -227,6 +229,10 @@ impl L7CcGuard {
             is_page_subresource.to_string(),
         );
         request.add_metadata(
+            "l7.cc.verified_static_asset".to_string(),
+            verified_static_asset.to_string(),
+        );
+        request.add_metadata(
             "l7.cc.weight_percent".to_string(),
             weight_percent.to_string(),
         );
@@ -274,7 +280,7 @@ impl L7CcGuard {
         let interactive_host_ip_multiplier = if interactive_session { 4 } else { 1 };
         let interactive_host_ip_block_multiplier = if interactive_session { 3 } else { 1 };
         let low_risk_subresource = request_kind == RequestKind::StaticAsset
-            && (is_page_subresource || interactive_session);
+            && (effective_page_subresource || interactive_session);
         let route_scale_percent = request
             .get_metadata("ai.cc.route_threshold_scale_percent")
             .and_then(|value| value.parse::<u32>().ok())
@@ -609,6 +615,7 @@ impl L7CcGuard {
                     "text/html; charset=utf-8".to_string(),
                 ),
                 ("cache-control".to_string(), "no-store".to_string()),
+                ("set-cookie".to_string(), cookie_assignment),
                 (
                     "x-rust-waf-cc-action".to_string(),
                     challenge_header_value(mode).to_string(),
@@ -742,7 +749,7 @@ impl L7CcGuard {
             "cc_page_host_window",
             OVERFLOW_SHARDS,
         );
-        let expires_at = unix_now + config.page_load_grace_secs as i64;
+        let expires_at = unix_now + effective_page_load_grace_secs(config) as i64;
         let mut entry = self
             .page_load_windows
             .entry(key)
@@ -760,7 +767,7 @@ impl L7CcGuard {
         request: &UnifiedHttpRequest,
         client_ip: std::net::IpAddr,
         host: &str,
-        route_path: &str,
+        raw_path: &str,
         unix_now: i64,
         limit: usize,
     ) -> bool {
@@ -792,7 +799,7 @@ impl L7CcGuard {
 
         // Weak match path: when Referer/Sec-Fetch metadata is missing but path strongly
         // looks like a static asset, still trust a short host-level page-load window.
-        if !looks_like_static_asset(route_path) {
+        if !looks_like_static_asset(raw_path) {
             return false;
         }
         let host_key = bounded_dashmap_key(

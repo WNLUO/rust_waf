@@ -336,7 +336,7 @@ const fn default_cc_page_subresource_weight_percent() -> u8 {
 }
 
 const fn default_cc_page_load_grace_secs() -> u64 {
-    3
+    8
 }
 
 const fn default_cc_hard_route_block_multiplier() -> u8 {

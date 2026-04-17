@@ -425,6 +425,15 @@ impl WafContext {
             if generated >= 8 {
                 break;
             }
+            let relearn_after_rejected =
+                existing
+                    .iter()
+                    .any(|(site_id, route_pattern, match_mode, status)| {
+                        site_id == &recommendation.site_id
+                            && route_pattern == &recommendation.route
+                            && match_mode == "exact"
+                            && status == "rejected"
+                    });
             if existing
                 .iter()
                 .any(|(site_id, route_pattern, match_mode, status)| {
@@ -439,7 +448,12 @@ impl WafContext {
             let identity = snapshot.identity_summaries.iter().find(|identity| {
                 identity.site_id == recommendation.site_id && identity.route == recommendation.route
             });
-            let candidate = infer_route_profile_candidate(recommendation, identity, now);
+            let candidate = infer_route_profile_candidate(
+                recommendation,
+                identity,
+                now,
+                relearn_after_rejected,
+            );
             store.upsert_ai_route_profile(&candidate).await?;
             generated += 1;
         }
@@ -695,6 +709,7 @@ fn infer_route_profile_candidate(
     recommendation: &LocalDefenseRecommendation,
     identity: Option<&AiDefenseIdentitySignal>,
     now: i64,
+    relearn_after_rejected: bool,
 ) -> AiRouteProfileUpsert {
     let route_lower = recommendation.route.to_ascii_lowercase();
     let mut route_type = "unknown";
@@ -769,11 +784,54 @@ fn infer_route_profile_candidate(
     if recommendation.defense_depth == "survival" {
         confidence += 6;
     }
+    if relearn_after_rejected {
+        confidence -= 6;
+    }
 
     recommended_actions.sort();
     recommended_actions.dedup();
     avoid_actions.sort();
     avoid_actions.dedup();
+
+    let evidence_json = serde_json::json!({
+        "learning_mode": if relearn_after_rejected {
+            "relearn_after_rejected"
+        } else {
+            "observed_candidate"
+        },
+        "observed_at": now,
+        "route_pressure": {
+            "defense_depth": recommendation.defense_depth,
+            "soft_events": recommendation.soft_events,
+            "hard_events": recommendation.hard_events,
+            "total_events": recommendation.total_events,
+            "recommended_action": recommendation.action,
+            "suggested_value": recommendation.suggested_value,
+            "ttl_secs": recommendation.ttl_secs,
+            "local_confidence": recommendation.confidence,
+            "rationale": recommendation.rationale,
+        },
+        "identity": identity.map(|identity| serde_json::json!({
+            "total_events": identity.total_events,
+            "distinct_client_count": identity.distinct_client_count,
+            "unresolved_events": identity.unresolved_events,
+            "trusted_proxy_events": identity.trusted_proxy_events,
+            "verified_challenge_events": identity.verified_challenge_events,
+            "interactive_session_events": identity.interactive_session_events,
+            "spoofed_forward_header_events": identity.spoofed_forward_header_events,
+            "top_user_agents": identity.top_user_agents.iter().map(|ua| serde_json::json!({
+                "value": &ua.value,
+                "count": ua.count,
+            })).collect::<Vec<_>>(),
+        })),
+        "confidence_inputs": {
+            "route_name_heuristic": route_type,
+            "sensitivity": sensitivity,
+            "auth_required": auth_required,
+            "normal_traffic_pattern": normal_traffic_pattern,
+            "relearn_penalty_applied": relearn_after_rejected,
+        }
+    });
 
     AiRouteProfileUpsert {
         site_id: recommendation.site_id.clone(),
@@ -785,14 +843,24 @@ fn infer_route_profile_candidate(
         normal_traffic_pattern: normal_traffic_pattern.to_string(),
         recommended_actions,
         avoid_actions,
+        evidence_json: evidence_json.to_string(),
         confidence: confidence.clamp(0, 100),
-        source: "local_ai_observed".to_string(),
+        source: if relearn_after_rejected {
+            "local_ai_relearned".to_string()
+        } else {
+            "local_ai_observed".to_string()
+        },
         status: "candidate".to_string(),
         rationale: format!(
-            "local AI inferred route profile from {} defense depth with {} total events and {} hard events",
+            "local AI inferred route profile from {} defense depth with {} total events and {} hard events{}",
             recommendation.defense_depth,
             recommendation.total_events,
-            recommendation.hard_events
+            recommendation.hard_events,
+            if relearn_after_rejected {
+                "; regenerated after previous rejection"
+            } else {
+                ""
+            }
         ),
         last_observed_at: Some(now),
         reviewed_at: None,
@@ -839,6 +907,8 @@ fn ai_defense_policy_signal(policy: &AiTempPolicyEntry) -> AiDefensePolicySignal
 }
 
 fn ai_defense_route_profile_signal(profile: AiRouteProfileEntry) -> AiDefenseRouteProfileSignal {
+    let raw_confidence = profile.confidence;
+    let (confidence, staleness_secs) = route_profile_effective_confidence(&profile);
     AiDefenseRouteProfileSignal {
         site_id: profile.site_id,
         route_pattern: profile.route_pattern,
@@ -850,11 +920,36 @@ fn ai_defense_route_profile_signal(profile: AiRouteProfileEntry) -> AiDefenseRou
         recommended_actions: serde_json::from_str(&profile.recommended_actions_json)
             .unwrap_or_default(),
         avoid_actions: serde_json::from_str(&profile.avoid_actions_json).unwrap_or_default(),
-        confidence: profile.confidence,
+        evidence: serde_json::from_str(&profile.evidence_json)
+            .unwrap_or_else(|_| serde_json::json!({})),
+        raw_confidence,
+        staleness_secs,
+        confidence,
         source: profile.source,
         status: profile.status,
         rationale: profile.rationale,
     }
+}
+
+fn route_profile_effective_confidence(profile: &AiRouteProfileEntry) -> (i64, Option<u64>) {
+    let Some(last_observed_at) = profile.last_observed_at else {
+        return (profile.confidence, None);
+    };
+    let staleness_secs = unix_timestamp().saturating_sub(last_observed_at).max(0) as u64;
+    let grace_days = if profile.reviewed_at.is_some() {
+        30
+    } else {
+        14
+    };
+    let stale_days = staleness_secs / 86_400;
+    let penalty = stale_days
+        .saturating_sub(grace_days)
+        .saturating_mul(2)
+        .min(30) as i64;
+    (
+        profile.confidence.saturating_sub(penalty).clamp(0, 100),
+        Some(staleness_secs),
+    )
 }
 
 fn ai_defense_decision_allowed(decision: &AiDefenseDecision, min_confidence: u32) -> bool {

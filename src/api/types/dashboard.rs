@@ -329,6 +329,7 @@ pub struct AiRouteProfileResponse {
     pub(crate) normal_traffic_pattern: String,
     pub(crate) recommended_actions: Vec<String>,
     pub(crate) avoid_actions: Vec<String>,
+    pub(crate) evidence: serde_json::Value,
     pub(crate) confidence: i64,
     pub(crate) source: String,
     pub(crate) status: String,
@@ -354,6 +355,8 @@ pub struct AiRouteProfileUpsertRequest {
     pub(crate) recommended_actions: Vec<String>,
     #[serde(default)]
     pub(crate) avoid_actions: Vec<String>,
+    #[serde(default)]
+    pub(crate) evidence: serde_json::Value,
     #[serde(default)]
     pub(crate) confidence: i64,
     #[serde(default = "default_ai_route_profile_source")]

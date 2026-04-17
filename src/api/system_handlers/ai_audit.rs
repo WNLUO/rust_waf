@@ -384,6 +384,8 @@ fn ai_route_profile_upsert_from_request(
         ),
         recommended_actions: normalize_route_profile_actions(payload.recommended_actions),
         avoid_actions: normalize_route_profile_actions(payload.avoid_actions),
+        evidence_json: serde_json::to_string(&payload.evidence)
+            .unwrap_or_else(|_| "{}".to_string()),
         confidence: payload.confidence.clamp(0, 100),
         source: compact_route_profile_value(payload.source, "ai_observed"),
         status,
@@ -409,6 +411,8 @@ fn ai_route_profile_response(value: crate::storage::AiRouteProfileEntry) -> AiRo
         recommended_actions: serde_json::from_str(&value.recommended_actions_json)
             .unwrap_or_default(),
         avoid_actions: serde_json::from_str(&value.avoid_actions_json).unwrap_or_default(),
+        evidence: serde_json::from_str(&value.evidence_json)
+            .unwrap_or_else(|_| serde_json::json!({})),
         confidence: value.confidence,
         source: value.source,
         status: value.status,

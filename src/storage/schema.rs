@@ -215,6 +215,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             normal_traffic_pattern TEXT NOT NULL DEFAULT 'unknown',
             recommended_actions_json TEXT NOT NULL DEFAULT '[]',
             avoid_actions_json TEXT NOT NULL DEFAULT '[]',
+            evidence_json TEXT NOT NULL DEFAULT '{}',
             confidence INTEGER NOT NULL DEFAULT 0,
             source TEXT NOT NULL DEFAULT 'ai_observed',
             status TEXT NOT NULL DEFAULT 'candidate',
@@ -496,6 +497,7 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
         "ALTER TABLE action_idea_overrides ADD COLUMN content_type TEXT",
         "ALTER TABLE action_idea_overrides ADD COLUMN body_file_path TEXT",
         "ALTER TABLE action_idea_overrides ADD COLUMN uploaded_file_name TEXT",
+        "ALTER TABLE ai_route_profiles ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
     ] {
         if let Err(err) = sqlx::query(statement).execute(pool).await {
             if !err.to_string().contains("duplicate column name") {

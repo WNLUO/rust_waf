@@ -6,15 +6,20 @@ impl SqliteStore {
         let now = unix_timestamp();
         let recommended_actions_json = serde_json::to_string(&profile.recommended_actions)?;
         let avoid_actions_json = serde_json::to_string(&profile.avoid_actions)?;
+        let evidence_json = if profile.evidence_json.trim().is_empty() {
+            "{}"
+        } else {
+            profile.evidence_json.trim()
+        };
         let result = sqlx::query(
             r#"
             INSERT INTO ai_route_profiles (
                 created_at, updated_at, last_observed_at, site_id, route_pattern, match_mode,
                 route_type, sensitivity, auth_required, normal_traffic_pattern,
-                recommended_actions_json, avoid_actions_json, confidence, source, status,
-                rationale, reviewed_at
+                recommended_actions_json, avoid_actions_json, evidence_json, confidence, source,
+                status, rationale, reviewed_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(site_id, route_pattern, match_mode) DO UPDATE SET
                 updated_at = excluded.updated_at,
                 last_observed_at = COALESCE(excluded.last_observed_at, ai_route_profiles.last_observed_at),
@@ -24,6 +29,7 @@ impl SqliteStore {
                 normal_traffic_pattern = excluded.normal_traffic_pattern,
                 recommended_actions_json = excluded.recommended_actions_json,
                 avoid_actions_json = excluded.avoid_actions_json,
+                evidence_json = excluded.evidence_json,
                 confidence = excluded.confidence,
                 source = excluded.source,
                 status = excluded.status,
@@ -43,6 +49,7 @@ impl SqliteStore {
         .bind(&profile.normal_traffic_pattern)
         .bind(recommended_actions_json)
         .bind(avoid_actions_json)
+        .bind(evidence_json)
         .bind(profile.confidence)
         .bind(&profile.source)
         .bind(&profile.status)
@@ -64,8 +71,8 @@ impl SqliteStore {
             r#"
             SELECT id, created_at, updated_at, last_observed_at, site_id, route_pattern, match_mode,
                    route_type, sensitivity, auth_required, normal_traffic_pattern,
-                   recommended_actions_json, avoid_actions_json, confidence, source, status,
-                   rationale, reviewed_at
+                   recommended_actions_json, avoid_actions_json, evidence_json, confidence, source,
+                   status, rationale, reviewed_at
             FROM ai_route_profiles
             WHERE 1=1
             "#,
@@ -113,8 +120,8 @@ impl SqliteStore {
             r#"
             SELECT id, created_at, updated_at, last_observed_at, site_id, route_pattern, match_mode,
                    route_type, sensitivity, auth_required, normal_traffic_pattern,
-                   recommended_actions_json, avoid_actions_json, confidence, source, status,
-                   rationale, reviewed_at
+                   recommended_actions_json, avoid_actions_json, evidence_json, confidence, source,
+                   status, rationale, reviewed_at
             FROM ai_route_profiles
             WHERE id = ?
             "#,

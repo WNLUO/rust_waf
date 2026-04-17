@@ -227,6 +227,11 @@ async fn test_ai_route_profile_refreshes_into_auto_defense_snapshot() {
                 "tighten_route_cc".to_string(),
             ],
             avoid_actions: vec!["add_temp_block".to_string()],
+            evidence_json: serde_json::json!({
+                "source": "test",
+                "reason": "login semantics"
+            })
+            .to_string(),
             confidence: 88,
             source: "ai_observed".to_string(),
             status: "active".to_string(),
@@ -289,6 +294,7 @@ async fn test_ai_route_profile_status_controls_runtime_cache() {
             normal_traffic_pattern: "interactive".to_string(),
             recommended_actions: vec!["tighten_route_cc".to_string()],
             avoid_actions: Vec::new(),
+            evidence_json: "{}".to_string(),
             confidence: 88,
             source: "ai_observed".to_string(),
             status: "candidate".to_string(),
@@ -375,6 +381,87 @@ async fn test_ai_auto_defense_generates_route_profile_candidate() {
     assert_eq!(profile.route_type, "authentication");
     assert_eq!(profile.status, "candidate");
     assert_eq!(profile.source, "local_ai_observed");
+    let evidence: serde_json::Value = serde_json::from_str(&profile.evidence_json).unwrap();
+    assert_eq!(evidence["learning_mode"], "observed_candidate");
+    assert_eq!(evidence["route_pressure"]["total_events"], 5);
+    assert_eq!(evidence["identity"]["distinct_client_count"], 5);
+}
+
+#[tokio::test]
+async fn test_ai_auto_defense_can_relearn_rejected_route_profile() {
+    let db_path = unique_test_db_path("ai_route_profile_relearn");
+    let config = Config {
+        interface: "lo0".to_string(),
+        listen_addrs: vec!["127.0.0.1:0".to_string()],
+        tcp_upstream_addr: None,
+        udp_upstream_addr: None,
+        runtime_profile: RuntimeProfile::Standard,
+        api_enabled: false,
+        api_bind: "127.0.0.1:3740".to_string(),
+        bloom_enabled: false,
+        l4_bloom_false_positive_verification: false,
+        l7_bloom_false_positive_verification: false,
+        maintenance_interval_secs: 30,
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        sqlite_rules_enabled: false,
+        max_concurrent_tasks: 128,
+        ..Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+    let store = context.sqlite_store.as_ref().unwrap();
+    store
+        .upsert_ai_route_profile(&crate::storage::AiRouteProfileUpsert {
+            site_id: "site-a".to_string(),
+            route_pattern: "/api/login".to_string(),
+            match_mode: "exact".to_string(),
+            route_type: "unknown".to_string(),
+            sensitivity: "unknown".to_string(),
+            auth_required: "unknown".to_string(),
+            normal_traffic_pattern: "unknown".to_string(),
+            recommended_actions: Vec::new(),
+            avoid_actions: Vec::new(),
+            evidence_json: "{}".to_string(),
+            confidence: 20,
+            source: "ai_observed".to_string(),
+            status: "rejected".to_string(),
+            rationale: "old rejected candidate".to_string(),
+            last_observed_at: Some(unix_timestamp()),
+            reviewed_at: Some(unix_timestamp()),
+        })
+        .await
+        .unwrap();
+
+    let result = InspectionResult::drop(InspectionLayer::L7, "route pressure");
+    for idx in 0..5 {
+        let mut request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/login".to_string(),
+        );
+        request.set_client_ip(format!("203.0.113.{}", idx + 40));
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        context.note_site_defense_signal(&request, &result);
+    }
+
+    let now = unix_timestamp();
+    let trigger_reason = context.consume_ai_auto_defense_trigger(now);
+    context
+        .run_ai_auto_defense(now, trigger_reason)
+        .await
+        .unwrap();
+
+    let profiles = store
+        .list_ai_route_profiles(Some("site-a"), Some("candidate"), 20)
+        .await
+        .unwrap();
+
+    assert_eq!(profiles.len(), 1);
+    let profile = &profiles[0];
+    assert_eq!(profile.source, "local_ai_relearned");
+    let evidence: serde_json::Value = serde_json::from_str(&profile.evidence_json).unwrap();
+    assert_eq!(evidence["learning_mode"], "relearn_after_rejected");
 }
 
 fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {

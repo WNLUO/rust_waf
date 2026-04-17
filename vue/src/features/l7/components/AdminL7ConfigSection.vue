@@ -7,6 +7,9 @@ import L7SafelineInterceptPanel from '@/features/l7/components/L7SafelineInterce
 import L7Http3Panel from '@/features/l7/components/L7Http3Panel.vue'
 import L7SlowAttackPanel from '@/features/l7/components/L7SlowAttackPanel.vue'
 import L7CcDefensePanel from '@/features/l7/components/L7CcDefensePanel.vue'
+import L7AutoTuningPanel from '@/features/l7/components/L7AutoTuningPanel.vue'
+import L7RuntimeLimitsPanel from '@/features/l7/components/L7RuntimeLimitsPanel.vue'
+import L7HttpConfigPanel from '@/features/l7/components/L7HttpConfigPanel.vue'
 
 const props = defineProps<{
   form: L7ConfigForm
@@ -195,6 +198,81 @@ const ccDefenseControls = {
   ccHardIpBlockMultiplier,
   ccHardHotPathBlockMultiplier,
 }
+
+const autoTuningControls = {
+  autoTuningMode,
+  autoTuningIntent,
+  autoRuntimeAdjustEnabled,
+  autoBootstrapSecs,
+  autoControlIntervalSecs,
+  autoCooldownSecs,
+  autoMaxStepPercent,
+  autoRollbackWindowMinutes,
+  autoTlsHandshakeTimeoutRatePercent,
+  autoBucketRejectRatePercent,
+  autoP95ProxyLatencyMs,
+  autoPinnedFieldsText,
+  autoEffectEvaluation,
+  hotspotView,
+  autoRiskLeaderboard,
+  autoRiskByHost,
+  autoRiskByRoute,
+  hotspotHeatmapCards,
+  autoEffectStatusLabel,
+  autoEffectStatusClass,
+}
+
+const autoTuningHelpers = {
+  formatSignedNumber,
+  formatSignedInteger,
+  segmentLabel,
+  segmentStatusLabel,
+  adjustReasonLabel,
+  riskSeverityClass,
+  hostRiskSeverityClass,
+  hotspotViewButtonClass,
+}
+
+const runtimeLimitControls = {
+  maxRequestSize,
+  firstByteTimeout,
+  readIdleTimeout,
+  tlsHandshakeTimeout,
+  proxyConnectTimeout,
+  proxyWriteTimeout,
+  proxyReadTimeout,
+  bloomFilterScale,
+  healthcheckInterval,
+  healthcheckTimeout,
+  http2MaxStreams,
+  http2MaxFrameSize,
+  http2InitialWindowSize,
+}
+
+const httpConfigControls = {
+  http10Enabled,
+  http10Saving,
+  http2Enabled,
+  bloomEnabled,
+  bloomVerifyEnabled,
+  healthcheckEnabled,
+  http3Enabled,
+  http2EnablePriorities,
+  runtimeProfile,
+  failureMode,
+  upstreamProtocolPolicy,
+  upstreamHttp1StrictMode,
+  upstreamHttp1AllowConnectionReuse,
+  rejectAmbiguousHttp1Requests,
+  rejectHttp1TransferEncodingRequests,
+  rejectBodyOnSafeHttpMethods,
+  rejectExpect100Continue,
+  handleHttp10Toggle,
+}
+
+function updateDropUnmatchedRequests(value: boolean) {
+  emit('update:dropUnmatchedRequests', value)
+}
 </script>
 
 <template>
@@ -215,591 +293,31 @@ const ccDefenseControls = {
       当前展示的是 L7 独立运行项。CC
       防护阈值与自动调优细项已交由自动化接管，并收纳到兼容层入口。
     </div>
-    <div
-      class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-    >
-      <div>
-        <p class="text-sm tracking-wider text-blue-700">
-          HTTP 配置（独立运行项）
-        </p>
-      </div>
-    </div>
-
-    <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>启用 HTTP/1.0</span>
-        <input
-          :checked="http10Enabled"
-          :disabled="http10Saving"
-          type="checkbox"
-          class="ui-switch"
-          @change="
-            handleHttp10Toggle(($event.target as HTMLInputElement).checked)
-          "
-        />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>启用 HTTP/2</span>
-        <input v-model="http2Enabled" type="checkbox" class="ui-switch" />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>未命中站点时直接断开连接</span>
-        <input
-          :checked="dropUnmatchedRequests"
-          :disabled="dropUnmatchedRequestsDisabled"
-          type="checkbox"
-          class="ui-switch"
-          @change="
-            emit(
-              'update:dropUnmatchedRequests',
-              ($event.target as HTMLInputElement).checked,
-            )
-          "
-        />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>启用 Bloom</span>
-        <input v-model="bloomEnabled" type="checkbox" class="ui-switch" />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>启用上游健康检查</span>
-        <input v-model="healthcheckEnabled" type="checkbox" class="ui-switch" />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>启用 Bloom 误判校验</span>
-        <input
-          v-model="bloomVerifyEnabled"
-          :disabled="!form.bloom_enabled"
-          type="checkbox"
-          class="ui-switch"
-        />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>启用 HTTP/3</span>
-        <input v-model="http3Enabled" type="checkbox" class="ui-switch" />
-      </label>
-      <label
-        class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-      >
-        <span>允许使用优先级信息处理 HTTP/2 请求</span>
-        <input
-          v-model="http2EnablePriorities"
-          type="checkbox"
-          class="ui-switch"
-        />
-      </label>
-    </div>
-
-    <div
-      v-if="!hideAdaptiveManagedSections"
-      class="mt-4 border-t border-slate-200 pt-4"
-    >
-      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <label class="text-sm text-stone-700">
-          运行档位
-          <select
-            v-model="runtimeProfile"
-            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-          >
-            <option value="minimal">精简模式</option>
-            <option value="standard">标准模式</option>
-          </select>
-        </label>
-        <label class="text-sm text-stone-700">
-          上游失败模式
-          <select
-            v-model="failureMode"
-            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-          >
-            <option value="fail_open">故障放行</option>
-            <option value="fail_close">故障关闭</option>
-          </select>
-        </label>
-        <label class="text-sm text-stone-700">
-          上游协议策略
-          <select
-            v-model="upstreamProtocolPolicy"
-            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-          >
-            <option value="http2_preferred">优先 HTTP/2</option>
-            <option value="http2_only">仅 HTTP/2</option>
-            <option value="auto">自动选择</option>
-            <option value="http1_only">仅 HTTP/1.1</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>启用上游 HTTP/1 严格模式</span>
-          <input
-            v-model="upstreamHttp1StrictMode"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>允许上游 HTTP/1 连接复用</span>
-          <input
-            v-model="upstreamHttp1AllowConnectionReuse"
-            :disabled="form.upstream_http1_strict_mode"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>拒绝歧义 HTTP/1 请求</span>
-          <input
-            v-model="rejectAmbiguousHttp1Requests"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>拒绝请求 Transfer-Encoding</span>
-          <input
-            v-model="rejectHttp1TransferEncodingRequests"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>拒绝 GET/HEAD/OPTIONS 携带 body</span>
-          <input
-            v-model="rejectBodyOnSafeHttpMethods"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>拒绝 Expect: 100-continue</span>
-          <input
-            v-model="rejectExpect100Continue"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-      </div>
-    </div>
+    <L7HttpConfigPanel
+      :controls="httpConfigControls"
+      :drop-unmatched-requests="dropUnmatchedRequests"
+      :drop-unmatched-requests-disabled="dropUnmatchedRequestsDisabled"
+      :hide-adaptive-managed-sections="hideAdaptiveManagedSections"
+      :update-drop-unmatched-requests="updateDropUnmatchedRequests"
+    />
 
     <L7SlowAttackPanel
       :controls="slowAttackControls"
       :number-input-class="numberInputClass"
     />
 
-    <div class="mt-4 border-t border-slate-200 pt-4">
-      <div
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <p class="text-sm tracking-wider text-blue-700">
-            自动调优（自动化接管项）
-          </p>
-        </div>
-        <label
-          class="inline-flex items-center justify-start gap-3 text-sm text-stone-800"
-        >
-          <span>运行时微调</span>
-          <input
-            v-model="autoRuntimeAdjustEnabled"
-            :disabled="autoTuningMode !== 'active'"
-            type="checkbox"
-            class="ui-switch"
-          />
-        </label>
-      </div>
+    <L7AutoTuningPanel
+      :controls="autoTuningControls"
+      :runtime="autoTuningRuntime ?? null"
+      :helpers="autoTuningHelpers"
+      :number-input-class="numberInputClass"
+      :list-field-class="listFieldClass"
+    />
 
-      <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <label class="text-sm text-stone-700">
-          调优模式
-          <select
-            v-model="autoTuningMode"
-            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-          >
-            <option value="off">关闭</option>
-            <option value="observe">观察模式</option>
-            <option value="active">主动模式</option>
-          </select>
-        </label>
-        <label class="text-sm text-stone-700">
-          防护强度
-          <select
-            v-model="autoTuningIntent"
-            class="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-blue-500"
-          >
-            <option value="conservative">保守</option>
-            <option value="balanced">均衡</option>
-            <option value="aggressive">激进</option>
-          </select>
-        </label>
-        <label class="text-sm text-stone-700">
-          启动探测窗口(s)
-          <input
-            v-model.number="autoBootstrapSecs"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          控制周期(s)
-          <input
-            v-model.number="autoControlIntervalSecs"
-            type="number"
-            min="10"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          冷却时间(s)
-          <input
-            v-model.number="autoCooldownSecs"
-            type="number"
-            min="30"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          单步最大调整(%)
-          <input
-            v-model.number="autoMaxStepPercent"
-            type="number"
-            min="1"
-            max="25"
-            :class="numberInputClass"
-          />
-        </label>
-        <label class="text-sm text-stone-700">
-          回滚窗口(分钟)
-          <input
-            v-model.number="autoRollbackWindowMinutes"
-            type="number"
-            min="5"
-            :class="numberInputClass"
-          />
-        </label>
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700"
-          >握手超时率目标(%)<input
-            v-model.number="autoTlsHandshakeTimeoutRatePercent"
-            type="number"
-            min="0.1"
-            step="0.1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >预算误拒绝率目标(%)<input
-            v-model.number="autoBucketRejectRatePercent"
-            type="number"
-            min="0.1"
-            step="0.1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >P95 代理延迟目标(ms)<input
-            v-model.number="autoP95ProxyLatencyMs"
-            type="number"
-            min="50"
-            :class="numberInputClass"
-        /></label>
-      </div>
-
-      <label class="mt-4 block text-sm text-stone-700">
-        锁定字段 (一行一个，锁定后不受自动调优影响)
-        <textarea
-          v-model="autoPinnedFieldsText"
-          :class="listFieldClass"
-          placeholder="例如：l7_config.tls_handshake_timeout_ms"
-        />
-      </label>
-
-      <div
-        v-if="autoTuningRuntime"
-        class="mt-3 rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-stone-600"
-      >
-        <p>
-          当前状态: {{ autoTuningRuntime.controller_state }} | CPU:
-          {{ autoTuningRuntime.detected_cpu_cores }} | 内存上限(MB):
-          {{ autoTuningRuntime.detected_memory_limit_mb ?? 'unknown' }}
-        </p>
-        <p class="mt-1">
-          观测值: 握手超时率
-          {{
-            autoTuningRuntime.last_observed_tls_handshake_timeout_rate_percent.toFixed(
-              2,
-            )
-          }}% / 预算拒绝率
-          {{
-            autoTuningRuntime.last_observed_bucket_reject_rate_percent.toFixed(
-              2,
-            )
-          }}% / 平均代理延迟
-          {{ autoTuningRuntime.last_observed_avg_proxy_latency_ms }}ms
-        </p>
-        <p class="mt-1">
-          最近动作:
-          {{ adjustReasonLabel(autoTuningRuntime.last_adjust_reason) }} | 24h
-          回滚: {{ autoTuningRuntime.rollback_count_24h }}
-        </p>
-        <p v-if="autoTuningRuntime.last_adjust_diff.length" class="mt-1">
-          动作说明:
-          {{ autoTuningRuntime.last_adjust_diff.join(' | ') }}
-        </p>
-        <template v-if="autoEffectEvaluation">
-          <p class="mt-1">
-            最近效果:
-            <span :class="autoEffectStatusClass">{{
-              autoEffectStatusLabel
-            }}</span>
-            | 样本 {{ autoEffectEvaluation.sample_requests }}
-            <span v-if="autoEffectEvaluation.observed_at !== null">
-              | 评估时间
-              {{
-                new Date(
-                  autoEffectEvaluation.observed_at * 1000,
-                ).toLocaleString()
-              }}
-            </span>
-          </p>
-          <p class="mt-1">
-            变化: 握手超时率
-            {{
-              formatSignedNumber(
-                autoEffectEvaluation.handshake_timeout_rate_delta_percent,
-              )
-            }}pp / 预算拒绝率
-            {{
-              formatSignedNumber(
-                autoEffectEvaluation.bucket_reject_rate_delta_percent,
-              )
-            }}pp / 平均代理延迟
-            {{
-              formatSignedInteger(
-                autoEffectEvaluation.avg_proxy_latency_delta_ms,
-              )
-            }}ms
-          </p>
-          <p class="mt-1">说明: {{ autoEffectEvaluation.summary }}</p>
-          <p v-if="autoEffectEvaluation.segments.length" class="mt-1">
-            分层观测:
-            {{
-              autoEffectEvaluation.segments
-                .map(
-                  (segment) =>
-                    `${segmentLabel(segment)} ${segmentStatusLabel(segment.status)} (${segment.sample_requests} req / ${formatSignedInteger(segment.avg_proxy_latency_delta_ms)}ms / ${formatSignedNumber(segment.failure_rate_delta_percent)}pp)`,
-                )
-                .join(' | ')
-            }}
-          </p>
-          <div
-            v-if="autoRiskLeaderboard.length"
-            class="mt-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3"
-          >
-            <p class="text-xs font-semibold tracking-wider text-slate-600">
-              业务风险榜单
-            </p>
-            <div class="mt-2 space-y-2">
-              <div
-                v-for="segment in autoRiskLeaderboard"
-                :key="`${segment.scope_type}-${segment.scope_key}`"
-                class="rounded-lg border px-3 py-2"
-                :class="riskSeverityClass(segment.status)"
-              >
-                <p class="text-xs font-semibold">
-                  {{ segmentLabel(segment) }}
-                </p>
-                <p class="mt-1 text-[11px] leading-5">
-                  {{ segmentStatusLabel(segment.status) }} | 样本
-                  {{ segment.sample_requests }} | 延迟
-                  {{
-                    formatSignedInteger(segment.avg_proxy_latency_delta_ms)
-                  }}ms | 失败率
-                  {{ formatSignedNumber(segment.failure_rate_delta_percent) }}pp
-                </p>
-              </div>
-            </div>
-          </div>
-          <div
-            v-if="autoRiskByHost.length || autoRiskByRoute.length"
-            class="mt-3 rounded-lg border border-slate-200 bg-white/75 p-3"
-          >
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <p class="text-xs font-semibold tracking-wider text-slate-600">
-                热点图视图
-              </p>
-              <div class="flex items-center gap-2">
-                <button
-                  type="button"
-                  class="rounded-full border px-3 py-1 text-[11px] font-semibold transition"
-                  :class="hotspotViewButtonClass('host')"
-                  @click="hotspotView = 'host'"
-                >
-                  Host
-                </button>
-                <button
-                  type="button"
-                  class="rounded-full border px-3 py-1 text-[11px] font-semibold transition"
-                  :class="hotspotViewButtonClass('route')"
-                  @click="hotspotView = 'route'"
-                >
-                  Route
-                </button>
-              </div>
-            </div>
-            <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              <div
-                v-for="item in hotspotHeatmapCards"
-                :key="'host' in item ? item.host : item.route"
-                class="rounded-xl border px-3 py-3 shadow-sm transition"
-                :class="hostRiskSeverityClass(item)"
-              >
-                <p class="text-xs font-semibold">
-                  {{ 'host' in item ? item.host : item.route }}
-                </p>
-                <p class="mt-1 text-[11px] leading-5">
-                  风险段 {{ item.regressed_count + item.stable_count }} | 样本
-                  {{ item.sample_requests }}
-                </p>
-                <p class="mt-1 text-[11px] leading-5">
-                  热度 {{ formatSignedInteger(item.max_latency_delta_ms) }}ms /
-                  {{
-                    formatSignedNumber(item.max_failure_rate_delta_percent)
-                  }}pp
-                </p>
-                <p class="mt-2 text-[11px] leading-5 opacity-80">
-                  主要热点: {{ item.top_label }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-
-    <div class="mt-4 border-t border-slate-200 pt-4">
-      <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-        <label class="l7-inline-field text-sm text-stone-700"
-          >最大请求体大小<input
-            v-model.number="maxRequestSize"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >首字节超时(ms)<input
-            v-model.number="firstByteTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >空闲读取超时(ms)<input
-            v-model.number="readIdleTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >TLS 握手超时(ms)<input
-            v-model.number="tlsHandshakeTimeout"
-            type="number"
-            min="500"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >代理连接超时(ms)<input
-            v-model.number="proxyConnectTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >代理写超时(ms)<input
-            v-model.number="proxyWriteTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >代理读超时(ms)<input
-            v-model.number="proxyReadTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >Bloom 缩放系数<input
-            v-model.number="bloomFilterScale"
-            type="number"
-            min="0.1"
-            step="0.1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >健康检查间隔(s)<input
-            v-model.number="healthcheckInterval"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >健康检查超时(ms)<input
-            v-model.number="healthcheckTimeout"
-            type="number"
-            min="100"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >HTTP/2 最大并发流<input
-            v-model.number="http2MaxStreams"
-            type="number"
-            min="1"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700"
-          >HTTP/2 最大帧<input
-            v-model.number="http2MaxFrameSize"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-        <label class="l7-inline-field text-sm text-stone-700 md:col-span-2"
-          >HTTP/2 初始窗口<input
-            v-model.number="http2InitialWindowSize"
-            type="number"
-            min="1024"
-            :class="numberInputClass"
-        /></label>
-      </div>
-    </div>
+    <L7RuntimeLimitsPanel
+      :controls="runtimeLimitControls"
+      :number-input-class="numberInputClass"
+    />
 
     <L7CcDefensePanel
       v-if="!hideAdaptiveManagedSections"

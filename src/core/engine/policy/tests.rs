@@ -54,6 +54,34 @@ async fn apply_response_policies_replaces_existing_hsts_header() {
 }
 
 #[tokio::test]
+async fn l7_bloom_filter_blocks_known_suspicious_method() {
+    let mut config = crate::config::Config {
+        l7_bloom_false_positive_verification: false,
+        ..crate::config::Config::default()
+    };
+    config.sqlite_enabled = false;
+    let context = WafContext::new(config).await.unwrap();
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "TRACE".to_string(), "/".to_string());
+
+    let result = inspect_l7_bloom_filter(&context, &mut request, false)
+        .expect("TRACE should match the default L7 bloom method set");
+
+    assert!(result.blocked);
+    assert_eq!(result.layer, InspectionLayer::L7);
+    assert_eq!(
+        request
+            .get_metadata("l7.bloom.category")
+            .map(String::as_str),
+        Some("method")
+    );
+    assert_eq!(
+        request.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("l7_bloom_filter")
+    );
+}
+
+#[tokio::test]
 async fn apply_client_identity_preserves_custom_source_ip_header_for_proxy() {
     let mut config = crate::config::Config::default();
     config.l4_config.trusted_cdn.manual_cidrs = vec!["203.0.113.0/24".to_string()];

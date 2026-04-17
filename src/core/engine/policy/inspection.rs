@@ -15,6 +15,76 @@ pub(crate) fn inspect_application_layers(
     InspectionResult::allow(InspectionLayer::L7)
 }
 
+pub(crate) fn inspect_l7_bloom_filter(
+    context: &WafContext,
+    request: &mut UnifiedHttpRequest,
+    include_body: bool,
+) -> Option<InspectionResult> {
+    let bloom = context.l7_bloom_filter()?;
+    if !bloom.is_enabled() {
+        return None;
+    }
+
+    let mut matched = None::<(&'static str, String)>;
+    if bloom.check_http_method(&request.method) {
+        matched = Some(("method", request.method.clone()));
+    } else if bloom.check_url(&request.uri) {
+        matched = Some(("url", request.uri.clone()));
+    } else if let Some(user_agent) = request.get_header("user-agent") {
+        if bloom.check_user_agent(user_agent) {
+            matched = Some(("user_agent", summarize_bloom_value(user_agent)));
+        }
+    }
+
+    if matched.is_none() {
+        if let Some(cookie) = request.get_header("cookie") {
+            if bloom.check_cookie(cookie) {
+                matched = Some(("cookie", "[redacted]".to_string()));
+            }
+        }
+    }
+
+    if matched.is_none() {
+        let headers = request
+            .headers
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>();
+        if bloom.check_headers(&headers) {
+            matched = Some(("headers", "header_signature".to_string()));
+        }
+    }
+
+    if matched.is_none() && include_body && !request.body.is_empty() {
+        let payload = String::from_utf8_lossy(&request.body);
+        if bloom.check_payload(payload.as_ref()) {
+            matched = Some(("payload", summarize_bloom_value(payload.as_ref())));
+        }
+    }
+
+    let (category, value) = matched?;
+    request.add_metadata("l7.bloom.action".to_string(), "drop".to_string());
+    request.add_metadata("l7.bloom.category".to_string(), category.to_string());
+    request.add_metadata("l7.bloom.matched".to_string(), value.clone());
+    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+    request.add_metadata("l7.drop_reason".to_string(), "l7_bloom_filter".to_string());
+    request.add_metadata("l4.force_close".to_string(), "true".to_string());
+
+    Some(InspectionResult::drop(
+        InspectionLayer::L7,
+        format!("l7 bloom filter matched {category}: {value}"),
+    ))
+}
+
+fn summarize_bloom_value(value: &str) -> String {
+    let normalized = value.trim().replace('\n', " ").replace('\r', " ");
+    if normalized.len() <= 160 {
+        normalized
+    } else {
+        format!("{}...", &normalized[..160])
+    }
+}
+
 fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> InspectionResult {
     let rule_engine_guard = context
         .rule_engine
@@ -184,7 +254,7 @@ pub(crate) fn persist_http_inspection_event(
     if should_aggregate_runtime_event(request, result) {
         store.enqueue_security_event_aggregated(event, "runtime_budget");
     } else {
-        event.details_json = build_request_identity_details(context, request, packet);
+        event.details_json = build_request_identity_details(context, request, packet, Some(result));
         store.enqueue_security_event(event);
     }
 
@@ -289,7 +359,7 @@ pub(crate) fn persist_safeline_intercept_event(
     {
         store.enqueue_security_event_aggregated(event, "runtime_budget_safeline");
     } else {
-        event.details_json = build_request_identity_details(context, request, packet);
+        event.details_json = build_request_identity_details(context, request, packet, None);
         store.enqueue_security_event(event);
     }
 }
@@ -413,18 +483,20 @@ fn build_request_identity_details(
     context: &WafContext,
     request: &UnifiedHttpRequest,
     packet: &PacketInfo,
+    result: Option<&InspectionResult>,
 ) -> Option<String> {
     let configured_header = context
         .config_snapshot()
         .gateway_config
         .custom_source_ip_header;
-    build_request_identity_details_with_header(&configured_header, request, packet)
+    build_request_identity_details_with_header(&configured_header, request, packet, result)
 }
 
 fn build_request_identity_details_with_header(
     configured_header: &str,
     request: &UnifiedHttpRequest,
     packet: &PacketInfo,
+    result: Option<&InspectionResult>,
 ) -> Option<String> {
     let client_ip = request
         .client_ip
@@ -483,6 +555,24 @@ fn build_request_identity_details_with_header(
             "session_span_secs": request.get_metadata("l7.behavior.session_span_secs").cloned(),
             "flags": request.get_metadata("l7.behavior.flags").cloned(),
         },
+        "l7_bloom": {
+            "action": request.get_metadata("l7.bloom.action").cloned(),
+            "category": request.get_metadata("l7.bloom.category").cloned(),
+            "matched": request.get_metadata("l7.bloom.matched").cloned(),
+        },
+        "ai_temp_policy": {
+            "action": request.get_metadata("ai.policy.action").cloned(),
+            "matched_count": request.get_metadata("ai.policy.matched_count").cloned(),
+            "matched_ids": request.get_metadata("ai.policy.matched_ids").cloned(),
+            "matched_actions": request.get_metadata("ai.policy.matched_actions").cloned(),
+            "temp_block_duration_secs": request.get_metadata("ai.temp_block_duration_secs").cloned(),
+            "cc_route_threshold_scale_percent": request.get_metadata("ai.cc.route_threshold_scale_percent").cloned(),
+            "cc_host_threshold_scale_percent": request.get_metadata("ai.cc.host_threshold_scale_percent").cloned(),
+            "cc_extra_delay_ms": request.get_metadata("ai.cc.extra_delay_ms").cloned(),
+            "cc_force_challenge": request.get_metadata("ai.cc.force_challenge").cloned(),
+            "behavior_score_boost": request.get_metadata("ai.behavior.score_boost").cloned(),
+            "behavior_force_watch": request.get_metadata("ai.behavior.force_watch").cloned(),
+        },
         "l4_runtime": {
             "identity_state": request.get_metadata("l4.identity_state").cloned(),
             "bucket_risk": request.get_metadata("l4.bucket_risk").cloned(),
@@ -492,6 +582,12 @@ fn build_request_identity_details_with_header(
             "suggested_delay_ms": request.get_metadata("l4.suggested_delay_ms").cloned(),
         },
         "inspection_runtime": {
+            "decision_action": result.map(InspectionResult::event_action),
+            "decision_layer": result.map(|result| match &result.layer { InspectionLayer::L4 => "L4", InspectionLayer::L7 => "L7" }),
+            "decision_persist_blocked_ip": result.map(|result| result.persist_blocked_ip),
+            "decision_reason": result.map(|result| result.reason.clone()),
+            "enforcement": request.get_metadata("l7.enforcement").cloned(),
+            "drop_reason": request.get_metadata("l7.drop_reason").cloned(),
             "rule_inspection_mode": request.get_metadata("l7.rule_inspection_mode").cloned(),
             "cc_identity_state": request.get_metadata("l7.cc.identity_state").cloned(),
             "runtime_pressure_level": request.get_metadata("runtime.pressure.level").cloned(),

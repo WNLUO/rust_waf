@@ -194,6 +194,37 @@ pub(crate) async fn handle_http2_connection(
                         });
                     }
 
+                    if let Some(result) =
+                        inspect_l7_bloom_filter(context.as_ref(), &mut request, false)
+                    {
+                        if result.should_persist_event() {
+                            persist_http_inspection_event(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                        }
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(result.layer.clone());
+                        }
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
+                        if result_should_drop_http2(&result, &request) {
+                            return Err(drop_http2_result(&result.reason));
+                        }
+                        return Ok(Http2Response {
+                            status_code: 403,
+                            headers: vec![],
+                            body: body_for_request(&request, result.reason.as_bytes()),
+                        });
+                    }
+
                     let early_rule_payload = request.to_lightweight_inspection_string();
                     let early_inspection_result = inspect_application_layers(
                         context.as_ref(),
@@ -388,6 +419,37 @@ pub(crate) async fn handle_http2_connection(
                         Err(err) => return Err(err),
                     };
                     request.body = request_body.to_vec();
+
+                    if let Some(result) =
+                        inspect_l7_bloom_filter(context.as_ref(), &mut request, true)
+                    {
+                        if result.should_persist_event() {
+                            persist_http_inspection_event(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                        }
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            metrics.record_block(result.layer.clone());
+                        }
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.record_l7_feedback(
+                                &packet,
+                                &request,
+                                crate::l4::behavior::FeedbackSource::L7Block,
+                            );
+                        }
+                        if result_should_drop_http2(&result, &request) {
+                            return Err(drop_http2_result(&result.reason));
+                        }
+                        return Ok(Http2Response {
+                            status_code: 403,
+                            headers: vec![],
+                            body: body_for_request(&request, result.reason.as_bytes()),
+                        });
+                    }
 
                     if let Some(response) = try_handle_browser_fingerprint_report(
                         context.as_ref(),

@@ -66,11 +66,12 @@ mod runtime;
 use self::policy::{
     apply_client_identity, apply_gateway_site_metadata, apply_response_policies, body_for_request,
     enforce_upstream_policy, http_status_text, inspect_application_layers,
-    inspect_blocked_client_ip, inspect_transport_layers, persist_http_inspection_event,
-    persist_l4_inspection_event, persist_safeline_intercept_blocked_ip,
-    persist_safeline_intercept_event, prepare_request_for_proxy, prepare_request_for_routing,
-    redirect_to_https_location, resolve_gateway_site, resolve_safeline_intercept_config,
-    select_upstream_target, should_keep_client_connection_open, should_reject_unmatched_site,
+    inspect_blocked_client_ip, inspect_l7_bloom_filter, inspect_transport_layers,
+    persist_http_inspection_event, persist_l4_inspection_event,
+    persist_safeline_intercept_blocked_ip, persist_safeline_intercept_event,
+    prepare_request_for_proxy, prepare_request_for_routing, redirect_to_https_location,
+    resolve_gateway_site, resolve_safeline_intercept_config, select_upstream_target,
+    should_keep_client_connection_open, should_reject_unmatched_site,
     try_handle_browser_fingerprint_report,
 };
 use self::proxy::{

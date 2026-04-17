@@ -17,7 +17,9 @@ pub mod traffic_map;
 use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
-use crate::l7::{HttpTrafficProcessor, L7BehaviorGuard, L7CcGuard, SlowAttackGuard};
+use crate::l7::{
+    HttpTrafficProcessor, L7BehaviorGuard, L7BloomFilterManager, L7CcGuard, SlowAttackGuard,
+};
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::{AiTempPolicyEntry, SqliteStore};
@@ -65,6 +67,7 @@ pub struct WafContext {
     pub config: Config,
     runtime_config: Arc<RwLock<Config>>,
     l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
+    l7_bloom_filter: RwLock<Option<Arc<L7BloomFilterManager>>>,
     l7_cc_guard: RwLock<Arc<L7CcGuard>>,
     l7_behavior_guard: RwLock<Arc<L7BehaviorGuard>>,
     slow_attack_guard: RwLock<Arc<SlowAttackGuard>>,
@@ -134,6 +137,7 @@ impl WafContext {
             config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
         let bloom_enabled = config.bloom_enabled;
         let l4_bloom_verification = config.l4_bloom_false_positive_verification;
+        let l7_bloom_verification = config.l7_bloom_false_positive_verification;
         let metrics = if config.metrics_enabled {
             Some(MetricsCollector::new())
         } else {
@@ -173,6 +177,13 @@ impl WafContext {
                     effective_l4_config,
                     bloom_enabled,
                     l4_bloom_verification,
+                ))
+            })),
+            l7_bloom_filter: RwLock::new(bloom_enabled.then(|| {
+                Arc::new(L7BloomFilterManager::new(
+                    config.l7_config.clone(),
+                    bloom_enabled,
+                    l7_bloom_verification,
                 ))
             })),
             l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&effective_cc_defense))),
@@ -260,6 +271,7 @@ impl WafContext {
         self.l7_cc_guard().update_config(&effective_cc_defense);
         self.slow_attack_guard()
             .update_config(&self.config_snapshot().l7_config.slow_attack_defense);
+        self.refresh_l7_bloom_filter_from_config();
         self.refresh_l4_behavior_tuning_from_config();
         self.refresh_http3_runtime_metadata();
     }
@@ -338,6 +350,14 @@ impl WafContext {
 
     pub fn l4_runtime_enabled(&self) -> bool {
         self.l4_inspector().as_ref().map(|_| true).unwrap_or(false)
+    }
+
+    pub fn l7_bloom_filter(&self) -> Option<Arc<L7BloomFilterManager>> {
+        self.l7_bloom_filter
+            .read()
+            .expect("l7_bloom_filter lock poisoned")
+            .as_ref()
+            .cloned()
     }
 
     pub fn l7_cc_guard(&self) -> Arc<L7CcGuard> {

@@ -215,6 +215,30 @@ pub(crate) async fn handle_http1_connection(
             return Ok(());
         }
 
+        if let Some(result) = inspect_l7_bloom_filter(context.as_ref(), &mut request, false) {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+            }
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if result_should_drop_http1(&result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
+            }
+            http1_handler
+                .write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes())
+                .await?;
+            return Ok(());
+        }
+
         if matches!(request.version, HttpVersion::Http1_0) && !config.gateway_config.enable_http1_0
         {
             http1_handler
@@ -504,6 +528,30 @@ pub(crate) async fn handle_http1_connection(
                 return Ok(());
             }
             return Err(err.into());
+        }
+
+        if let Some(result) = inspect_l7_bloom_filter(context.as_ref(), &mut request, true) {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+            }
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    packet,
+                    &request,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if result_should_drop_http1(&result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
+            }
+            http1_handler
+                .write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes())
+                .await?;
+            return Ok(());
         }
 
         if let Some(response) = try_handle_browser_fingerprint_report(

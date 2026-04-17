@@ -201,6 +201,34 @@ async fn handle_http3_request(
         return Ok(());
     }
 
+    if let Some(result) = inspect_l7_bloom_filter(context.as_ref(), &mut unified, false) {
+        if result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+        }
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(result.layer.clone());
+        }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.record_l7_feedback(
+                &packet,
+                &unified,
+                crate::l4::behavior::FeedbackSource::L7Block,
+            );
+        }
+        if result_should_drop_http3(&result, &unified) {
+            return Ok(());
+        }
+        send_http3_response(
+            &mut stream,
+            403,
+            &[],
+            body_for_request(&unified, result.reason.as_bytes()),
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
+
     let early_rule_payload = unified.to_lightweight_inspection_string();
     let early_inspection_result =
         inspect_application_layers(context.as_ref(), &packet, &unified, &early_rule_payload);
@@ -375,6 +403,34 @@ async fn handle_http3_request(
         Err(err) => return Err(err.into()),
     };
     unified.body = body;
+
+    if let Some(result) = inspect_l7_bloom_filter(context.as_ref(), &mut unified, true) {
+        if result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+        }
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_block(result.layer.clone());
+        }
+        if let Some(inspector) = context.l4_inspector() {
+            inspector.record_l7_feedback(
+                &packet,
+                &unified,
+                crate::l4::behavior::FeedbackSource::L7Block,
+            );
+        }
+        if result_should_drop_http3(&result, &unified) {
+            return Ok(());
+        }
+        send_http3_response(
+            &mut stream,
+            403,
+            &[],
+            body_for_request(&unified, result.reason.as_bytes()),
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
 
     if let Some(response) = try_handle_browser_fingerprint_report(
         context.as_ref(),

@@ -67,6 +67,8 @@ impl WafContext {
         let identity = ai_request_identity(request);
 
         let mut matched_hits = Vec::new();
+        let mut matched_policy_ids = Vec::new();
+        let mut matched_policy_actions = Vec::new();
         let mut route_scale_percent = 100u32;
         let mut host_scale_percent = 100u32;
         let mut extra_delay_ms = 0u64;
@@ -81,6 +83,8 @@ impl WafContext {
             let Some(matched) = matched else {
                 continue;
             };
+            matched_policy_ids.push(policy.id.to_string());
+            matched_policy_actions.push(policy.action.clone());
             matched_hits.push(AiTempPolicyHitRecord {
                 id: policy.id,
                 action: policy.action.clone(),
@@ -129,6 +133,22 @@ impl WafContext {
         }
 
         self.record_ai_temp_policy_hits(matched_hits);
+        if !matched_policy_ids.is_empty() {
+            request.add_metadata(
+                "ai.policy.matched_count".to_string(),
+                matched_policy_ids.len().to_string(),
+            );
+            request.add_metadata(
+                "ai.policy.matched_ids".to_string(),
+                matched_policy_ids.join(","),
+            );
+            matched_policy_actions.sort();
+            matched_policy_actions.dedup();
+            request.add_metadata(
+                "ai.policy.matched_actions".to_string(),
+                matched_policy_actions.join(","),
+            );
+        }
 
         if let Some(reason) = block_reason {
             request.add_metadata("ai.policy.action".to_string(), "add_temp_block".to_string());

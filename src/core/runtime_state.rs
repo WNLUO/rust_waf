@@ -472,6 +472,22 @@ impl WafContext {
         }
     }
 
+    pub fn refresh_l7_bloom_filter_from_config(&self) {
+        let config = self.config_snapshot();
+        let next = config.bloom_enabled.then(|| {
+            Arc::new(crate::l7::L7BloomFilterManager::new(
+                config.l7_config.clone(),
+                config.bloom_enabled,
+                config.l7_bloom_false_positive_verification,
+            ))
+        });
+        let mut guard = self
+            .l7_bloom_filter
+            .write()
+            .expect("l7_bloom_filter lock poisoned");
+        *guard = next;
+    }
+
     pub(super) fn effective_l7_cc_defense(&self) -> crate::config::l7::CcDefenseConfig {
         adaptive_protection::derive_effective_cc_config(
             &self.config_snapshot(),

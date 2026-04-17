@@ -167,6 +167,10 @@ pub struct AiAuditSettingsResponse {
     pub(crate) allow_auto_temp_block: bool,
     pub(crate) allow_auto_extend_effective_policies: bool,
     pub(crate) auto_revoke_warmup_secs: u64,
+    pub(crate) auto_defense_enabled: bool,
+    pub(crate) auto_defense_auto_apply: bool,
+    pub(crate) auto_defense_min_confidence: u32,
+    pub(crate) auto_defense_max_apply_per_tick: u32,
     pub(crate) auto_audit_enabled: bool,
     pub(crate) auto_audit_interval_secs: u64,
     pub(crate) auto_audit_cooldown_secs: u64,
@@ -207,6 +211,14 @@ pub struct AiAuditSettingsRequest {
     pub(crate) allow_auto_extend_effective_policies: bool,
     #[serde(default)]
     pub(crate) auto_revoke_warmup_secs: u64,
+    #[serde(default = "default_auto_defense_enabled")]
+    pub(crate) auto_defense_enabled: bool,
+    #[serde(default = "default_auto_defense_auto_apply")]
+    pub(crate) auto_defense_auto_apply: bool,
+    #[serde(default = "default_auto_defense_min_confidence")]
+    pub(crate) auto_defense_min_confidence: u32,
+    #[serde(default = "default_auto_defense_max_apply_per_tick")]
+    pub(crate) auto_defense_max_apply_per_tick: u32,
     #[serde(default)]
     pub(crate) auto_audit_enabled: bool,
     #[serde(default)]
@@ -221,6 +233,22 @@ pub struct AiAuditSettingsRequest {
     pub(crate) auto_audit_on_hotspot_shift: bool,
     #[serde(default)]
     pub(crate) auto_audit_force_local_rules_under_attack: bool,
+}
+
+fn default_auto_defense_enabled() -> bool {
+    true
+}
+
+fn default_auto_defense_auto_apply() -> bool {
+    true
+}
+
+fn default_auto_defense_min_confidence() -> u32 {
+    82
+}
+
+fn default_auto_defense_max_apply_per_tick() -> u32 {
+    2
 }
 
 #[derive(Debug, Serialize)]

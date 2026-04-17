@@ -1,4 +1,5 @@
 pub(crate) mod adaptive_protection;
+mod ai_defense_runtime;
 mod ai_temp_policy;
 mod ai_temp_policy_runtime;
 mod auto_tuning;
@@ -146,6 +147,40 @@ pub struct LocalDefenseRecommendation {
     pub ttl_secs: u64,
     pub confidence: u8,
     pub rationale: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseSignalSnapshot {
+    pub generated_at: i64,
+    pub sqlite_available: bool,
+    pub active_temp_policy_count: u32,
+    pub max_active_temp_policy_count: u32,
+    pub local_recommendations: Vec<LocalDefenseRecommendation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiDefenseDecision {
+    pub key: String,
+    pub title: String,
+    pub layer: String,
+    pub scope_type: String,
+    pub scope_value: String,
+    pub action: String,
+    pub operator: String,
+    pub suggested_value: String,
+    pub ttl_secs: u64,
+    pub confidence: u8,
+    pub auto_apply: bool,
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AiDefenseRunResult {
+    pub generated_at: i64,
+    pub decisions: Vec<AiDefenseDecision>,
+    pub applied: usize,
+    pub skipped: usize,
+    pub disabled_reason: Option<String>,
 }
 
 impl WafContext {

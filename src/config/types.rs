@@ -158,6 +158,14 @@ pub struct AiAuditConfig {
     pub allow_auto_extend_effective_policies: bool,
     #[serde(default = "default_ai_audit_auto_revoke_warmup_secs")]
     pub auto_revoke_warmup_secs: u64,
+    #[serde(default = "default_ai_audit_auto_defense_enabled")]
+    pub auto_defense_enabled: bool,
+    #[serde(default = "default_ai_audit_auto_defense_auto_apply")]
+    pub auto_defense_auto_apply: bool,
+    #[serde(default = "default_ai_audit_auto_defense_min_confidence")]
+    pub auto_defense_min_confidence: u32,
+    #[serde(default = "default_ai_audit_auto_defense_max_apply_per_tick")]
+    pub auto_defense_max_apply_per_tick: u32,
     #[serde(default = "default_ai_audit_auto_audit_enabled")]
     pub auto_audit_enabled: bool,
     #[serde(default = "default_ai_audit_auto_audit_interval_secs")]
@@ -310,6 +318,22 @@ const fn default_ai_audit_allow_auto_extend_effective_policies() -> bool {
 
 const fn default_ai_audit_auto_revoke_warmup_secs() -> u64 {
     5 * 60
+}
+
+const fn default_ai_audit_auto_defense_enabled() -> bool {
+    true
+}
+
+const fn default_ai_audit_auto_defense_auto_apply() -> bool {
+    true
+}
+
+const fn default_ai_audit_auto_defense_min_confidence() -> u32 {
+    82
+}
+
+const fn default_ai_audit_auto_defense_max_apply_per_tick() -> u32 {
+    2
 }
 
 const fn default_ai_audit_auto_audit_enabled() -> bool {

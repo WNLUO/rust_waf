@@ -464,6 +464,18 @@ pub(super) fn normalize_integrations_and_admin(config: &mut Config) {
         24 * 3600,
         5 * 60,
     );
+    config.integrations.ai_audit.auto_defense_min_confidence = clamp_u64(
+        config.integrations.ai_audit.auto_defense_min_confidence as u64,
+        50,
+        100,
+        82,
+    ) as u32;
+    config.integrations.ai_audit.auto_defense_max_apply_per_tick = clamp_u64(
+        config.integrations.ai_audit.auto_defense_max_apply_per_tick as u64,
+        0,
+        8,
+        2,
+    ) as u32;
     config.integrations.ai_audit.auto_audit_interval_secs = clamp_u64(
         config.integrations.ai_audit.auto_audit_interval_secs,
         60,

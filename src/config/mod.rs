@@ -290,4 +290,19 @@ mod tests {
         assert_eq!(config.l7_config.cc_defense.route_block_threshold, 18);
         assert_eq!(config.l7_config.cc_defense.hot_path_block_threshold, 80);
     }
+
+    #[test]
+    fn ai_audit_config_defaults_enable_local_auto_defense_for_old_configs() {
+        let config = serde_json::from_value::<AiAuditConfig>(serde_json::json!({
+            "enabled": false,
+            "provider": "open_ai_compatible",
+            "auto_apply_temp_policies": false
+        }))
+        .unwrap();
+
+        assert!(config.auto_defense_enabled);
+        assert!(config.auto_defense_auto_apply);
+        assert_eq!(config.auto_defense_min_confidence, 82);
+        assert_eq!(config.auto_defense_max_apply_per_tick, 2);
+    }
 }

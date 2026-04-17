@@ -132,6 +132,56 @@ async fn test_context_restores_active_local_blocked_ips_into_runtime_memory() {
     assert_eq!(stats.connections.blocked_connections, 1);
 }
 
+#[tokio::test]
+async fn test_ai_auto_defense_applies_hot_route_temp_policy() {
+    let db_path = unique_test_db_path("ai_auto_defense");
+    let config = Config {
+        interface: "lo0".to_string(),
+        listen_addrs: vec!["127.0.0.1:0".to_string()],
+        tcp_upstream_addr: None,
+        udp_upstream_addr: None,
+        runtime_profile: RuntimeProfile::Standard,
+        api_enabled: false,
+        api_bind: "127.0.0.1:3740".to_string(),
+        bloom_enabled: false,
+        l4_bloom_false_positive_verification: false,
+        l7_bloom_false_positive_verification: false,
+        maintenance_interval_secs: 30,
+        sqlite_enabled: true,
+        sqlite_path: db_path,
+        sqlite_auto_migrate: true,
+        sqlite_rules_enabled: false,
+        max_concurrent_tasks: 128,
+        ..Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+    let result = InspectionResult::drop(InspectionLayer::L7, "route pressure");
+
+    for _ in 0..5 {
+        let mut request = crate::protocol::UnifiedHttpRequest::new(
+            crate::protocol::HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/login".to_string(),
+        );
+        request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+        context.note_site_defense_signal(&request, &result);
+    }
+
+    let now = unix_timestamp();
+    let run = context.run_ai_auto_defense(now).await.unwrap();
+
+    assert_eq!(run.applied, 1);
+    let active = context.active_ai_temp_policies();
+    assert_eq!(active.len(), 1);
+    let policy = &active[0];
+    assert_eq!(policy.action, "tighten_route_cc");
+    assert_eq!(policy.scope_type, "route");
+    assert_eq!(policy.scope_value, "/api/login");
+    assert_eq!(policy.operator, "exact");
+    assert_eq!(policy.suggested_value, "45");
+    assert!(policy.auto_applied);
+}
+
 fn test_policy(scope_type: &str, scope_value: &str, operator: &str) -> AiTempPolicyEntry {
     AiTempPolicyEntry {
         id: 1,

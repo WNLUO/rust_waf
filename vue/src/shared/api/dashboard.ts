@@ -17,6 +17,7 @@ import type {
   AiAutoAuditStatus,
   AiAuditFeedbackUpdatePayload,
   AiTempPoliciesResponse,
+  AiVisitorIntelligenceResponse,
   TrafficMapQuery,
   TrafficMapResponse,
   WriteStatusResponse,
@@ -109,6 +110,12 @@ export async function updateAiAuditReportFeedback(
 
 export async function fetchAiTempPolicies(): Promise<AiTempPoliciesResponse> {
   return apiRequest<AiTempPoliciesResponse>('/dashboard/ai-temp-policies')
+}
+
+export async function fetchAiVisitorProfiles(): Promise<AiVisitorIntelligenceResponse> {
+  return apiRequest<AiVisitorIntelligenceResponse>(
+    '/dashboard/ai-visitor-profiles',
+  )
 }
 
 export async function deleteAiTempPolicy(

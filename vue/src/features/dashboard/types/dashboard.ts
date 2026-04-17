@@ -347,6 +347,71 @@ export interface AiTempPoliciesResponse {
   policies: AiTempPolicyItem[]
 }
 
+export interface AiVisitorRouteSummary {
+  route: string
+  count: number
+}
+
+export interface AiVisitorProfileSignal {
+  identity_key: string
+  identity_source: string
+  site_id: string
+  client_ip: string
+  user_agent: string
+  state: string
+  first_seen_at: number
+  last_seen_at: number
+  request_count: number
+  document_count: number
+  api_count: number
+  static_count: number
+  admin_count: number
+  challenge_count: number
+  challenge_verified_count: number
+  challenge_page_report_count: number
+  challenge_js_report_count: number
+  fingerprint_seen: boolean
+  upstream_success_count: number
+  upstream_redirect_count: number
+  upstream_client_error_count: number
+  upstream_error_count: number
+  auth_required_route_count: number
+  auth_success_count: number
+  auth_rejected_count: number
+  human_confidence: number
+  automation_risk: number
+  probe_risk: number
+  abuse_risk: number
+  false_positive_risk: string
+  tracking_priority: string
+  route_summary: AiVisitorRouteSummary[]
+  business_route_types: Record<string, number>
+  status_codes: Record<string, number>
+  flags: string[]
+  ai_rationale: string
+}
+
+export interface AiVisitorDecisionSignal {
+  decision_key: string
+  identity_key: string
+  site_id: string
+  action: string
+  confidence: number
+  ttl_secs: number
+  rationale: string
+  applied: boolean
+  effect_status: string
+}
+
+export interface AiVisitorIntelligenceResponse {
+  generated_at: number
+  enabled: boolean
+  degraded_reason: string | null
+  active_profile_count: number
+  profiles: AiVisitorProfileSignal[]
+  recommendations: AiVisitorDecisionSignal[]
+}
+
 export interface AiAuditFeedbackUpdatePayload {
   feedback_status?: 'confirmed' | 'false_positive' | 'follow_up' | null
   feedback_notes?: string | null

@@ -2,6 +2,7 @@ use super::*;
 use crate::config::{
     Config, Http3Config, L4Config, L7Config, Rule, RuleAction, RuleLayer, RuntimeProfile, Severity,
 };
+use crate::core::ai_temp_policy::match_ai_temp_policy;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn unique_test_db_path(name: &str) -> String {

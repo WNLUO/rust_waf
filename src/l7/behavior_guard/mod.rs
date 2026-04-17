@@ -165,6 +165,12 @@ impl L7BehaviorGuard {
         if should_auto_block {
             self.record_block(&assessment.identity, now, window);
             request.add_metadata("l7.behavior.action".to_string(), "block".to_string());
+            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+            request.add_metadata(
+                "l7.drop_reason".to_string(),
+                "behavior_auto_block".to_string(),
+            );
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
             let reason = format!(
                 "l7 behavior guard blocked suspicious session: score={} repeated_ratio={} document_repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={} flags={}",
                 assessment.score,
@@ -175,10 +181,9 @@ impl L7BehaviorGuard {
                 assessment.recent_challenges,
                 assessment.flags.join("|"),
             );
-            return Some(InspectionResult::respond_and_persist_ip(
+            return Some(InspectionResult::drop_and_persist_ip(
                 InspectionLayer::L7,
-                reason.clone(),
-                build_behavior_response(request, 429, "行为异常，请稍后重试", &reason),
+                reason,
             ));
         }
 

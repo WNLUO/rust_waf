@@ -2,7 +2,7 @@ use super::{
     ai_temp_policy::{
         ai_request_identity, match_ai_temp_policy, parse_scale_percent, parse_suggested_delay_ms,
     },
-    unix_timestamp, CustomHttpResponse, InspectionLayer, InspectionResult, WafContext,
+    unix_timestamp, InspectionLayer, InspectionResult, WafContext,
 };
 use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{AiTempPolicyEntry, AiTempPolicyHitRecord};
@@ -132,30 +132,12 @@ impl WafContext {
 
         if let Some(reason) = block_reason {
             request.add_metadata("ai.policy.action".to_string(), "add_temp_block".to_string());
-            return Some(InspectionResult::respond_and_persist_ip(
+            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+            request.add_metadata("l7.drop_reason".to_string(), "ai_temp_block".to_string());
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
+            return Some(InspectionResult::drop_and_persist_ip(
                 InspectionLayer::L7,
-                reason.clone(),
-                CustomHttpResponse {
-                    status_code: 429,
-                    headers: vec![
-                        (
-                            "content-type".to_string(),
-                            "application/json; charset=utf-8".to_string(),
-                        ),
-                        ("cache-control".to_string(), "no-store".to_string()),
-                        ("x-rust-waf-ai-policy".to_string(), "temp_block".to_string()),
-                    ],
-                    body: serde_json::json!({
-                        "success": false,
-                        "action": "temp_block",
-                        "message": "访问已被专项防护策略临时阻断",
-                        "reason": reason,
-                    })
-                    .to_string()
-                    .into_bytes(),
-                    tarpit: None,
-                    random_status: None,
-                },
+                reason,
             ));
         }
 

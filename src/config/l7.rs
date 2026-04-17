@@ -418,7 +418,7 @@ impl Default for SafeLineInterceptConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            action: SafeLineInterceptAction::Replace,
+            action: SafeLineInterceptAction::Drop,
             match_mode: SafeLineInterceptMatchMode::Strict,
             max_body_bytes: default_safeline_intercept_max_body_bytes(),
             block_duration_secs: default_safeline_intercept_block_duration_secs(),

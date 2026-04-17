@@ -200,74 +200,7 @@ pub(crate) fn resolve_client_identity(
     let config = context.config_snapshot();
     let gateway = &config.gateway_config;
     let trusted_proxy_peer = peer_is_trusted_proxy(context, peer_addr.ip());
-    let custom_header_name = gateway.custom_source_ip_header.trim();
-    let custom_header_value = if custom_header_name.is_empty() {
-        None
-    } else {
-        request.get_header(custom_header_name)
-    };
-    let custom_header_present = custom_header_value.is_some();
-    let custom_header_ip =
-        custom_header_value.and_then(|value| extract_forwarded_ip_by_strategy(value, 0));
-
-    if matches!(
-        gateway.source_ip_strategy,
-        crate::config::SourceIpStrategy::Header
-    ) {
-        let auth_header_name = gateway.custom_source_ip_header_auth_header.trim();
-        let auth_header_value = if auth_header_name.is_empty() {
-            None
-        } else {
-            request.get_header(auth_header_name)
-        };
-        let auth_valid = if gateway.custom_source_ip_header_auth_enabled {
-            auth_header_value
-                .map(|value| value.trim() == gateway.custom_source_ip_header_auth_secret.trim())
-                .unwrap_or(false)
-        } else {
-            custom_header_present
-        };
-        let header_trusted = custom_header_present && auth_valid;
-
-        return match (header_trusted, custom_header_ip) {
-            (true, Some(ip)) => ClientIdentityResolution {
-                resolved_client_ip: ip,
-                source_label: "forwarded_header",
-                source_header_name: Some(custom_header_name.to_string()),
-                trusted_proxy_peer: true,
-                forwarded_header_present: custom_header_present,
-                forwarded_header_valid: true,
-                identity_state: "trusted_cdn_forwarded",
-            },
-            (true, None) => ClientIdentityResolution {
-                resolved_client_ip: peer_addr.ip(),
-                source_label: "socket_peer",
-                source_header_name: None,
-                trusted_proxy_peer: true,
-                forwarded_header_present: custom_header_present,
-                forwarded_header_valid: false,
-                identity_state: "trusted_cdn_unresolved",
-            },
-            (false, Some(_)) => ClientIdentityResolution {
-                resolved_client_ip: peer_addr.ip(),
-                source_label: "socket_peer",
-                source_header_name: None,
-                trusted_proxy_peer: false,
-                forwarded_header_present: true,
-                forwarded_header_valid: false,
-                identity_state: "spoofed_forward_header",
-            },
-            (false, None) => ClientIdentityResolution {
-                resolved_client_ip: peer_addr.ip(),
-                source_label: "socket_peer",
-                source_header_name: None,
-                trusted_proxy_peer,
-                forwarded_header_present: false,
-                forwarded_header_valid: false,
-                identity_state: "direct_client",
-            },
-        };
-    }
+    let forwarded_header_present = forwarded_identity_header_present(request, gateway);
 
     if !trusted_proxy_peer {
         return ClientIdentityResolution {
@@ -275,9 +208,9 @@ pub(crate) fn resolve_client_identity(
             source_label: "socket_peer",
             source_header_name: None,
             trusted_proxy_peer,
-            forwarded_header_present: custom_header_present,
+            forwarded_header_present,
             forwarded_header_valid: false,
-            identity_state: if custom_header_present {
+            identity_state: if forwarded_header_present {
                 "spoofed_forward_header"
             } else {
                 "direct_client"
@@ -285,29 +218,17 @@ pub(crate) fn resolve_client_identity(
         };
     }
 
-    let resolved = match gateway.source_ip_strategy {
-        crate::config::SourceIpStrategy::Connection => None,
-        crate::config::SourceIpStrategy::XForwardedForFirst => request
-            .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
-            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
-        crate::config::SourceIpStrategy::XForwardedForLast => request
-            .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_from_right(value, 0))
-            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
-        crate::config::SourceIpStrategy::XForwardedForLastButOne => request
-            .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_from_right(value, 1))
-            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
-        crate::config::SourceIpStrategy::XForwardedForLastButTwo => request
-            .get_header("x-forwarded-for")
-            .and_then(|value| extract_forwarded_ip_from_right(value, 2))
-            .map(|ip| (ip, Some("x-forwarded-for".to_string()))),
-        crate::config::SourceIpStrategy::Header => None,
-        crate::config::SourceIpStrategy::ProxyProtocol => request
+    let resolved = if matches!(
+        gateway.source_ip_strategy,
+        crate::config::SourceIpStrategy::ProxyProtocol
+    ) {
+        request
             .get_metadata("proxy_protocol_source_ip")
             .and_then(|value| value.parse::<std::net::IpAddr>().ok())
-            .map(|ip| (ip, None)),
+            .map(|ip| (ip, None))
+            .or_else(|| auto_forwarded_client_ip(request, gateway))
+    } else {
+        auto_forwarded_client_ip(request, gateway)
     };
 
     if let Some((ip, header)) = resolved {
@@ -316,7 +237,7 @@ pub(crate) fn resolve_client_identity(
             source_label: "forwarded_header",
             source_header_name: header,
             trusted_proxy_peer,
-            forwarded_header_present: custom_header_present,
+            forwarded_header_present,
             forwarded_header_valid: true,
             identity_state: "trusted_cdn_forwarded",
         }
@@ -326,11 +247,62 @@ pub(crate) fn resolve_client_identity(
             source_label: "socket_peer",
             source_header_name: None,
             trusted_proxy_peer,
-            forwarded_header_present: custom_header_present,
+            forwarded_header_present,
             forwarded_header_valid: false,
             identity_state: "trusted_cdn_unresolved",
         }
     }
+}
+
+fn forwarded_identity_header_present(
+    request: &UnifiedHttpRequest,
+    gateway: &crate::config::GatewayConfig,
+) -> bool {
+    [
+        "cf-connecting-ip",
+        "true-client-ip",
+        "x-real-ip",
+        "x-forwarded-for",
+    ]
+    .iter()
+    .any(|header| request.get_header(header).is_some())
+        || (!gateway.custom_source_ip_header.trim().is_empty()
+            && request
+                .get_header(gateway.custom_source_ip_header.trim())
+                .is_some())
+}
+
+fn auto_forwarded_client_ip(
+    request: &UnifiedHttpRequest,
+    gateway: &crate::config::GatewayConfig,
+) -> Option<(std::net::IpAddr, Option<String>)> {
+    for header in ["cf-connecting-ip", "true-client-ip", "x-real-ip"] {
+        if let Some(ip) = request
+            .get_header(header)
+            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+        {
+            return Some((ip, Some(header.to_string())));
+        }
+    }
+
+    if let Some(ip) = request
+        .get_header("x-forwarded-for")
+        .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+    {
+        return Some((ip, Some("x-forwarded-for".to_string())));
+    }
+
+    let custom_header = gateway.custom_source_ip_header.trim();
+    if !custom_header.is_empty() {
+        if let Some(ip) = request
+            .get_header(custom_header)
+            .and_then(|value| extract_forwarded_ip_by_strategy(value, 0))
+        {
+            return Some((ip, Some(custom_header.to_string())));
+        }
+    }
+
+    None
 }
 
 fn peer_is_trusted_proxy(context: &WafContext, peer_ip: std::net::IpAddr) -> bool {
@@ -350,17 +322,6 @@ fn extract_forwarded_ip_by_strategy(value: &str, index: usize) -> Option<std::ne
     value
         .split(',')
         .nth(index)
-        .and_then(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
-}
-
-fn extract_forwarded_ip_from_right(
-    value: &str,
-    index_from_right: usize,
-) -> Option<std::net::IpAddr> {
-    value
-        .split(',')
-        .rev()
-        .nth(index_from_right)
         .and_then(|candidate| candidate.trim().parse::<std::net::IpAddr>().ok())
 }
 

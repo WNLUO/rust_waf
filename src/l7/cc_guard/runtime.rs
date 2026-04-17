@@ -58,11 +58,13 @@ impl L7CcGuard {
                 host, route_path, client_ip
             );
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            return Some(InspectionResult::respond(
-                InspectionLayer::L7,
-                reason.clone(),
-                build_block_response(request, &reason),
-            ));
+            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+            request.add_metadata(
+                "l7.drop_reason".to_string(),
+                "spoofed_forward_header".to_string(),
+            );
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
+            return Some(InspectionResult::drop(InspectionLayer::L7, reason));
         }
 
         if request_kind == RequestKind::Document {
@@ -295,10 +297,12 @@ impl L7CcGuard {
                 client_identity_unresolved,
             );
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            return Some(InspectionResult::respond(
+            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+            request.add_metadata("l7.drop_reason".to_string(), "cc_hard_block".to_string());
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
+            return Some(InspectionResult::drop_and_persist_ip(
                 InspectionLayer::L7,
-                reason.clone(),
-                build_block_response(request, &reason),
+                reason,
             ));
         }
 

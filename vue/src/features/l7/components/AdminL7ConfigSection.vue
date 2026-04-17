@@ -302,11 +302,13 @@ function updateDropUnmatchedRequests(value: boolean) {
     />
 
     <L7SlowAttackPanel
+      v-if="!hideAdaptiveManagedSections"
       :controls="slowAttackControls"
       :number-input-class="numberInputClass"
     />
 
     <L7AutoTuningPanel
+      v-if="!hideAdaptiveManagedSections"
       :controls="autoTuningControls"
       :runtime="autoTuningRuntime ?? null"
       :helpers="autoTuningHelpers"
@@ -326,6 +328,7 @@ function updateDropUnmatchedRequests(value: boolean) {
     />
 
     <L7SafelineInterceptPanel
+      v-if="!hideAdaptiveManagedSections"
       :controls="safelineControls"
       :number-input-class="numberInputClass"
     />

@@ -42,6 +42,7 @@ pub enum InspectionAction {
     Block,
     Alert,
     Respond,
+    Drop,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +162,24 @@ impl InspectionResult {
         }
     }
 
+    pub fn drop(layer: InspectionLayer, reason: impl Into<String>) -> Self {
+        Self {
+            blocked: true,
+            reason: reason.into(),
+            layer,
+            action: InspectionAction::Drop,
+            persist_blocked_ip: false,
+            custom_response: None,
+        }
+    }
+
+    pub fn drop_and_persist_ip(layer: InspectionLayer, reason: impl Into<String>) -> Self {
+        Self {
+            persist_blocked_ip: true,
+            ..Self::drop(layer, reason)
+        }
+    }
+
     pub fn should_persist_event(&self) -> bool {
         self.blocked
             || matches!(
@@ -175,6 +194,7 @@ impl InspectionResult {
             InspectionAction::Block => "block",
             InspectionAction::Alert => "alert",
             InspectionAction::Respond => "respond",
+            InspectionAction::Drop => "drop",
         }
     }
 }

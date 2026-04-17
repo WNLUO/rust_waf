@@ -77,7 +77,7 @@ pub(crate) async fn inspect_blocked_client_ip(
         }
     }?;
 
-    Some(InspectionResult::block(
+    Some(InspectionResult::drop(
         InspectionLayer::L7,
         format!(
             "Request blocked by local blocked IP list: {} ({})",

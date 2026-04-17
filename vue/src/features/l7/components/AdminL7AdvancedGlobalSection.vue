@@ -201,7 +201,10 @@ onMounted(loadSettings)
         <p class="text-sm font-semibold text-stone-900">真实来源 IP 获取</p>
 
         <div class="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
+          <label
+            v-if="false"
+            class="flex items-center justify-start gap-2 text-sm text-stone-700"
+          >
             <span class="font-medium whitespace-nowrap">获取方式</span>
             <select
               v-model="form.source_ip_strategy"
@@ -225,7 +228,10 @@ onMounted(loadSettings)
             </select>
           </label>
 
-          <label class="flex items-center justify-start gap-2 text-sm text-stone-700">
+          <label
+            v-if="false"
+            class="flex items-center justify-start gap-2 text-sm text-stone-700"
+          >
             <span class="font-medium whitespace-nowrap">真实来源 IP Header</span>
             <input
               v-model="form.custom_source_ip_header"

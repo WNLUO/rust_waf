@@ -59,6 +59,12 @@ pub(crate) fn apply_safeline_upstream_action(
                         intercept_config.block_duration_secs,
                         matched.event_id.as_deref(),
                     );
+                    block_safeline_intercept_ip_in_runtime(
+                        context,
+                        request,
+                        intercept_config.block_duration_secs,
+                        matched.event_id.as_deref(),
+                    );
                     (
                         "replace_and_block_ip",
                         UpstreamResponseDisposition::Custom(custom),
@@ -97,6 +103,40 @@ pub(crate) fn apply_safeline_upstream_action(
     );
 
     disposition
+}
+
+fn block_safeline_intercept_ip_in_runtime(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    block_duration_secs: u64,
+    provider_event_id: Option<&str>,
+) {
+    if request
+        .get_metadata("network.identity_state")
+        .map(|value| value == "trusted_cdn_unresolved")
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let Some(ip) = request
+        .client_ip
+        .as_deref()
+        .and_then(|value| value.parse::<std::net::IpAddr>().ok())
+    else {
+        return;
+    };
+
+    let reason = provider_event_id
+        .map(|event_id| format!("safeline upstream intercept: event_id={event_id}"))
+        .unwrap_or_else(|| "safeline upstream intercept".to_string());
+    if let Some(inspector) = context.l4_inspector() {
+        inspector.block_ip(
+            &ip,
+            &reason,
+            std::time::Duration::from_secs(block_duration_secs),
+        );
+    }
 }
 
 fn detect_safeline_block_response(

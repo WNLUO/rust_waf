@@ -45,6 +45,10 @@ fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> InspectionResu
                 );
                 return rule_result;
             }
+            InspectionAction::Drop => {
+                debug!("L4 drop rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
             InspectionAction::Block => {}
         }
     }
@@ -81,6 +85,10 @@ fn inspect_l7_rules(
             }
             InspectionAction::Respond => {
                 debug!("L7 respond rule matched: {}", rule_result.reason);
+                return rule_result;
+            }
+            InspectionAction::Drop => {
+                debug!("L7 drop rule matched: {}", rule_result.reason);
                 return rule_result;
             }
             InspectionAction::Block => {}
@@ -355,7 +363,12 @@ fn should_skip_persisting_result_event(
     result: &InspectionResult,
     request: Option<&UnifiedHttpRequest>,
 ) -> bool {
-    if result.persist_blocked_ip || matches!(result.action, InspectionAction::Block) {
+    if result.persist_blocked_ip
+        || matches!(
+            result.action,
+            InspectionAction::Block | InspectionAction::Drop
+        )
+    {
         return false;
     }
 

@@ -44,10 +44,9 @@ impl L4ConfigUpdateRequest {
     pub(crate) fn into_config(
         self,
         mut current: Config,
-        allow_compatibility_updates: bool,
+        _allow_compatibility_updates: bool,
     ) -> Config {
-        let adaptive_managed_fields =
-            current.adaptive_protection.enabled && !allow_compatibility_updates;
+        let adaptive_managed_fields = true;
         let previous_trusted_cdn = current.l4_config.trusted_cdn.clone();
         let previous_l4 = current.l4_config.clone();
         let previous_edgeone = previous_trusted_cdn.edgeone_overseas;
@@ -187,10 +186,9 @@ impl L7ConfigUpdateRequest {
     pub(crate) fn into_config(
         self,
         mut current: Config,
-        allow_compatibility_updates: bool,
+        _allow_compatibility_updates: bool,
     ) -> Result<Config, String> {
-        let adaptive_managed_fields =
-            current.adaptive_protection.enabled && !allow_compatibility_updates;
+        let adaptive_managed_fields = true;
         current.runtime_profile = match self.runtime_profile.as_str() {
             "minimal" => RuntimeProfile::Minimal,
             "standard" => RuntimeProfile::Standard,
@@ -282,12 +280,27 @@ impl L7ConfigUpdateRequest {
                 current.l7_config.cc_defense = cc_defense.into_config();
             }
         }
-        current.l7_config.slow_attack_defense = self.slow_attack_defense.into_config();
+        if !adaptive_managed_fields {
+            current.l7_config.slow_attack_defense = self.slow_attack_defense.into_config();
+        }
         if let Some(safeline_intercept) = self.safeline_intercept {
-            current.l7_config.safeline_intercept = safeline_intercept.into_config()?;
+            if adaptive_managed_fields {
+                let mut next = current.l7_config.safeline_intercept.clone();
+                next.enabled = safeline_intercept.enabled;
+                next.action = crate::config::l7::SafeLineInterceptAction::Drop;
+                current.l7_config.safeline_intercept = next;
+            } else {
+                current.l7_config.safeline_intercept = safeline_intercept.into_config()?;
+            }
         }
         if let Some(auto_tuning) = self.auto_tuning {
-            current.auto_tuning = auto_tuning.into_config()?;
+            if adaptive_managed_fields {
+                log::debug!(
+                    "Ignoring manual auto tuning update because adaptive protection owns runtime tuning"
+                );
+            } else {
+                current.auto_tuning = auto_tuning.into_config()?;
+            }
         }
 
         Ok(current.normalized())
@@ -392,8 +405,9 @@ impl AutoTuningConfigRequest {
 
 impl AdaptiveProtectionConfigRequest {
     pub(crate) fn into_config(self) -> Result<crate::config::AdaptiveProtectionConfig, String> {
+        let _requested_enabled = self.enabled;
         Ok(crate::config::AdaptiveProtectionConfig {
-            enabled: self.enabled,
+            enabled: true,
             mode: parse_adaptive_protection_mode(&self.mode)?,
             goal: parse_adaptive_protection_goal(&self.goal)?,
             cdn_fronted: self.cdn_fronted,

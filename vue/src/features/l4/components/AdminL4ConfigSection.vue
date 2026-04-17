@@ -46,6 +46,7 @@ defineEmits<{
   <section class="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
     <AdminL4ConfigFormCard
       :form="form"
+      :hide-adaptive-managed-sections="meta.adaptive_managed_fields"
       @update:form="$emit('update:form', $event)"
     />
 

@@ -196,6 +196,10 @@ pub(crate) async fn handle_http1_connection(
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
             }
+            if result_should_drop_http1(&result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
+            }
             http1_handler
                 .write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes())
                 .await?;
@@ -267,6 +271,10 @@ pub(crate) async fn handle_http1_connection(
                     &request,
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
+            }
+            if result_should_drop_http1(&early_inspection_result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
             }
             if let Some(response) = early_inspection_result.custom_response.as_ref() {
                 let response =
@@ -341,6 +349,10 @@ pub(crate) async fn handle_http1_connection(
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
             }
+            if result_should_drop_http1(&result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
+            }
             if let Some(response) = result.custom_response.as_ref() {
                 let response =
                     crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
@@ -411,6 +423,10 @@ pub(crate) async fn handle_http1_connection(
                     &request,
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
+            }
+            if result_should_drop_http1(&result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
                 let response =
@@ -531,6 +547,10 @@ pub(crate) async fn handle_http1_connection(
                     crate::l4::behavior::FeedbackSource::L7Block,
                 );
             }
+            if result_should_drop_http1(&result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
+            }
             if let Some(response) = result.custom_response.as_ref() {
                 let response = resolve_runtime_custom_response(response);
                 let body = body_for_request(&request, &response.body);
@@ -581,6 +601,10 @@ pub(crate) async fn handle_http1_connection(
                         &request,
                         crate::l4::behavior::FeedbackSource::L7Block,
                     );
+                }
+                if result_should_drop_http1(&result, &request) {
+                    let _ = stream.shutdown().await;
+                    return Ok(());
                 }
                 if let Some(response) = result.custom_response.as_ref() {
                     let response = resolve_runtime_custom_response(response);
@@ -638,6 +662,10 @@ pub(crate) async fn handle_http1_connection(
                         &request,
                         crate::l4::behavior::FeedbackSource::L7Block,
                     );
+                }
+                if result_should_drop_http1(&result, &request) {
+                    let _ = stream.shutdown().await;
+                    return Ok(());
                 }
                 if let Some(response) = result.custom_response.as_ref() {
                     let response =
@@ -737,6 +765,10 @@ pub(crate) async fn handle_http1_connection(
                 .record_ingress(traffic_source_ip.clone(), request_dump.len(), true);
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_block(inspection_result.layer.clone());
+            }
+            if result_should_drop_http1(&inspection_result, &request) {
+                let _ = stream.shutdown().await;
+                return Ok(());
             }
             if let Some(response) = inspection_result.custom_response.as_ref() {
                 let response =
@@ -1007,6 +1039,17 @@ pub(crate) async fn handle_http1_connection(
             return Ok(());
         }
     }
+}
+
+fn result_should_drop_http1(
+    result: &crate::core::InspectionResult,
+    request: &UnifiedHttpRequest,
+) -> bool {
+    matches!(result.action, crate::core::InspectionAction::Drop)
+        || request
+            .get_metadata("l7.enforcement")
+            .map(|value| value == "drop")
+            .unwrap_or(false)
 }
 
 async fn handle_slow_attack_error(

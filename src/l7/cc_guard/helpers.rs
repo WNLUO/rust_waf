@@ -1,5 +1,4 @@
 use crate::config::l7::CcDefenseConfig;
-use crate::core::CustomHttpResponse;
 use crate::protocol::UnifiedHttpRequest;
 use dashmap::DashMap;
 use sha2::{Digest, Sha256};
@@ -82,42 +81,6 @@ pub(super) fn challenge_header_value(mode: HtmlResponseMode) -> &'static str {
     match mode {
         HtmlResponseMode::HtmlChallenge => "challenge",
         HtmlResponseMode::TextOnly => "api-friction",
-    }
-}
-
-pub(super) fn build_block_response(
-    request: &UnifiedHttpRequest,
-    reason: &str,
-) -> CustomHttpResponse {
-    let content_type =
-        if challenge_mode(request, &normalized_route_path(request_path(&request.uri)))
-            == HtmlResponseMode::HtmlChallenge
-        {
-            "text/html; charset=utf-8"
-        } else {
-            "text/plain; charset=utf-8"
-        };
-    let body = if content_type.starts_with("text/html") {
-        format!(
-            "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>请求过于频繁</title></head><body><h1>请求过于频繁</h1><p>当前请求已被限流，请稍后重试。</p><p><code>{}</code></p></body></html>",
-            escape_html(reason)
-        )
-        .into_bytes()
-    } else {
-        format!("too many requests: {reason}").into_bytes()
-    };
-
-    CustomHttpResponse {
-        status_code: 429,
-        headers: vec![
-            ("content-type".to_string(), content_type.to_string()),
-            ("cache-control".to_string(), "no-store".to_string()),
-            ("retry-after".to_string(), "10".to_string()),
-            ("x-rust-waf-cc-action".to_string(), "block".to_string()),
-        ],
-        body,
-        tarpit: None,
-        random_status: None,
     }
 }
 

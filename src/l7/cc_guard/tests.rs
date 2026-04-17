@@ -255,9 +255,14 @@ async fn hard_multiplier_configuration_can_force_block_for_subresources() {
     );
     let result = guard.inspect_request(&mut second_img).await;
     assert!(result.is_some());
+    let result = result.unwrap();
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert!(result.persist_blocked_ip);
     assert_eq!(
-        result.unwrap().action,
-        crate::core::InspectionAction::Respond
+        second_img
+            .get_metadata("l7.enforcement")
+            .map(String::as_str),
+        Some("drop")
     );
 }
 
@@ -306,10 +311,14 @@ async fn spoofed_forward_header_requests_are_blocked_immediately() {
 
     assert!(result.is_some());
     let result = result.unwrap();
-    assert_eq!(result.action, crate::core::InspectionAction::Respond);
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
     assert_eq!(
         request.get_metadata("l7.cc.action").map(String::as_str),
         Some("block")
+    );
+    assert_eq!(
+        request.get_metadata("l7.enforcement").map(String::as_str),
+        Some("drop")
     );
     assert!(result.reason.contains("spoofed forwarded header"));
 }

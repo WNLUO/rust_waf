@@ -37,6 +37,13 @@ const {
 } = useAdminDashboardPage()
 
 const aiPolicyFeedbackExpanded = ref(false)
+const trafficMapMode = ref<'china' | 'global'>('china')
+
+const trafficOverviewGridClass = computed(() =>
+  trafficMapMode.value === 'china'
+    ? 'xl:grid-cols-[minmax(300px,0.85fr)_minmax(0,1.7fr)]'
+    : 'xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.95fr)]',
+)
 
 const ccTotal = computed(
   () =>
@@ -617,15 +624,12 @@ const defenseMatrix = computed(() => {
           label: '高风险',
           value: formatNumber(l4Overview?.high_risk_buckets || 0),
           class:
-            (l4Overview?.high_risk_buckets || 0) > 0
-              ? 'text-amber-700'
-              : '',
+            (l4Overview?.high_risk_buckets || 0) > 0 ? 'text-amber-700' : '',
         },
         {
           label: '丢弃',
           value: formatNumber(l4Overview?.dropped_events || 0),
-          class:
-            (l4Overview?.dropped_events || 0) > 0 ? 'text-red-700' : '',
+          class: (l4Overview?.dropped_events || 0) > 0 ? 'text-red-700' : '',
         },
         {
           label: '预算拒绝',
@@ -685,7 +689,9 @@ const defenseMatrix = computed(() => {
         },
         {
           label: '平均延迟',
-          value: formatLatencyEnglish(metrics?.average_proxy_latency_micros || 0),
+          value: formatLatencyEnglish(
+            metrics?.average_proxy_latency_micros || 0,
+          ),
         },
         {
           label: '慢攻命中',
@@ -727,8 +733,7 @@ const defenseMatrix = computed(() => {
         {
           label: '行为延迟',
           value: formatNumber(metrics?.l7_behavior_delays || 0),
-          class:
-            (metrics?.l7_behavior_delays || 0) > 0 ? 'text-amber-700' : '',
+          class: (metrics?.l7_behavior_delays || 0) > 0 ? 'text-amber-700' : '',
         },
       ],
       summary: 'CC 挑战链路',
@@ -875,7 +880,9 @@ const defenseMatrix = computed(() => {
                     {{ card.readValue }}
                   </p>
                 </div>
-                <div class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"
+                >
                   <div
                     class="h-full rounded-full bg-indigo-600"
                     :style="{ width: `${card.readPercent}%` }"
@@ -892,7 +899,9 @@ const defenseMatrix = computed(() => {
                     {{ card.writeValue }}
                   </p>
                 </div>
-                <div class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"
+                >
                   <div
                     class="h-full rounded-full bg-cyan-600"
                     :style="{ width: `${card.writePercent}%` }"
@@ -916,7 +925,11 @@ const defenseMatrix = computed(() => {
         />
         <MetricWidget
           label="平均代理延迟"
-          :value="formatLatencyEnglish(dashboard?.metrics.average_proxy_latency_micros || 0)"
+          :value="
+            formatLatencyEnglish(
+              dashboard?.metrics.average_proxy_latency_micros || 0,
+            )
+          "
           :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"
           :trend="metricTrends.latency"
           :series="metricsHistory.latency"
@@ -948,12 +961,12 @@ const defenseMatrix = computed(() => {
         />
       </section>
 
-      <section
-        class="grid gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,0.95fr)]"
-      >
+      <section class="grid gap-3 xl:grid" :class="trafficOverviewGridClass">
         <AdminEventMapSection
           :traffic-map="trafficMap"
           :traffic-events="trafficEvents"
+          :map-mode="trafficMapMode"
+          @update:map-mode="trafficMapMode = $event"
         />
 
         <AdminNetworkPerformancePanel
@@ -964,10 +977,13 @@ const defenseMatrix = computed(() => {
           :timestamps="networkHistory.timestamps"
           :rx-series="networkHistory.rx"
           :tx-series="networkHistory.tx"
+          :map-mode="trafficMapMode"
         />
       </section>
 
-      <section class="grid gap-3 xl:grid-cols-[minmax(0,0.92fr)_minmax(430px,1.08fr)]">
+      <section
+        class="grid gap-3 xl:grid-cols-[minmax(0,0.92fr)_minmax(430px,1.08fr)]"
+      >
         <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
           <div
             v-for="item in defenseMatrix"
@@ -1000,7 +1016,9 @@ const defenseMatrix = computed(() => {
               </div>
             </div>
 
-            <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2">
+            <div
+              class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2"
+            >
               <div
                 v-for="stat in item.secondaryStats"
                 :key="stat.label"
@@ -1038,10 +1056,16 @@ const defenseMatrix = computed(() => {
                 <span>{{ providerLabel(aiAutomation?.provider) }}</span>
                 <span class="text-slate-300">/</span>
                 <span>
-                  {{ aiAutomation?.auto_apply_temp_policies ? '自动应用' : '仅建议' }}
+                  {{
+                    aiAutomation?.auto_apply_temp_policies
+                      ? '自动应用'
+                      : '仅建议'
+                  }}
                 </span>
                 <span class="text-slate-300">/</span>
-                <span>{{ pressureLabel(aiAutomation?.runtime_pressure_level) }}</span>
+                <span>{{
+                  pressureLabel(aiAutomation?.runtime_pressure_level)
+                }}</span>
                 <span class="text-slate-300">/</span>
                 <span class="font-medium text-slate-700">
                   上次运行 {{ aiLastRunLabel }}
@@ -1132,7 +1156,9 @@ const defenseMatrix = computed(() => {
                   >
                     {{ window.labelText }}
                   </span>
-                  <div class="mt-0.5 grid grid-cols-2 gap-x-1 gap-y-0.5 text-[10px]">
+                  <div
+                    class="mt-0.5 grid grid-cols-2 gap-x-1 gap-y-0.5 text-[10px]"
+                  >
                     <span
                       v-for="bar in window.bars"
                       :key="`${bar.label}-value`"
@@ -1158,9 +1184,15 @@ const defenseMatrix = computed(() => {
               <div class="mb-1.5 flex items-center justify-between text-[11px]">
                 <span class="font-medium text-slate-700">策略反馈</span>
                 <span class="text-slate-400">
-                  {{ formatNumber(aiAutomation?.recent_policy_feedback.length || 0) }}
+                  {{
+                    formatNumber(
+                      aiAutomation?.recent_policy_feedback.length || 0,
+                    )
+                  }}
                   条<span v-if="hiddenAiPolicyFeedbackCount > 0">
-                    · 还有{{ formatNumber(hiddenAiPolicyFeedbackCount) }}条</span
+                    · 还有{{
+                      formatNumber(hiddenAiPolicyFeedbackCount)
+                    }}条</span
                   >
                 </span>
               </div>

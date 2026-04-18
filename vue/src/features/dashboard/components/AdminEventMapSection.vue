@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, watch, onBeforeUnmount, toRef } from 'vue'
-import { EffectScatterChart, LinesChart } from 'echarts/charts'
-import type {
-  EffectScatterSeriesOption,
-  LinesSeriesOption,
-} from 'echarts/charts'
+import {
+  computed,
+  ref,
+  shallowRef,
+  onMounted,
+  watch,
+  onBeforeUnmount,
+  toRef,
+} from 'vue'
+import { LinesChart, ScatterChart } from 'echarts/charts'
+import type { LinesSeriesOption, ScatterSeriesOption } from 'echarts/charts'
 import { GeoComponent, TooltipComponent } from 'echarts/components'
 import { init, registerMap, use } from 'echarts/core'
 import type { ECharts } from 'echarts/core'
@@ -16,23 +21,26 @@ import type {
   TrafficMapResponse,
 } from '@/shared/types'
 
-use([
-  CanvasRenderer,
-  GeoComponent,
-  TooltipComponent,
-  LinesChart,
-  EffectScatterChart,
-])
+use([CanvasRenderer, GeoComponent, TooltipComponent, LinesChart, ScatterChart])
+
+type MapMode = 'china' | 'global'
 
 const props = defineProps<{
   trafficMap?: TrafficMapResponse | null
   trafficEvents?: TrafficEventDelta[]
+  mapMode?: MapMode
+}>()
+
+const emit = defineEmits<{
+  'update:mapMode': [value: MapMode]
 }>()
 
 const chartRef = ref<HTMLElement | null>(null)
 let chart: ECharts | null = null
-type MapMode = 'china' | 'global'
-const mapMode = ref<MapMode>('china')
+const currentMapMode = computed<MapMode>({
+  get: () => props.mapMode ?? 'china',
+  set: (value) => emit('update:mapMode', value),
+})
 
 const { snapshot } = useAdminEventMap({
   trafficMap: toRef(props, 'trafficMap'),
@@ -88,8 +96,13 @@ let cleanupTimer: number | null = null
 let renderTimeout: number | null = null
 let lastRenderTime = 0
 let mapsReady = false
+let resizeObserver: ResizeObserver | null = null
+let resizeFrame: number | null = null
+let modeSwitching = false
+let modeSwitchTimer: number | null = null
 
-const MAP_CONTEXT = 'waf-world-context'
+const MAP_CONTEXT = 'waf-world-context-pacific'
+const PACIFIC_SHIFT_THRESHOLD_LNG = -25
 const CHINA_REGION_NAMES = [
   '北京市',
   '天津市',
@@ -149,7 +162,21 @@ const scheduleRender = () => {
   }
 }
 
-const resizeChart = () => chart?.resize()
+const resizeChart = () => {
+  if (resizeFrame !== null) {
+    window.cancelAnimationFrame(resizeFrame)
+  }
+  resizeFrame = window.requestAnimationFrame(() => {
+    resizeFrame = null
+    chart?.resize()
+  })
+}
+
+function resizeDuringLayoutChange() {
+  resizeChart()
+  window.setTimeout(resizeChart, 120)
+  window.setTimeout(resizeChart, 320)
+}
 
 function hasGeo(node: EventMapNode): node is GeoNode {
   return typeof node.lat === 'number' && typeof node.lng === 'number'
@@ -325,10 +352,16 @@ function isChinaWorldFeature(feature: {
 function buildContextMap(
   worldGeoJson: {
     type: 'FeatureCollection'
-    features: Array<{ properties?: Record<string, unknown> }>
+    features: Array<{
+      geometry?: { coordinates?: unknown }
+      properties?: Record<string, unknown>
+    }>
   },
   chinaGeoJson: {
-    features: Array<{ properties?: Record<string, unknown> }>
+    features: Array<{
+      geometry?: { coordinates?: unknown }
+      properties?: Record<string, unknown>
+    }>
   },
 ) {
   return {
@@ -343,14 +376,75 @@ function buildContextMap(
   }
 }
 
+function shiftLongitude(lng: number) {
+  return lng < PACIFIC_SHIFT_THRESHOLD_LNG ? lng + 360 : lng
+}
+
+function mapPoint(lng: number, lat: number) {
+  return [shiftLongitude(lng), lat]
+}
+
+function collectLongitudes(value: unknown, result: number[] = []) {
+  if (!Array.isArray(value)) return result
+  if (
+    value.length >= 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number'
+  ) {
+    result.push(value[0])
+    return result
+  }
+  value.forEach((item) => collectLongitudes(item, result))
+  return result
+}
+
+function shouldShiftFeature(coordinates: unknown) {
+  const longitudes = collectLongitudes(coordinates)
+  if (longitudes.length === 0) return false
+  return Math.max(...longitudes) < PACIFIC_SHIFT_THRESHOLD_LNG
+}
+
+function shiftGeoJsonLongitudes<T>(value: T): T {
+  if (typeof value === 'number') {
+    return shiftLongitude(value) as T
+  }
+  if (!Array.isArray(value)) {
+    return value
+  }
+  if (
+    value.length >= 2 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number'
+  ) {
+    return [shiftLongitude(value[0]), value[1], ...value.slice(2)] as T
+  }
+  return value.map((item) => shiftGeoJsonLongitudes(item)) as T
+}
+
+function buildPacificMap(geoJson: ReturnType<typeof buildContextMap>) {
+  return {
+    ...geoJson,
+    features: geoJson.features.map((feature) => ({
+      ...feature,
+      geometry:
+        feature.geometry && shouldShiftFeature(feature.geometry.coordinates)
+          ? {
+              ...feature.geometry,
+              coordinates: shiftGeoJsonLongitudes(feature.geometry.coordinates),
+            }
+          : feature.geometry,
+    })),
+  }
+}
+
 function geoConfigForMode(mode: MapMode) {
   const chinaMode = mode === 'china'
   return {
     map: MAP_CONTEXT,
     roam: false,
-    zoom: chinaMode ? 2.55 : 1.08,
-    center: chinaMode ? [104.5, 35.5] : [16, 18],
-    scaleLimit: { min: 0.8, max: 4 },
+    zoom: chinaMode ? 5.65 : 1.72,
+    center: chinaMode ? [106.3, 36.1] : [158, 12],
+    scaleLimit: { min: 0.8, max: 6.5 },
     emphasis: { disabled: true },
     label: { show: false },
     itemStyle: {
@@ -372,14 +466,43 @@ function geoConfigForMode(mode: MapMode) {
       { name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } },
     ],
     animation: true,
-    animationDurationUpdate: 720,
-    animationEasingUpdate: 'cubicOut',
+    animationDurationUpdate: 520,
+    animationEasingUpdate: 'quarticOut',
   }
 }
 
 function setMapMode(mode: MapMode) {
-  if (mapMode.value === mode) return
-  mapMode.value = mode
+  if (currentMapMode.value === mode) return
+  currentMapMode.value = mode
+}
+
+function clearTrafficLayers() {
+  chart?.setOption(
+    {
+      animation: false,
+      series: [
+        {
+          id: 'traffic-projectiles',
+          type: 'lines',
+          coordinateSystem: 'geo',
+          data: [],
+        },
+        {
+          id: 'traffic-nodes',
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          data: [],
+        },
+        {
+          id: 'request-source-bursts',
+          type: 'scatter',
+          coordinateSystem: 'geo',
+          data: [],
+        },
+      ],
+    },
+    { replaceMerge: ['series'], lazyUpdate: false },
+  )
 }
 
 // 加载地图并初始化
@@ -396,9 +519,11 @@ const initMap = async () => {
       chinaResponse.json(),
     ])
 
+    const contextMap = buildContextMap(worldGeoJson, chinaGeoJson)
+
     registerMap(
       MAP_CONTEXT,
-      buildContextMap(worldGeoJson, chinaGeoJson) as unknown as Parameters<
+      buildPacificMap(contextMap) as unknown as Parameters<
         typeof registerMap
       >[1],
     )
@@ -409,12 +534,17 @@ const initMap = async () => {
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { show: false },
-      geo: geoConfigForMode(mapMode.value),
+      geo: geoConfigForMode(currentMapMode.value),
       animation: true,
-      animationDurationUpdate: 720,
-      animationEasingUpdate: 'cubicOut',
+      animationDurationUpdate: 520,
+      animationEasingUpdate: 'quarticOut',
       series: [],
     })
+
+    resizeObserver = new ResizeObserver(() => {
+      resizeChart()
+    })
+    resizeObserver.observe(chartRef.value)
 
     renderChart()
   } catch (error) {
@@ -432,16 +562,18 @@ const renderChart = () => {
   }
 
   const snapshotNodeMap = new Map(nodes.filter(hasGeo).map((n) => [n.id, n]))
-  activeRealtimeNodes.forEach((record, id) => {
-    if (!snapshotNodeMap.has(id)) {
-      snapshotNodeMap.set(id, { ...record.node, trafficWeight: 1 })
-    }
-  })
-  const geoNodes = Array.from(snapshotNodeMap.values())
+  if (!modeSwitching) {
+    activeRealtimeNodes.forEach((record, id) => {
+      if (!snapshotNodeMap.has(id)) {
+        snapshotNodeMap.set(id, { ...record.node, trafficWeight: 1 })
+      }
+    })
+  }
+  const geoNodes = modeSwitching ? [] : Array.from(snapshotNodeMap.values())
 
   const scatterData = geoNodes.map((node) => ({
     name: node.name,
-    value: [node.lng, node.lat, node.trafficWeight],
+    value: [...mapPoint(node.lng, node.lat), node.trafficWeight],
     itemStyle: {
       color: activeRealtimeNodes.has(node.id)
         ? activeRealtimeNodes.get(node.id)?.decision === 'block'
@@ -455,26 +587,30 @@ const renderChart = () => {
     },
   }))
 
-  const burstData = Array.from(activeRealtimeNodes.values()).map((record) => ({
-    name: record.node.name,
-    value: [record.node.lng, record.node.lat, 2.2],
-    itemStyle: {
-      color:
-        record.decision === 'block'
-          ? '#ff4d4f'
-          : record.direction === 'egress'
-            ? '#00f2fe'
-            : '#70ff00',
-    },
-  }))
+  const burstData = modeSwitching
+    ? []
+    : Array.from(activeRealtimeNodes.values()).map((record) => ({
+        name: record.node.name,
+        value: [...mapPoint(record.node.lng, record.node.lat), 2.2],
+        itemStyle: {
+          color:
+            record.decision === 'block'
+              ? '#ff4d4f'
+              : record.direction === 'egress'
+                ? '#00f2fe'
+                : '#70ff00',
+        },
+      }))
 
-  scatterData.push({
-    name: originNode.name,
-    value: [originNode.lng, originNode.lat, 2.5],
-    itemStyle: {
-      color: '#10b981',
-    },
-  })
+  if (!modeSwitching) {
+    scatterData.push({
+      name: originNode.name,
+      value: [...mapPoint(originNode.lng, originNode.lat), 1.8],
+      itemStyle: {
+        color: '#10b981',
+      },
+    })
+  }
 
   const linesSeries: LinesSeriesOption = {
     id: 'traffic-projectiles',
@@ -490,50 +626,51 @@ const renderChart = () => {
     lineStyle: {
       curveness: 0.2,
     },
-    data: activeLinesData.value,
+    data: modeSwitching
+      ? []
+      : activeLinesData.value.map((line) => ({
+          ...line,
+          coords: line.coords.map(([lng, lat]) => mapPoint(lng, lat)),
+        })),
   }
 
-  const scatterSeries: EffectScatterSeriesOption = {
+  const scatterSeries: ScatterSeriesOption = {
     id: 'traffic-nodes',
-    type: 'effectScatter',
+    type: 'scatter',
     coordinateSystem: 'geo',
     zlevel: 2,
-    rippleEffect: {
-      brushType: 'stroke',
-      scale: 3,
-    },
     label: {
       show: false,
     },
     symbolSize: (val: unknown) => {
       const point = Array.isArray(val) ? val : []
       const weight = typeof point[2] === 'number' ? point[2] : 0
-      return 3 + weight * 2
+      const base = currentMapMode.value === 'china' ? 2.2 : 2
+      return Math.min(
+        base + weight * 1.35,
+        currentMapMode.value === 'china' ? 6 : 5,
+      )
     },
     data: scatterData,
+    animation: false,
   }
 
-  const burstSeries: EffectScatterSeriesOption = {
+  const burstSeries: ScatterSeriesOption = {
     id: 'request-source-bursts',
-    type: 'effectScatter',
+    type: 'scatter',
     coordinateSystem: 'geo',
     zlevel: 4,
-    rippleEffect: {
-      brushType: 'stroke',
-      scale: mapMode.value === 'china' ? 5.2 : 4.2,
-      period: 2,
-    },
     label: { show: false },
     symbolSize: (val: unknown) => {
       const point = Array.isArray(val) ? val : []
       const weight = typeof point[2] === 'number' ? point[2] : 1
-      return 4 + weight * 2.2
+      return Math.min(4 + weight * 1.6, 7)
     },
-    data: burstData,
+    data: modeSwitching ? [] : burstData,
+    animation: false,
   }
 
   chart.setOption({
-    geo: geoConfigForMode(mapMode.value),
     series: [linesSeries, scatterSeries, burstSeries],
   })
 }
@@ -560,8 +697,26 @@ watch(
   },
 )
 
-watch(mapMode, () => {
-  scheduleRender()
+watch(currentMapMode, (mode) => {
+  if (modeSwitchTimer !== null) {
+    window.clearTimeout(modeSwitchTimer)
+    modeSwitchTimer = null
+  }
+  modeSwitching = true
+  activeLinesData.value = []
+  activeRealtimeNodes.clear()
+  clearTrafficLayers()
+  chart?.setOption({
+    animation: true,
+    geo: geoConfigForMode(mode),
+  })
+  resizeDuringLayoutChange()
+  modeSwitchTimer = window.setTimeout(() => {
+    modeSwitching = false
+    modeSwitchTimer = null
+    resizeDuringLayoutChange()
+    scheduleRender()
+  }, 560)
 })
 
 onMounted(() => {
@@ -580,6 +735,16 @@ onBeforeUnmount(() => {
     window.clearInterval(cleanupTimer)
     cleanupTimer = null
   }
+  if (resizeFrame !== null) {
+    window.cancelAnimationFrame(resizeFrame)
+    resizeFrame = null
+  }
+  if (modeSwitchTimer !== null) {
+    window.clearTimeout(modeSwitchTimer)
+    modeSwitchTimer = null
+  }
+  resizeObserver?.disconnect()
+  resizeObserver = null
   lastLaunchTime.clear()
   activeRealtimeNodes.clear()
   chart?.dispose()
@@ -595,49 +760,33 @@ onBeforeUnmount(() => {
           实时流量监控 (CDN ↔ 源站)
         </h3>
       </div>
-      <div class="flex items-center gap-3">
-        <div
-          class="flex items-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/40 p-0.5 text-[11px] text-slate-400"
+      <div
+        class="flex items-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/40 p-0.5 text-[11px] text-slate-400"
+      >
+        <button
+          type="button"
+          class="h-7 px-2.5 transition-colors"
+          :class="
+            currentMapMode === 'china'
+              ? 'bg-sky-500/20 text-sky-200'
+              : 'hover:text-slate-200'
+          "
+          @click="setMapMode('china')"
         >
-          <button
-            type="button"
-            class="h-7 px-2.5 transition-colors"
-            :class="
-              mapMode === 'china'
-                ? 'bg-sky-500/20 text-sky-200'
-                : 'hover:text-slate-200'
-            "
-            @click="setMapMode('china')"
-          >
-            全国
-          </button>
-          <button
-            type="button"
-            class="h-7 px-2.5 transition-colors"
-            :class="
-              mapMode === 'global'
-                ? 'bg-sky-500/20 text-sky-200'
-                : 'hover:text-slate-200'
-            "
-            @click="setMapMode('global')"
-          >
-            全球
-          </button>
-        </div>
-        <div class="hidden items-center gap-3 text-xs text-slate-500 lg:flex">
-          <div class="flex items-center gap-1">
-            <span class="w-2 h-[2px] bg-blue-500"></span>
-            <span>CDN 请求</span>
-          </div>
-          <div class="flex items-center gap-1">
-            <span class="w-2 h-[2px] bg-emerald-500"></span>
-            <span>源站响应</span>
-          </div>
-          <div class="flex items-center gap-1">
-            <span class="w-2 h-[2px] bg-red-500"></span>
-            <span>拦截异常</span>
-          </div>
-        </div>
+          全国
+        </button>
+        <button
+          type="button"
+          class="h-7 px-2.5 transition-colors"
+          :class="
+            currentMapMode === 'global'
+              ? 'bg-sky-500/20 text-sky-200'
+              : 'hover:text-slate-200'
+          "
+          @click="setMapMode('global')"
+        >
+          全球
+        </button>
       </div>
     </div>
 
@@ -694,6 +843,24 @@ onBeforeUnmount(() => {
           <span class="text-emerald-400 font-mono"
             >{{ snapshot.peakBandwidthMbps.toFixed(1) }} Mbps</span
           >
+        </div>
+      </div>
+
+      <!-- 流向图例 -->
+      <div
+        class="absolute bottom-3 right-3 flex flex-col gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 p-2.5 text-[10px] text-slate-400 backdrop-blur-md"
+      >
+        <div class="flex items-center gap-1.5">
+          <span class="h-[2px] w-4 bg-blue-500"></span>
+          <span>CDN 请求</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="h-[2px] w-4 bg-emerald-500"></span>
+          <span>源站响应</span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <span class="h-[2px] w-4 bg-red-500"></span>
+          <span>拦截异常</span>
         </div>
       </div>
     </div>

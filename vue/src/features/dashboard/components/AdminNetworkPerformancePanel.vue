@@ -26,15 +26,16 @@ const props = defineProps<{
   timestamps: number[]
   rxSeries: number[]
   txSeries: number[]
+  mapMode?: 'china' | 'global'
 }>()
 
 const chartEl = ref<HTMLDivElement | null>(null)
 let chart: ECharts | null = null
 
 const { formatBytes } = useFormatters()
-const windowMs = 10_000
 const stepMs = 2_000
-const slotCount = windowMs / stepMs + 1
+const slotCount = computed(() => (props.mapMode === 'china' ? 10 : 6))
+const windowMs = computed(() => (slotCount.value - 1) * stepMs)
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
   minute: '2-digit',
@@ -69,13 +70,15 @@ const chartSlots = computed(() => {
   const latestTimestamp = props.timestamps.at(-1) || Date.now()
   const end = Math.floor(latestTimestamp / stepMs) * stepMs
   return Array.from(
-    { length: slotCount },
-    (_, index) => end - windowMs + index * stepMs,
+    { length: slotCount.value },
+    (_, index) => end - windowMs.value + index * stepMs,
   )
 })
 
 const currentLabels = computed(() =>
-  chartSlots.value.map((timestamp) => timeFormatter.format(new Date(timestamp))),
+  chartSlots.value.map((timestamp) =>
+    timeFormatter.format(new Date(timestamp)),
+  ),
 )
 
 const seriesForSlots = (series: number[]) =>
@@ -200,16 +203,25 @@ const renderChart = async () => {
 
 const resizeChart = () => chart?.resize()
 
+function renderAndResizeChart() {
+  void renderChart().then(() => {
+    resizeChart()
+  })
+}
+
 watch(
   () => [
-    props.timestamps,
-    props.rxSeries,
-    props.txSeries,
+    props.timestamps.length,
+    props.timestamps.at(-1),
+    props.rxSeries.length,
+    props.rxSeries.at(-1),
+    props.txSeries.length,
+    props.txSeries.at(-1),
     props.rxRate,
     props.txRate,
+    props.mapMode,
   ],
-  () => void renderChart(),
-  { deep: true },
+  renderAndResizeChart,
 )
 
 onMounted(() => {
@@ -236,7 +248,10 @@ onBeforeUnmount(() => {
       >
         <div class="min-w-0">
           <div class="flex min-w-0 items-center gap-1.5">
-            <span class="h-2 w-2 shrink-0 rounded-full" :class="item.dot"></span>
+            <span
+              class="h-2 w-2 shrink-0 rounded-full"
+              :class="item.dot"
+            ></span>
             <p class="truncate text-xs font-medium text-slate-300">
               {{ item.label }}
             </p>

@@ -72,69 +72,30 @@ const statItems = computed(() => [
   },
 ])
 
-const chartSlots = computed(() => {
-  const latestTimestamp = props.timestamps.at(-1) || Date.now()
-  const end = Math.floor(latestTimestamp / stepMs) * stepMs
-  return Array.from(
-    { length: slotCount.value },
-    (_, index) => end - windowMs.value + index * stepMs,
-  )
-})
+const formatAxisRate = (value: number) => {
+  if (value === 0) return '0 B'
+  if (value < 1024) return `${value.toFixed(0)} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
 
-const currentLabels = computed(() =>
-  chartSlots.value.map((timestamp, index, slots) =>
-    index === slots.length - 1
-      ? '现在'
-      : timeFormatter.format(new Date(timestamp)),
-  ),
+const currentRxData = computed(() =>
+  props.timestamps.map((t, i) => [t, props.rxSeries[i] || 0]),
+)
+const currentTxData = computed(() =>
+  props.timestamps.map((t, i) => [t, props.txSeries[i] || 0]),
 )
 
-const formatMegabytes = (value: number) =>
-  `${(value / megabyte).toFixed(1)} MB`
-
-const seriesForSlots = (series: number[]) =>
-  chartSlots.value.map((slot) => {
-    for (let index = props.timestamps.length - 1; index >= 0; index -= 1) {
-      const timestamp = props.timestamps[index]
-      if (timestamp <= slot && timestamp > slot - stepMs) {
-        return series[index] || 0
-      }
-    }
-    return 0
-  })
-
-const currentRxSeries = computed(() => seriesForSlots(props.rxSeries))
-const currentTxSeries = computed(() => seriesForSlots(props.txSeries))
-const chartPeak = computed(() =>
-  Math.max(0, ...currentRxSeries.value, ...currentTxSeries.value),
-)
-const previousChartPeak = computed(() =>
-  Math.max(
-    0,
-    ...currentRxSeries.value.slice(0, -1),
-    ...currentTxSeries.value.slice(0, -1),
-  ),
-)
-const yAxisMax = computed(() => {
-  const peak = chartPeak.value
-  if (peak <= 0) return megabyte
-
-  const previousPeak = previousChartPeak.value
-  const isBurst = previousPeak > 0 && peak >= previousPeak * 1.8
-  const max = peak * (isBurst ? 1.5 : 2)
-  return Math.max(megabyte, Math.ceil(max / megabyte) * megabyte)
-})
-const yAxisInterval = computed(() => yAxisMax.value / 4)
+let rafId: number | null = null
 
 const renderChart = async () => {
   await nextTick()
   if (!chartEl.value) return
   if (!chart) chart = init(chartEl.value)
 
+  const now = Date.now()
   const option: NetworkChartOption = {
-    animation: true,
-    animationDurationUpdate: 450,
-    animationEasingUpdate: 'cubicOut',
+    animation: false, // 彻底禁用内置动画，完全由物理引擎逐帧驱动
     grid: {
       left: 58,
       right: 12,
@@ -153,9 +114,10 @@ const renderChart = async () => {
       valueFormatter: (value) => `${formatBytes(Number(value || 0))}/s`,
     },
     xAxis: {
-      type: 'category',
+      type: 'time',
       boundaryGap: false,
-      data: currentLabels.value,
+      min: now - windowMs.value,
+      max: now,
       axisLine: {
         lineStyle: {
           color: 'rgba(148, 163, 184, 0.5)',
@@ -168,17 +130,24 @@ const renderChart = async () => {
         color: '#aeb7c4',
         fontSize: 11,
         hideOverlap: true,
+        formatter: (value: number) => {
+          const date = new Date(value)
+          return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`
+        },
+      },
+      splitLine: {
+        show: false,
       },
     },
     yAxis: {
       type: 'value',
       min: 0,
-      max: yAxisMax.value,
-      interval: yAxisInterval.value,
+      max: 1024 * 10,
+      interval: (1024 * 10) / 4,
       axisLabel: {
         color: '#aeb7c4',
         fontSize: 11,
-        formatter: (value: number) => formatMegabytes(value),
+        formatter: (value: number) => formatAxisRate(value),
       },
       splitLine: {
         lineStyle: {
@@ -192,9 +161,8 @@ const renderChart = async () => {
         name: '下行',
         type: 'line',
         smooth: true,
-        symbol: 'circle',
-        symbolSize: 5,
-        data: currentRxSeries.value,
+        symbol: 'none',
+        data: currentRxData.value,
         lineStyle: {
           width: 2,
           color: '#f59e0b',
@@ -220,9 +188,8 @@ const renderChart = async () => {
         name: '上行',
         type: 'line',
         smooth: true,
-        symbol: 'circle',
-        symbolSize: 5,
-        data: currentTxSeries.value,
+        symbol: 'none',
+        data: currentTxData.value,
         lineStyle: {
           width: 2,
           color: '#22c55e',
@@ -239,11 +206,102 @@ const renderChart = async () => {
 
 const resizeChart = () => chart?.resize()
 
-function renderAndResizeChart() {
-  void renderChart().then(() => {
-    resizeChart()
-  })
+let currentRenderYMax = 1024 * 10
+
+const startAnimation = () => {
+  const animate = () => {
+    if (chart) {
+      const now = Date.now()
+      // 维持 1500ms 的延迟渲染缓冲区
+      const renderTime = now - 1500
+      const minTime = renderTime - windowMs.value
+
+      // 关键修复：只计算当前“视口可见范围内”的数据峰值，忽略屏幕外的历史数据
+      let visiblePeak = 0
+      for (let i = 0; i < props.timestamps.length; i++) {
+        // 多容忍一秒的余量，防止数据点刚划出屏幕时 Y 轴立刻暴跌导致抖动
+        if (props.timestamps[i] >= minTime - 1000) {
+          const rx = props.rxSeries[i] || 0
+          const tx = props.txSeries[i] || 0
+          if (rx > visiblePeak) visiblePeak = rx
+          if (tx > visiblePeak) visiblePeak = tx
+        }
+      }
+
+      // 目标最大值为屏幕可见数据峰值的 2 倍
+      const targetYMax = Math.max(1024 * 10, visiblePeak * 2)
+      // 平滑逼近，形成连续呼吸效果
+      currentRenderYMax += (targetYMax - currentRenderYMax) * 0.08
+
+      chart.setOption({
+        xAxis: {
+          min: minTime,
+          max: renderTime,
+        },
+        yAxis: {
+          max: currentRenderYMax,
+          interval: currentRenderYMax / 4,
+        },
+      })
+    }
+    rafId = requestAnimationFrame(animate)
+  }
+  rafId = requestAnimationFrame(animate)
 }
+
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  void renderChart().then(() => {
+    startAnimation()
+    if (chartEl.value) {
+      resizeObserver = new ResizeObserver(() => {
+        resizeChart()
+      })
+      resizeObserver.observe(chartEl.value)
+    }
+  })
+  window.addEventListener('resize', resizeChart)
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  if (rafId !== null) {
+    cancelAnimationFrame(rafId)
+  }
+  if (slotCountTransitionTimer !== null) {
+    window.clearInterval(slotCountTransitionTimer)
+  }
+  window.removeEventListener('resize', resizeChart)
+  chart?.dispose()
+  chart = null
+})
+
+// 当真实数据到达时更新系列数据
+watch(
+  () => [currentRxData.value, currentTxData.value],
+  () => {
+    const rx = [...currentRxData.value]
+    const tx = [...currentTxData.value]
+
+    // 关键修复：向未来延伸一个虚拟点，保持当前最后的值。
+    // 这样无论是在“全国模式”更宽的画布下，还是遇到网络微小抖动，
+    // X 轴的右侧视口边缘永远会被这根平移线“填满”，不会再出现突然断开的留白。
+    if (rx.length > 0) {
+      const future = Date.now() + 10000
+      rx.push([future, rx[rx.length - 1][1]])
+      tx.push([future, tx[tx.length - 1][1]])
+    }
+
+    chart?.setOption({
+      series: [
+        { data: rx },
+        { data: tx },
+      ],
+    })
+  },
+  { deep: true }
+)
 
 watch(
   targetSlotCount,
@@ -269,35 +327,7 @@ watch(
   },
 )
 
-watch(
-  () => [
-    displayedSlotCount.value,
-    props.timestamps.length,
-    props.timestamps.at(-1),
-    props.rxSeries.length,
-    props.rxSeries.at(-1),
-    props.txSeries.length,
-    props.txSeries.at(-1),
-    props.rxRate,
-    props.txRate,
-    props.mapMode,
-  ],
-  renderAndResizeChart,
-)
 
-onMounted(() => {
-  void renderChart()
-  window.addEventListener('resize', resizeChart)
-})
-
-onBeforeUnmount(() => {
-  if (slotCountTransitionTimer !== null) {
-    window.clearInterval(slotCountTransitionTimer)
-  }
-  window.removeEventListener('resize', resizeChart)
-  chart?.dispose()
-  chart = null
-})
 </script>
 
 <template>

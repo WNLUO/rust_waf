@@ -154,3 +154,52 @@ async fn test_sqlite_store_loads_legacy_app_config_with_default_safeline() {
     );
     assert_eq!(loaded.console_settings.gateway_name, "玄枢防护网关");
 }
+
+#[tokio::test]
+async fn test_expiring_ai_temp_policy_does_not_conflict_with_legacy_inactive_duplicate() {
+    let path = unique_test_db_path("ai_temp_policy_expire_conflict");
+    let store = SqliteStore::new(path, true).await.unwrap();
+    let now = unix_timestamp();
+
+    sqlx::query(
+        r#"
+        INSERT INTO ai_temp_policies (
+            created_at, updated_at, expires_at, status, source_report_id, policy_key, title,
+            policy_type, layer, scope_type, scope_value, action, operator, suggested_value,
+            rationale, confidence, auto_applied, hit_count, last_hit_at, effect_json
+        )
+        VALUES (?, ?, ?, 'expired', NULL, 'dup-policy', 'old', 'cc', 'l7', 'route', '/login',
+            'increase_challenge', 'prefix', '/login', 'legacy inactive duplicate', 80, 1, 0, NULL, '{}')
+        "#,
+    )
+    .bind(now - 200)
+    .bind(now - 200)
+    .bind(now - 100)
+    .execute(&store.pool)
+    .await
+    .unwrap();
+
+    store
+        .upsert_ai_temp_policy(&crate::storage::AiTempPolicyUpsert {
+            source_report_id: None,
+            policy_key: "dup-policy".to_string(),
+            title: "active".to_string(),
+            policy_type: "cc".to_string(),
+            layer: "l7".to_string(),
+            scope_type: "route".to_string(),
+            scope_value: "/login".to_string(),
+            action: "increase_challenge".to_string(),
+            operator: "prefix".to_string(),
+            suggested_value: "/login".to_string(),
+            rationale: "active duplicate should expire cleanly".to_string(),
+            confidence: 90,
+            auto_applied: true,
+            expires_at: now - 1,
+            effect_stats: None,
+        })
+        .await
+        .unwrap();
+
+    let expired = store.expire_ai_temp_policies(now).await.unwrap();
+    assert_eq!(expired, 1);
+}

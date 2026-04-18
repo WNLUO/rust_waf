@@ -73,7 +73,7 @@ impl SqliteStore {
 
     pub async fn expire_ai_temp_policies(&self, now: i64) -> Result<u64> {
         let result = sqlx::query(
-            "UPDATE ai_temp_policies SET status = 'expired', updated_at = ? WHERE status = 'active' AND expires_at <= ?",
+            "UPDATE ai_temp_policies SET status = 'expired:' || id, updated_at = ? WHERE status = 'active' AND expires_at <= ?",
         )
         .bind(now)
         .bind(now)
@@ -84,7 +84,7 @@ impl SqliteStore {
 
     pub async fn delete_ai_temp_policy(&self, id: i64) -> Result<bool> {
         let result = sqlx::query(
-            "UPDATE ai_temp_policies SET status = 'revoked', updated_at = ? WHERE id = ? AND status = 'active'",
+            "UPDATE ai_temp_policies SET status = 'revoked:' || id, updated_at = ? WHERE id = ? AND status = 'active'",
         )
         .bind(unix_timestamp())
         .bind(id)
@@ -100,7 +100,7 @@ impl SqliteStore {
         now: i64,
     ) -> Result<bool> {
         let result = sqlx::query(
-            "UPDATE ai_temp_policies SET status = 'revoked', updated_at = ?, effect_json = ? WHERE id = ? AND status = 'active'",
+            "UPDATE ai_temp_policies SET status = 'revoked:' || id, updated_at = ?, effect_json = ? WHERE id = ? AND status = 'active'",
         )
         .bind(now)
         .bind(serde_json::to_string(effect)?)

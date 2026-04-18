@@ -756,22 +756,18 @@ const defenseMatrix = computed(() => {
         />
       </section>
 
-      <section
-        class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
-      >
-        <div
-          class="grid grid-cols-1 divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4"
-        >
+      <section class="grid gap-3 xl:grid-cols-[minmax(0,0.92fr)_minmax(430px,1.08fr)]">
+        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
           <div
             v-for="item in defenseMatrix"
             :key="item.label"
-            class="relative min-w-0 px-0 py-2 pr-16 first:pt-0 last:pb-0 md:px-3 md:py-0 md:pr-16 md:first:pl-0"
+            class="relative min-h-[6.6rem] min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-16 shadow-sm"
           >
             <p class="truncate text-xs font-semibold text-slate-900">
               {{ item.label }}
             </p>
             <StatusBadge
-              class="absolute right-0 top-2 md:right-3 md:top-0"
+              class="absolute right-3 top-2.5"
               :text="item.badge"
               :type="item.type"
               compact
@@ -790,6 +786,174 @@ const defenseMatrix = computed(() => {
                 >
                   {{ stat.value }}
                 </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
+        >
+          <div
+            class="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-blue-50/80 to-transparent"
+          ></div>
+          <div class="relative flex min-w-0 items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="truncate text-xs font-semibold text-slate-950">
+                AI自动化
+              </p>
+              <div
+                class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500"
+              >
+                <span>{{ providerLabel(aiAutomation?.provider) }}</span>
+                <span class="text-slate-300">/</span>
+                <span>
+                  {{ aiAutomation?.auto_apply_temp_policies ? '自动应用' : '仅建议' }}
+                </span>
+                <span class="text-slate-300">/</span>
+                <span>{{ pressureLabel(aiAutomation?.runtime_pressure_level) }}</span>
+              </div>
+            </div>
+            <StatusBadge
+              :text="aiAutomationStatusLabel"
+              :type="aiAutomationStatusType"
+              compact
+            />
+          </div>
+
+          <div class="relative mt-3 grid grid-cols-4 gap-2">
+            <div
+              v-for="item in aiAutomationStats"
+              :key="item.label"
+              class="min-w-0"
+            >
+              <p class="truncate text-[10px] text-slate-500">
+                {{ item.label }}
+              </p>
+              <p
+                class="mt-0.5 truncate text-sm font-semibold text-slate-950"
+                :class="item.class"
+                :title="item.value"
+              >
+                {{ item.value }}
+              </p>
+            </div>
+          </div>
+
+          <div class="relative mt-3 grid gap-1.5">
+            <div
+              v-for="row in aiAutomationPressureRows"
+              :key="row.label"
+              class="grid grid-cols-[4.5rem_minmax(0,1fr)_3rem] items-center gap-2 text-[11px]"
+            >
+              <span class="truncate text-slate-500">{{ row.label }}</span>
+              <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  class="h-full rounded-full"
+                  :class="row.color"
+                  :style="{ width: `${clampPercent(row.value)}%` }"
+                ></div>
+              </div>
+              <span class="text-right font-semibold text-slate-800">
+                {{ formatPercent(row.value) }}
+              </span>
+            </div>
+          </div>
+
+          <div
+            class="relative mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-2 md:grid-cols-3"
+          >
+            <div
+              v-for="item in aiTriggerFacts"
+              :key="item.label"
+              class="flex min-w-0 items-baseline justify-between gap-2 text-[11px]"
+            >
+              <span class="shrink-0 text-slate-500">{{ item.label }}</span>
+              <span
+                class="min-w-0 truncate text-right font-semibold text-slate-900"
+                :title="item.value"
+              >
+                {{ item.value }}
+              </span>
+            </div>
+          </div>
+
+          <div
+            class="relative mt-3 grid gap-3 border-t border-slate-100 pt-2 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
+          >
+            <div class="min-w-0">
+              <div class="mb-1.5 flex items-center justify-between text-[11px]">
+                <span class="font-medium text-slate-700">近窗口趋势</span>
+                <span class="text-slate-400">
+                  {{ formatNumber(aiAutomation?.active_rules || 0) }} 条规则
+                </span>
+              </div>
+              <div class="grid grid-cols-4 items-end gap-1.5">
+                <div
+                  v-for="window in aiAutomation?.trend_windows || []"
+                  :key="window.label"
+                  class="grid min-h-[3.4rem] min-w-0 content-end gap-1"
+                  :title="`${window.label}: ${formatNumber(window.total_events)} 事件`"
+                >
+                  <div
+                    class="mx-auto w-full overflow-hidden rounded-sm bg-slate-100"
+                    :style="{
+                      height: `${Math.max(8, (window.total_events / aiTrendMax) * 42)}px`,
+                    }"
+                  >
+                    <div
+                      class="h-full w-full rounded-sm bg-gradient-to-t from-blue-700 to-cyan-400"
+                    ></div>
+                  </div>
+                  <span class="truncate text-center text-[10px] text-slate-400">
+                    {{ window.label }}
+                  </span>
+                </div>
+                <div
+                  v-if="!(aiAutomation?.trend_windows || []).length"
+                  class="col-span-4 grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
+                >
+                  暂无趋势样本
+                </div>
+              </div>
+            </div>
+
+            <div class="min-w-0">
+              <div class="mb-1.5 flex items-center justify-between text-[11px]">
+                <span class="font-medium text-slate-700">策略反馈</span>
+                <span class="text-slate-400">
+                  {{ formatNumber(aiAutomation?.recent_policy_feedback.length || 0) }}
+                  条
+                </span>
+              </div>
+              <div class="grid gap-1.5">
+                <div
+                  v-for="policy in aiAutomation?.recent_policy_feedback || []"
+                  :key="policy.policy_key"
+                  class="grid min-w-0 grid-cols-[minmax(0,1fr)_4rem_3.25rem_2.5rem] items-center gap-2 text-[11px]"
+                >
+                  <span class="truncate font-medium text-slate-800" :title="policy.title">
+                    {{ policy.title }}
+                  </span>
+                  <span class="truncate text-slate-500" :title="aiActionLabel(policy.action)">
+                    {{ aiActionLabel(policy.action) }}
+                  </span>
+                  <span class="text-right font-semibold text-slate-900">
+                    {{ formatNumber(policy.hit_count) }}
+                  </span>
+                  <span
+                    class="truncate text-right text-slate-500"
+                    :title="aiPolicyStatusLabel(policy.action_status)"
+                  >
+                    {{ aiPolicyStatusLabel(policy.action_status) }}
+                  </span>
+                </div>
+                <div
+                  v-if="!(aiAutomation?.recent_policy_feedback || []).length"
+                  class="grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
+                >
+                  暂无自动策略命中
+                </div>
               </div>
             </div>
           </div>

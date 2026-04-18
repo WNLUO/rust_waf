@@ -313,8 +313,7 @@ pub(super) use ai_audit::{
     ai_automation_overview_handler, ai_defense_snapshot_handler, ai_visitor_profiles_handler,
     delete_ai_temp_policy_handler, list_ai_audit_reports_handler, list_ai_route_profiles_handler,
     list_ai_temp_policies_handler, local_defense_recommendations_handler,
-    run_ai_audit_report_handler,
-    update_ai_audit_report_feedback_handler, update_ai_route_profile_status_handler,
-    upsert_ai_route_profile_handler,
+    run_ai_audit_report_handler, update_ai_audit_report_feedback_handler,
+    update_ai_route_profile_status_handler, upsert_ai_route_profile_handler,
 };
 pub(crate) use ai_audit::{build_ai_audit_summary_for_context, run_ai_audit_report_for_context};

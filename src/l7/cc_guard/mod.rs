@@ -74,6 +74,33 @@ impl L7CcGuard {
         let host = normalized_host(request);
         self.has_valid_challenge_cookie(request, client_ip, &host, &config)
     }
+
+    pub fn has_valid_request_challenge(&self, request: &UnifiedHttpRequest) -> bool {
+        let Some(client_ip) = request_client_ip(request) else {
+            return false;
+        };
+        let config = self.config();
+        let host = normalized_host(request);
+        self.has_valid_challenge_cookie(request, client_ip, &host, &config)
+    }
+
+    pub fn build_request_challenge_result(
+        &self,
+        request: &UnifiedHttpRequest,
+        reason: impl Into<String>,
+    ) -> Option<crate::core::InspectionResult> {
+        let client_ip = request_client_ip(request)?;
+        let config = self.config();
+        let host = normalized_host(request);
+        let raw_path = request_path(&request.uri);
+        let html_mode = challenge_mode(request, raw_path);
+        let reason = reason.into();
+        Some(crate::core::InspectionResult::respond(
+            crate::core::InspectionLayer::L7,
+            reason.clone(),
+            self.build_challenge_response(request, client_ip, &host, &reason, html_mode, &config),
+        ))
+    }
 }
 
 #[cfg(test)]

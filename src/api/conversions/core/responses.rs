@@ -265,8 +265,62 @@ impl L7ConfigResponse {
             safeline_intercept: SafeLineInterceptConfigResponse::from_config(
                 &config.l7_config.safeline_intercept,
             ),
+            ip_access: IpAccessConfigPayload::from_config(&config.l7_config.ip_access),
             auto_tuning: AutoTuningConfigResponse::from_config(&config.auto_tuning),
         }
+    }
+}
+
+impl IpAccessConfigPayload {
+    pub(crate) fn from_config(config: &crate::config::l7::IpAccessConfig) -> Self {
+        Self {
+            enabled: config.enabled,
+            mode: ip_access_mode_label(config.mode).to_string(),
+            default_action: ip_access_action_label(config.default_action).to_string(),
+            overseas_action: ip_access_action_label(config.overseas_action).to_string(),
+            unknown_geo_action: ip_access_action_label(config.unknown_geo_action).to_string(),
+            allow_private_ips: config.allow_private_ips,
+            allow_server_public_ip: config.allow_server_public_ip,
+            domestic_country_codes: config.domestic_country_codes.clone(),
+            allow_cidrs: config.allow_cidrs.clone(),
+            block_cidrs: config.block_cidrs.clone(),
+            domestic_cidrs: config.domestic_cidrs.clone(),
+            bot_policy: IpAccessBotPolicyPayload {
+                allow_verified_search_bots: config.bot_policy.allow_verified_search_bots,
+                allow_claimed_search_bots: config.bot_policy.allow_claimed_search_bots,
+                allow_ai_bots: config.bot_policy.allow_ai_bots,
+                claimed_search_bot_action: ip_access_action_label(
+                    config.bot_policy.claimed_search_bot_action,
+                )
+                .to_string(),
+                suspect_bot_action: ip_access_action_label(config.bot_policy.suspect_bot_action)
+                    .to_string(),
+            },
+            geo_headers: IpAccessGeoHeaderConfigPayload {
+                enabled: config.geo_headers.enabled,
+                trust_only_from_proxy: config.geo_headers.trust_only_from_proxy,
+                country_headers: config.geo_headers.country_headers.clone(),
+                region_headers: config.geo_headers.region_headers.clone(),
+                city_headers: config.geo_headers.city_headers.clone(),
+            },
+        }
+    }
+}
+
+fn ip_access_mode_label(mode: crate::config::l7::IpAccessMode) -> &'static str {
+    match mode {
+        crate::config::l7::IpAccessMode::Monitor => "monitor",
+        crate::config::l7::IpAccessMode::DomesticOnly => "domestic_only",
+        crate::config::l7::IpAccessMode::Custom => "custom",
+    }
+}
+
+fn ip_access_action_label(action: crate::config::l7::IpAccessAction) -> &'static str {
+    match action {
+        crate::config::l7::IpAccessAction::Allow => "allow",
+        crate::config::l7::IpAccessAction::Challenge => "challenge",
+        crate::config::l7::IpAccessAction::Block => "block",
+        crate::config::l7::IpAccessAction::Alert => "alert",
     }
 }
 

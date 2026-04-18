@@ -216,6 +216,60 @@ pub(crate) async fn handle_http1_connection(
             return Ok(());
         }
 
+        if let Some(result) = context
+            .ip_access_guard()
+            .inspect_request(context.as_ref(), &mut request)
+        {
+            if !result.blocked {
+                if result.should_persist_event() {
+                    persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+                }
+            } else {
+                if result.should_persist_event() {
+                    persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+                }
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_block(result.layer.clone());
+                }
+                if let Some(inspector) = context.l4_inspector() {
+                    inspector.record_l7_feedback(
+                        packet,
+                        &request,
+                        crate::l4::behavior::FeedbackSource::L7Block,
+                    );
+                }
+                if result_should_drop_http1(&result, &request) {
+                    let _ = stream.shutdown().await;
+                    return Ok(());
+                }
+                if let Some(response) = result.custom_response.as_ref() {
+                    let response =
+                        crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                            context.as_ref(),
+                            &resolve_runtime_custom_response(response),
+                        );
+                    let body = body_for_request(&request, &response.body);
+                    http1_handler
+                        .write_response_with_headers(
+                            &mut stream,
+                            response.status_code,
+                            http_status_text(response.status_code),
+                            &response.headers,
+                            &body,
+                        )
+                        .await?;
+                } else {
+                    http1_handler
+                        .write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes())
+                        .await?;
+                }
+                if !should_keep_client_connection_open(&request) {
+                    return Ok(());
+                }
+                continue;
+            }
+        }
+
         if let Some(result) = inspect_l7_bloom_filter(context.as_ref(), &mut request, false) {
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);

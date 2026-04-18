@@ -24,6 +24,38 @@ export interface SafeLineInterceptConfigPayload {
   response_template: RuleResponseTemplatePayload
 }
 
+export interface IpAccessBotPolicyPayload {
+  allow_verified_search_bots: boolean
+  allow_claimed_search_bots: boolean
+  allow_ai_bots: boolean
+  claimed_search_bot_action: 'allow' | 'challenge' | 'block' | 'alert' | string
+  suspect_bot_action: 'allow' | 'challenge' | 'block' | 'alert' | string
+}
+
+export interface IpAccessGeoHeaderConfigPayload {
+  enabled: boolean
+  trust_only_from_proxy: boolean
+  country_headers: string[]
+  region_headers: string[]
+  city_headers: string[]
+}
+
+export interface IpAccessConfigPayload {
+  enabled: boolean
+  mode: 'monitor' | 'domestic_only' | 'custom' | string
+  default_action: 'allow' | 'challenge' | 'block' | 'alert' | string
+  overseas_action: 'allow' | 'challenge' | 'block' | 'alert' | string
+  unknown_geo_action: 'allow' | 'challenge' | 'block' | 'alert' | string
+  allow_private_ips: boolean
+  allow_server_public_ip: boolean
+  domestic_country_codes: string[]
+  allow_cidrs: string[]
+  block_cidrs: string[]
+  domestic_cidrs: string[]
+  bot_policy: IpAccessBotPolicyPayload
+  geo_headers: IpAccessGeoHeaderConfigPayload
+}
+
 export interface CcDefenseConfigPayload {
   enabled: boolean
   request_window_secs: number
@@ -171,6 +203,7 @@ export interface L7ConfigPayload {
   cc_defense: CcDefenseConfigPayload
   slow_attack_defense: SlowAttackDefenseConfigPayload
   safeline_intercept: SafeLineInterceptConfigPayload
+  ip_access: IpAccessConfigPayload
   auto_tuning: AutoTuningConfigPayload
 }
 

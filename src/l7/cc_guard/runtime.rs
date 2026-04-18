@@ -615,7 +615,7 @@ impl L7CcGuard {
         None
     }
 
-    fn build_challenge_response(
+    pub(super) fn build_challenge_response(
         &self,
         request: &UnifiedHttpRequest,
         client_ip: std::net::IpAddr,

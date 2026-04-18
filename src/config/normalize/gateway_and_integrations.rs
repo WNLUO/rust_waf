@@ -282,6 +282,39 @@ pub(super) fn normalize_l7_settings(config: &mut Config) {
             .response_template
             .content_type = default_rule_response_content_type();
     }
+
+    config.l7_config.ip_access.domestic_country_codes =
+        normalize_country_codes(&config.l7_config.ip_access.domestic_country_codes);
+    if config.l7_config.ip_access.domestic_country_codes.is_empty() {
+        config.l7_config.ip_access.domestic_country_codes = vec!["CN".to_string()];
+    }
+    config.l7_config.ip_access.allow_cidrs =
+        normalize_cidr_list(&config.l7_config.ip_access.allow_cidrs);
+    config.l7_config.ip_access.block_cidrs =
+        normalize_cidr_list(&config.l7_config.ip_access.block_cidrs);
+    config.l7_config.ip_access.domestic_cidrs =
+        normalize_cidr_list(&config.l7_config.ip_access.domestic_cidrs);
+    config.l7_config.ip_access.geo_headers.country_headers =
+        normalize_header_list(&config.l7_config.ip_access.geo_headers.country_headers);
+    if config
+        .l7_config
+        .ip_access
+        .geo_headers
+        .country_headers
+        .is_empty()
+    {
+        config.l7_config.ip_access.geo_headers.country_headers = vec![
+            "cf-ipcountry".to_string(),
+            "cloudfront-viewer-country".to_string(),
+            "fastly-client-country-code".to_string(),
+            "x-geo-country".to_string(),
+            "x-client-country".to_string(),
+        ];
+    }
+    config.l7_config.ip_access.geo_headers.region_headers =
+        normalize_header_list(&config.l7_config.ip_access.geo_headers.region_headers);
+    config.l7_config.ip_access.geo_headers.city_headers =
+        normalize_header_list(&config.l7_config.ip_access.geo_headers.city_headers);
 }
 
 fn cc_block_floor(challenge_threshold: u32, minimum: u32) -> u32 {
@@ -300,6 +333,34 @@ fn normalize_cidr_list(values: &[String]) -> Vec<String> {
     {
         if !normalized.iter().any(|item| item == cidr) {
             normalized.push(cidr.to_string());
+        }
+    }
+    normalized
+}
+
+fn normalize_country_codes(values: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for code in values
+        .iter()
+        .map(|code| code.trim().to_ascii_uppercase())
+        .filter(|code| code.len() == 2 && code.chars().all(|ch| ch.is_ascii_alphabetic()))
+    {
+        if !normalized.iter().any(|item| item == &code) {
+            normalized.push(code);
+        }
+    }
+    normalized
+}
+
+fn normalize_header_list(values: &[String]) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for header in values
+        .iter()
+        .map(|header| header.trim().to_ascii_lowercase())
+        .filter(|header| !header.is_empty())
+    {
+        if !normalized.iter().any(|item| item == &header) {
+            normalized.push(header);
         }
     }
     normalized

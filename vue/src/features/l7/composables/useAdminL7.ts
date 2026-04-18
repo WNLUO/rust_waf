@@ -56,6 +56,22 @@ export function useAdminL7() {
           headers: [...payload.safeline_intercept.response_template.headers],
         },
       },
+      ip_access: {
+        ...payload.ip_access,
+        domestic_country_codes: [...payload.ip_access.domestic_country_codes],
+        allow_cidrs: [...payload.ip_access.allow_cidrs],
+        block_cidrs: [...payload.ip_access.block_cidrs],
+        domestic_cidrs: [...payload.ip_access.domestic_cidrs],
+        bot_policy: {
+          ...payload.ip_access.bot_policy,
+        },
+        geo_headers: {
+          ...payload.ip_access.geo_headers,
+          country_headers: [...payload.ip_access.geo_headers.country_headers],
+          region_headers: [...payload.ip_access.geo_headers.region_headers],
+          city_headers: [...payload.ip_access.geo_headers.city_headers],
+        },
+      },
     })
   }
 
@@ -145,6 +161,20 @@ export function useAdminL7() {
         http3_certificate_path: targetForm.http3_certificate_path,
         http3_private_key_path: targetForm.http3_private_key_path,
         http3_enable_tls13: targetForm.http3_enable_tls13,
+        ip_access: {
+          ...targetForm.ip_access,
+          domestic_country_codes: [...targetForm.ip_access.domestic_country_codes],
+          allow_cidrs: [...targetForm.ip_access.allow_cidrs],
+          block_cidrs: [...targetForm.ip_access.block_cidrs],
+          domestic_cidrs: [...targetForm.ip_access.domestic_cidrs],
+          bot_policy: { ...targetForm.ip_access.bot_policy },
+          geo_headers: {
+            ...targetForm.ip_access.geo_headers,
+            country_headers: [...targetForm.ip_access.geo_headers.country_headers],
+            region_headers: [...targetForm.ip_access.geo_headers.region_headers],
+            city_headers: [...targetForm.ip_access.geo_headers.city_headers],
+          },
+        },
       })
       successMessage.value = response.message
       await refreshAll()

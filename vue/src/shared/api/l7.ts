@@ -20,6 +20,7 @@ export type L7ConfigUpdatePayload = Pick<
   | 'http3_certificate_path'
   | 'http3_private_key_path'
   | 'http3_enable_tls13'
+  | 'ip_access'
 >
 
 export function fetchL7Config() {

@@ -1,6 +1,7 @@
 pub mod behavior_guard;
 pub mod bloom_filter;
 pub mod cc_guard;
+pub mod ip_access;
 pub mod slow_attack_guard;
 
 use crate::config::L7Config;
@@ -10,6 +11,7 @@ use log::{debug, info};
 pub use behavior_guard::{BehaviorProfileSnapshot, L7BehaviorGuard};
 pub use bloom_filter::L7BloomFilterManager;
 pub use cc_guard::L7CcGuard;
+pub use ip_access::IpAccessGuard;
 pub use slow_attack_guard::{SlowAttackGuard, SlowAttackKind, SlowAttackObservation};
 
 #[derive(Debug, Clone)]

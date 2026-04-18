@@ -202,6 +202,59 @@ async fn handle_http3_request(
         return Ok(());
     }
 
+    if let Some(result) = context
+        .ip_access_guard()
+        .inspect_request(context.as_ref(), &mut unified)
+    {
+        if !result.blocked {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+            }
+        } else {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+            }
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_block(result.layer.clone());
+            }
+            if let Some(inspector) = context.l4_inspector() {
+                inspector.record_l7_feedback(
+                    &packet,
+                    &unified,
+                    crate::l4::behavior::FeedbackSource::L7Block,
+                );
+            }
+            if result_should_drop_http3(&result, &unified) {
+                return Ok(());
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
+                send_http3_response(
+                    &mut stream,
+                    response.status_code,
+                    &response.headers,
+                    body_for_request(&unified, &response.body),
+                    response.tarpit.as_ref(),
+                )
+                .await?;
+            } else {
+                send_http3_response(
+                    &mut stream,
+                    403,
+                    &[],
+                    body_for_request(&unified, result.reason.as_bytes()),
+                    None,
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+    }
+
     if let Some(result) = inspect_l7_bloom_filter(context.as_ref(), &mut unified, false) {
         if result.should_persist_event() {
             persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);

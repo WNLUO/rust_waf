@@ -77,6 +77,85 @@ pub struct L7Config {
     pub slow_attack_defense: SlowAttackDefenseConfig,
     #[serde(default)]
     pub safeline_intercept: SafeLineInterceptConfig,
+    #[serde(default)]
+    pub ip_access: IpAccessConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAccessConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: IpAccessMode,
+    #[serde(default)]
+    pub default_action: IpAccessAction,
+    #[serde(default)]
+    pub overseas_action: IpAccessAction,
+    #[serde(default)]
+    pub unknown_geo_action: IpAccessAction,
+    #[serde(default = "default_ip_access_allow_private_ips")]
+    pub allow_private_ips: bool,
+    #[serde(default = "default_ip_access_allow_server_public_ip")]
+    pub allow_server_public_ip: bool,
+    #[serde(default = "default_ip_access_domestic_country_codes")]
+    pub domestic_country_codes: Vec<String>,
+    #[serde(default)]
+    pub allow_cidrs: Vec<String>,
+    #[serde(default)]
+    pub block_cidrs: Vec<String>,
+    #[serde(default)]
+    pub domestic_cidrs: Vec<String>,
+    #[serde(default)]
+    pub bot_policy: IpAccessBotPolicy,
+    #[serde(default)]
+    pub geo_headers: IpAccessGeoHeaderConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IpAccessMode {
+    Monitor,
+    #[default]
+    DomesticOnly,
+    Custom,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IpAccessAction {
+    #[default]
+    Allow,
+    Challenge,
+    Block,
+    Alert,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAccessBotPolicy {
+    #[serde(default = "default_ip_access_allow_verified_search_bots")]
+    pub allow_verified_search_bots: bool,
+    #[serde(default)]
+    pub allow_claimed_search_bots: bool,
+    #[serde(default)]
+    pub allow_ai_bots: bool,
+    #[serde(default = "default_ip_access_claimed_search_bot_action")]
+    pub claimed_search_bot_action: IpAccessAction,
+    #[serde(default = "default_ip_access_suspect_bot_action")]
+    pub suspect_bot_action: IpAccessAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAccessGeoHeaderConfig {
+    #[serde(default = "default_ip_access_geo_headers_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_ip_access_geo_headers_trust_only_from_proxy")]
+    pub trust_only_from_proxy: bool,
+    #[serde(default = "default_ip_access_country_headers")]
+    pub country_headers: Vec<String>,
+    #[serde(default = "default_ip_access_region_headers")]
+    pub region_headers: Vec<String>,
+    #[serde(default = "default_ip_access_city_headers")]
+    pub city_headers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -463,6 +542,50 @@ impl Default for SafeLineInterceptConfig {
     }
 }
 
+impl Default for IpAccessConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: IpAccessMode::DomesticOnly,
+            default_action: IpAccessAction::Allow,
+            overseas_action: IpAccessAction::Challenge,
+            unknown_geo_action: IpAccessAction::Challenge,
+            allow_private_ips: default_ip_access_allow_private_ips(),
+            allow_server_public_ip: default_ip_access_allow_server_public_ip(),
+            domestic_country_codes: default_ip_access_domestic_country_codes(),
+            allow_cidrs: Vec::new(),
+            block_cidrs: Vec::new(),
+            domestic_cidrs: Vec::new(),
+            bot_policy: IpAccessBotPolicy::default(),
+            geo_headers: IpAccessGeoHeaderConfig::default(),
+        }
+    }
+}
+
+impl Default for IpAccessBotPolicy {
+    fn default() -> Self {
+        Self {
+            allow_verified_search_bots: default_ip_access_allow_verified_search_bots(),
+            allow_claimed_search_bots: false,
+            allow_ai_bots: false,
+            claimed_search_bot_action: default_ip_access_claimed_search_bot_action(),
+            suspect_bot_action: default_ip_access_suspect_bot_action(),
+        }
+    }
+}
+
+impl Default for IpAccessGeoHeaderConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_ip_access_geo_headers_enabled(),
+            trust_only_from_proxy: default_ip_access_geo_headers_trust_only_from_proxy(),
+            country_headers: default_ip_access_country_headers(),
+            region_headers: default_ip_access_region_headers(),
+            city_headers: default_ip_access_city_headers(),
+        }
+    }
+}
+
 impl Default for CcDefenseConfig {
     fn default() -> Self {
         Self {
@@ -548,6 +671,57 @@ impl Default for L7Config {
             cc_defense: CcDefenseConfig::default(),
             slow_attack_defense: SlowAttackDefenseConfig::default(),
             safeline_intercept: SafeLineInterceptConfig::default(),
+            ip_access: IpAccessConfig::default(),
         }
     }
+}
+
+const fn default_ip_access_allow_private_ips() -> bool {
+    true
+}
+
+const fn default_ip_access_allow_server_public_ip() -> bool {
+    true
+}
+
+fn default_ip_access_domestic_country_codes() -> Vec<String> {
+    vec!["CN".to_string()]
+}
+
+const fn default_ip_access_allow_verified_search_bots() -> bool {
+    true
+}
+
+const fn default_ip_access_claimed_search_bot_action() -> IpAccessAction {
+    IpAccessAction::Challenge
+}
+
+const fn default_ip_access_suspect_bot_action() -> IpAccessAction {
+    IpAccessAction::Challenge
+}
+
+const fn default_ip_access_geo_headers_enabled() -> bool {
+    true
+}
+
+const fn default_ip_access_geo_headers_trust_only_from_proxy() -> bool {
+    true
+}
+
+fn default_ip_access_country_headers() -> Vec<String> {
+    vec![
+        "cf-ipcountry".to_string(),
+        "cloudfront-viewer-country".to_string(),
+        "fastly-client-country-code".to_string(),
+        "x-geo-country".to_string(),
+        "x-client-country".to_string(),
+    ]
+}
+
+fn default_ip_access_region_headers() -> Vec<String> {
+    vec!["x-geo-region".to_string()]
+}
+
+fn default_ip_access_city_headers() -> Vec<String> {
+    vec!["x-geo-city".to_string()]
 }

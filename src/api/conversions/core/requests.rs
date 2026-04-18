@@ -155,8 +155,68 @@ impl L7ConfigUpdateRequest {
         current.listen_addrs = listen_addrs;
         current.tcp_upstream_addr = non_empty_string(upstream_endpoint);
         current.http3_config = http3_config;
+        current.l7_config.ip_access = self.ip_access.into_config()?;
 
         Ok(current.normalized())
+    }
+}
+
+impl IpAccessConfigPayload {
+    pub(crate) fn into_config(self) -> Result<crate::config::l7::IpAccessConfig, String> {
+        Ok(crate::config::l7::IpAccessConfig {
+            enabled: self.enabled,
+            mode: parse_ip_access_mode(&self.mode)?,
+            default_action: parse_ip_access_action(&self.default_action)?,
+            overseas_action: parse_ip_access_action(&self.overseas_action)?,
+            unknown_geo_action: parse_ip_access_action(&self.unknown_geo_action)?,
+            allow_private_ips: self.allow_private_ips,
+            allow_server_public_ip: self.allow_server_public_ip,
+            domestic_country_codes: self.domestic_country_codes,
+            allow_cidrs: self.allow_cidrs,
+            block_cidrs: self.block_cidrs,
+            domestic_cidrs: self.domestic_cidrs,
+            bot_policy: crate::config::l7::IpAccessBotPolicy {
+                allow_verified_search_bots: self.bot_policy.allow_verified_search_bots,
+                allow_claimed_search_bots: self.bot_policy.allow_claimed_search_bots,
+                allow_ai_bots: self.bot_policy.allow_ai_bots,
+                claimed_search_bot_action: parse_ip_access_action(
+                    &self.bot_policy.claimed_search_bot_action,
+                )?,
+                suspect_bot_action: parse_ip_access_action(&self.bot_policy.suspect_bot_action)?,
+            },
+            geo_headers: crate::config::l7::IpAccessGeoHeaderConfig {
+                enabled: self.geo_headers.enabled,
+                trust_only_from_proxy: self.geo_headers.trust_only_from_proxy,
+                country_headers: self.geo_headers.country_headers,
+                region_headers: self.geo_headers.region_headers,
+                city_headers: self.geo_headers.city_headers,
+            },
+        })
+    }
+}
+
+fn parse_ip_access_mode(value: &str) -> Result<crate::config::l7::IpAccessMode, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "monitor" => Ok(crate::config::l7::IpAccessMode::Monitor),
+        "" | "domestic_only" => Ok(crate::config::l7::IpAccessMode::DomesticOnly),
+        "custom" => Ok(crate::config::l7::IpAccessMode::Custom),
+        other => Err(format!(
+            "IP 地域访问模式仅支持 monitor/domestic_only/custom，收到 '{}'",
+            other
+        )),
+    }
+}
+
+fn parse_ip_access_action(value: &str) -> Result<crate::config::l7::IpAccessAction, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "allow" => Ok(crate::config::l7::IpAccessAction::Allow),
+        "challenge" => Ok(crate::config::l7::IpAccessAction::Challenge),
+        "block" => Ok(crate::config::l7::IpAccessAction::Block),
+        "alert" => Ok(crate::config::l7::IpAccessAction::Alert),
+        other => Err(format!(
+            "IP 地域访问动作仅支持 allow/challenge/block/alert，收到 '{}'",
+            other
+        )),
     }
 }
 
@@ -520,6 +580,7 @@ mod tests {
             http3_certificate_path: String::new(),
             http3_private_key_path: String::new(),
             http3_enable_tls13: true,
+            ip_access: IpAccessConfigPayload::default(),
         }
         .into_config(current, false)
         .expect("l7 update should succeed");

@@ -205,6 +205,64 @@ pub(crate) async fn handle_http2_connection(
                         });
                     }
 
+                    if let Some(result) = context
+                        .ip_access_guard()
+                        .inspect_request(context.as_ref(), &mut request)
+                    {
+                        if !result.blocked {
+                            if result.should_persist_event() {
+                                persist_http_inspection_event(
+                                    context.as_ref(),
+                                    &packet,
+                                    &request,
+                                    &result,
+                                );
+                            }
+                        } else {
+                            if result.should_persist_event() {
+                                persist_http_inspection_event(
+                                    context.as_ref(),
+                                    &packet,
+                                    &request,
+                                    &result,
+                                );
+                            }
+                            if let Some(metrics) = context.metrics.as_ref() {
+                                metrics.record_block(result.layer.clone());
+                            }
+                            if let Some(inspector) = context.l4_inspector() {
+                                inspector.record_l7_feedback(
+                                    &packet,
+                                    &request,
+                                    crate::l4::behavior::FeedbackSource::L7Block,
+                                );
+                            }
+                            if result_should_drop_http2(&result, &request) {
+                                return Err(drop_http2_result(&result.reason));
+                            }
+                            if let Some(response) = result.custom_response.as_ref() {
+                                let response = resolve_runtime_custom_response(response);
+                                let body = body_for_request(&request, &response.body);
+                                let mut headers = response.headers.clone();
+                                apply_response_policies(
+                                    context.as_ref(),
+                                    &mut headers,
+                                    response.status_code,
+                                );
+                                return Ok(Http2Response {
+                                    status_code: response.status_code,
+                                    headers,
+                                    body,
+                                });
+                            }
+                            return Ok(Http2Response {
+                                status_code: 403,
+                                headers: vec![],
+                                body: body_for_request(&request, result.reason.as_bytes()),
+                            });
+                        }
+                    }
+
                     if let Some(result) =
                         inspect_l7_bloom_filter(context.as_ref(), &mut request, false)
                     {

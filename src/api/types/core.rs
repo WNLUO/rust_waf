@@ -135,6 +135,7 @@ pub struct L7ConfigResponse {
     pub(crate) cc_defense: CcDefenseConfigResponse,
     pub(crate) slow_attack_defense: SlowAttackDefenseConfigResponse,
     pub(crate) safeline_intercept: SafeLineInterceptConfigResponse,
+    pub(crate) ip_access: IpAccessConfigPayload,
     pub(crate) auto_tuning: AutoTuningConfigResponse,
 }
 
@@ -277,6 +278,49 @@ pub struct L7ConfigUpdateRequest {
     pub(crate) http3_certificate_path: String,
     pub(crate) http3_private_key_path: String,
     pub(crate) http3_enable_tls13: bool,
+    #[serde(default)]
+    pub(crate) ip_access: IpAccessConfigPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAccessConfigPayload {
+    pub(crate) enabled: bool,
+    pub(crate) mode: String,
+    pub(crate) default_action: String,
+    pub(crate) overseas_action: String,
+    pub(crate) unknown_geo_action: String,
+    pub(crate) allow_private_ips: bool,
+    pub(crate) allow_server_public_ip: bool,
+    pub(crate) domestic_country_codes: Vec<String>,
+    pub(crate) allow_cidrs: Vec<String>,
+    pub(crate) block_cidrs: Vec<String>,
+    pub(crate) domestic_cidrs: Vec<String>,
+    pub(crate) bot_policy: IpAccessBotPolicyPayload,
+    pub(crate) geo_headers: IpAccessGeoHeaderConfigPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAccessBotPolicyPayload {
+    pub(crate) allow_verified_search_bots: bool,
+    pub(crate) allow_claimed_search_bots: bool,
+    pub(crate) allow_ai_bots: bool,
+    pub(crate) claimed_search_bot_action: String,
+    pub(crate) suspect_bot_action: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpAccessGeoHeaderConfigPayload {
+    pub(crate) enabled: bool,
+    pub(crate) trust_only_from_proxy: bool,
+    pub(crate) country_headers: Vec<String>,
+    pub(crate) region_headers: Vec<String>,
+    pub(crate) city_headers: Vec<String>,
+}
+
+impl Default for IpAccessConfigPayload {
+    fn default() -> Self {
+        Self::from_config(&crate::config::l7::IpAccessConfig::default())
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

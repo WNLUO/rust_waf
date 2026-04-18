@@ -23,7 +23,8 @@ use crate::config::Config;
 use crate::core::gateway::GatewayRuntime;
 use crate::l4::L4Inspector;
 use crate::l7::{
-    HttpTrafficProcessor, L7BehaviorGuard, L7BloomFilterManager, L7CcGuard, SlowAttackGuard,
+    HttpTrafficProcessor, IpAccessGuard, L7BehaviorGuard, L7BloomFilterManager, L7CcGuard,
+    SlowAttackGuard,
 };
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
@@ -78,6 +79,7 @@ pub struct WafContext {
     l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
     l7_bloom_filter: RwLock<Option<Arc<L7BloomFilterManager>>>,
     l7_cc_guard: RwLock<Arc<L7CcGuard>>,
+    ip_access_guard: RwLock<Arc<IpAccessGuard>>,
     l7_behavior_guard: RwLock<Arc<L7BehaviorGuard>>,
     slow_attack_guard: RwLock<Arc<SlowAttackGuard>>,
     pub http_processor: HttpTrafficProcessor,
@@ -446,6 +448,7 @@ impl WafContext {
                 ))
             })),
             l7_cc_guard: RwLock::new(Arc::new(L7CcGuard::new(&effective_cc_defense))),
+            ip_access_guard: RwLock::new(Arc::new(IpAccessGuard::new(&config.l7_config.ip_access))),
             l7_behavior_guard: RwLock::new(Arc::new(L7BehaviorGuard::new())),
             slow_attack_guard: RwLock::new(Arc::new(SlowAttackGuard::new(
                 &config.l7_config.slow_attack_defense,
@@ -543,6 +546,8 @@ impl WafContext {
         self.refresh_adaptive_protection_runtime(None);
         let effective_cc_defense = self.effective_l7_cc_defense();
         self.l7_cc_guard().update_config(&effective_cc_defense);
+        self.ip_access_guard()
+            .update_config(&self.config_snapshot().l7_config.ip_access);
         self.slow_attack_guard()
             .update_config(&self.config_snapshot().l7_config.slow_attack_defense);
         self.refresh_l7_bloom_filter_from_config();
@@ -643,6 +648,13 @@ impl WafContext {
         self.l7_cc_guard
             .read()
             .expect("l7_cc_guard lock poisoned")
+            .clone()
+    }
+
+    pub fn ip_access_guard(&self) -> Arc<IpAccessGuard> {
+        self.ip_access_guard
+            .read()
+            .expect("ip_access_guard lock poisoned")
             .clone()
     }
 

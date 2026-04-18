@@ -1,10 +1,23 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, onMounted, onBeforeUnmount } from 'vue'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
 import { RefreshCw } from 'lucide-vue-next'
 import { useAdminDashboardPage } from '@/features/dashboard/composables/useAdminDashboardPage'
+import {
+  aiPolicyDetailLine,
+  aiPolicyStatusLabel,
+  aiPolicyTitle,
+  aiTriggerReasonLabel,
+  confidenceLabel,
+  controllerStateLabel,
+  l4OverloadLabel,
+  l7ModeLabel,
+  pressureLabel,
+  providerLabel,
+  trendWindowLabel,
+} from '@/features/dashboard/utils/dashboardLabels'
 
 const AdminEventMapSection = defineAsyncComponent(
   () => import('@/features/dashboard/components/AdminEventMapSection.vue'),
@@ -75,174 +88,6 @@ const stateTextClass = {
   error: 'text-red-700',
   muted: 'text-slate-500',
 } as const
-
-const l7ModeLabel = (mode?: string) => {
-  const labels: Record<string, string> = {
-    active: '主动',
-    observe: '观察',
-    off: '关闭',
-  }
-  return labels[mode || ''] || '关闭'
-}
-
-const l4OverloadLabel = (level?: string) => {
-  const labels: Record<string, string> = {
-    normal: '正常',
-    high: '偏高',
-    critical: '严重',
-  }
-  return labels[level || ''] || '正常'
-}
-
-const controllerStateLabel = (state?: string) => {
-  const labels: Record<string, string> = {
-    active_bootstrap_pending: '主动预热',
-    adjusted: '已调整',
-    bootstrap_adjusted: '初始调整',
-    cooldown: '冷却中',
-    disabled: '已关闭',
-    idle: '空闲',
-    observe_only: '仅观察',
-    observe_pending_adjust: '待调整',
-    rollback: '已回滚',
-    stable: '稳定',
-    warming_up: '预热中',
-  }
-  return labels[state || ''] || '未知'
-}
-
-const providerLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    local_rules: '本地规则',
-    stub_model: '占位模型',
-    openai_compatible: 'OpenAI兼容',
-    xiaomi_mimo: '小米Mimo',
-  }
-  return labels[value || ''] || '未知'
-}
-
-const confidenceLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    high: '高',
-    medium: '中',
-    low: '低',
-  }
-  return labels[value || ''] || '未知'
-}
-
-const pressureLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    normal: '正常',
-    elevated: '升高',
-    high: '偏高',
-    attack: '攻击',
-  }
-  return labels[value || ''] || '未知'
-}
-
-const trendWindowLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    last_5m: '近5分钟',
-    last_15m: '近15分钟',
-    last_60m: '近60分钟',
-  }
-  return labels[value || ''] || value || '未知窗口'
-}
-
-const aiTriggerReasonLabel = (value?: string | null) => {
-  const labels: Record<string, string> = {
-    adaptive_pressure: '运行压力升高',
-    attack_mode: '攻击态势触发',
-    auto_apply_disabled: '自动应用关闭',
-    auto_defense_auto_apply_disabled: '自动防御未自动应用',
-    data_quality_degraded: '数据质量下降',
-    fallback_due: '兜底周期触发',
-    force_local_rules_under_attack: '攻击态势本地兜底',
-    hotspot_shift: '热点变化',
-    identity_pressure: '身份解析压力',
-    identity_resolution_pressure: '身份解析压力',
-    local_rules_fallback: '本地规则兜底',
-    manual_run: '手动运行',
-    pressure_high: '运行压力升高',
-    scheduled: '周期巡检',
-    startup: '启动巡检',
-  }
-  const key = value || ''
-  if (!key) return '暂无触发'
-  return labels[key] || key.replace(/_/g, ' ')
-}
-
-const aiActionLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    add_behavior_watch: '行为观察',
-    add_temp_block: '临时封禁',
-    increase_challenge: '增加挑战',
-    increase_delay: '增加延迟',
-    mark_trusted_temporarily: '临时信任',
-    raise_identity_risk: '提高身份风险',
-    reduce_friction: '降低摩擦',
-    tighten_host_cc: '收紧Host CC',
-    tighten_route_cc: '收紧路由CC',
-    watch: '观察',
-    watch_visitor: '观察访客',
-  }
-  return labels[value || ''] || value || '未知动作'
-}
-
-const aiPolicyStatusLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    cold: '待命中',
-    effective: '有效',
-    needs_review: '需复核',
-    observing: '观察中',
-    watch: '观察',
-  }
-  return labels[value || ''] || value || '观察中'
-}
-
-const aiScopeLabel = (value?: string) => {
-  const labels: Record<string, string> = {
-    client_ip: '来源IP',
-    host: 'Host',
-    identity: '身份',
-    route: '路由',
-    source_ip: '来源IP',
-  }
-  return labels[value || ''] || '范围'
-}
-
-const hasChineseText = (value?: string) => /[\u4e00-\u9fff]/.test(value || '')
-
-const aiPolicyTitle = (policy: {
-  title: string
-  action: string
-  scope_type: string
-  scope_value: string
-}) => {
-  if (hasChineseText(policy.title)) return policy.title
-  const scopeValue = policy.scope_value ? ` ${policy.scope_value}` : ''
-  return `${aiActionLabel(policy.action)} · ${aiScopeLabel(policy.scope_type)}${scopeValue}`
-}
-
-const aiPolicyDetailLine = (policy: {
-  title: string
-  action: string
-  scope_type: string
-  scope_value: string
-}) => {
-  const title = aiPolicyTitle(policy)
-  const action = aiActionLabel(policy.action)
-  const scope = aiScopeLabel(policy.scope_type)
-  const scopeValue = policy.scope_value || '全局范围'
-  if (
-    title.includes(action) &&
-    title.includes(scope) &&
-    (!policy.scope_value || title.includes(policy.scope_value))
-  ) {
-    return ''
-  }
-  return `${action} / ${scope} / ${scopeValue}`
-}
 
 const formatPercent = (value?: number) => `${(value || 0).toFixed(0)}%`
 
@@ -525,6 +370,48 @@ type PerformanceIoCard = {
 
 type PerformanceCard = PerformanceGaugeCard | PerformanceIoCard
 
+const smoothIoReadPercent = ref(0)
+const smoothIoWritePercent = ref(0)
+const smoothTotalPackets = ref(0)
+const smoothLatencyMicros = ref(0)
+let ioRafId: number | null = null
+
+onMounted(() => {
+  const animateIo = () => {
+    const metrics = dashboard.value?.metrics
+    const system = metrics?.system
+    const ioRead = system?.process_disk_read_bytes_per_sec || 0
+    const ioWrite = system?.process_disk_write_bytes_per_sec || 0
+
+    const calcIoShockPercent = (rate: number) => {
+      if (rate <= 0) return 0
+      const maxRate = 50 * 1024 * 1024
+      const ratio = Math.min(1, rate / maxRate)
+      return Math.max(2, Math.pow(ratio, 0.3) * 100)
+    }
+
+    const targetRead = calcIoShockPercent(ioRead)
+    const targetWrite = calcIoShockPercent(ioWrite)
+
+    // IO 条形平滑插值
+    smoothIoReadPercent.value += (targetRead - smoothIoReadPercent.value) * 0.08
+    smoothIoWritePercent.value += (targetWrite - smoothIoWritePercent.value) * 0.08
+
+    // 报文和延迟的数字平滑滚动
+    const targetPackets = metrics?.total_packets || 0
+    const targetLatency = metrics?.average_proxy_latency_micros || 0
+    smoothTotalPackets.value += (targetPackets - smoothTotalPackets.value) * 0.08
+    smoothLatencyMicros.value += (targetLatency - smoothLatencyMicros.value) * 0.08
+
+    ioRafId = requestAnimationFrame(animateIo)
+  }
+  ioRafId = requestAnimationFrame(animateIo)
+})
+
+onBeforeUnmount(() => {
+  if (ioRafId !== null) cancelAnimationFrame(ioRafId)
+})
+
 const performanceCards = computed(() => {
   const system = dashboard.value?.metrics.system
   const cpuPercent = clampPercent(system?.cpu_usage_percent || 0)
@@ -537,9 +424,7 @@ const performanceCards = computed(() => {
   const ioRead = system?.process_disk_read_bytes_per_sec || 0
   const ioWrite = system?.process_disk_write_bytes_per_sec || 0
   const ioTotal = ioRead + ioWrite
-  const ioPeak = Math.max(ioRead, ioWrite, 1)
-  const ioReadPercent = Math.max(6, (ioRead / ioPeak) * 100)
-  const ioWritePercent = Math.max(6, (ioWrite / ioPeak) * 100)
+
   const cpuTone = gaugeTone(cpuPercent)
   const memoryTone = gaugeTone(memoryPercent)
 
@@ -577,8 +462,8 @@ const performanceCards = computed(() => {
       label: 'IO',
       readValue: `${formatBytes(ioRead)}/s`,
       writeValue: `${formatBytes(ioWrite)}/s`,
-      readPercent: ioReadPercent,
-      writePercent: ioWritePercent,
+      readPercent: smoothIoReadPercent.value,
+      writePercent: smoothIoWritePercent.value,
       tone:
         ioTotal > 10 * 1024 * 1024
           ? 'border-blue-200 bg-blue-50/80 text-blue-700'
@@ -686,12 +571,6 @@ const defenseMatrix = computed(() => {
           label: '策略放行',
           value: formatNumber(ipAccessPasses),
           class: ipAccessPasses > 0 ? 'text-emerald-700' : '',
-        },
-        {
-          label: '平均延迟',
-          value: formatLatencyEnglish(
-            metrics?.average_proxy_latency_micros || 0,
-          ),
         },
         {
           label: '慢攻命中',
@@ -913,7 +792,7 @@ const defenseMatrix = computed(() => {
         </div>
         <MetricWidget
           label="累计处理报文"
-          :value="formatNumber(dashboard?.metrics.total_packets || 0)"
+          :value="formatNumber(Math.round(smoothTotalPackets))"
           :hint="`累计处理 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
           :series="metricsHistory.totalPackets"
           :series-min="0"
@@ -927,7 +806,7 @@ const defenseMatrix = computed(() => {
           label="平均代理延迟"
           :value="
             formatLatencyEnglish(
-              dashboard?.metrics.average_proxy_latency_micros || 0,
+              smoothLatencyMicros,
             )
           "
           :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"

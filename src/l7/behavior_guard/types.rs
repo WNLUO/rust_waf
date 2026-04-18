@@ -56,6 +56,17 @@ pub(super) enum RequestKind {
     Other,
 }
 
+impl RequestKind {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            RequestKind::Document => "document",
+            RequestKind::Static => "static",
+            RequestKind::Api => "api",
+            RequestKind::Other => "other",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct BehaviorAssessment {
     pub(super) identity: String,

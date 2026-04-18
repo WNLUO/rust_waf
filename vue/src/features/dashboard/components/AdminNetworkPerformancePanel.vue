@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { TrendingUp, TrendingDown, Minus } from 'lucide-vue-next'
 import { LineChart } from 'echarts/charts'
 import type { LineSeriesOption } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
@@ -33,7 +34,6 @@ const chartEl = ref<HTMLDivElement | null>(null)
 let chart: ECharts | null = null
 
 const { formatBytes } = useFormatters()
-const megabyte = 1024 * 1024
 const stepMs = 1_000
 const slotCountForMapMode = (mode?: 'china' | 'global') =>
   mode === 'china' ? 10 : 6
@@ -41,24 +41,31 @@ const targetSlotCount = computed(() => slotCountForMapMode(props.mapMode))
 const displayedSlotCount = ref(targetSlotCount.value)
 const slotCount = computed(() => displayedSlotCount.value)
 const windowMs = computed(() => (slotCount.value - 1) * stepMs)
-const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-})
 let slotCountTransitionTimer: number | null = null
+
+const getTrend = (series: number[]) => {
+  const len = series.length
+  if (len < 2) return { text: '保持', icon: Minus, color: 'text-slate-500' }
+  const current = series[len - 1]
+  const prev = series[len - 2]
+  // 当流量差异超过 5% 时认为是有明显变化，否则认为是保持
+  if (current > prev * 1.05) return { text: '升高', icon: TrendingUp, color: 'text-emerald-500' }
+  if (current < prev * 0.95) return { text: '降低', icon: TrendingDown, color: 'text-amber-500' }
+  return { text: '保持', icon: Minus, color: 'text-slate-500' }
+}
 
 const statItems = computed(() => [
   {
     label: '上行',
     value: `${formatBytes(props.txRate)}/s`,
     dot: 'bg-emerald-500',
+    trend: getTrend(props.txSeries),
   },
   {
     label: '下行',
     value: `${formatBytes(props.rxRate)}/s`,
     dot: 'bg-amber-500',
+    trend: getTrend(props.rxSeries),
   },
   {
     label: '总发送',
@@ -115,7 +122,7 @@ const renderChart = async () => {
     },
     xAxis: {
       type: 'time',
-      boundaryGap: false,
+      boundaryGap: ['0%', '0%'],
       min: now - windowMs.value,
       max: now,
       axisLine: {
@@ -340,22 +347,33 @@ watch(
         :key="item.label"
         class="min-w-0 rounded-lg border border-white/5 bg-white/[0.03] px-2 py-2"
       >
-        <div class="min-w-0">
-          <div class="flex min-w-0 items-center gap-1.5">
-            <span
-              class="h-2 w-2 shrink-0 rounded-full"
-              :class="item.dot"
-            ></span>
-            <p class="truncate text-xs font-medium text-slate-300">
-              {{ item.label }}
+        <div class="flex min-w-0 items-center justify-between gap-2">
+          <div class="min-w-0">
+            <div class="flex min-w-0 items-center gap-1.5">
+              <span
+                class="h-2 w-2 shrink-0 rounded-full"
+                :class="item.dot"
+              ></span>
+              <p class="truncate text-xs font-medium text-slate-300">
+                {{ item.label }}
+              </p>
+            </div>
+            <p
+              class="mt-1 break-all text-xs font-semibold leading-tight text-slate-100"
+              :title="item.value"
+            >
+              {{ item.value }}
             </p>
           </div>
-          <p
-            class="mt-1 break-all text-xs font-semibold leading-tight text-slate-100"
-            :title="item.value"
+
+          <div
+            v-if="props.mapMode === 'china' && item.trend"
+            class="flex shrink-0 items-center gap-1 rounded-md bg-white/5 px-1.5 py-1"
+            :class="item.trend.color"
           >
-            {{ item.value }}
-          </p>
+            <component :is="item.trend.icon" :size="14" />
+            <span class="text-[10px] font-medium leading-none">{{ item.trend.text }}</span>
+          </div>
         </div>
       </div>
     </div>

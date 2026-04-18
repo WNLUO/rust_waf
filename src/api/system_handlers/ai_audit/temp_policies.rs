@@ -321,3 +321,39 @@ mod tests {
         assert!(!ai_audit_action_allowed_for_auto_apply("watch_only"));
     }
 }
+pub(crate) async fn list_ai_temp_policies_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<AiTempPoliciesResponse>> {
+    let items = state.context.active_ai_temp_policies();
+    let summary =
+        build_ai_audit_summary(state.context.as_ref(), Some(900), Some(120), Some(0)).await?;
+    Ok(Json(AiTempPoliciesResponse {
+        total: items.len() as u32,
+        policies: items
+            .into_iter()
+            .map(|item| ai_temp_policy_response_from_entry(item, &summary))
+            .collect(),
+    }))
+}
+pub(crate) async fn delete_ai_temp_policy_handler(
+    State(state): State<ApiState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<WriteStatusResponse>> {
+    let store = sqlite_store(&state)?;
+    let deleted = store
+        .delete_ai_temp_policy(id)
+        .await
+        .map_err(ApiError::internal)?;
+    if !deleted {
+        return Err(ApiError::not_found("未找到对应的 AI 临时策略"));
+    }
+    state
+        .context
+        .refresh_ai_temp_policies()
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(WriteStatusResponse {
+        success: true,
+        message: "AI 临时策略已撤销".to_string(),
+    }))
+}

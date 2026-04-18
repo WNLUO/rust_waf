@@ -15,6 +15,14 @@ import { init, registerMap, use } from 'echarts/core'
 import type { ECharts } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useAdminEventMap } from '../composables/useAdminEventMap'
+import {
+  buildContextMap,
+  buildPacificMap,
+  geoConfigForMode,
+  MAP_CONTEXT,
+  mapPoint,
+  type MapMode,
+} from '@/features/dashboard/utils/eventMapGeo'
 import type {
   EventMapNode,
   TrafficEventDelta,
@@ -22,8 +30,6 @@ import type {
 } from '@/shared/types'
 
 use([CanvasRenderer, GeoComponent, TooltipComponent, LinesChart, ScatterChart])
-
-type MapMode = 'china' | 'global'
 
 const props = defineProps<{
   trafficMap?: TrafficMapResponse | null
@@ -101,46 +107,6 @@ let resizeFrame: number | null = null
 let isTransitioning = false
 let transitionTimeout: number | null = null
 
-const MAP_CONTEXT = 'waf-world-context-pacific'
-const PACIFIC_SHIFT_THRESHOLD_LNG = -25
-const CHINA_REGION_NAMES = [
-  '北京市',
-  '天津市',
-  '河北省',
-  '山西省',
-  '内蒙古自治区',
-  '辽宁省',
-  '吉林省',
-  '黑龙江省',
-  '上海市',
-  '江苏省',
-  '浙江省',
-  '安徽省',
-  '福建省',
-  '江西省',
-  '山东省',
-  '河南省',
-  '湖北省',
-  '湖南省',
-  '广东省',
-  '广西壮族自治区',
-  '海南省',
-  '重庆市',
-  '四川省',
-  '贵州省',
-  '云南省',
-  '西藏自治区',
-  '陕西省',
-  '甘肃省',
-  '青海省',
-  '宁夏回族自治区',
-  '新疆维吾尔自治区',
-  '台湾省',
-  '香港特别行政区',
-  '澳门特别行政区',
-]
-
-// 防抖/节流图表渲染，避免 ECharts 频繁 setOption 导致主线程阻塞
 const scheduleRender = () => {
   const now = Date.now()
   if (now - lastRenderTime >= 150) {
@@ -177,23 +143,23 @@ const getTargetWidth = (mode: MapMode) => {
   if (!chartRef.value) return undefined
   const section = chartRef.value.closest('section')
   if (!section) return undefined
-  
+
   const totalWidth = section.clientWidth
   const paddingAndBorder = 34
-  
+
   if (window.innerWidth < 1280) {
     return totalWidth - paddingAndBorder
   }
-  
+
   if (mode === 'china') {
     const colWidth = Math.max(300, (totalWidth - 12) * (0.85 / 2.55))
     return colWidth - paddingAndBorder
-  } else {
-    let rightW = (totalWidth - 12) * (0.95 / 2.50)
-    if (rightW < 360) rightW = 360
-    const colWidth = totalWidth - 12 - rightW
-    return colWidth - paddingAndBorder
   }
+
+  let rightW = (totalWidth - 12) * (0.95 / 2.5)
+  if (rightW < 360) rightW = 360
+  const colWidth = totalWidth - 12 - rightW
+  return colWidth - paddingAndBorder
 }
 
 function hasGeo(node: EventMapNode): node is GeoNode {
@@ -203,20 +169,20 @@ function hasGeo(node: EventMapNode): node is GeoNode {
 function projectilePalette(event: TrafficEventDelta) {
   if (event.decision === 'block') {
     return {
-      color: '#ff4d4f', // 鲜艳的红色
+      color: '#ff4d4f',
       trailColor: 'rgba(255, 77, 79, 0.15)',
       symbolSize: 4.5,
     }
   }
   if (event.direction === 'egress') {
     return {
-      color: '#00f2fe', // 亮青色
+      color: '#00f2fe',
       trailColor: 'rgba(0, 242, 254, 0.12)',
       symbolSize: 3.5,
     }
   }
   return {
-    color: '#70ff00', // 荧光绿
+    color: '#70ff00',
     trailColor: 'rgba(112, 255, 0, 0.12)',
     symbolSize: 3.5,
   }
@@ -241,14 +207,12 @@ function runCleanup() {
   const now = Date.now()
   let changed = false
 
-  // 清理过期的线条
   const nextLines = activeLinesData.value.filter((line) => now < line.expireAt)
   if (nextLines.length !== activeLinesData.value.length) {
     activeLinesData.value = nextLines
     changed = true
   }
 
-  // 清理过期的实时节点（超过 5 秒没有新流量的节点渐渐消失）
   for (const [id, record] of activeRealtimeNodes.entries()) {
     if (now > record.expireAt) {
       activeRealtimeNodes.delete(id)
@@ -283,7 +247,7 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
         node: event.node as GeoNode,
         decision: event.decision,
         direction: event.direction,
-        expireAt: now + 5000, // 节点小圆圈 5 秒后渐渐消失
+        expireAt: now + 5000,
       })
     } else {
       return
@@ -306,7 +270,6 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
             [event.node.lng, event.node.lat],
           ]
       const palette = projectilePalette(event)
-
       const durationMs = 1000 + Math.random() * 120
 
       const lineData: LocalLinesDataItem = {
@@ -327,7 +290,7 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
           color: palette.color,
           shadowBlur: event.decision === 'block' ? 12 : 8,
           shadowColor: palette.color,
-          loop: false, // 动画播放一次即停止
+          loop: false,
         },
         expireAt: now + durationMs + 800,
       }
@@ -335,7 +298,6 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
       activeLinesData.value = [...activeLinesData.value, lineData].slice(
         -PROJECTILE_CAP,
       )
-
       lastLaunchTime.set(linkKey, now)
       hasNew = true
     }
@@ -353,135 +315,6 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
 
   if (lastLaunchTime.size > 100) {
     lastLaunchTime.clear()
-  }
-}
-
-function isChinaWorldFeature(feature: {
-  properties?: Record<string, unknown>
-}) {
-  const name = String(feature.properties?.name || '').toLowerCase()
-  return (
-    name === 'china' ||
-    name === "people's republic of china" ||
-    name === 'republic of china'
-  )
-}
-
-function buildContextMap(
-  worldGeoJson: {
-    type: 'FeatureCollection'
-    features: Array<{
-      geometry?: { coordinates?: unknown }
-      properties?: Record<string, unknown>
-    }>
-  },
-  chinaGeoJson: {
-    features: Array<{
-      geometry?: { coordinates?: unknown }
-      properties?: Record<string, unknown>
-    }>
-  },
-) {
-  return {
-    ...worldGeoJson,
-    type: 'FeatureCollection' as const,
-    features: [
-      ...worldGeoJson.features.filter(
-        (feature) => !isChinaWorldFeature(feature),
-      ),
-      ...chinaGeoJson.features,
-    ],
-  }
-}
-
-function shiftLongitude(lng: number) {
-  return lng < PACIFIC_SHIFT_THRESHOLD_LNG ? lng + 360 : lng
-}
-
-function mapPoint(lng: number, lat: number) {
-  return [shiftLongitude(lng), lat]
-}
-
-function collectLongitudes(value: unknown, result: number[] = []) {
-  if (!Array.isArray(value)) return result
-  if (
-    value.length >= 2 &&
-    typeof value[0] === 'number' &&
-    typeof value[1] === 'number'
-  ) {
-    result.push(value[0])
-    return result
-  }
-  value.forEach((item) => collectLongitudes(item, result))
-  return result
-}
-
-function shouldShiftFeature(coordinates: unknown) {
-  const longitudes = collectLongitudes(coordinates)
-  if (longitudes.length === 0) return false
-  return Math.max(...longitudes) < PACIFIC_SHIFT_THRESHOLD_LNG
-}
-
-function shiftGeoJsonLongitudes<T>(value: T): T {
-  if (typeof value === 'number') {
-    return shiftLongitude(value) as T
-  }
-  if (!Array.isArray(value)) {
-    return value
-  }
-  if (
-    value.length >= 2 &&
-    typeof value[0] === 'number' &&
-    typeof value[1] === 'number'
-  ) {
-    return [shiftLongitude(value[0]), value[1], ...value.slice(2)] as T
-  }
-  return value.map((item) => shiftGeoJsonLongitudes(item)) as T
-}
-
-function buildPacificMap(geoJson: ReturnType<typeof buildContextMap>) {
-  return {
-    ...geoJson,
-    features: geoJson.features.map((feature) => ({
-      ...feature,
-      geometry:
-        feature.geometry && shouldShiftFeature(feature.geometry.coordinates)
-          ? {
-              ...feature.geometry,
-              coordinates: shiftGeoJsonLongitudes(feature.geometry.coordinates),
-            }
-          : feature.geometry,
-    })),
-  }
-}
-
-function geoConfigForMode(mode: MapMode) {
-  const chinaMode = mode === 'china'
-  return {
-    map: MAP_CONTEXT,
-    roam: false,
-    zoom: chinaMode ? 8 : 1.72,
-    center: chinaMode ? [106.3, 36.1] : [158, 12],
-    scaleLimit: { min: 0.8, max: 8.5 },
-    emphasis: { disabled: true },
-    label: { show: false },
-    itemStyle: {
-      areaColor: chinaMode ? '#111827' : '#172033',
-      borderColor: chinaMode ? 'rgba(100, 116, 139, 0.36)' : '#334155',
-      borderWidth: chinaMode ? 0.6 : 0.8,
-    },
-    regions: [
-      ...CHINA_REGION_NAMES.map((name) => ({
-        name,
-        itemStyle: {
-          areaColor: chinaMode ? '#1f3b57' : '#1d3a4f',
-          borderColor: chinaMode ? '#38bdf8' : 'rgba(56, 189, 248, 0.45)',
-          borderWidth: chinaMode ? 0.9 : 0.45,
-        },
-      })),
-      { name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } },
-    ],
-    animation: false,
   }
 }
 
@@ -694,7 +527,7 @@ watch(currentMapMode, (mode) => {
         isTransitioning = false
         if (chartRef.value) {
           chartRef.value.style.width = '100%'
-          chart.resize()
+          chart?.resize()
         }
       }, 550)
     }

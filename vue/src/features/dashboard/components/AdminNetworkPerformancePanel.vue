@@ -33,8 +33,13 @@ const chartEl = ref<HTMLDivElement | null>(null)
 let chart: ECharts | null = null
 
 const { formatBytes } = useFormatters()
-const stepMs = 2_000
-const slotCount = computed(() => (props.mapMode === 'china' ? 10 : 6))
+const megabyte = 1024 * 1024
+const stepMs = 1_000
+const slotCountForMapMode = (mode?: 'china' | 'global') =>
+  mode === 'china' ? 10 : 6
+const targetSlotCount = computed(() => slotCountForMapMode(props.mapMode))
+const displayedSlotCount = ref(targetSlotCount.value)
+const slotCount = computed(() => displayedSlotCount.value)
 const windowMs = computed(() => (slotCount.value - 1) * stepMs)
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
@@ -42,6 +47,7 @@ const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
   second: '2-digit',
   hour12: false,
 })
+let slotCountTransitionTimer: number | null = null
 
 const statItems = computed(() => [
   {
@@ -76,10 +82,15 @@ const chartSlots = computed(() => {
 })
 
 const currentLabels = computed(() =>
-  chartSlots.value.map((timestamp) =>
-    timeFormatter.format(new Date(timestamp)),
+  chartSlots.value.map((timestamp, index, slots) =>
+    index === slots.length - 1
+      ? '现在'
+      : timeFormatter.format(new Date(timestamp)),
   ),
 )
+
+const formatMegabytes = (value: number) =>
+  `${(value / megabyte).toFixed(1)} MB`
 
 const seriesForSlots = (series: number[]) =>
   chartSlots.value.map((slot) => {
@@ -94,6 +105,26 @@ const seriesForSlots = (series: number[]) =>
 
 const currentRxSeries = computed(() => seriesForSlots(props.rxSeries))
 const currentTxSeries = computed(() => seriesForSlots(props.txSeries))
+const chartPeak = computed(() =>
+  Math.max(0, ...currentRxSeries.value, ...currentTxSeries.value),
+)
+const previousChartPeak = computed(() =>
+  Math.max(
+    0,
+    ...currentRxSeries.value.slice(0, -1),
+    ...currentTxSeries.value.slice(0, -1),
+  ),
+)
+const yAxisMax = computed(() => {
+  const peak = chartPeak.value
+  if (peak <= 0) return megabyte
+
+  const previousPeak = previousChartPeak.value
+  const isBurst = previousPeak > 0 && peak >= previousPeak * 1.8
+  const max = peak * (isBurst ? 1.5 : 2)
+  return Math.max(megabyte, Math.ceil(max / megabyte) * megabyte)
+})
+const yAxisInterval = computed(() => yAxisMax.value / 4)
 
 const renderChart = async () => {
   await nextTick()
@@ -101,11 +132,14 @@ const renderChart = async () => {
   if (!chart) chart = init(chartEl.value)
 
   const option: NetworkChartOption = {
+    animation: true,
+    animationDurationUpdate: 450,
+    animationEasingUpdate: 'cubicOut',
     grid: {
       left: 58,
       right: 12,
       top: 28,
-      bottom: 36,
+      bottom: 20,
       containLabel: false,
     },
     tooltip: {
@@ -139,10 +173,12 @@ const renderChart = async () => {
     yAxis: {
       type: 'value',
       min: 0,
+      max: yAxisMax.value,
+      interval: yAxisInterval.value,
       axisLabel: {
         color: '#aeb7c4',
         fontSize: 11,
-        formatter: (value: number) => formatBytes(value),
+        formatter: (value: number) => formatMegabytes(value),
       },
       splitLine: {
         lineStyle: {
@@ -198,7 +234,7 @@ const renderChart = async () => {
     ],
   }
 
-  chart.setOption(option, true)
+  chart.setOption(option)
 }
 
 const resizeChart = () => chart?.resize()
@@ -210,7 +246,32 @@ function renderAndResizeChart() {
 }
 
 watch(
+  targetSlotCount,
+  (nextSlotCount) => {
+    if (slotCountTransitionTimer !== null) {
+      window.clearInterval(slotCountTransitionTimer)
+      slotCountTransitionTimer = null
+    }
+
+    slotCountTransitionTimer = window.setInterval(() => {
+      const currentSlotCount = displayedSlotCount.value
+      if (currentSlotCount === nextSlotCount) {
+        if (slotCountTransitionTimer !== null) {
+          window.clearInterval(slotCountTransitionTimer)
+          slotCountTransitionTimer = null
+        }
+        return
+      }
+
+      displayedSlotCount.value =
+        currentSlotCount + (currentSlotCount < nextSlotCount ? 1 : -1)
+    }, 90)
+  },
+)
+
+watch(
   () => [
+    displayedSlotCount.value,
     props.timestamps.length,
     props.timestamps.at(-1),
     props.rxSeries.length,
@@ -230,6 +291,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (slotCountTransitionTimer !== null) {
+    window.clearInterval(slotCountTransitionTimer)
+  }
   window.removeEventListener('resize', resizeChart)
   chart?.dispose()
   chart = null
@@ -266,6 +330,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div ref="chartEl" class="mt-4 h-[286px] w-full"></div>
+    <div ref="chartEl" class="mt-4 h-[306px] w-full"></div>
   </section>
 </template>

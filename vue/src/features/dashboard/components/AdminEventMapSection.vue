@@ -98,6 +98,8 @@ let lastRenderTime = 0
 let mapsReady = false
 let resizeObserver: ResizeObserver | null = null
 let resizeFrame: number | null = null
+let isTransitioning = false
+let transitionTimeout: number | null = null
 
 const MAP_CONTEXT = 'waf-world-context-pacific'
 const PACIFIC_SHIFT_THRESHOLD_LNG = -25
@@ -161,6 +163,7 @@ const scheduleRender = () => {
 }
 
 const resizeChart = () => {
+  if (isTransitioning) return
   if (resizeFrame !== null) {
     window.cancelAnimationFrame(resizeFrame)
   }
@@ -168,6 +171,29 @@ const resizeChart = () => {
     resizeFrame = null
     chart?.resize()
   })
+}
+
+const getTargetWidth = (mode: MapMode) => {
+  if (!chartRef.value) return undefined
+  const section = chartRef.value.closest('section')
+  if (!section) return undefined
+  
+  const totalWidth = section.clientWidth
+  const paddingAndBorder = 34
+  
+  if (window.innerWidth < 1280) {
+    return totalWidth - paddingAndBorder
+  }
+  
+  if (mode === 'china') {
+    const colWidth = Math.max(300, (totalWidth - 12) * (0.85 / 2.55))
+    return colWidth - paddingAndBorder
+  } else {
+    let rightW = (totalWidth - 12) * (0.95 / 2.50)
+    if (rightW < 360) rightW = 360
+    const colWidth = totalWidth - 12 - rightW
+    return colWidth - paddingAndBorder
+  }
 }
 
 function hasGeo(node: EventMapNode): node is GeoNode {
@@ -651,8 +677,29 @@ watch(
   },
 )
 
-watch(currentMapMode, () => {
+watch(currentMapMode, (mode) => {
   activeLinesData.value = []
+  
+  if (chart && chartRef.value) {
+    const targetW = getTargetWidth(mode)
+    if (targetW) {
+      isTransitioning = true
+      chartRef.value.style.width = `${targetW}px`
+      chart.resize({ width: targetW })
+      
+      if (transitionTimeout !== null) {
+        window.clearTimeout(transitionTimeout)
+      }
+      transitionTimeout = window.setTimeout(() => {
+        isTransitioning = false
+        if (chartRef.value) {
+          chartRef.value.style.width = '100%'
+          chart.resize()
+        }
+      }, 550)
+    }
+  }
+
   scheduleRender()
 })
 

@@ -961,7 +961,7 @@ const defenseMatrix = computed(() => {
         />
       </section>
 
-      <section class="grid gap-3 xl:grid" :class="trafficOverviewGridClass">
+      <section class="grid gap-3 xl:grid transition-[grid-template-columns] duration-500 ease-in-out" :class="trafficOverviewGridClass">
         <AdminEventMapSection
           :traffic-map="trafficMap"
           :traffic-events="trafficEvents"

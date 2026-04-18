@@ -98,8 +98,6 @@ let lastRenderTime = 0
 let mapsReady = false
 let resizeObserver: ResizeObserver | null = null
 let resizeFrame: number | null = null
-let modeSwitching = false
-let modeSwitchTimer: number | null = null
 
 const MAP_CONTEXT = 'waf-world-context-pacific'
 const PACIFIC_SHIFT_THRESHOLD_LNG = -25
@@ -170,12 +168,6 @@ const resizeChart = () => {
     resizeFrame = null
     chart?.resize()
   })
-}
-
-function resizeDuringLayoutChange() {
-  resizeChart()
-  window.setTimeout(resizeChart, 120)
-  window.setTimeout(resizeChart, 320)
 }
 
 function hasGeo(node: EventMapNode): node is GeoNode {
@@ -442,17 +434,15 @@ function geoConfigForMode(mode: MapMode) {
   return {
     map: MAP_CONTEXT,
     roam: false,
-    zoom: chinaMode ? 5.65 : 1.72,
+    zoom: chinaMode ? 8 : 1.72,
     center: chinaMode ? [106.3, 36.1] : [158, 12],
-    scaleLimit: { min: 0.8, max: 6.5 },
+    scaleLimit: { min: 0.8, max: 8.5 },
     emphasis: { disabled: true },
     label: { show: false },
     itemStyle: {
       areaColor: chinaMode ? '#111827' : '#172033',
       borderColor: chinaMode ? 'rgba(100, 116, 139, 0.36)' : '#334155',
       borderWidth: chinaMode ? 0.6 : 0.8,
-      shadowColor: 'rgba(0, 0, 0, 0.42)',
-      shadowBlur: chinaMode ? 4 : 8,
     },
     regions: [
       ...CHINA_REGION_NAMES.map((name) => ({
@@ -465,44 +455,13 @@ function geoConfigForMode(mode: MapMode) {
       })),
       { name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } },
     ],
-    animation: true,
-    animationDurationUpdate: 520,
-    animationEasingUpdate: 'quarticOut',
+    animation: false,
   }
 }
 
 function setMapMode(mode: MapMode) {
   if (currentMapMode.value === mode) return
   currentMapMode.value = mode
-}
-
-function clearTrafficLayers() {
-  chart?.setOption(
-    {
-      animation: false,
-      series: [
-        {
-          id: 'traffic-projectiles',
-          type: 'lines',
-          coordinateSystem: 'geo',
-          data: [],
-        },
-        {
-          id: 'traffic-nodes',
-          type: 'scatter',
-          coordinateSystem: 'geo',
-          data: [],
-        },
-        {
-          id: 'request-source-bursts',
-          type: 'scatter',
-          coordinateSystem: 'geo',
-          data: [],
-        },
-      ],
-    },
-    { replaceMerge: ['series'], lazyUpdate: false },
-  )
 }
 
 // 加载地图并初始化
@@ -535,9 +494,7 @@ const initMap = async () => {
       backgroundColor: 'transparent',
       tooltip: { show: false },
       geo: geoConfigForMode(currentMapMode.value),
-      animation: true,
-      animationDurationUpdate: 520,
-      animationEasingUpdate: 'quarticOut',
+      animation: false,
       series: [],
     })
 
@@ -562,14 +519,13 @@ const renderChart = () => {
   }
 
   const snapshotNodeMap = new Map(nodes.filter(hasGeo).map((n) => [n.id, n]))
-  if (!modeSwitching) {
-    activeRealtimeNodes.forEach((record, id) => {
-      if (!snapshotNodeMap.has(id)) {
-        snapshotNodeMap.set(id, { ...record.node, trafficWeight: 1 })
-      }
-    })
-  }
-  const geoNodes = modeSwitching ? [] : Array.from(snapshotNodeMap.values())
+  activeRealtimeNodes.forEach((record, id) => {
+    if (!snapshotNodeMap.has(id)) {
+      snapshotNodeMap.set(id, { ...record.node, trafficWeight: 1 })
+    }
+  })
+  
+  const geoNodes = Array.from(snapshotNodeMap.values())
 
   const scatterData = geoNodes.map((node) => ({
     name: node.name,
@@ -587,30 +543,26 @@ const renderChart = () => {
     },
   }))
 
-  const burstData = modeSwitching
-    ? []
-    : Array.from(activeRealtimeNodes.values()).map((record) => ({
-        name: record.node.name,
-        value: [...mapPoint(record.node.lng, record.node.lat), 2.2],
-        itemStyle: {
-          color:
-            record.decision === 'block'
-              ? '#ff4d4f'
-              : record.direction === 'egress'
-                ? '#00f2fe'
-                : '#70ff00',
-        },
-      }))
+  const burstData = Array.from(activeRealtimeNodes.values()).map((record) => ({
+    name: record.node.name,
+    value: [...mapPoint(record.node.lng, record.node.lat), 2.2],
+    itemStyle: {
+      color:
+        record.decision === 'block'
+          ? '#ff4d4f'
+          : record.direction === 'egress'
+            ? '#00f2fe'
+            : '#70ff00',
+    },
+  }))
 
-  if (!modeSwitching) {
-    scatterData.push({
-      name: originNode.name,
-      value: [...mapPoint(originNode.lng, originNode.lat), 1.8],
-      itemStyle: {
-        color: '#10b981',
-      },
-    })
-  }
+  scatterData.push({
+    name: originNode.name,
+    value: [...mapPoint(originNode.lng, originNode.lat), 1.8],
+    itemStyle: {
+      color: '#10b981',
+    },
+  })
 
   const linesSeries: LinesSeriesOption = {
     id: 'traffic-projectiles',
@@ -626,12 +578,10 @@ const renderChart = () => {
     lineStyle: {
       curveness: 0.2,
     },
-    data: modeSwitching
-      ? []
-      : activeLinesData.value.map((line) => ({
-          ...line,
-          coords: line.coords.map(([lng, lat]) => mapPoint(lng, lat)),
-        })),
+    data: activeLinesData.value.map((line) => ({
+      ...line,
+      coords: line.coords.map(([lng, lat]) => mapPoint(lng, lat)),
+    })),
   }
 
   const scatterSeries: ScatterSeriesOption = {
@@ -666,13 +616,17 @@ const renderChart = () => {
       const weight = typeof point[2] === 'number' ? point[2] : 1
       return Math.min(4 + weight * 1.6, 7)
     },
-    data: modeSwitching ? [] : burstData,
+    data: burstData,
     animation: false,
   }
 
   chart.setOption({
+    animation: false,
+    backgroundColor: 'transparent',
+    tooltip: { show: false },
+    geo: geoConfigForMode(currentMapMode.value),
     series: [linesSeries, scatterSeries, burstSeries],
-  })
+  }, { replaceMerge: ['series'] })
 }
 
 watch(
@@ -697,26 +651,9 @@ watch(
   },
 )
 
-watch(currentMapMode, (mode) => {
-  if (modeSwitchTimer !== null) {
-    window.clearTimeout(modeSwitchTimer)
-    modeSwitchTimer = null
-  }
-  modeSwitching = true
+watch(currentMapMode, () => {
   activeLinesData.value = []
-  activeRealtimeNodes.clear()
-  clearTrafficLayers()
-  chart?.setOption({
-    animation: true,
-    geo: geoConfigForMode(mode),
-  })
-  resizeDuringLayoutChange()
-  modeSwitchTimer = window.setTimeout(() => {
-    modeSwitching = false
-    modeSwitchTimer = null
-    resizeDuringLayoutChange()
-    scheduleRender()
-  }, 560)
+  scheduleRender()
 })
 
 onMounted(() => {
@@ -738,10 +675,6 @@ onBeforeUnmount(() => {
   if (resizeFrame !== null) {
     window.cancelAnimationFrame(resizeFrame)
     resizeFrame = null
-  }
-  if (modeSwitchTimer !== null) {
-    window.clearTimeout(modeSwitchTimer)
-    modeSwitchTimer = null
   }
   resizeObserver?.disconnect()
   resizeObserver = null

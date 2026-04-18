@@ -497,6 +497,15 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             expires_at INTEGER NOT NULL,
             synced_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS bot_ip_cache (
+            provider TEXT PRIMARY KEY,
+            ranges_json TEXT NOT NULL DEFAULT '[]',
+            last_refresh_at INTEGER,
+            last_success_at INTEGER,
+            last_error TEXT,
+            updated_at INTEGER NOT NULL
+        );
         "#,
     )
     .execute(pool)

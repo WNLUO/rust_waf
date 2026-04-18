@@ -304,6 +304,22 @@ pub struct AiDefenseSnapshotResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct BotVerifierStatusResponse {
+    pub(crate) generated_at: i64,
+    pub(crate) providers: Vec<BotVerifierProviderStatusResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BotVerifierProviderStatusResponse {
+    pub(crate) provider: String,
+    pub(crate) range_count: usize,
+    pub(crate) last_refresh_at: Option<i64>,
+    pub(crate) last_success_at: Option<i64>,
+    pub(crate) last_error: Option<String>,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ServerPublicIpSnapshotResponse {
     pub(crate) ips: Vec<String>,
     pub(crate) last_refresh_at: Option<i64>,

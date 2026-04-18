@@ -64,6 +64,14 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(system_handlers::local_defense_recommendations_handler),
         )
         .route(
+            "/dashboard/bot-verifier",
+            get(system_handlers::bot_verifier_status_handler),
+        )
+        .route(
+            "/dashboard/bot-verifier/refresh",
+            post(system_handlers::refresh_bot_verifier_handler),
+        )
+        .route(
             "/dashboard/ai-route-profiles",
             get(system_handlers::list_ai_route_profiles_handler)
                 .post(system_handlers::upsert_ai_route_profile_handler),

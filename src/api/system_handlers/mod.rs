@@ -166,6 +166,37 @@ pub(super) async fn traffic_map_handler(
     })
 }
 
+pub(super) async fn bot_verifier_status_handler(
+    State(state): State<ApiState>,
+) -> Json<BotVerifierStatusResponse> {
+    let snapshot = state.context.bot_verifier_snapshot();
+    Json(BotVerifierStatusResponse {
+        generated_at: snapshot.generated_at,
+        providers: snapshot
+            .providers
+            .into_iter()
+            .map(|provider| BotVerifierProviderStatusResponse {
+                provider: provider.provider,
+                range_count: provider.range_count,
+                last_refresh_at: provider.last_refresh_at,
+                last_success_at: provider.last_success_at,
+                last_error: provider.last_error,
+                status: provider.status,
+            })
+            .collect(),
+    })
+}
+
+pub(super) async fn refresh_bot_verifier_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<BotVerifierStatusResponse>> {
+    let verifier = state.context.bot_ip_verifier();
+    verifier
+        .refresh_once(state.context.sqlite_store.as_deref())
+        .await;
+    Ok(bot_verifier_status_handler(State(state)).await)
+}
+
 mod ai_audit;
 
 pub(super) use ai_audit::{

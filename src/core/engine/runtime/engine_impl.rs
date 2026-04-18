@@ -52,8 +52,9 @@ impl WafEngine {
             let _ = context.refresh_server_public_ip_allowlist(true).await;
         });
         let verifier = self.context.bot_ip_verifier();
+        let store = self.context.sqlite_store.as_ref().cloned();
         tokio::spawn(async move {
-            crate::core::bot_verifier::run_bot_ip_refresh_loop(verifier).await;
+            crate::core::bot_verifier::run_bot_ip_refresh_loop(verifier, store).await;
         });
 
         #[cfg(feature = "api")]

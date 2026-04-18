@@ -18,6 +18,7 @@ import type {
   AiAuditFeedbackUpdatePayload,
   AiTempPoliciesResponse,
   AiVisitorIntelligenceResponse,
+  BotVerifierStatusResponse,
   TrafficMapQuery,
   TrafficMapResponse,
   WriteStatusResponse,
@@ -116,6 +117,16 @@ export async function fetchAiVisitorProfiles(): Promise<AiVisitorIntelligenceRes
   return apiRequest<AiVisitorIntelligenceResponse>(
     '/dashboard/ai-visitor-profiles',
   )
+}
+
+export async function fetchBotVerifierStatus(): Promise<BotVerifierStatusResponse> {
+  return apiRequest<BotVerifierStatusResponse>('/dashboard/bot-verifier')
+}
+
+export async function refreshBotVerifierStatus(): Promise<BotVerifierStatusResponse> {
+  return apiRequest<BotVerifierStatusResponse>('/dashboard/bot-verifier/refresh', {
+    method: 'POST',
+  })
 }
 
 export async function deleteAiTempPolicy(

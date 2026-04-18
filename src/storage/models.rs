@@ -104,6 +104,16 @@ pub struct SecurityEventEntry {
     pub handled_at: Option<i64>,
 }
 
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct BotIpCacheEntry {
+    pub provider: String,
+    pub ranges_json: String,
+    pub last_refresh_at: Option<i64>,
+    pub last_success_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub updated_at: i64,
+}
+
 #[cfg_attr(not(feature = "api"), allow(dead_code))]
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AiAuditReportEntry {

@@ -284,6 +284,20 @@ export interface AiAutoAuditStatus {
   last_report_id: number | null
 }
 
+export interface BotVerifierStatusResponse {
+  generated_at: number
+  providers: BotVerifierProviderStatus[]
+}
+
+export interface BotVerifierProviderStatus {
+  provider: string
+  range_count: number
+  last_refresh_at: number | null
+  last_success_at: number | null
+  last_error: string | null
+  status: string
+}
+
 export interface AiTempPolicyItem {
   id: number
   created_at: number

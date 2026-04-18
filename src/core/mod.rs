@@ -500,6 +500,12 @@ impl WafContext {
         ) {
             restore_runtime_blocked_ips(store.as_ref(), inspector.as_ref()).await?;
         }
+        if let Some(store) = context.sqlite_store.as_ref() {
+            match store.list_bot_ip_cache_entries().await {
+                Ok(entries) => context.bot_ip_verifier.hydrate_from_entries(entries),
+                Err(err) => log::warn!("Failed to hydrate bot verifier cache: {}", err),
+            }
+        }
 
         Ok(context)
     }
@@ -649,6 +655,10 @@ impl WafContext {
 
     pub(crate) fn bot_ip_verifier(&self) -> Arc<bot_verifier::BotIpVerifier> {
         Arc::clone(&self.bot_ip_verifier)
+    }
+
+    pub(crate) fn bot_verifier_snapshot(&self) -> bot_verifier::BotVerifierSnapshot {
+        self.bot_ip_verifier.snapshot()
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {

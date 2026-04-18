@@ -6,6 +6,8 @@ use std::net::IpAddr;
 use std::sync::RwLock;
 use std::time::Duration;
 
+use crate::storage::{BotIpCacheEntry, SqliteStore};
+
 const REFRESH_INTERVAL_SECS: u64 = 6 * 60 * 60;
 const INITIAL_REFRESH_RETRY_SECS: u64 = 5 * 60;
 
@@ -38,6 +40,22 @@ struct BotIpProviderCache {
 #[derive(Debug, Default)]
 pub(crate) struct BotIpVerifier {
     cache: RwLock<BotIpCache>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BotVerifierSnapshot {
+    pub generated_at: i64,
+    pub providers: Vec<BotVerifierProviderSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BotVerifierProviderSnapshot {
+    pub provider: String,
+    pub range_count: usize,
+    pub last_refresh_at: Option<i64>,
+    pub last_success_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub status: String,
 }
 
 const PROVIDERS: &[BotIpProvider] = &[
@@ -78,7 +96,64 @@ impl BotIpVerifier {
         }
     }
 
-    pub(crate) async fn refresh_once(&self) {
+    pub(crate) fn hydrate_from_entries(&self, entries: Vec<BotIpCacheEntry>) {
+        let mut guard = self
+            .cache
+            .write()
+            .expect("bot verifier cache lock poisoned");
+        for entry in entries {
+            let ranges = serde_json::from_str::<Vec<String>>(&entry.ranges_json)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|item| item.parse::<IpNet>().ok())
+                .collect::<Vec<_>>();
+            guard.providers.insert(
+                entry.provider,
+                BotIpProviderCache {
+                    ranges,
+                    last_refresh_at: entry.last_refresh_at,
+                    last_success_at: entry.last_success_at,
+                    last_error: entry.last_error,
+                },
+            );
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> BotVerifierSnapshot {
+        let guard = self.cache.read().expect("bot verifier cache lock poisoned");
+        let mut providers = PROVIDERS
+            .iter()
+            .map(|provider| {
+                let cache = guard.providers.get(provider.id);
+                let range_count = cache.map(|cache| cache.ranges.len()).unwrap_or(0);
+                let last_refresh_at = cache.and_then(|cache| cache.last_refresh_at);
+                let last_success_at = cache.and_then(|cache| cache.last_success_at);
+                let last_error = cache.and_then(|cache| cache.last_error.clone());
+                let status = if range_count > 0 && last_success_at.is_some() {
+                    "ready"
+                } else if last_error.is_some() {
+                    "degraded"
+                } else {
+                    "empty"
+                };
+                BotVerifierProviderSnapshot {
+                    provider: provider.id.to_string(),
+                    range_count,
+                    last_refresh_at,
+                    last_success_at,
+                    last_error,
+                    status: status.to_string(),
+                }
+            })
+            .collect::<Vec<_>>();
+        providers.sort_by(|left, right| left.provider.cmp(&right.provider));
+        BotVerifierSnapshot {
+            generated_at: unix_timestamp(),
+            providers,
+        }
+    }
+
+    pub(crate) async fn refresh_once(&self, store: Option<&SqliteStore>) {
         let client = match Client::builder()
             .timeout(Duration::from_secs(8))
             .connect_timeout(Duration::from_secs(3))
@@ -94,31 +169,82 @@ impl BotIpVerifier {
 
         for provider in PROVIDERS {
             let result = fetch_provider_ranges(&client, provider).await;
-            let mut guard = self
-                .cache
-                .write()
-                .expect("bot verifier cache lock poisoned");
-            let cache = guard.providers.entry(provider.id.to_string()).or_default();
-            cache.last_refresh_at = Some(unix_timestamp());
-            match result {
-                Ok(ranges) if !ranges.is_empty() => {
-                    cache.ranges = ranges;
-                    cache.last_success_at = cache.last_refresh_at;
-                    cache.last_error = None;
-                    log::info!(
-                        "Bot verifier refreshed provider={} ranges={}",
+            let refresh_result = {
+                let mut guard = self
+                    .cache
+                    .write()
+                    .expect("bot verifier cache lock poisoned");
+                let cache = guard.providers.entry(provider.id.to_string()).or_default();
+                cache.last_refresh_at = Some(unix_timestamp());
+                match result {
+                    Ok(ranges) if !ranges.is_empty() => {
+                        let ranges_json = serde_json::to_string(
+                            &ranges.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                        )
+                        .unwrap_or_else(|_| "[]".to_string());
+                        cache.ranges = ranges;
+                        cache.last_success_at = cache.last_refresh_at;
+                        cache.last_error = None;
+                        log::info!(
+                            "Bot verifier refreshed provider={} ranges={}",
+                            provider.id,
+                            cache.ranges.len()
+                        );
+                        ProviderRefreshPersistence {
+                            ranges_json,
+                            last_refresh_at: cache.last_refresh_at,
+                            last_success_at: cache.last_success_at,
+                            last_error: None,
+                        }
+                    }
+                    Ok(_) => {
+                        cache.last_error = Some("empty provider ranges".to_string());
+                        log::warn!("Bot verifier provider={} returned no ranges", provider.id);
+                        ProviderRefreshPersistence {
+                            ranges_json: "[]".to_string(),
+                            last_refresh_at: cache.last_refresh_at,
+                            last_success_at: cache.last_success_at,
+                            last_error: cache.last_error.clone(),
+                        }
+                    }
+                    Err(err) => {
+                        cache.last_error = Some(err.to_string());
+                        let ranges_json = serde_json::to_string(
+                            &cache
+                                .ranges
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>(),
+                        )
+                        .unwrap_or_else(|_| "[]".to_string());
+                        log::warn!(
+                            "Bot verifier failed to refresh provider={}: {}",
+                            provider.id,
+                            err
+                        );
+                        ProviderRefreshPersistence {
+                            ranges_json,
+                            last_refresh_at: cache.last_refresh_at,
+                            last_success_at: cache.last_success_at,
+                            last_error: cache.last_error.clone(),
+                        }
+                    }
+                }
+            };
+
+            if let Some(store) = store {
+                if let Err(err) = store
+                    .upsert_bot_ip_cache_entry(
                         provider.id,
-                        cache.ranges.len()
-                    );
-                }
-                Ok(_) => {
-                    cache.last_error = Some("empty provider ranges".to_string());
-                    log::warn!("Bot verifier provider={} returned no ranges", provider.id);
-                }
-                Err(err) => {
-                    cache.last_error = Some(err.to_string());
+                        &refresh_result.ranges_json,
+                        refresh_result.last_refresh_at,
+                        refresh_result.last_success_at,
+                        refresh_result.last_error.as_deref(),
+                    )
+                    .await
+                {
                     log::warn!(
-                        "Bot verifier failed to refresh provider={}: {}",
+                        "Failed to persist bot verifier cache provider={}: {}",
                         provider.id,
                         err
                     );
@@ -128,12 +254,22 @@ impl BotIpVerifier {
     }
 }
 
-pub(crate) async fn run_bot_ip_refresh_loop(verifier: std::sync::Arc<BotIpVerifier>) {
-    verifier.refresh_once().await;
+struct ProviderRefreshPersistence {
+    ranges_json: String,
+    last_refresh_at: Option<i64>,
+    last_success_at: Option<i64>,
+    last_error: Option<String>,
+}
+
+pub(crate) async fn run_bot_ip_refresh_loop(
+    verifier: std::sync::Arc<BotIpVerifier>,
+    store: Option<std::sync::Arc<SqliteStore>>,
+) {
+    verifier.refresh_once(store.as_deref()).await;
     let mut interval = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECS));
     loop {
         interval.tick().await;
-        verifier.refresh_once().await;
+        verifier.refresh_once(store.as_deref()).await;
         if !has_any_success(&verifier) {
             tokio::time::sleep(Duration::from_secs(INITIAL_REFRESH_RETRY_SECS)).await;
         }

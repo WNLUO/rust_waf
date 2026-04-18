@@ -24,6 +24,8 @@ const {
   refreshing,
   metricsHistory,
   networkHistory,
+  metricTrends,
+  blockedPeriodDelta,
   formatBytes,
   formatNumber,
   successRate,
@@ -105,52 +107,97 @@ const formatGaugeValue = (percent: number) => {
   return `${percent.toFixed(0)}%`
 }
 
+const proxySuccessPercent = computed(() => {
+  const metrics = dashboard.value?.metrics
+  if (!metrics) return 0
+  const total = metrics.proxy_successes + metrics.proxy_failures
+  if (total === 0) return 0
+  return (metrics.proxy_successes / total) * 100
+})
+
+type PerformanceGaugeCard = {
+  kind: 'gauge'
+  label: string
+  value: string
+  gaugeValue: string
+  primaryLabel: string
+  primaryValue: string
+  secondaryLabel: string
+  secondaryValue: string
+  percent: number
+  tone: string
+  color: string
+  track: string
+}
+
+type PerformanceIoCard = {
+  kind: 'io'
+  label: string
+  readValue: string
+  writeValue: string
+  readPercent: number
+  writePercent: number
+  tone: string
+  color: string
+  track: string
+}
+
+type PerformanceCard = PerformanceGaugeCard | PerformanceIoCard
+
 const performanceCards = computed(() => {
   const system = dashboard.value?.metrics.system
   const cpuPercent = clampPercent(system?.cpu_usage_percent || 0)
   const memoryPercent = clampPercent(system?.memory_usage_percent || 0)
-  const ioTotal =
-    (system?.process_disk_read_bytes_per_sec || 0) +
-    (system?.process_disk_write_bytes_per_sec || 0)
-  const ioPercent = clampPercent((ioTotal / (10 * 1024 * 1024)) * 100)
+  const cpuCoreCount =
+    system?.cpu_core_count || l7Stats.value?.auto_tuning.detected_cpu_cores || 0
+  const activeCpuCores = (cpuCoreCount * cpuPercent) / 100
+  const memoryUsed = system?.memory_used_bytes || 0
+  const memoryTotal = system?.memory_total_bytes || 0
+  const ioRead = system?.process_disk_read_bytes_per_sec || 0
+  const ioWrite = system?.process_disk_write_bytes_per_sec || 0
+  const ioTotal = ioRead + ioWrite
+  const ioPeak = Math.max(ioRead, ioWrite, 1)
+  const ioReadPercent = Math.max(6, (ioRead / ioPeak) * 100)
+  const ioWritePercent = Math.max(6, (ioWrite / ioPeak) * 100)
   const cpuTone = gaugeTone(cpuPercent)
   const memoryTone = gaugeTone(memoryPercent)
 
   return [
     {
+      kind: 'gauge',
       label: 'CPU',
       value: `${cpuPercent.toFixed(1)}%`,
       gaugeValue: formatGaugeValue(cpuPercent),
-      hint: `${formatNumber(
-        system?.cpu_core_count ||
-          l7Stats.value?.auto_tuning.detected_cpu_cores ||
-          0,
-      )} cores`,
+      primaryLabel: '总核心',
+      primaryValue: formatNumber(cpuCoreCount),
+      secondaryLabel: '活跃核',
+      secondaryValue: activeCpuCores.toFixed(1),
       percent: cpuPercent,
       tone: cpuTone.card,
       color: cpuTone.color,
       track: cpuTone.track,
     },
     {
+      kind: 'gauge',
       label: '内存',
       value: `${memoryPercent.toFixed(1)}%`,
       gaugeValue: formatGaugeValue(memoryPercent),
-      hint: `${formatBytes(system?.memory_used_bytes || 0)} / ${formatBytes(
-        system?.memory_total_bytes || 0,
-      )}`,
+      primaryLabel: '已用',
+      primaryValue: formatBytes(memoryUsed),
+      secondaryLabel: '总量',
+      secondaryValue: formatBytes(memoryTotal),
       percent: memoryPercent,
       tone: memoryTone.card,
       color: memoryTone.color,
       track: memoryTone.track,
     },
     {
+      kind: 'io',
       label: 'IO',
-      value: formatBytes(ioTotal) + '/s',
-      gaugeValue: formatGaugeValue(ioPercent),
-      hint: `R ${formatBytes(system?.process_disk_read_bytes_per_sec || 0)}/s · W ${formatBytes(
-        system?.process_disk_write_bytes_per_sec || 0,
-      )}/s`,
-      percent: ioPercent,
+      readValue: `${formatBytes(ioRead)}/s`,
+      writeValue: `${formatBytes(ioWrite)}/s`,
+      readPercent: ioReadPercent,
+      writePercent: ioWritePercent,
       tone:
         ioTotal > 10 * 1024 * 1024
           ? 'border-blue-200 bg-blue-50/80 text-blue-700'
@@ -158,7 +205,7 @@ const performanceCards = computed(() => {
       color: ioTotal > 10 * 1024 * 1024 ? '#2563eb' : '#4f46e5',
       track: 'rgba(224, 231, 255, 0.9)',
     },
-  ]
+  ] satisfies PerformanceCard[]
 })
 
 const defenseMatrix = computed(() => [
@@ -244,52 +291,97 @@ const defenseMatrix = computed(() => [
         <div
           v-for="card in performanceCards"
           :key="card.label"
-          class="min-w-0 rounded-xl border px-2.5 py-2 shadow-sm"
+          class="flex min-h-[5.75rem] min-w-0 flex-col rounded-xl border px-2.5 py-2 shadow-sm"
           :class="card.tone"
         >
-          <div class="flex min-w-0 items-center gap-2.5">
+          <p class="truncate text-xs font-medium opacity-75">
+            {{ card.label }}
+          </p>
+          <div
+            v-if="card.kind === 'gauge'"
+            class="mt-1.5 flex min-w-0 items-center gap-2.5"
+          >
             <div
-              class="relative grid h-12 w-12 shrink-0 place-items-center rounded-full sm:h-14 sm:w-14"
+              class="relative grid h-12 w-12 shrink-0 place-items-center rounded-full"
               :style="{
                 background: `conic-gradient(${card.color} ${card.percent * 3.6}deg, ${card.track} 0deg)`,
               }"
             >
               <div
-                class="grid h-9 w-9 place-items-center rounded-full bg-white text-[10px] font-semibold text-slate-950 shadow-inner sm:h-10 sm:w-10"
+                class="grid h-9 w-9 place-items-center rounded-full bg-white text-[10px] font-semibold text-slate-950 shadow-inner"
                 :title="card.value"
               >
                 {{ card.gaugeValue }}
               </div>
             </div>
-            <div class="min-w-0 leading-none">
-              <p class="truncate text-xs font-medium opacity-75">
-                {{ card.label }}
-              </p>
-              <p
-                class="mt-1 break-words text-sm font-semibold leading-4 text-slate-950"
-                :title="card.value"
-              >
-                {{ card.value }}
-              </p>
-              <p
-                class="mt-0.5 break-words text-[11px] leading-4 text-slate-500"
-                :title="card.hint"
-              >
-                {{ card.hint }}
-              </p>
+            <div class="grid min-w-0 flex-1 gap-1 leading-none">
+              <div class="flex min-w-0 items-baseline justify-between gap-2">
+                <p class="text-[10px] leading-3 text-slate-500">
+                  {{ card.primaryLabel }}
+                </p>
+                <p
+                  class="truncate text-xs font-semibold leading-4 text-slate-950"
+                  :title="card.primaryValue"
+                >
+                  {{ card.primaryValue }}
+                </p>
+              </div>
+              <div class="flex min-w-0 items-baseline justify-between gap-2">
+                <p class="text-[10px] leading-3 text-slate-500">
+                  {{ card.secondaryLabel }}
+                </p>
+                <p
+                  class="truncate text-xs font-semibold leading-4 text-slate-950"
+                  :title="card.secondaryValue"
+                >
+                  {{ card.secondaryValue }}
+                </p>
+              </div>
             </div>
           </div>
-          <div class="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
-            <div
-              class="h-full rounded-full"
-              :style="{ width: `${card.percent}%`, backgroundColor: card.color }"
-            ></div>
+          <div v-else class="mt-2 min-w-0">
+            <div class="grid gap-1.5 text-[11px]">
+              <div class="min-w-0">
+                <div class="flex min-w-0 items-baseline justify-between gap-2">
+                  <p class="text-slate-500">Read</p>
+                  <p
+                    class="truncate font-semibold leading-4 text-slate-950"
+                    :title="card.readValue"
+                  >
+                    {{ card.readValue }}
+                  </p>
+                </div>
+                <div class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    class="h-full rounded-full bg-indigo-600"
+                    :style="{ width: `${card.readPercent}%` }"
+                  ></div>
+                </div>
+              </div>
+              <div class="min-w-0">
+                <div class="flex min-w-0 items-baseline justify-between gap-2">
+                  <p class="text-slate-500">Write</p>
+                  <p
+                    class="truncate font-semibold leading-4 text-slate-950"
+                    :title="card.writeValue"
+                  >
+                    {{ card.writeValue }}
+                  </p>
+                </div>
+                <div class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    class="h-full rounded-full bg-cyan-600"
+                    :style="{ width: `${card.writePercent}%` }"
+                  ></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <MetricWidget
           label="累计处理报文"
           :value="formatNumber(dashboard?.metrics.total_packets || 0)"
-          :hint="`累计流量 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
+          :hint="`累计处理 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
           :series="metricsHistory.totalPackets"
           no-top-line
           trend-placement="corner"
@@ -297,9 +389,8 @@ const defenseMatrix = computed(() => [
         <MetricWidget
           label="累计拦截次数"
           :value="formatNumber(dashboard?.metrics.blocked_packets || 0)"
-          :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
-          trend="up"
-          :series="metricsHistory.blockRate"
+          :hint="`本周期 +${formatNumber(blockedPeriodDelta)} · 四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
+          :trend="metricTrends.blocked"
           no-top-line
           trend-placement="corner"
         />
@@ -307,7 +398,7 @@ const defenseMatrix = computed(() => [
           label="平均代理延迟"
           :value="formatLatencyEnglish(dashboard?.metrics.average_proxy_latency_micros || 0)"
           :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"
-          trend="down"
+          :trend="metricTrends.latency"
           :series="metricsHistory.latency"
           no-top-line
           trend-placement="corner"
@@ -316,6 +407,8 @@ const defenseMatrix = computed(() => [
           label="代理成功率"
           :value="successRate"
           :hint="`成功 ${formatNumber(dashboard?.metrics.proxy_successes || 0)} / 失败 ${formatNumber(dashboard?.metrics.proxy_failures || 0)}`"
+          :trend="metricTrends.successRate"
+          :progress="proxySuccessPercent"
           no-top-line
           trend-placement="corner"
         />

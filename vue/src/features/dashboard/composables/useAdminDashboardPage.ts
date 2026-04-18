@@ -38,6 +38,12 @@ export function useAdminDashboardPage() {
   const refreshing = ref(false)
   const error = ref('')
   const lastUpdated = ref<number | null>(null)
+  const lastTotalPackets = ref<number | null>(null)
+  const lastBlockedPackets = ref<number | null>(null)
+  const lastBlockedDelta = ref<number | null>(null)
+  const blockedPeriodDelta = ref(0)
+  const lastLatencyMicros = ref<number | null>(null)
+  const lastProxySuccessRate = ref<number | null>(null)
   const realtimeState = useAdminRealtimeState()
 
   useFlashMessages({
@@ -48,8 +54,12 @@ export function useAdminDashboardPage() {
 
   const metricsHistory = reactive({
     totalPackets: [] as number[],
-    blockRate: [] as number[],
     latency: [] as number[],
+  })
+  const metricTrends = reactive({
+    blocked: 'neutral' as 'up' | 'down' | 'neutral',
+    latency: 'neutral' as 'up' | 'down' | 'neutral',
+    successRate: 'neutral' as 'up' | 'down' | 'neutral',
   })
   const networkHistory = reactive({
     timestamps: [] as number[],
@@ -74,6 +84,12 @@ export function useAdminDashboardPage() {
       networkHistory.rx.shift()
       networkHistory.tx.shift()
     }
+  }
+
+  const trendFromDiff = (diff: number, threshold = 0) => {
+    if (diff > threshold) return 'up' as const
+    if (diff < -threshold) return 'down' as const
+    return 'neutral' as const
   }
 
   const { formatBytes, formatNumber, formatLatency } = useFormatters()
@@ -245,17 +261,42 @@ export function useAdminDashboardPage() {
   const applyMetrics = (metrics: MetricsResponse) => {
     if (!dashboard.value) return
     dashboard.value.metrics = metrics
-    pushHistory('totalPackets', metrics.total_packets)
-    pushHistory(
-      'blockRate',
-      metrics.total_packets
-        ? Number(
-            ((metrics.blocked_packets / metrics.total_packets) * 100).toFixed(
-              2,
-            ),
-          )
-        : 0,
-    )
+    const packetDelta =
+      lastTotalPackets.value === null
+        ? 0
+        : Math.max(0, metrics.total_packets - lastTotalPackets.value)
+    lastTotalPackets.value = metrics.total_packets
+    pushHistory('totalPackets', packetDelta)
+    const blockedDelta =
+      lastBlockedPackets.value === null
+        ? 0
+        : Math.max(0, metrics.blocked_packets - lastBlockedPackets.value)
+    if (lastBlockedDelta.value !== null) {
+      metricTrends.blocked = trendFromDiff(
+        blockedDelta - lastBlockedDelta.value,
+      )
+    }
+    lastBlockedPackets.value = metrics.blocked_packets
+    lastBlockedDelta.value = blockedDelta
+    blockedPeriodDelta.value = blockedDelta
+    if (lastLatencyMicros.value !== null) {
+      metricTrends.latency = trendFromDiff(
+        metrics.average_proxy_latency_micros - lastLatencyMicros.value,
+        1_000,
+      )
+    }
+    lastLatencyMicros.value = metrics.average_proxy_latency_micros
+    const proxyTotal = metrics.proxy_successes + metrics.proxy_failures
+    const proxySuccessRate = proxyTotal
+      ? (metrics.proxy_successes / proxyTotal) * 100
+      : 0
+    if (lastProxySuccessRate.value !== null) {
+      metricTrends.successRate = trendFromDiff(
+        proxySuccessRate - lastProxySuccessRate.value,
+        0.1,
+      )
+    }
+    lastProxySuccessRate.value = proxySuccessRate
     pushHistory('latency', metrics.average_proxy_latency_micros)
     pushNetworkHistory(metrics)
     lastUpdated.value = Date.now()
@@ -428,6 +469,8 @@ export function useAdminDashboardPage() {
     realtimeState,
     metricsHistory,
     networkHistory,
+    metricTrends,
+    blockedPeriodDelta,
     pushHistory,
     formatBytes,
     formatNumber,

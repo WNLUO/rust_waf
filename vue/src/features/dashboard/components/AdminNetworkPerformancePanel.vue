@@ -99,10 +99,11 @@ const renderChart = async () => {
 
   const option: NetworkChartOption = {
     grid: {
-      left: 44,
+      left: 58,
       right: 12,
-      top: 14,
-      bottom: 30,
+      top: 28,
+      bottom: 36,
+      containLabel: false,
     },
     tooltip: {
       trigger: 'axis',
@@ -250,6 +251,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div ref="chartEl" class="mt-3 h-[286px] w-full"></div>
+    <div ref="chartEl" class="mt-4 h-[286px] w-full"></div>
   </section>
 </template>

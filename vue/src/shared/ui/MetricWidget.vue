@@ -11,20 +11,25 @@ const props = defineProps<{
   trendPlacement?: 'inline' | 'corner'
   icon?: Component
   series?: number[]
+  seriesMin?: number
+  seriesMax?: number
   progress?: number
+  ambientSeries?: boolean
   noTopLine?: boolean
 }>()
 
 const chartPath = computed(() => {
   if (!props.series || props.series.length < 2) return ''
-  const max = Math.max(...props.series)
-  const min = Math.min(...props.series)
-  const range = max - min || 1
+  const rawMax = Math.max(...props.series)
+  const rawMin = Math.min(...props.series)
+  const min = props.seriesMin ?? Math.min(0, rawMin)
+  const max = Math.max(props.seriesMax ?? rawMax * 1.25, min + 1)
+  const range = max - min
   const step = 100 / (props.series.length - 1)
 
   const points = props.series.map((value, index) => ({
     x: index * step,
-    y: 100 - ((value - min) / range) * 100,
+    y: 100 - ((Math.max(min, Math.min(max, value)) - min) / range) * 100,
   }))
 
   if (points.length === 2) {
@@ -71,6 +76,34 @@ const trendTone = computed(() => {
       v-if="!noTopLine"
       class="absolute inset-x-0 top-0 h-0.5 bg-blue-500"
     ></div>
+    <svg
+      v-if="chartPath && ambientSeries"
+      class="pointer-events-none absolute inset-x-0 bottom-0 h-full w-full text-blue-500"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <line
+        v-for="y in [25, 50, 75]"
+        :key="y"
+        x1="0"
+        x2="100"
+        :y1="y"
+        :y2="y"
+        class="stroke-slate-200/70"
+        stroke-width="1"
+        stroke-dasharray="3 3"
+      />
+      <path :d="chartAreaPath" class="fill-blue-500/10" />
+      <path
+        :d="chartPath"
+        fill="none"
+        class="stroke-current opacity-50"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
     <div
       v-if="trend && trendPlacement === 'corner'"
       class="absolute right-2.5 top-2.5 flex items-center gap-1 text-xs font-medium"
@@ -88,7 +121,7 @@ const trendTone = computed(() => {
       <component :is="icon" v-if="icon" :size="18" class="text-blue-600" />
     </div>
 
-    <div class="flex h-full min-h-[4.4rem] flex-col">
+    <div class="relative z-10 flex h-full min-h-[4.4rem] flex-col">
       <p
         class="truncate text-xs font-medium text-slate-500"
         :class="{ 'pr-12': icon || (trend && trendPlacement === 'corner') }"
@@ -116,12 +149,23 @@ const trendTone = computed(() => {
         {{ hint }}
       </p>
       <svg
-        v-if="chartPath"
+        v-if="chartPath && !ambientSeries"
         class="mt-1 h-4 w-full text-blue-500"
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
         aria-hidden="true"
       >
+        <line
+          v-for="y in [25, 50, 75]"
+          :key="y"
+          x1="0"
+          x2="100"
+          :y1="y"
+          :y2="y"
+          class="stroke-slate-200"
+          stroke-width="1"
+          stroke-dasharray="3 3"
+        />
         <path
           :d="chartAreaPath"
           class="fill-blue-500/10"

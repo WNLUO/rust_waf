@@ -25,7 +25,6 @@ const {
   metricsHistory,
   networkHistory,
   metricTrends,
-  blockedPeriodDelta,
   formatBytes,
   formatNumber,
   successRate,
@@ -113,6 +112,17 @@ const proxySuccessPercent = computed(() => {
   const total = metrics.proxy_successes + metrics.proxy_failures
   if (total === 0) return 0
   return (metrics.proxy_successes / total) * 100
+})
+
+const packetSparkMax = computed(() => {
+  const max = Math.max(...metricsHistory.totalPackets, 1)
+  return Math.max(5, max * 1.5)
+})
+
+const latencySparkMax = computed(() => {
+  const current = dashboard.value?.metrics.average_proxy_latency_micros || 0
+  const max = Math.max(...metricsHistory.latency, current, 1_000)
+  return max * 1.5
 })
 
 type PerformanceGaugeCard = {
@@ -383,14 +393,9 @@ const defenseMatrix = computed(() => [
           :value="formatNumber(dashboard?.metrics.total_packets || 0)"
           :hint="`累计处理 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
           :series="metricsHistory.totalPackets"
-          no-top-line
-          trend-placement="corner"
-        />
-        <MetricWidget
-          label="累计拦截次数"
-          :value="formatNumber(dashboard?.metrics.blocked_packets || 0)"
-          :hint="`本周期 +${formatNumber(blockedPeriodDelta)} · 四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
-          :trend="metricTrends.blocked"
+          :series-min="0"
+          :series-max="packetSparkMax"
+          ambient-series
           no-top-line
           trend-placement="corner"
         />
@@ -400,6 +405,9 @@ const defenseMatrix = computed(() => [
           :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"
           :trend="metricTrends.latency"
           :series="metricsHistory.latency"
+          :series-min="0"
+          :series-max="latencySparkMax"
+          ambient-series
           no-top-line
           trend-placement="corner"
         />
@@ -409,6 +417,14 @@ const defenseMatrix = computed(() => [
           :hint="`成功 ${formatNumber(dashboard?.metrics.proxy_successes || 0)} / 失败 ${formatNumber(dashboard?.metrics.proxy_failures || 0)}`"
           :trend="metricTrends.successRate"
           :progress="proxySuccessPercent"
+          no-top-line
+          trend-placement="corner"
+        />
+        <MetricWidget
+          label="累计拦截次数"
+          :value="formatNumber(dashboard?.metrics.blocked_packets || 0)"
+          :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
+          :trend="metricTrends.blocked"
           no-top-line
           trend-placement="corner"
         />

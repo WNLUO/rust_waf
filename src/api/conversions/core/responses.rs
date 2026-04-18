@@ -59,6 +59,7 @@ impl SettingsResponse {
                         enabled: provider.enabled,
                         id: provider.id.clone(),
                         urls: provider.urls.clone(),
+                        mirror_urls: provider.mirror_urls.clone(),
                         format: provider.format.clone(),
                         reverse_dns_enabled: provider.reverse_dns_enabled,
                         reverse_dns_suffixes: provider.reverse_dns_suffixes.clone(),

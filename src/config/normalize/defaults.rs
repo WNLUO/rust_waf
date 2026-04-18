@@ -132,6 +132,7 @@ pub(crate) fn default_bot_providers() -> Vec<BotProviderConfig> {
                 "https://developers.google.com/crawling/ipranges/special-crawlers.json".to_string(),
                 "https://developers.google.com/crawling/ipranges/user-triggered-fetchers.json".to_string(),
             ],
+            mirror_urls: vec![],
             format: "json_recursive".to_string(),
             reverse_dns_enabled: true,
             reverse_dns_suffixes: vec![
@@ -144,6 +145,7 @@ pub(crate) fn default_bot_providers() -> Vec<BotProviderConfig> {
             enabled: true,
             id: "bing".to_string(),
             urls: vec!["https://www.bing.com/toolbox/bingbot.json".to_string()],
+            mirror_urls: vec![],
             format: "json_recursive".to_string(),
             reverse_dns_enabled: true,
             reverse_dns_suffixes: vec![".search.msn.com".to_string()],

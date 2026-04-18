@@ -88,6 +88,7 @@ export interface BotProviderSettings {
   enabled: boolean
   id: string
   urls: string[]
+  mirror_urls: string[]
   format: string
   reverse_dns_enabled: boolean
   reverse_dns_suffixes: string[]

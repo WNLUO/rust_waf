@@ -45,6 +45,7 @@ pub struct BotProviderSettingsPayload {
     pub(crate) enabled: bool,
     pub(crate) id: String,
     pub(crate) urls: Vec<String>,
+    pub(crate) mirror_urls: Vec<String>,
     pub(crate) format: String,
     pub(crate) reverse_dns_enabled: bool,
     pub(crate) reverse_dns_suffixes: Vec<String>,

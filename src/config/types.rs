@@ -85,6 +85,8 @@ pub struct BotProviderConfig {
     #[serde(default)]
     pub urls: Vec<String>,
     #[serde(default)]
+    pub mirror_urls: Vec<String>,
+    #[serde(default)]
     pub format: String,
     #[serde(default)]
     pub reverse_dns_enabled: bool,

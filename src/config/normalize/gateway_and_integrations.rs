@@ -680,6 +680,12 @@ pub(super) fn normalize_bot_detection(config: &mut Config) {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .collect();
+        provider.mirror_urls = provider
+            .mirror_urls
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
         provider.reverse_dns_suffixes = provider
             .reverse_dns_suffixes
             .iter()
@@ -689,7 +695,9 @@ pub(super) fn normalize_bot_detection(config: &mut Config) {
     }
     config.bot_detection.providers.retain(|provider| {
         !provider.id.is_empty()
-            && (!provider.urls.is_empty() || !provider.reverse_dns_suffixes.is_empty())
+            && (!provider.urls.is_empty()
+                || !provider.mirror_urls.is_empty()
+                || !provider.reverse_dns_suffixes.is_empty())
     });
 }
 

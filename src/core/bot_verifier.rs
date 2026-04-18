@@ -367,10 +367,17 @@ fn bot_ip_providers(configured: &[BotProviderConfig]) -> Vec<BotIpProvider> {
     configured
         .iter()
         .filter(|provider| provider.enabled)
-        .filter(|provider| !provider.id.trim().is_empty() && !provider.urls.is_empty())
+        .filter(|provider| {
+            !provider.id.trim().is_empty()
+                && (!provider.mirror_urls.is_empty() || !provider.urls.is_empty())
+        })
         .map(|provider| BotIpProvider {
             id: provider.id.trim().to_ascii_lowercase(),
-            urls: provider.urls.clone(),
+            urls: if provider.mirror_urls.is_empty() {
+                provider.urls.clone()
+            } else {
+                provider.mirror_urls.clone()
+            },
         })
         .collect()
 }
@@ -530,5 +537,44 @@ mod tests {
         let google_v6 = "2001:4860:4801::1".parse::<IpAddr>().unwrap();
         assert!(ranges.iter().any(|range| range.contains(&google_v4)));
         assert!(ranges.iter().any(|range| range.contains(&google_v6)));
+    }
+
+    #[test]
+    fn bot_ip_providers_prefer_mirror_urls_when_configured() {
+        let providers = bot_ip_providers(&[BotProviderConfig {
+            enabled: true,
+            id: "Google".to_string(),
+            urls: vec!["https://official.example/googlebot.json".to_string()],
+            mirror_urls: vec!["https://mirror.example/googlebot.json".to_string()],
+            format: "json_recursive".to_string(),
+            reverse_dns_enabled: true,
+            reverse_dns_suffixes: vec![".googlebot.com".to_string()],
+        }]);
+
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "google");
+        assert_eq!(
+            providers[0].urls,
+            vec!["https://mirror.example/googlebot.json"]
+        );
+    }
+
+    #[test]
+    fn bot_ip_providers_fall_back_to_official_urls_without_mirrors() {
+        let providers = bot_ip_providers(&[BotProviderConfig {
+            enabled: true,
+            id: "bing".to_string(),
+            urls: vec!["https://official.example/bingbot.json".to_string()],
+            mirror_urls: vec![],
+            format: "json_recursive".to_string(),
+            reverse_dns_enabled: true,
+            reverse_dns_suffixes: vec![".search.msn.com".to_string()],
+        }]);
+
+        assert_eq!(providers.len(), 1);
+        assert_eq!(
+            providers[0].urls,
+            vec!["https://official.example/bingbot.json"]
+        );
     }
 }

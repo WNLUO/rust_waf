@@ -304,6 +304,7 @@ impl SettingsUpdateRequest {
                     enabled: provider.enabled,
                     id: provider.id,
                     urls: provider.urls,
+                    mirror_urls: provider.mirror_urls,
                     format: provider.format,
                     reverse_dns_enabled: provider.reverse_dns_enabled,
                     reverse_dns_suffixes: provider.reverse_dns_suffixes,

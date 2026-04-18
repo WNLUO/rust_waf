@@ -28,6 +28,12 @@ export function useAdminSettingsSystem({
         fetchSettings(),
         fetchGlobalEntryConfig(),
       ])
+      payload.bot_detection.providers = payload.bot_detection.providers.map((provider) => ({
+        ...provider,
+        urls: provider.urls ?? [],
+        mirror_urls: provider.mirror_urls ?? [],
+        reverse_dns_suffixes: provider.reverse_dns_suffixes ?? [],
+      }))
       Object.assign(systemSettings, payload)
       Object.assign(globalEntryForm, globalEntryPayload)
     } catch (e) {

@@ -129,6 +129,7 @@ const addBotProvider = () => {
     enabled: true,
     id: 'custom',
     urls: ['https://example.com/bot-ranges.json'],
+    mirror_urls: [],
     format: 'json_recursive',
     reverse_dns_enabled: false,
     reverse_dns_suffixes: [],
@@ -143,6 +144,12 @@ const updateProviderUrls = (index: number, value: string) => {
   const provider = systemSettings.bot_detection.providers[index]
   if (!provider) return
   provider.urls = value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
+}
+
+const updateProviderMirrorUrls = (index: number, value: string) => {
+  const provider = systemSettings.bot_detection.providers[index]
+  if (!provider) return
+  provider.mirror_urls = value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
 }
 
 const updateProviderDnsSuffixes = (index: number, value: string) => {
@@ -380,7 +387,15 @@ useFlashMessages({
                 class="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-4"
                 rows="2"
                 :value="provider.urls.join('\n')"
+                placeholder="官方 URL，每行一个"
                 @input="updateProviderUrls(index, ($event.target as HTMLTextAreaElement).value)"
+              ></textarea>
+              <textarea
+                class="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-4"
+                rows="2"
+                :value="provider.mirror_urls.join('\n')"
+                placeholder="镜像/中转 URL，每行一个；留空则使用官方 URL"
+                @input="updateProviderMirrorUrls(index, ($event.target as HTMLTextAreaElement).value)"
               ></textarea>
               <input
                 class="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-4"

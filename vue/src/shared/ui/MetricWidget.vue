@@ -16,6 +16,7 @@ const props = defineProps<{
   progress?: number
   ambientSeries?: boolean
   noTopLine?: boolean
+  filled?: boolean
 }>()
 
 const chartPath = computed(() => {
@@ -70,7 +71,8 @@ const trendTone = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
+    class="relative overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+    :class="filled ? 'px-3 py-2' : 'px-3 py-2.5'"
   >
     <div
       v-if="!noTopLine"
@@ -121,15 +123,26 @@ const trendTone = computed(() => {
       <component :is="icon" v-if="icon" :size="18" class="text-blue-600" />
     </div>
 
-    <div class="relative z-10 flex h-full min-h-[4.4rem] flex-col">
+    <div
+      class="relative z-10 flex h-full flex-col"
+      :class="filled ? 'min-h-[5.25rem]' : 'min-h-[4.4rem]'"
+    >
       <p
         class="truncate text-xs font-medium text-slate-500"
         :class="{ 'pr-12': icon || (trend && trendPlacement === 'corner') }"
       >
         {{ label }}
       </p>
-      <div class="flex flex-1 flex-wrap items-center justify-center gap-1.5 text-center">
-        <h3 class="text-lg font-semibold text-slate-900">{{ value }}</h3>
+      <div
+        class="flex flex-1 flex-wrap items-center justify-center gap-1.5 text-center"
+        :class="filled ? 'py-1.5' : ''"
+      >
+        <h3
+          class="font-semibold text-slate-900"
+          :class="filled ? 'text-2xl leading-7' : 'text-lg'"
+        >
+          {{ value }}
+        </h3>
         <div
           v-if="trend && trendPlacement !== 'corner'"
           class="mb-0.5 flex items-center gap-1 text-xs font-medium"
@@ -143,7 +156,8 @@ const trendTone = computed(() => {
       </div>
       <p
         v-if="hint"
-        class="truncate text-center text-xs text-slate-500"
+        class="truncate text-center text-slate-500"
+        :class="filled ? 'text-[11px]' : 'text-xs'"
         :title="hint"
       >
         {{ hint }}
@@ -181,7 +195,8 @@ const trendTone = computed(() => {
       </svg>
       <div
         v-else-if="progressPercent !== null"
-        class="mt-1 h-4 rounded-full bg-rose-100"
+        class="mt-1 rounded-full bg-rose-100"
+        :class="filled ? 'h-2' : 'h-4'"
         aria-hidden="true"
       >
         <div

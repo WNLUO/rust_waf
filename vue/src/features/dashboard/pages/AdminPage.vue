@@ -131,15 +131,27 @@ const pressureLabel = (value?: string) => {
   return labels[value || ''] || '未知'
 }
 
+const trendWindowLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    last_5m: '近5分钟',
+    last_15m: '近15分钟',
+    last_60m: '近60分钟',
+  }
+  return labels[value || ''] || value || '未知窗口'
+}
+
 const aiActionLabel = (value?: string) => {
   const labels: Record<string, string> = {
     add_behavior_watch: '行为观察',
     add_temp_block: '临时封禁',
     increase_challenge: '增加挑战',
     increase_delay: '增加延迟',
+    mark_trusted_temporarily: '临时信任',
     raise_identity_risk: '提高身份风险',
+    reduce_friction: '降低摩擦',
     tighten_host_cc: '收紧Host CC',
     tighten_route_cc: '收紧路由CC',
+    watch_visitor: '观察访客',
   }
   return labels[value || ''] || value || '未知动作'
 }
@@ -152,6 +164,30 @@ const aiPolicyStatusLabel = (value?: string) => {
     observing: '观察中',
   }
   return labels[value || ''] || value || '观察中'
+}
+
+const aiScopeLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    client_ip: '来源IP',
+    host: 'Host',
+    identity: '身份',
+    route: '路由',
+    source_ip: '来源IP',
+  }
+  return labels[value || ''] || '范围'
+}
+
+const hasChineseText = (value?: string) => /[\u4e00-\u9fff]/.test(value || '')
+
+const aiPolicyTitle = (policy: {
+  title: string
+  action: string
+  scope_type: string
+  scope_value: string
+}) => {
+  if (hasChineseText(policy.title)) return policy.title
+  const scopeValue = policy.scope_value ? ` ${policy.scope_value}` : ''
+  return `${aiActionLabel(policy.action)} · ${aiScopeLabel(policy.scope_type)}${scopeValue}`
 }
 
 const formatPercent = (value?: number) => `${(value || 0).toFixed(0)}%`
@@ -240,9 +276,12 @@ const latencySparkMax = computed(() => {
 const aiAutomationStatusType = computed(() => {
   if (!aiAutomation.value?.available) return 'warning' as const
   if (!aiAutomation.value.status.enabled) return 'muted' as const
+  if (aiAutomation.value.provider === 'local_rules') {
+    return 'info' as const
+  }
   if (
-    aiAutomation.value.status.force_local_rules_under_attack ||
-    aiAutomation.value.provider === 'local_rules'
+    aiAutomation.value.runtime_pressure_level === 'attack' &&
+    aiAutomation.value.status.force_local_rules_under_attack
   ) {
     return 'info' as const
   }
@@ -252,12 +291,12 @@ const aiAutomationStatusType = computed(() => {
 const aiAutomationStatusLabel = computed(() => {
   if (!aiAutomation.value?.available) return '数据不足'
   if (!aiAutomation.value.status.enabled) return '已关闭'
+  if (aiAutomation.value.provider === 'local_rules') return '本地规则'
   if (
-    aiAutomation.value.status.force_local_rules_under_attack ||
-    aiAutomation.value.provider === 'local_rules'
-  ) {
-    return '本地兜底'
-  }
+    aiAutomation.value.runtime_pressure_level === 'attack' &&
+    aiAutomation.value.status.force_local_rules_under_attack
+  )
+    return '攻击兜底'
   return '运行中'
 })
 
@@ -438,37 +477,62 @@ const defenseMatrix = computed(() => {
   const metrics = dashboard.value?.metrics
   const l7Tuning = l7Stats.value?.auto_tuning
   const l4Overview = l4Stats.value?.behavior.overview
+  const slowAttackHits =
+    (metrics?.slow_attack_idle_timeouts || 0) +
+    (metrics?.slow_attack_header_timeouts || 0) +
+    (metrics?.slow_attack_body_timeouts || 0) +
+    (metrics?.slow_attack_tls_handshake_hits || 0) +
+    (metrics?.slow_attack_blocks || 0)
   const droppedStorageEvents =
     (metrics?.sqlite_dropped_security_events || 0) +
     (metrics?.sqlite_dropped_blocked_ips || 0)
 
   return [
     {
-      label: 'CC',
-      badge: ccTotal.value > 0 ? '活跃' : '无命中',
-      type: ccTotal.value > 0 ? ('warning' as const) : ('muted' as const),
+      label: 'L4',
+      badge: l4OverloadLabel(l4OverloadLevel.value),
+      type: l4OverloadType.value,
       stats: [
         {
-          label: '挑战',
-          value: formatNumber(metrics?.l7_cc_challenges || 0),
+          label: '桶数',
+          value: formatNumber(l4Overview?.bucket_count || 0),
         },
         {
-          label: '拦截',
-          value: formatNumber(metrics?.l7_cc_blocks || 0),
-          class: (metrics?.l7_cc_blocks || 0) > 0 ? 'text-red-700' : '',
+          label: '高风险',
+          value: formatNumber(l4Overview?.high_risk_buckets || 0),
+          class:
+            (l4Overview?.high_risk_buckets || 0) > 0
+              ? 'text-amber-700'
+              : '',
         },
         {
-          label: '延迟',
-          value: formatNumber(metrics?.l7_cc_delays || 0),
-          class: (metrics?.l7_cc_delays || 0) > 0 ? 'text-amber-700' : '',
+          label: '丢弃',
+          value: formatNumber(l4Overview?.dropped_events || 0),
+          class:
+            (l4Overview?.dropped_events || 0) > 0 ? 'text-red-700' : '',
         },
         {
-          label: '放行',
-          value: formatNumber(metrics?.l7_cc_verified_passes || 0),
-          class: 'text-emerald-700',
+          label: '预算拒绝',
+          value: formatNumber(metrics?.l4_bucket_budget_rejections || 0),
+          class:
+            (metrics?.l4_bucket_budget_rejections || 0) > 0
+              ? 'text-red-700'
+              : '',
+        },
+        {
+          label: '细粒度',
+          value: formatNumber(metrics?.l4_fine_grained_buckets || 0),
+        },
+        {
+          label: '代理降级',
+          value: formatNumber(metrics?.trusted_proxy_l4_degrade_actions || 0),
+          class:
+            (metrics?.trusted_proxy_l4_degrade_actions || 0) > 0
+              ? 'text-amber-700'
+              : '',
         },
       ],
-      summary: 'CC 挑战链路',
+      summary: '四层限速与过载',
     },
     {
       label: 'L7',
@@ -501,42 +565,55 @@ const defenseMatrix = computed(() => {
               0,
           ),
         },
+        {
+          label: '平均延迟',
+          value: formatLatencyEnglish(metrics?.average_proxy_latency_micros || 0),
+        },
+        {
+          label: '慢攻命中',
+          value: formatNumber(slowAttackHits),
+          class: slowAttackHits > 0 ? 'text-red-700' : '',
+        },
       ],
       summary: l7Tuning?.last_adjust_reason || '最近无自动动作',
     },
     {
-      label: 'L4',
-      badge: l4OverloadLabel(l4OverloadLevel.value),
-      type: l4OverloadType.value,
+      label: 'CC',
+      badge: ccTotal.value > 0 ? '活跃' : '无命中',
+      type: ccTotal.value > 0 ? ('warning' as const) : ('muted' as const),
       stats: [
         {
-          label: '桶数',
-          value: formatNumber(l4Overview?.bucket_count || 0),
+          label: '挑战',
+          value: formatNumber(metrics?.l7_cc_challenges || 0),
         },
         {
-          label: '高风险',
-          value: formatNumber(l4Overview?.high_risk_buckets || 0),
-          class:
-            (l4Overview?.high_risk_buckets || 0) > 0
-              ? 'text-amber-700'
-              : '',
+          label: '拦截',
+          value: formatNumber(metrics?.l7_cc_blocks || 0),
+          class: (metrics?.l7_cc_blocks || 0) > 0 ? 'text-red-700' : '',
         },
         {
-          label: '丢弃',
-          value: formatNumber(l4Overview?.dropped_events || 0),
-          class:
-            (l4Overview?.dropped_events || 0) > 0 ? 'text-red-700' : '',
+          label: '延迟',
+          value: formatNumber(metrics?.l7_cc_delays || 0),
+          class: (metrics?.l7_cc_delays || 0) > 0 ? 'text-amber-700' : '',
         },
         {
-          label: '预算拒绝',
-          value: formatNumber(metrics?.l4_bucket_budget_rejections || 0),
+          label: '放行',
+          value: formatNumber(metrics?.l7_cc_verified_passes || 0),
+          class: 'text-emerald-700',
+        },
+        {
+          label: '行为拦截',
+          value: formatNumber(metrics?.l7_behavior_blocks || 0),
+          class: (metrics?.l7_behavior_blocks || 0) > 0 ? 'text-red-700' : '',
+        },
+        {
+          label: '行为延迟',
+          value: formatNumber(metrics?.l7_behavior_delays || 0),
           class:
-            (metrics?.l4_bucket_budget_rejections || 0) > 0
-              ? 'text-red-700'
-              : '',
+            (metrics?.l7_behavior_delays || 0) > 0 ? 'text-amber-700' : '',
         },
       ],
-      summary: '四层限速与过载',
+      summary: 'CC 挑战链路',
     },
     {
       label: '存储',
@@ -566,10 +643,22 @@ const defenseMatrix = computed(() => {
           value: formatNumber(droppedStorageEvents),
           class: droppedStorageEvents > 0 ? 'text-red-700' : '',
         },
+        {
+          label: '已存事件',
+          value: formatNumber(metrics?.persisted_security_events || 0),
+        },
+        {
+          label: '封禁IP',
+          value: formatNumber(metrics?.persisted_blocked_ips || 0),
+        },
       ],
       summary: '事件写入与聚合',
     },
-  ]
+  ].map((item) => ({
+    ...item,
+    primaryStats: item.stats.slice(0, 2),
+    secondaryStats: item.stats.slice(2),
+  }))
 })
 </script>
 
@@ -705,6 +794,7 @@ const defenseMatrix = computed(() => {
           ambient-series
           no-top-line
           trend-placement="corner"
+          filled
         />
         <MetricWidget
           label="平均代理延迟"
@@ -717,6 +807,7 @@ const defenseMatrix = computed(() => {
           ambient-series
           no-top-line
           trend-placement="corner"
+          filled
         />
         <MetricWidget
           label="代理成功率"
@@ -726,6 +817,7 @@ const defenseMatrix = computed(() => {
           :progress="proxySuccessPercent"
           no-top-line
           trend-placement="corner"
+          filled
         />
         <MetricWidget
           label="累计拦截次数"
@@ -734,6 +826,7 @@ const defenseMatrix = computed(() => {
           :trend="metricTrends.blocked"
           no-top-line
           trend-placement="corner"
+          filled
         />
       </section>
 
@@ -761,20 +854,37 @@ const defenseMatrix = computed(() => {
           <div
             v-for="item in defenseMatrix"
             :key="item.label"
-            class="relative min-h-[6.6rem] min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-16 shadow-sm"
+            class="relative min-h-[8.25rem] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
           >
-            <p class="truncate text-xs font-semibold text-slate-900">
-              {{ item.label }}
-            </p>
-            <StatusBadge
-              class="absolute right-3 top-2.5"
-              :text="item.badge"
-              :type="item.type"
-              compact
-            />
-            <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <div class="flex min-w-0 items-start justify-between gap-2">
+              <p class="truncate text-xs font-semibold text-slate-900">
+                {{ item.label }}
+              </p>
+              <StatusBadge :text="item.badge" :type="item.type" compact />
+            </div>
+
+            <div class="mt-2 grid grid-cols-2 gap-2">
               <div
-                v-for="stat in item.stats"
+                v-for="stat in item.primaryStats"
+                :key="stat.label"
+                class="flex min-w-0 items-baseline justify-between gap-2 border-l border-slate-200 pl-2 first:border-l-0 first:pl-0"
+              >
+                <p class="shrink-0 truncate text-[10px] text-slate-500">
+                  {{ stat.label }}
+                </p>
+                <p
+                  class="min-w-0 truncate text-right text-base font-semibold leading-5 text-slate-950"
+                  :class="stat.class"
+                  :title="stat.value"
+                >
+                  {{ stat.value }}
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2">
+              <div
+                v-for="stat in item.secondaryStats"
                 :key="stat.label"
                 class="flex min-w-0 items-baseline justify-between gap-2 text-[11px]"
               >
@@ -798,12 +908,14 @@ const defenseMatrix = computed(() => {
             class="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-blue-50/80 to-transparent"
           ></div>
           <div class="relative flex min-w-0 items-start justify-between gap-3">
-            <div class="min-w-0">
+            <div
+              class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 pr-2"
+            >
               <p class="truncate text-xs font-semibold text-slate-950">
                 AI自动化
               </p>
               <div
-                class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500"
+                class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500"
               >
                 <span>{{ providerLabel(aiAutomation?.provider) }}</span>
                 <span class="text-slate-300">/</span>
@@ -821,7 +933,9 @@ const defenseMatrix = computed(() => {
             />
           </div>
 
-          <div class="relative mt-3 grid grid-cols-4 gap-2">
+          <div
+            class="relative mx-auto mt-3 grid w-full max-w-[28rem] grid-cols-4 gap-2 text-center"
+          >
             <div
               v-for="item in aiAutomationStats"
               :key="item.label"
@@ -888,12 +1002,12 @@ const defenseMatrix = computed(() => {
                   {{ formatNumber(aiAutomation?.active_rules || 0) }} 条规则
                 </span>
               </div>
-              <div class="grid grid-cols-4 items-end gap-1.5">
+              <div class="grid grid-cols-3 items-end gap-1.5">
                 <div
                   v-for="window in aiAutomation?.trend_windows || []"
                   :key="window.label"
                   class="grid min-h-[3.4rem] min-w-0 content-end gap-1"
-                  :title="`${window.label}: ${formatNumber(window.total_events)} 事件`"
+                  :title="`${trendWindowLabel(window.label)}: ${formatNumber(window.total_events)} 事件`"
                 >
                   <div
                     class="mx-auto w-full overflow-hidden rounded-sm bg-slate-100"
@@ -906,12 +1020,12 @@ const defenseMatrix = computed(() => {
                     ></div>
                   </div>
                   <span class="truncate text-center text-[10px] text-slate-400">
-                    {{ window.label }}
+                    {{ trendWindowLabel(window.label) }}
                   </span>
                 </div>
                 <div
                   v-if="!(aiAutomation?.trend_windows || []).length"
-                  class="col-span-4 grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
+                  class="col-span-3 grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
                 >
                   暂无趋势样本
                 </div>
@@ -930,23 +1044,32 @@ const defenseMatrix = computed(() => {
                 <div
                   v-for="policy in aiAutomation?.recent_policy_feedback || []"
                   :key="policy.policy_key"
-                  class="grid min-w-0 grid-cols-[minmax(0,1fr)_4rem_3.25rem_2.5rem] items-center gap-2 text-[11px]"
+                  class="min-w-0 border-b border-slate-100 pb-1.5 text-[11px] last:border-b-0 last:pb-0"
                 >
-                  <span class="truncate font-medium text-slate-800" :title="policy.title">
-                    {{ policy.title }}
-                  </span>
-                  <span class="truncate text-slate-500" :title="aiActionLabel(policy.action)">
-                    {{ aiActionLabel(policy.action) }}
-                  </span>
-                  <span class="text-right font-semibold text-slate-900">
-                    {{ formatNumber(policy.hit_count) }}
-                  </span>
                   <span
-                    class="truncate text-right text-slate-500"
-                    :title="aiPolicyStatusLabel(policy.action_status)"
+                    class="block truncate font-medium leading-4 text-slate-800"
+                    :title="aiPolicyTitle(policy)"
                   >
-                    {{ aiPolicyStatusLabel(policy.action_status) }}
+                    {{ aiPolicyTitle(policy) }}
                   </span>
+                  <div
+                    class="mt-0.5 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 text-slate-500"
+                  >
+                    <span class="truncate" :title="aiActionLabel(policy.action)">
+                      {{ aiActionLabel(policy.action) }}
+                      <span class="text-slate-300">/</span>
+                      {{ aiScopeLabel(policy.scope_type) }}
+                    </span>
+                    <span class="font-semibold text-slate-900">
+                      {{ formatNumber(policy.hit_count) }} 命中
+                    </span>
+                    <span
+                      class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
+                      :title="aiPolicyStatusLabel(policy.action_status)"
+                    >
+                      {{ aiPolicyStatusLabel(policy.action_status) }}
+                    </span>
+                  </div>
                 </div>
                 <div
                   v-if="!(aiAutomation?.recent_policy_feedback || []).length"

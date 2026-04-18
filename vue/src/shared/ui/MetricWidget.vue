@@ -8,8 +8,10 @@ const props = defineProps<{
   value: string | number
   hint?: string
   trend?: 'up' | 'down' | 'neutral'
+  trendPlacement?: 'inline' | 'corner'
   icon?: Component
   series?: number[]
+  noTopLine?: boolean
 }>()
 
 const chartPath = computed(() => {
@@ -31,19 +33,39 @@ const chartPath = computed(() => {
 
 <template>
   <div
-    class="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+    class="relative overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
   >
-    <div class="absolute inset-x-0 top-0 h-1 bg-blue-500"></div>
-    <div class="absolute right-0 top-0 p-3 opacity-20">
-      <component :is="icon" v-if="icon" :size="20" class="text-blue-600" />
+    <div
+      v-if="!noTopLine"
+      class="absolute inset-x-0 top-0 h-0.5 bg-blue-500"
+    ></div>
+    <div
+      v-if="trend && trendPlacement === 'corner'"
+      class="absolute right-2.5 top-2.5 flex items-center gap-1 text-xs font-medium"
+      :class="[trend === 'up' ? 'text-red-600' : 'text-emerald-600']"
+    >
+      <TrendingUp v-if="trend === 'up'" :size="14" />
+      <TrendingDown v-if="trend === 'down'" :size="14" />
+      <span>{{ trend === 'up' ? '上升' : '下降' }}</span>
+    </div>
+    <div
+      v-if="icon && trendPlacement !== 'corner'"
+      class="absolute right-0 top-0 p-2.5 opacity-15"
+    >
+      <component :is="icon" v-if="icon" :size="18" class="text-blue-600" />
     </div>
 
-    <div class="space-y-1">
-      <p class="text-xs font-medium text-slate-500">{{ label }}</p>
+    <div>
+      <p
+        class="truncate text-xs font-medium text-slate-500"
+        :class="{ 'pr-12': icon || (trend && trendPlacement === 'corner') }"
+      >
+        {{ label }}
+      </p>
       <div class="flex flex-wrap items-end gap-1.5">
-        <h3 class="text-xl font-semibold text-slate-900">{{ value }}</h3>
+        <h3 class="text-lg font-semibold text-slate-900">{{ value }}</h3>
         <div
-          v-if="trend"
+          v-if="trend && trendPlacement !== 'corner'"
           class="mb-0.5 flex items-center gap-1 text-xs font-medium"
           :class="[trend === 'up' ? 'text-red-600' : 'text-emerald-600']"
         >
@@ -52,9 +74,12 @@ const chartPath = computed(() => {
           <span>{{ trend === 'up' ? '上升' : '下降' }}</span>
         </div>
       </div>
+      <p v-if="hint" class="truncate text-xs text-slate-500" :title="hint">
+        {{ hint }}
+      </p>
       <svg
         v-if="chartPath"
-        class="mt-1 h-6 w-full text-blue-500"
+        class="mt-1 h-4 w-full text-blue-500"
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
         aria-hidden="true"
@@ -74,13 +99,6 @@ const chartPath = computed(() => {
           stroke-width="2"
         />
       </svg>
-      <p
-        v-if="hint"
-        class="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-500 truncate"
-        :title="hint"
-      >
-        {{ hint }}
-      </p>
     </div>
   </div>
 </template>

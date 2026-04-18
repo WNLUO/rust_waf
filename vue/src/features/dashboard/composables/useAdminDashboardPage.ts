@@ -51,12 +51,28 @@ export function useAdminDashboardPage() {
     blockRate: [] as number[],
     latency: [] as number[],
   })
+  const networkHistory = reactive({
+    timestamps: [] as number[],
+    rx: [] as number[],
+    tx: [] as number[],
+  })
 
   const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
     const series = metricsHistory[key]
     series.push(Number.isFinite(value) ? value : 0)
     if (series.length > 12) {
       series.shift()
+    }
+  }
+  const pushNetworkHistory = (metrics: MetricsResponse) => {
+    const now = Date.now()
+    networkHistory.timestamps.push(now)
+    networkHistory.rx.push(metrics.system.network_rx_bytes_per_sec || 0)
+    networkHistory.tx.push(metrics.system.network_tx_bytes_per_sec || 0)
+    if (networkHistory.timestamps.length > 60) {
+      networkHistory.timestamps.shift()
+      networkHistory.rx.shift()
+      networkHistory.tx.shift()
     }
   }
 
@@ -241,6 +257,7 @@ export function useAdminDashboardPage() {
         : 0,
     )
     pushHistory('latency', metrics.average_proxy_latency_micros)
+    pushNetworkHistory(metrics)
     lastUpdated.value = Date.now()
   }
 
@@ -410,6 +427,7 @@ export function useAdminDashboardPage() {
     lastUpdated,
     realtimeState,
     metricsHistory,
+    networkHistory,
     pushHistory,
     formatBytes,
     formatNumber,

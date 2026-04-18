@@ -73,6 +73,8 @@ export interface SystemMetrics {
   memory_usage_percent: number
   network_rx_bytes_per_sec: number
   network_tx_bytes_per_sec: number
+  network_rx_total_bytes: number
+  network_tx_total_bytes: number
   process_disk_read_bytes_per_sec: number
   process_disk_write_bytes_per_sec: number
 }

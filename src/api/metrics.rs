@@ -217,6 +217,8 @@ impl SystemMetricsSampler {
             memory_usage_percent,
             network_rx_bytes_per_sec,
             network_tx_bytes_per_sec,
+            network_rx_total_bytes: network_rx,
+            network_tx_total_bytes: network_tx,
             process_disk_read_bytes_per_sec,
             process_disk_write_bytes_per_sec,
         }

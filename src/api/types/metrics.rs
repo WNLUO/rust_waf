@@ -76,6 +76,8 @@ pub struct SystemMetricsResponse {
     pub(crate) memory_usage_percent: f32,
     pub(crate) network_rx_bytes_per_sec: u64,
     pub(crate) network_tx_bytes_per_sec: u64,
+    pub(crate) network_rx_total_bytes: u64,
+    pub(crate) network_tx_total_bytes: u64,
     pub(crate) process_disk_read_bytes_per_sec: u64,
     pub(crate) process_disk_write_bytes_per_sec: u64,
 }

@@ -124,6 +124,11 @@ export interface AiAuditCounters {
   l7_behavior_challenges: number
   l7_behavior_blocks: number
   l7_behavior_delays: number
+  l7_ip_access_allows: number
+  l7_ip_access_alerts: number
+  l7_ip_access_challenges: number
+  l7_ip_access_blocks: number
+  l7_ip_access_verified_passes: number
   l4_bucket_budget_rejections: number
   trusted_proxy_permit_drops: number
   trusted_proxy_l4_degrade_actions: number

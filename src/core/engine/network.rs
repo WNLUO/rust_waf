@@ -13,7 +13,8 @@ pub(super) use self::detect::{detect_and_handle_protocol, parse_proxy_protocol_s
 pub(crate) use self::helpers::{
     maybe_delay_policy, maybe_delay_request, next_connection_id, peer_is_configured_trusted_proxy,
     proxy_metric_labels, proxy_traffic_kind, record_l7_behavior_metrics, record_l7_cc_metrics,
-    request_in_critical_overload, should_skip_l4_connection_budget_for_trusted_proxy,
+    record_l7_ip_access_metrics, request_in_critical_overload,
+    should_skip_l4_connection_budget_for_trusted_proxy,
 };
 pub(super) use self::http1::handle_http1_connection;
 pub(super) use self::http2::handle_http2_connection;

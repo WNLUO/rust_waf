@@ -111,6 +111,26 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.l7_behavior_delays)
                 .unwrap_or(0),
+            ip_access_allow_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_ip_access_allows)
+                .unwrap_or(0),
+            ip_access_alert_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_ip_access_alerts)
+                .unwrap_or(0),
+            ip_access_challenge_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_ip_access_challenges)
+                .unwrap_or(0),
+            ip_access_block_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_ip_access_blocks)
+                .unwrap_or(0),
+            ip_access_verified_pass_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_ip_access_verified_passes)
+                .unwrap_or(0),
             proxied_requests: metrics
                 .as_ref()
                 .map(|value| value.proxied_requests)

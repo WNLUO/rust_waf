@@ -213,7 +213,16 @@ export interface L7StatsPayload {
   cc_challenge_requests: number
   cc_block_requests: number
   cc_delayed_requests: number
+  cc_unresolved_identity_delayed_requests: number
   cc_verified_pass_requests: number
+  behavior_challenge_requests: number
+  behavior_block_requests: number
+  behavior_delayed_requests: number
+  ip_access_allow_requests: number
+  ip_access_alert_requests: number
+  ip_access_challenge_requests: number
+  ip_access_block_requests: number
+  ip_access_verified_pass_requests: number
   proxied_requests: number
   proxy_successes: number
   proxy_failures: number

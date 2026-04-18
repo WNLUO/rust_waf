@@ -21,6 +21,11 @@ pub struct MetricsCollector {
     l7_behavior_challenges: AtomicU64,
     l7_behavior_blocks: AtomicU64,
     l7_behavior_delays: AtomicU64,
+    l7_ip_access_allows: AtomicU64,
+    l7_ip_access_alerts: AtomicU64,
+    l7_ip_access_challenges: AtomicU64,
+    l7_ip_access_blocks: AtomicU64,
+    l7_ip_access_verified_passes: AtomicU64,
     total_bytes: AtomicU64,
     proxied_requests: AtomicU64,
     proxy_successes: AtomicU64,
@@ -113,6 +118,11 @@ impl MetricsCollector {
             l7_behavior_challenges: AtomicU64::new(0),
             l7_behavior_blocks: AtomicU64::new(0),
             l7_behavior_delays: AtomicU64::new(0),
+            l7_ip_access_allows: AtomicU64::new(0),
+            l7_ip_access_alerts: AtomicU64::new(0),
+            l7_ip_access_challenges: AtomicU64::new(0),
+            l7_ip_access_blocks: AtomicU64::new(0),
+            l7_ip_access_verified_passes: AtomicU64::new(0),
             total_bytes: AtomicU64::new(0),
             proxied_requests: AtomicU64::new(0),
             proxy_successes: AtomicU64::new(0),
@@ -348,6 +358,27 @@ impl MetricsCollector {
         self.l7_behavior_delays.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_l7_ip_access_allow(&self) {
+        self.l7_ip_access_allows.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_ip_access_alert(&self) {
+        self.l7_ip_access_alerts.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_ip_access_challenge(&self) {
+        self.l7_ip_access_challenges.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_ip_access_block(&self) {
+        self.l7_ip_access_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_ip_access_verified_pass(&self) {
+        self.l7_ip_access_verified_passes
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_upstream_healthcheck(&self, healthy: bool) {
         if healthy {
             self.upstream_healthcheck_successes
@@ -412,6 +443,11 @@ impl MetricsCollector {
             l7_behavior_challenges: self.l7_behavior_challenges.load(Ordering::Relaxed),
             l7_behavior_blocks: self.l7_behavior_blocks.load(Ordering::Relaxed),
             l7_behavior_delays: self.l7_behavior_delays.load(Ordering::Relaxed),
+            l7_ip_access_allows: self.l7_ip_access_allows.load(Ordering::Relaxed),
+            l7_ip_access_alerts: self.l7_ip_access_alerts.load(Ordering::Relaxed),
+            l7_ip_access_challenges: self.l7_ip_access_challenges.load(Ordering::Relaxed),
+            l7_ip_access_blocks: self.l7_ip_access_blocks.load(Ordering::Relaxed),
+            l7_ip_access_verified_passes: self.l7_ip_access_verified_passes.load(Ordering::Relaxed),
             total_bytes: self.total_bytes.load(Ordering::Relaxed),
             proxied_requests: self.proxied_requests.load(Ordering::Relaxed),
             proxy_successes,
@@ -543,6 +579,11 @@ pub struct MetricsSnapshot {
     pub l7_behavior_challenges: u64,
     pub l7_behavior_blocks: u64,
     pub l7_behavior_delays: u64,
+    pub l7_ip_access_allows: u64,
+    pub l7_ip_access_alerts: u64,
+    pub l7_ip_access_challenges: u64,
+    pub l7_ip_access_blocks: u64,
+    pub l7_ip_access_verified_passes: u64,
     pub total_bytes: u64,
     pub proxied_requests: u64,
     pub proxy_successes: u64,
@@ -761,6 +802,11 @@ mod tests {
         metrics.record_l7_cc_delay();
         metrics.record_l7_cc_unresolved_identity_delay();
         metrics.record_l7_cc_verified_pass();
+        metrics.record_l7_ip_access_allow();
+        metrics.record_l7_ip_access_alert();
+        metrics.record_l7_ip_access_challenge();
+        metrics.record_l7_ip_access_block();
+        metrics.record_l7_ip_access_verified_pass();
         metrics.record_upstream_healthcheck(true);
         metrics.record_upstream_healthcheck(false);
         metrics.record_trusted_proxy_permit_drop();
@@ -773,6 +819,11 @@ mod tests {
         assert_eq!(snapshot.l7_cc_delays, 1);
         assert_eq!(snapshot.l7_cc_unresolved_identity_delays, 1);
         assert_eq!(snapshot.l7_cc_verified_passes, 1);
+        assert_eq!(snapshot.l7_ip_access_allows, 1);
+        assert_eq!(snapshot.l7_ip_access_alerts, 1);
+        assert_eq!(snapshot.l7_ip_access_challenges, 1);
+        assert_eq!(snapshot.l7_ip_access_blocks, 1);
+        assert_eq!(snapshot.l7_ip_access_verified_passes, 1);
         assert_eq!(snapshot.proxied_requests, 1);
         assert_eq!(snapshot.proxy_successes, 1);
         assert_eq!(snapshot.proxy_failures, 1);

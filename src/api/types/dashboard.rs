@@ -861,6 +861,16 @@ pub struct AiAuditCountersResponse {
     #[serde(default)]
     pub(crate) l7_behavior_delays: u64,
     #[serde(default)]
+    pub(crate) l7_ip_access_allows: u64,
+    #[serde(default)]
+    pub(crate) l7_ip_access_alerts: u64,
+    #[serde(default)]
+    pub(crate) l7_ip_access_challenges: u64,
+    #[serde(default)]
+    pub(crate) l7_ip_access_blocks: u64,
+    #[serde(default)]
+    pub(crate) l7_ip_access_verified_passes: u64,
+    #[serde(default)]
     pub(crate) l4_bucket_budget_rejections: u64,
     #[serde(default)]
     pub(crate) trusted_proxy_permit_drops: u64,

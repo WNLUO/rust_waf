@@ -206,6 +206,9 @@ async fn handle_http3_request(
         .ip_access_guard()
         .inspect_request(context.as_ref(), &mut unified)
     {
+        if let Some(metrics) = context.metrics.as_ref() {
+            crate::core::engine::network::record_l7_ip_access_metrics(metrics, &unified);
+        }
         if !result.blocked {
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);

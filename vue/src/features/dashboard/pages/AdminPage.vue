@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
@@ -35,6 +35,8 @@ const {
   bucketRejectState,
   fetchData,
 } = useAdminDashboardPage()
+
+const aiPolicyFeedbackExpanded = ref(false)
 
 const ccTotal = computed(
   () =>
@@ -140,6 +142,29 @@ const trendWindowLabel = (value?: string) => {
   return labels[value || ''] || value || '未知窗口'
 }
 
+const aiTriggerReasonLabel = (value?: string | null) => {
+  const labels: Record<string, string> = {
+    adaptive_pressure: '运行压力升高',
+    attack_mode: '攻击态势触发',
+    auto_apply_disabled: '自动应用关闭',
+    auto_defense_auto_apply_disabled: '自动防御未自动应用',
+    data_quality_degraded: '数据质量下降',
+    fallback_due: '兜底周期触发',
+    force_local_rules_under_attack: '攻击态势本地兜底',
+    hotspot_shift: '热点变化',
+    identity_pressure: '身份解析压力',
+    identity_resolution_pressure: '身份解析压力',
+    local_rules_fallback: '本地规则兜底',
+    manual_run: '手动运行',
+    pressure_high: '运行压力升高',
+    scheduled: '周期巡检',
+    startup: '启动巡检',
+  }
+  const key = value || ''
+  if (!key) return '暂无触发'
+  return labels[key] || key.replace(/_/g, ' ')
+}
+
 const aiActionLabel = (value?: string) => {
   const labels: Record<string, string> = {
     add_behavior_watch: '行为观察',
@@ -151,6 +176,7 @@ const aiActionLabel = (value?: string) => {
     reduce_friction: '降低摩擦',
     tighten_host_cc: '收紧Host CC',
     tighten_route_cc: '收紧路由CC',
+    watch: '观察',
     watch_visitor: '观察访客',
   }
   return labels[value || ''] || value || '未知动作'
@@ -162,6 +188,7 @@ const aiPolicyStatusLabel = (value?: string) => {
     effective: '有效',
     needs_review: '需复核',
     observing: '观察中',
+    watch: '观察',
   }
   return labels[value || ''] || value || '观察中'
 }
@@ -190,6 +217,26 @@ const aiPolicyTitle = (policy: {
   return `${aiActionLabel(policy.action)} · ${aiScopeLabel(policy.scope_type)}${scopeValue}`
 }
 
+const aiPolicyDetailLine = (policy: {
+  title: string
+  action: string
+  scope_type: string
+  scope_value: string
+}) => {
+  const title = aiPolicyTitle(policy)
+  const action = aiActionLabel(policy.action)
+  const scope = aiScopeLabel(policy.scope_type)
+  const scopeValue = policy.scope_value || '全局范围'
+  if (
+    title.includes(action) &&
+    title.includes(scope) &&
+    (!policy.scope_value || title.includes(policy.scope_value))
+  ) {
+    return ''
+  }
+  return `${action} / ${scope} / ${scopeValue}`
+}
+
 const formatPercent = (value?: number) => `${(value || 0).toFixed(0)}%`
 
 const formatCompactDuration = (seconds?: number) => {
@@ -205,6 +252,16 @@ const formatUnixTime = (value?: number | null) => {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+  }).format(new Date(value * 1000))
+}
+
+const formatPolicyTime = (value?: number | null) => {
+  if (!value) return '暂无'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value * 1000))
 }
 
@@ -300,6 +357,28 @@ const aiAutomationStatusLabel = computed(() => {
   return '运行中'
 })
 
+const aiLastRunLabel = computed(() =>
+  formatUnixTime(aiAutomation.value?.status.last_run_at),
+)
+
+const aiTriggerReasonValue = computed(() => {
+  const overview = aiAutomation.value
+  if (overview?.status.last_trigger_reason) {
+    return aiTriggerReasonLabel(overview.status.last_trigger_reason)
+  }
+  if (overview?.unavailable_reason) {
+    return aiTriggerReasonLabel(overview.unavailable_reason)
+  }
+  return '暂无触发'
+})
+
+const aiRunCycleValue = computed(() => {
+  const overview = aiAutomation.value
+  return `${formatCompactDuration(
+    overview?.status.interval_secs,
+  )} / 冷却 ${formatCompactDuration(overview?.status.cooldown_secs)}`
+})
+
 const aiAutomationStats = computed(() => {
   const overview = aiAutomation.value
   return [
@@ -327,6 +406,14 @@ const aiAutomationStats = computed(() => {
       label: '持久覆盖',
       value: formatPercent(overview?.data_quality.persistence_coverage_ratio),
     },
+    {
+      label: '触发原因',
+      value: aiTriggerReasonValue.value,
+    },
+    {
+      label: '运行周期',
+      value: aiRunCycleValue.value,
+    },
   ]
 })
 
@@ -350,35 +437,57 @@ const aiAutomationPressureRows = computed(() => [
 
 const aiTrendMax = computed(() =>
   Math.max(
-    ...((aiAutomation.value?.trend_windows || []).map(
-      (item) => item.total_events,
+    ...((aiAutomation.value?.trend_windows || []).map((item) =>
+      Math.max(
+        item.total_events,
+        item.blocked_events,
+        item.challenged_events,
+        item.delayed_events,
+      ),
     ) || []),
     1,
   ),
 )
 
-const aiTriggerFacts = computed(() => {
-  const overview = aiAutomation.value
-  return [
-    {
-      label: '触发',
-      value:
-        overview?.status.last_trigger_reason ||
-        overview?.unavailable_reason ||
-        '暂无触发',
-    },
-    {
-      label: '完成',
-      value: formatUnixTime(overview?.status.last_completed_at),
-    },
-    {
-      label: '周期',
-      value: `${formatCompactDuration(
-        overview?.status.interval_secs,
-      )} / 冷却 ${formatCompactDuration(overview?.status.cooldown_secs)}`,
-    },
-  ]
+const aiTrendWindows = computed(() =>
+  (aiAutomation.value?.trend_windows || []).map((window) => ({
+    ...window,
+    labelText: trendWindowLabel(window.label),
+    bars: [
+      {
+        label: '事件',
+        value: window.total_events,
+        color: 'bg-blue-500',
+      },
+      {
+        label: '拦截',
+        value: window.blocked_events,
+        color: 'bg-red-500',
+      },
+      {
+        label: '挑战',
+        value: window.challenged_events,
+        color: 'bg-amber-500',
+      },
+      {
+        label: '延迟',
+        value: window.delayed_events,
+        color: 'bg-cyan-500',
+      },
+    ],
+  })),
+)
+
+const visibleAiPolicyFeedback = computed(() => {
+  const feedback = aiAutomation.value?.recent_policy_feedback || []
+  return aiPolicyFeedbackExpanded.value ? feedback : feedback.slice(0, 2)
 })
+
+const hiddenAiPolicyFeedbackCount = computed(() =>
+  aiPolicyFeedbackExpanded.value
+    ? 0
+    : Math.max((aiAutomation.value?.recent_policy_feedback.length || 0) - 2, 0),
+)
 
 type PerformanceGaugeCard = {
   kind: 'gauge'
@@ -486,6 +595,13 @@ const defenseMatrix = computed(() => {
   const droppedStorageEvents =
     (metrics?.sqlite_dropped_security_events || 0) +
     (metrics?.sqlite_dropped_blocked_ips || 0)
+  const ipAccessActions =
+    (metrics?.l7_ip_access_alerts || 0) +
+    (metrics?.l7_ip_access_challenges || 0) +
+    (metrics?.l7_ip_access_blocks || 0)
+  const ipAccessPasses =
+    (metrics?.l7_ip_access_allows || 0) +
+    (metrics?.l7_ip_access_verified_passes || 0)
 
   return [
     {
@@ -540,6 +656,11 @@ const defenseMatrix = computed(() => {
       type: l7ModeType.value,
       stats: [
         {
+          label: '访问策略',
+          value: formatNumber(ipAccessActions),
+          class: ipAccessActions > 0 ? 'text-amber-700' : '',
+        },
+        {
           label: '状态',
           value: controllerStateLabel(l7Tuning?.controller_state),
         },
@@ -558,12 +679,9 @@ const defenseMatrix = computed(() => {
           class: stateTextClass[bucketRejectState.value],
         },
         {
-          label: '核心',
-          value: formatNumber(
-            l7Tuning?.detected_cpu_cores ||
-              metrics?.system?.cpu_core_count ||
-              0,
-          ),
+          label: '策略放行',
+          value: formatNumber(ipAccessPasses),
+          class: ipAccessPasses > 0 ? 'text-emerald-700' : '',
         },
         {
           label: '平均延迟',
@@ -924,6 +1042,10 @@ const defenseMatrix = computed(() => {
                 </span>
                 <span class="text-slate-300">/</span>
                 <span>{{ pressureLabel(aiAutomation?.runtime_pressure_level) }}</span>
+                <span class="text-slate-300">/</span>
+                <span class="font-medium text-slate-700">
+                  上次运行 {{ aiLastRunLabel }}
+                </span>
               </div>
             </div>
             <StatusBadge
@@ -934,7 +1056,7 @@ const defenseMatrix = computed(() => {
           </div>
 
           <div
-            class="relative mx-auto mt-3 grid w-full max-w-[28rem] grid-cols-4 gap-2 text-center"
+            class="relative mx-auto mt-3 grid w-full max-w-[42rem] grid-cols-3 gap-2 text-center md:grid-cols-6"
           >
             <div
               v-for="item in aiAutomationStats"
@@ -975,56 +1097,52 @@ const defenseMatrix = computed(() => {
           </div>
 
           <div
-            class="relative mt-3 grid grid-cols-1 gap-x-4 gap-y-1.5 border-t border-slate-100 pt-2 md:grid-cols-3"
-          >
-            <div
-              v-for="item in aiTriggerFacts"
-              :key="item.label"
-              class="flex min-w-0 items-baseline justify-between gap-2 text-[11px]"
-            >
-              <span class="shrink-0 text-slate-500">{{ item.label }}</span>
-              <span
-                class="min-w-0 truncate text-right font-semibold text-slate-900"
-                :title="item.value"
-              >
-                {{ item.value }}
-              </span>
-            </div>
-          </div>
-
-          <div
             class="relative mt-3 grid gap-3 border-t border-slate-100 pt-2 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
           >
             <div class="min-w-0">
               <div class="mb-1.5 flex items-center justify-between text-[11px]">
-                <span class="font-medium text-slate-700">近窗口趋势</span>
+                <span class="font-medium text-slate-700">AI判定窗口</span>
                 <span class="text-slate-400">
                   {{ formatNumber(aiAutomation?.active_rules || 0) }} 条规则
                 </span>
               </div>
-              <div class="grid grid-cols-3 items-end gap-1.5">
+              <div class="grid grid-cols-3 gap-1.5">
                 <div
-                  v-for="window in aiAutomation?.trend_windows || []"
+                  v-for="window in aiTrendWindows"
                   :key="window.label"
-                  class="grid min-h-[3.4rem] min-w-0 content-end gap-1"
-                  :title="`${trendWindowLabel(window.label)}: ${formatNumber(window.total_events)} 事件`"
+                  class="min-w-0"
+                  :title="`${window.labelText}: ${formatNumber(window.total_events)} 事件 / ${formatNumber(window.blocked_events)} 拦截 / ${formatNumber(window.challenged_events)} 挑战 / ${formatNumber(window.delayed_events)} 延迟`"
                 >
-                  <div
-                    class="mx-auto w-full overflow-hidden rounded-sm bg-slate-100"
-                    :style="{
-                      height: `${Math.max(8, (window.total_events / aiTrendMax) * 42)}px`,
-                    }"
-                  >
-                    <div
-                      class="h-full w-full rounded-sm bg-gradient-to-t from-blue-700 to-cyan-400"
-                    ></div>
+                  <div class="flex h-9 items-end gap-0.5">
+                    <span
+                      v-for="bar in window.bars"
+                      :key="bar.label"
+                      class="block min-h-1 flex-1 rounded-sm"
+                      :class="bar.color"
+                      :style="{
+                        height: `${Math.max(4, (bar.value / aiTrendMax) * 36)}px`,
+                        opacity: bar.value > 0 ? 1 : 0.25,
+                      }"
+                    ></span>
                   </div>
-                  <span class="truncate text-center text-[10px] text-slate-400">
-                    {{ trendWindowLabel(window.label) }}
+                  <span class="mt-1 block truncate text-[10px] text-slate-500">
+                    {{ window.labelText }}
                   </span>
+                  <div class="mt-0.5 grid grid-cols-2 gap-x-1 gap-y-0.5 text-[10px]">
+                    <span
+                      v-for="bar in window.bars"
+                      :key="`${bar.label}-value`"
+                      class="flex min-w-0 justify-between gap-1 text-slate-500"
+                    >
+                      <span class="truncate">{{ bar.label }}</span>
+                      <span class="font-semibold text-slate-800">
+                        {{ formatNumber(bar.value) }}
+                      </span>
+                    </span>
+                  </div>
                 </div>
                 <div
-                  v-if="!(aiAutomation?.trend_windows || []).length"
+                  v-if="!aiTrendWindows.length"
                   class="col-span-3 grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
                 >
                   暂无趋势样本
@@ -1037,40 +1155,51 @@ const defenseMatrix = computed(() => {
                 <span class="font-medium text-slate-700">策略反馈</span>
                 <span class="text-slate-400">
                   {{ formatNumber(aiAutomation?.recent_policy_feedback.length || 0) }}
-                  条
+                  条<span v-if="hiddenAiPolicyFeedbackCount > 0">
+                    · 还有{{ formatNumber(hiddenAiPolicyFeedbackCount) }}条</span
+                  >
                 </span>
               </div>
               <div class="grid gap-1.5">
                 <div
-                  v-for="policy in aiAutomation?.recent_policy_feedback || []"
+                  v-for="policy in visibleAiPolicyFeedback"
                   :key="policy.policy_key"
-                  class="min-w-0 border-b border-slate-100 pb-1.5 text-[11px] last:border-b-0 last:pb-0"
+                  class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b border-slate-100 pb-1.5 text-[11px] last:border-b-0 last:pb-0"
                 >
                   <span
-                    class="block truncate font-medium leading-4 text-slate-800"
-                    :title="aiPolicyTitle(policy)"
+                    class="min-w-0 truncate font-medium leading-4 text-slate-800"
+                    :title="aiPolicyDetailLine(policy) || aiPolicyTitle(policy)"
                   >
                     {{ aiPolicyTitle(policy) }}
                   </span>
-                  <div
-                    class="mt-0.5 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 text-slate-500"
+                  <span
+                    class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
+                    :title="aiPolicyStatusLabel(policy.action_status)"
                   >
-                    <span class="truncate" :title="aiActionLabel(policy.action)">
-                      {{ aiActionLabel(policy.action) }}
-                      <span class="text-slate-300">/</span>
-                      {{ aiScopeLabel(policy.scope_type) }}
-                    </span>
-                    <span class="font-semibold text-slate-900">
-                      {{ formatNumber(policy.hit_count) }} 命中
-                    </span>
-                    <span
-                      class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
-                      :title="aiPolicyStatusLabel(policy.action_status)"
-                    >
-                      {{ aiPolicyStatusLabel(policy.action_status) }}
-                    </span>
-                  </div>
+                    {{ aiPolicyStatusLabel(policy.action_status) }}
+                  </span>
+                  <span class="shrink-0 text-[10px] font-semibold text-slate-900">
+                    {{ formatNumber(policy.hit_count) }} 命中
+                  </span>
+                  <span
+                    class="shrink-0 text-right text-[10px] text-slate-500"
+                    :title="formatPolicyTime(policy.updated_at)"
+                  >
+                    {{ formatPolicyTime(policy.updated_at) }}
+                  </span>
                 </div>
+                <button
+                  v-if="(aiAutomation?.recent_policy_feedback.length || 0) > 2"
+                  type="button"
+                  class="h-6 rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                  @click="aiPolicyFeedbackExpanded = !aiPolicyFeedbackExpanded"
+                >
+                  {{
+                    aiPolicyFeedbackExpanded
+                      ? '收起'
+                      : `查看更多 ${formatNumber(hiddenAiPolicyFeedbackCount)} 条`
+                  }}
+                </button>
                 <div
                   v-if="!(aiAutomation?.recent_policy_feedback || []).length"
                   class="grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"

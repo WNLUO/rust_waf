@@ -113,6 +113,20 @@ pub(crate) fn record_l7_behavior_metrics(
     }
 }
 
+pub(crate) fn record_l7_ip_access_metrics(
+    metrics: &crate::metrics::MetricsCollector,
+    request: &crate::protocol::UnifiedHttpRequest,
+) {
+    match request.get_metadata("ip_access.action").map(String::as_str) {
+        Some("allow") => metrics.record_l7_ip_access_allow(),
+        Some("alert") => metrics.record_l7_ip_access_alert(),
+        Some("challenge") => metrics.record_l7_ip_access_challenge(),
+        Some("block") => metrics.record_l7_ip_access_block(),
+        Some("challenge_verified") => metrics.record_l7_ip_access_verified_pass(),
+        _ => {}
+    }
+}
+
 pub(crate) fn proxy_traffic_kind(
     request: &crate::protocol::UnifiedHttpRequest,
 ) -> crate::metrics::ProxyTrafficKind {

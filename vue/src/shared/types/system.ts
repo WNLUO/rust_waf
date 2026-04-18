@@ -18,6 +18,11 @@ export interface MetricsResponse {
   l7_behavior_challenges: number
   l7_behavior_blocks: number
   l7_behavior_delays: number
+  l7_ip_access_allows: number
+  l7_ip_access_alerts: number
+  l7_ip_access_challenges: number
+  l7_ip_access_blocks: number
+  l7_ip_access_verified_passes: number
   total_bytes: number
   proxied_requests: number
   proxy_successes: number

@@ -1,5 +1,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchTrafficMap } from '@/shared/api/dashboard'
+import {
+  fetchAiAutomationOverview,
+  fetchTrafficMap,
+} from '@/shared/api/dashboard'
 import { fetchBlockedIps, fetchSecurityEvents } from '@/shared/api/events'
 import { fetchL4Config, fetchL4Stats } from '@/shared/api/l4'
 import { fetchL7Config, fetchL7Stats } from '@/shared/api/l7'
@@ -15,6 +18,7 @@ import type {
   L7StatsPayload,
   MetricsResponse,
   SecurityEventItem,
+  AiAutomationOverviewResponse,
   TrafficEventDelta,
   SecurityEventsResponse,
   TrafficMapResponse,
@@ -29,6 +33,7 @@ import {
 export function useAdminDashboardPage() {
   const dashboard = ref<DashboardPayload | null>(null)
   const trafficMap = ref<TrafficMapResponse | null>(null)
+  const aiAutomation = ref<AiAutomationOverviewResponse | null>(null)
   const trafficEvents = ref<TrafficEventDelta[]>([])
   const l4Stats = ref<L4StatsPayload | null>(null)
   const l4Config = ref<L4ConfigPayload | null>(null)
@@ -397,6 +402,7 @@ export function useAdminDashboardPage() {
         l4ConfigPayload,
         l7StatsPayload,
         l7ConfigPayload,
+        aiAutomationPayload,
       ] = await Promise.all([
         fetchHealth(),
         fetchMetrics(),
@@ -416,6 +422,7 @@ export function useAdminDashboardPage() {
         fetchL4Config(),
         fetchL7Stats(),
         fetchL7Config(),
+        fetchAiAutomationOverview(),
       ])
 
       dashboard.value = {
@@ -431,6 +438,7 @@ export function useAdminDashboardPage() {
       l4Config.value = l4ConfigPayload
       l7Stats.value = l7StatsPayload
       l7Config.value = l7ConfigPayload
+      aiAutomation.value = aiAutomationPayload
       error.value = ''
     } catch (e) {
       error.value = e instanceof Error ? e.message : '读取控制台数据失败'
@@ -457,6 +465,7 @@ export function useAdminDashboardPage() {
   return {
     dashboard,
     trafficMap,
+    aiAutomation,
     trafficEvents,
     l4Stats,
     l4Config,

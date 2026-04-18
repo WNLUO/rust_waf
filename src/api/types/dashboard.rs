@@ -276,6 +276,32 @@ pub struct AiAutoAuditStatusResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct AiAutomationOverviewResponse {
+    pub(crate) generated_at: i64,
+    pub(crate) available: bool,
+    pub(crate) unavailable_reason: Option<String>,
+    pub(crate) provider: String,
+    pub(crate) fallback_to_rules: bool,
+    pub(crate) auto_apply_temp_policies: bool,
+    pub(crate) active_policy_count: u32,
+    pub(crate) max_active_policy_count: u32,
+    pub(crate) status: AiAutoAuditStatusResponse,
+    pub(crate) window_seconds: u32,
+    pub(crate) sampled_events: u32,
+    pub(crate) total_events: u64,
+    pub(crate) active_rules: u64,
+    pub(crate) runtime_pressure_level: String,
+    pub(crate) degraded_reasons: Vec<String>,
+    pub(crate) data_quality: AiAuditDataQualityResponse,
+    pub(crate) current: AiAuditCurrentStateResponse,
+    pub(crate) counters: AiAuditCountersResponse,
+    pub(crate) trend_windows: Vec<AiAuditTrendWindowResponse>,
+    pub(crate) top_signals: Vec<AiAuditCountItem>,
+    pub(crate) top_routes: Vec<AiAuditCountItem>,
+    pub(crate) recent_policy_feedback: Vec<AiAuditPolicyFeedbackResponse>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct AiTempPoliciesResponse {
     pub(crate) total: u32,
     pub(crate) policies: Vec<AiTempPolicyResponse>,

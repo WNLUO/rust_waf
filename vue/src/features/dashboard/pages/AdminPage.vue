@@ -17,6 +17,7 @@ const AdminNetworkPerformancePanel = defineAsyncComponent(
 const {
   dashboard,
   trafficMap,
+  aiAutomation,
   trafficEvents,
   l4Stats,
   l7Stats,
@@ -30,7 +31,6 @@ const {
   successRate,
   requestStatus,
   storageInsights,
-  autoStateStyles,
   tlsTimeoutState,
   bucketRejectState,
   fetchData,
@@ -59,6 +59,118 @@ const l7ModeType = computed(() => {
   if (mode === 'observe') return 'warning' as const
   return 'muted' as const
 })
+
+const stateTextClass = {
+  success: 'text-emerald-700',
+  warning: 'text-amber-700',
+  error: 'text-red-700',
+  muted: 'text-slate-500',
+} as const
+
+const l7ModeLabel = (mode?: string) => {
+  const labels: Record<string, string> = {
+    active: '主动',
+    observe: '观察',
+    off: '关闭',
+  }
+  return labels[mode || ''] || '关闭'
+}
+
+const l4OverloadLabel = (level?: string) => {
+  const labels: Record<string, string> = {
+    normal: '正常',
+    high: '偏高',
+    critical: '严重',
+  }
+  return labels[level || ''] || '正常'
+}
+
+const controllerStateLabel = (state?: string) => {
+  const labels: Record<string, string> = {
+    active_bootstrap_pending: '主动预热',
+    adjusted: '已调整',
+    bootstrap_adjusted: '初始调整',
+    cooldown: '冷却中',
+    disabled: '已关闭',
+    idle: '空闲',
+    observe_only: '仅观察',
+    observe_pending_adjust: '待调整',
+    rollback: '已回滚',
+    stable: '稳定',
+    warming_up: '预热中',
+  }
+  return labels[state || ''] || '未知'
+}
+
+const providerLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    local_rules: '本地规则',
+    stub_model: '占位模型',
+    openai_compatible: 'OpenAI兼容',
+    xiaomi_mimo: '小米Mimo',
+  }
+  return labels[value || ''] || '未知'
+}
+
+const confidenceLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    high: '高',
+    medium: '中',
+    low: '低',
+  }
+  return labels[value || ''] || '未知'
+}
+
+const pressureLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    normal: '正常',
+    elevated: '升高',
+    high: '偏高',
+    attack: '攻击',
+  }
+  return labels[value || ''] || '未知'
+}
+
+const aiActionLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    add_behavior_watch: '行为观察',
+    add_temp_block: '临时封禁',
+    increase_challenge: '增加挑战',
+    increase_delay: '增加延迟',
+    raise_identity_risk: '提高身份风险',
+    tighten_host_cc: '收紧Host CC',
+    tighten_route_cc: '收紧路由CC',
+  }
+  return labels[value || ''] || value || '未知动作'
+}
+
+const aiPolicyStatusLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    cold: '待命中',
+    effective: '有效',
+    needs_review: '需复核',
+    observing: '观察中',
+  }
+  return labels[value || ''] || value || '观察中'
+}
+
+const formatPercent = (value?: number) => `${(value || 0).toFixed(0)}%`
+
+const formatCompactDuration = (seconds?: number) => {
+  const value = seconds || 0
+  if (value < 60) return `${value}s`
+  if (value < 3600) return `${Math.round(value / 60)}m`
+  return `${(value / 3600).toFixed(1)}h`
+}
+
+const formatUnixTime = (value?: number | null) => {
+  if (!value) return '暂无'
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value * 1000))
+}
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, value))
 
@@ -123,6 +235,110 @@ const latencySparkMax = computed(() => {
   const current = dashboard.value?.metrics.average_proxy_latency_micros || 0
   const max = Math.max(...metricsHistory.latency, current, 1_000)
   return max * 1.5
+})
+
+const aiAutomationStatusType = computed(() => {
+  if (!aiAutomation.value?.available) return 'warning' as const
+  if (!aiAutomation.value.status.enabled) return 'muted' as const
+  if (
+    aiAutomation.value.status.force_local_rules_under_attack ||
+    aiAutomation.value.provider === 'local_rules'
+  ) {
+    return 'info' as const
+  }
+  return 'success' as const
+})
+
+const aiAutomationStatusLabel = computed(() => {
+  if (!aiAutomation.value?.available) return '数据不足'
+  if (!aiAutomation.value.status.enabled) return '已关闭'
+  if (
+    aiAutomation.value.status.force_local_rules_under_attack ||
+    aiAutomation.value.provider === 'local_rules'
+  ) {
+    return '本地兜底'
+  }
+  return '运行中'
+})
+
+const aiAutomationStats = computed(() => {
+  const overview = aiAutomation.value
+  return [
+    {
+      label: '活跃策略',
+      value: `${formatNumber(overview?.active_policy_count || 0)}/${formatNumber(
+        overview?.max_active_policy_count || 0,
+      )}`,
+    },
+    {
+      label: '采样事件',
+      value: `${formatNumber(overview?.sampled_events || 0)}/${formatNumber(
+        overview?.total_events || 0,
+      )}`,
+    },
+    {
+      label: '可信度',
+      value: confidenceLabel(overview?.data_quality.analysis_confidence),
+      class:
+        overview?.data_quality.analysis_confidence === 'low'
+          ? 'text-amber-700'
+          : 'text-emerald-700',
+    },
+    {
+      label: '持久覆盖',
+      value: formatPercent(overview?.data_quality.persistence_coverage_ratio),
+    },
+  ]
+})
+
+const aiAutomationPressureRows = computed(() => [
+  {
+    label: '身份压力',
+    value: aiAutomation.value?.current.identity_pressure_percent || 0,
+    color: 'bg-blue-600',
+  },
+  {
+    label: 'L7摩擦',
+    value: aiAutomation.value?.current.l7_friction_pressure_percent || 0,
+    color: 'bg-amber-500',
+  },
+  {
+    label: '慢速攻击',
+    value: aiAutomation.value?.current.slow_attack_pressure_percent || 0,
+    color: 'bg-red-500',
+  },
+])
+
+const aiTrendMax = computed(() =>
+  Math.max(
+    ...((aiAutomation.value?.trend_windows || []).map(
+      (item) => item.total_events,
+    ) || []),
+    1,
+  ),
+)
+
+const aiTriggerFacts = computed(() => {
+  const overview = aiAutomation.value
+  return [
+    {
+      label: '触发',
+      value:
+        overview?.status.last_trigger_reason ||
+        overview?.unavailable_reason ||
+        '暂无触发',
+    },
+    {
+      label: '完成',
+      value: formatUnixTime(overview?.status.last_completed_at),
+    },
+    {
+      label: '周期',
+      value: `${formatCompactDuration(
+        overview?.status.interval_secs,
+      )} / 冷却 ${formatCompactDuration(overview?.status.cooldown_secs)}`,
+    },
+  ]
 })
 
 type PerformanceGaugeCard = {
@@ -218,52 +434,143 @@ const performanceCards = computed(() => {
   ] satisfies PerformanceCard[]
 })
 
-const defenseMatrix = computed(() => [
-  {
-    label: 'CC',
-    badge: ccTotal.value > 0 ? '活跃' : '无命中',
-    type: ccTotal.value > 0 ? ('warning' as const) : ('muted' as const),
-    value: `挑战 ${formatNumber(dashboard.value?.metrics.l7_cc_challenges || 0)} / 拦截 ${formatNumber(
-      dashboard.value?.metrics.l7_cc_blocks || 0,
-    )}`,
-    hint: `延迟 ${formatNumber(dashboard.value?.metrics.l7_cc_delays || 0)} / 放行 ${formatNumber(
-      dashboard.value?.metrics.l7_cc_verified_passes || 0,
-    )}`,
-  },
-  {
-    label: 'L7',
-    badge: l7Stats.value?.auto_tuning.mode || 'off',
-    type: l7ModeType.value,
-    value: l7Stats.value?.auto_tuning.controller_state || 'unknown',
-    hint: l7Stats.value?.auto_tuning.last_adjust_reason || '最近无自动动作',
-  },
-  {
-    label: 'L4',
-    badge: l4OverloadLevel.value,
-    type: l4OverloadType.value,
-    value: `高风险 ${formatNumber(
-      l4Stats.value?.behavior.overview.high_risk_buckets || 0,
-    )}`,
-    hint: `Bucket ${formatNumber(
-      l4Stats.value?.behavior.overview.bucket_count || 0,
-    )} / 丢弃 ${formatNumber(
-      l4Stats.value?.behavior.overview.dropped_events || 0,
-    )}`,
-  },
-  {
-    label: '存储',
-    badge: dashboard.value?.metrics.sqlite_enabled ? '持久化' : '未连接',
-    type: dashboard.value?.metrics.sqlite_enabled
-      ? ('success' as const)
-      : ('muted' as const),
-    value: `队列 ${formatNumber(
-      dashboard.value?.metrics.runtime_pressure_storage_queue_percent || 0,
-    )}%`,
-    hint: `聚合 ${formatNumber(storageInsights.value.active_event_count)} / 长尾 ${formatNumber(
-      storageInsights.value.long_tail_event_count,
-    )}`,
-  },
-])
+const defenseMatrix = computed(() => {
+  const metrics = dashboard.value?.metrics
+  const l7Tuning = l7Stats.value?.auto_tuning
+  const l4Overview = l4Stats.value?.behavior.overview
+  const droppedStorageEvents =
+    (metrics?.sqlite_dropped_security_events || 0) +
+    (metrics?.sqlite_dropped_blocked_ips || 0)
+
+  return [
+    {
+      label: 'CC',
+      badge: ccTotal.value > 0 ? '活跃' : '无命中',
+      type: ccTotal.value > 0 ? ('warning' as const) : ('muted' as const),
+      stats: [
+        {
+          label: '挑战',
+          value: formatNumber(metrics?.l7_cc_challenges || 0),
+        },
+        {
+          label: '拦截',
+          value: formatNumber(metrics?.l7_cc_blocks || 0),
+          class: (metrics?.l7_cc_blocks || 0) > 0 ? 'text-red-700' : '',
+        },
+        {
+          label: '延迟',
+          value: formatNumber(metrics?.l7_cc_delays || 0),
+          class: (metrics?.l7_cc_delays || 0) > 0 ? 'text-amber-700' : '',
+        },
+        {
+          label: '放行',
+          value: formatNumber(metrics?.l7_cc_verified_passes || 0),
+          class: 'text-emerald-700',
+        },
+      ],
+      summary: 'CC 挑战链路',
+    },
+    {
+      label: 'L7',
+      badge: l7ModeLabel(l7Tuning?.mode),
+      type: l7ModeType.value,
+      stats: [
+        {
+          label: '状态',
+          value: controllerStateLabel(l7Tuning?.controller_state),
+        },
+        {
+          label: 'TLS超时',
+          value: `${(
+            l7Tuning?.last_observed_tls_handshake_timeout_rate_percent || 0
+          ).toFixed(2)}%`,
+          class: stateTextClass[tlsTimeoutState.value],
+        },
+        {
+          label: '桶拒绝',
+          value: `${(
+            l7Tuning?.last_observed_bucket_reject_rate_percent || 0
+          ).toFixed(2)}%`,
+          class: stateTextClass[bucketRejectState.value],
+        },
+        {
+          label: '核心',
+          value: formatNumber(
+            l7Tuning?.detected_cpu_cores ||
+              metrics?.system?.cpu_core_count ||
+              0,
+          ),
+        },
+      ],
+      summary: l7Tuning?.last_adjust_reason || '最近无自动动作',
+    },
+    {
+      label: 'L4',
+      badge: l4OverloadLabel(l4OverloadLevel.value),
+      type: l4OverloadType.value,
+      stats: [
+        {
+          label: '桶数',
+          value: formatNumber(l4Overview?.bucket_count || 0),
+        },
+        {
+          label: '高风险',
+          value: formatNumber(l4Overview?.high_risk_buckets || 0),
+          class:
+            (l4Overview?.high_risk_buckets || 0) > 0
+              ? 'text-amber-700'
+              : '',
+        },
+        {
+          label: '丢弃',
+          value: formatNumber(l4Overview?.dropped_events || 0),
+          class:
+            (l4Overview?.dropped_events || 0) > 0 ? 'text-red-700' : '',
+        },
+        {
+          label: '预算拒绝',
+          value: formatNumber(metrics?.l4_bucket_budget_rejections || 0),
+          class:
+            (metrics?.l4_bucket_budget_rejections || 0) > 0
+              ? 'text-red-700'
+              : '',
+        },
+      ],
+      summary: '四层限速与过载',
+    },
+    {
+      label: '存储',
+      badge: metrics?.sqlite_enabled ? '持久化' : '未连接',
+      type: metrics?.sqlite_enabled ? ('success' as const) : ('muted' as const),
+      stats: [
+        {
+          label: '队列',
+          value: `${formatNumber(
+            metrics?.runtime_pressure_storage_queue_percent || 0,
+          )}%`,
+          class:
+            (metrics?.runtime_pressure_storage_queue_percent || 0) >= 80
+              ? 'text-amber-700'
+              : '',
+        },
+        {
+          label: '聚合',
+          value: formatNumber(storageInsights.value.active_event_count),
+        },
+        {
+          label: '长尾',
+          value: formatNumber(storageInsights.value.long_tail_event_count),
+        },
+        {
+          label: '丢弃',
+          value: formatNumber(droppedStorageEvents),
+          class: droppedStorageEvents > 0 ? 'text-red-700' : '',
+        },
+      ],
+      summary: '事件写入与聚合',
+    },
+  ]
+})
 </script>
 
 <template>
@@ -450,7 +757,7 @@ const defenseMatrix = computed(() => [
       </section>
 
       <section
-        class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+        class="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
       >
         <div
           class="grid grid-cols-1 divide-y divide-slate-100 md:grid-cols-2 md:divide-x md:divide-y-0 xl:grid-cols-4"
@@ -458,59 +765,32 @@ const defenseMatrix = computed(() => [
           <div
             v-for="item in defenseMatrix"
             :key="item.label"
-            class="min-w-0 px-0 py-2 first:pt-0 last:pb-0 md:px-3 md:py-0 md:first:pl-0 md:last:pr-0"
+            class="relative min-w-0 px-0 py-2 pr-16 first:pt-0 last:pb-0 md:px-3 md:py-0 md:pr-16 md:first:pl-0"
           >
-            <div class="flex items-center justify-between gap-3">
-              <p class="text-xs font-medium text-slate-500">{{ item.label }}</p>
-              <StatusBadge :text="item.badge" :type="item.type" compact />
-            </div>
-            <p class="mt-2 truncate text-sm font-semibold text-slate-900">
-              {{ item.value }}
+            <p class="truncate text-xs font-semibold text-slate-900">
+              {{ item.label }}
             </p>
-            <p class="mt-1 truncate text-xs text-slate-500" :title="item.hint">
-              {{ item.hint }}
-            </p>
-            <div
-              v-if="item.label === 'L7'"
-              class="mt-2 grid grid-cols-2 gap-2 text-[11px]"
-            >
+            <StatusBadge
+              class="absolute right-0 top-2 md:right-3 md:top-0"
+              :text="item.badge"
+              :type="item.type"
+              compact
+            />
+            <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
               <div
-                :class="`rounded-md border px-2 py-1 ${autoStateStyles[tlsTimeoutState]}`"
+                v-for="stat in item.stats"
+                :key="stat.label"
+                class="flex min-w-0 items-baseline justify-between gap-2 text-[11px]"
               >
-                TLS
-                {{
-                  (
-                    l7Stats?.auto_tuning
-                      .last_observed_tls_handshake_timeout_rate_percent || 0
-                  ).toFixed(2)
-                }}%
+                <span class="shrink-0 text-slate-500">{{ stat.label }}</span>
+                <span
+                  class="min-w-0 truncate text-right font-semibold text-slate-900"
+                  :class="stat.class"
+                  :title="stat.value"
+                >
+                  {{ stat.value }}
+                </span>
               </div>
-              <div
-                :class="`rounded-md border px-2 py-1 ${autoStateStyles[bucketRejectState]}`"
-              >
-                拒绝
-                {{
-                  (
-                    l7Stats?.auto_tuning
-                      .last_observed_bucket_reject_rate_percent || 0
-                  ).toFixed(2)
-                }}%
-              </div>
-            </div>
-            <div
-              v-if="item.label === '存储'"
-              class="mt-2 text-[11px] text-slate-500"
-            >
-              代理 {{ formatNumber(dashboard?.metrics.proxy_successes || 0) }}
-              /
-              {{ formatNumber(dashboard?.metrics.proxy_failures || 0) }}
-              <span class="text-slate-300">·</span>
-              失败关闭
-              {{
-                formatNumber(
-                  dashboard?.metrics.proxy_fail_close_rejections || 0,
-                )
-              }}
             </div>
           </div>
         </div>

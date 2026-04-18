@@ -284,6 +284,31 @@ export interface AiAutoAuditStatus {
   last_report_id: number | null
 }
 
+export interface AiAutomationOverviewResponse {
+  generated_at: number
+  available: boolean
+  unavailable_reason: string | null
+  provider: string
+  fallback_to_rules: boolean
+  auto_apply_temp_policies: boolean
+  active_policy_count: number
+  max_active_policy_count: number
+  status: AiAutoAuditStatus
+  window_seconds: number
+  sampled_events: number
+  total_events: number
+  active_rules: number
+  runtime_pressure_level: string
+  degraded_reasons: string[]
+  data_quality: AiAuditDataQuality
+  current: AiAuditCurrentState
+  counters: AiAuditCounters
+  trend_windows: AiAuditTrendWindow[]
+  top_signals: AiAuditCountItem[]
+  top_routes: AiAuditCountItem[]
+  recent_policy_feedback: AiAuditPolicyFeedback[]
+}
+
 export interface BotVerifierStatusResponse {
   generated_at: number
   providers: BotVerifierProviderStatus[]

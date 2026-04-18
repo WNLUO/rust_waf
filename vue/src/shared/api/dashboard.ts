@@ -15,6 +15,7 @@ import type {
   AiAuditReportsQuery,
   AiAuditReportsResponse,
   AiAutoAuditStatus,
+  AiAutomationOverviewResponse,
   AiAuditFeedbackUpdatePayload,
   AiTempPoliciesResponse,
   AiVisitorIntelligenceResponse,
@@ -95,6 +96,12 @@ export async function fetchAiAuditReports(
 
 export async function fetchAiAutoAuditStatus(): Promise<AiAutoAuditStatus> {
   return apiRequest<AiAutoAuditStatus>('/dashboard/ai-auto-audit-status')
+}
+
+export async function fetchAiAutomationOverview(): Promise<AiAutomationOverviewResponse> {
+  return apiRequest<AiAutomationOverviewResponse>(
+    '/dashboard/ai-automation-overview',
+  )
 }
 
 export async function updateAiAuditReportFeedback(

@@ -1076,13 +1076,18 @@ const defenseMatrix = computed(() => {
             </div>
           </div>
 
-          <div class="relative mt-3 grid gap-1.5">
+          <div class="relative mt-3 grid grid-cols-3 gap-3">
             <div
               v-for="row in aiAutomationPressureRows"
               :key="row.label"
-              class="grid grid-cols-[4.5rem_minmax(0,1fr)_3rem] items-center gap-2 text-[11px]"
+              class="min-w-0 text-[11px]"
             >
-              <span class="truncate text-slate-500">{{ row.label }}</span>
+              <div class="mb-1 flex min-w-0 items-center justify-between gap-2">
+                <span class="truncate text-slate-500">{{ row.label }}</span>
+                <span class="shrink-0 font-semibold text-slate-800">
+                  {{ formatPercent(row.value) }}
+                </span>
+              </div>
               <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
                 <div
                   class="h-full rounded-full"
@@ -1090,9 +1095,6 @@ const defenseMatrix = computed(() => {
                   :style="{ width: `${clampPercent(row.value)}%` }"
                 ></div>
               </div>
-              <span class="text-right font-semibold text-slate-800">
-                {{ formatPercent(row.value) }}
-              </span>
             </div>
           </div>
 
@@ -1125,7 +1127,9 @@ const defenseMatrix = computed(() => {
                       }"
                     ></span>
                   </div>
-                  <span class="mt-1 block truncate text-[10px] text-slate-500">
+                  <span
+                    class="mx-auto mt-1 block max-w-full truncate text-center text-[10px] text-slate-500"
+                  >
                     {{ window.labelText }}
                   </span>
                   <div class="mt-0.5 grid grid-cols-2 gap-x-1 gap-y-0.5 text-[10px]">
@@ -1160,7 +1164,14 @@ const defenseMatrix = computed(() => {
                   >
                 </span>
               </div>
-              <div class="grid gap-1.5">
+              <div
+                class="grid gap-1.5"
+                :class="
+                  aiPolicyFeedbackExpanded
+                    ? 'max-h-[5.75rem] overflow-y-auto pr-1'
+                    : ''
+                "
+              >
                 <div
                   v-for="policy in visibleAiPolicyFeedback"
                   :key="policy.policy_key"
@@ -1173,33 +1184,23 @@ const defenseMatrix = computed(() => {
                     {{ aiPolicyTitle(policy) }}
                   </span>
                   <span
-                    class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
+                    class="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
                     :title="aiPolicyStatusLabel(policy.action_status)"
                   >
                     {{ aiPolicyStatusLabel(policy.action_status) }}
                   </span>
-                  <span class="shrink-0 text-[10px] font-semibold text-slate-900">
+                  <span
+                    class="shrink-0 whitespace-nowrap text-[10px] font-semibold text-slate-900"
+                  >
                     {{ formatNumber(policy.hit_count) }} 命中
                   </span>
                   <span
-                    class="shrink-0 text-right text-[10px] text-slate-500"
+                    class="shrink-0 whitespace-nowrap text-right text-[10px] text-slate-500"
                     :title="formatPolicyTime(policy.updated_at)"
                   >
                     {{ formatPolicyTime(policy.updated_at) }}
                   </span>
                 </div>
-                <button
-                  v-if="(aiAutomation?.recent_policy_feedback.length || 0) > 2"
-                  type="button"
-                  class="h-6 rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                  @click="aiPolicyFeedbackExpanded = !aiPolicyFeedbackExpanded"
-                >
-                  {{
-                    aiPolicyFeedbackExpanded
-                      ? '收起'
-                      : `查看更多 ${formatNumber(hiddenAiPolicyFeedbackCount)} 条`
-                  }}
-                </button>
                 <div
                   v-if="!(aiAutomation?.recent_policy_feedback || []).length"
                   class="grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
@@ -1207,6 +1208,18 @@ const defenseMatrix = computed(() => {
                   暂无自动策略命中
                 </div>
               </div>
+              <button
+                v-if="(aiAutomation?.recent_policy_feedback.length || 0) > 2"
+                type="button"
+                class="mt-1 h-6 w-full rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                @click="aiPolicyFeedbackExpanded = !aiPolicyFeedbackExpanded"
+              >
+                {{
+                  aiPolicyFeedbackExpanded
+                    ? '收起'
+                    : `查看更多 ${formatNumber(hiddenAiPolicyFeedbackCount)} 条`
+                }}
+              </button>
             </div>
           </div>
         </div>

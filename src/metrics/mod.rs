@@ -1,12 +1,18 @@
 use crate::core::InspectionLayer;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
-const MAX_PROXY_SEGMENT_ENTRIES: usize = 512;
-const MAX_SEGMENT_COMPONENT_LEN: usize = 96;
+mod segments;
+mod snapshot;
+
+pub use self::segments::ProxyTrafficSegmentSnapshot;
+pub use self::snapshot::{MetricsSnapshot, ProxyTrafficMetricsSnapshot};
+
+use self::segments::{
+    host_route_segment_key, host_segment_key, route_segment_key, segment_snapshots,
+    update_segment_map, ProxySegmentScope, ProxySegmentUpdate, ProxyTrafficSegmentAccumulator,
+};
 
 pub struct MetricsCollector {
     total_packets: AtomicU64,
@@ -80,27 +86,6 @@ pub struct ProxyMetricLabels {
     pub host: String,
     pub route: String,
     pub request_kind: String,
-}
-
-#[derive(Debug, Clone, Default)]
-struct ProxyTrafficSegmentAccumulator {
-    proxied_requests: u64,
-    proxy_successes: u64,
-    proxy_failures: u64,
-    latency_micros_total: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ProxyTrafficSegmentSnapshot {
-    pub scope_type: String,
-    pub scope_key: String,
-    pub host: Option<String>,
-    pub route: Option<String>,
-    pub request_kind: String,
-    pub proxied_requests: u64,
-    pub proxy_successes: u64,
-    pub proxy_failures: u64,
-    pub average_proxy_latency_micros: u64,
 }
 
 impl MetricsCollector {
@@ -485,17 +470,17 @@ impl MetricsCollector {
             api_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Api),
             static_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Static),
             other_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Other),
-            top_host_segments: self.segment_snapshots(
+            top_host_segments: segment_snapshots(
                 &self.host_proxy_segments,
                 ProxySegmentScope::Host,
                 5,
             ),
-            top_route_segments: self.segment_snapshots(
+            top_route_segments: segment_snapshots(
                 &self.route_proxy_segments,
                 ProxySegmentScope::Route,
                 5,
             ),
-            top_host_route_segments: self.segment_snapshots(
+            top_host_route_segments: segment_snapshots(
                 &self.host_route_proxy_segments,
                 ProxySegmentScope::HostRoute,
                 5,
@@ -535,244 +520,6 @@ impl MetricsCollector {
             update,
         );
     }
-
-    fn segment_snapshots(
-        &self,
-        segments: &Mutex<HashMap<String, ProxyTrafficSegmentAccumulator>>,
-        scope: ProxySegmentScope,
-        limit: usize,
-    ) -> Vec<ProxyTrafficSegmentSnapshot> {
-        let guard = segments.lock().expect("segment metrics lock poisoned");
-        let mut snapshots = guard
-            .iter()
-            .map(|(key, value)| build_segment_snapshot(scope, key, value))
-            .collect::<Vec<_>>();
-        snapshots.sort_by(|left, right| {
-            right
-                .proxied_requests
-                .cmp(&left.proxied_requests)
-                .then(right.proxy_failures.cmp(&left.proxy_failures))
-                .then(
-                    right
-                        .average_proxy_latency_micros
-                        .cmp(&left.average_proxy_latency_micros),
-                )
-                .then(left.scope_key.cmp(&right.scope_key))
-        });
-        snapshots.truncate(limit);
-        snapshots
-    }
-}
-
-#[cfg_attr(not(feature = "api"), allow(dead_code))]
-#[derive(Debug, Clone, Default)]
-pub struct MetricsSnapshot {
-    pub total_packets: u64,
-    pub blocked_packets: u64,
-    pub blocked_l4: u64,
-    pub blocked_l7: u64,
-    pub l7_cc_challenges: u64,
-    pub l7_cc_blocks: u64,
-    pub l7_cc_delays: u64,
-    pub l7_cc_unresolved_identity_delays: u64,
-    pub l7_cc_verified_passes: u64,
-    pub l7_behavior_challenges: u64,
-    pub l7_behavior_blocks: u64,
-    pub l7_behavior_delays: u64,
-    pub l7_ip_access_allows: u64,
-    pub l7_ip_access_alerts: u64,
-    pub l7_ip_access_challenges: u64,
-    pub l7_ip_access_blocks: u64,
-    pub l7_ip_access_verified_passes: u64,
-    pub total_bytes: u64,
-    pub proxied_requests: u64,
-    pub proxy_successes: u64,
-    pub proxy_failures: u64,
-    pub proxy_fail_close_rejections: u64,
-    pub l4_bucket_budget_rejections: u64,
-    pub l4_request_budget_softened: u64,
-    pub tls_pre_handshake_rejections: u64,
-    pub trusted_proxy_permit_drops: u64,
-    pub trusted_proxy_l4_degrade_actions: u64,
-    pub tls_handshake_timeouts: u64,
-    pub tls_handshake_failures: u64,
-    pub slow_attack_idle_timeouts: u64,
-    pub slow_attack_header_timeouts: u64,
-    pub slow_attack_body_timeouts: u64,
-    pub slow_attack_tls_handshake_hits: u64,
-    pub slow_attack_blocks: u64,
-    pub upstream_healthcheck_successes: u64,
-    pub upstream_healthcheck_failures: u64,
-    pub proxy_latency_micros_total: u64,
-    pub average_proxy_latency_micros: u64,
-    pub document_proxy: ProxyTrafficMetricsSnapshot,
-    pub api_proxy: ProxyTrafficMetricsSnapshot,
-    pub static_proxy: ProxyTrafficMetricsSnapshot,
-    pub other_proxy: ProxyTrafficMetricsSnapshot,
-    pub top_host_segments: Vec<ProxyTrafficSegmentSnapshot>,
-    pub top_route_segments: Vec<ProxyTrafficSegmentSnapshot>,
-    pub top_host_route_segments: Vec<ProxyTrafficSegmentSnapshot>,
-    pub l4_direct_idle_no_request_buckets: u64,
-    pub l4_direct_idle_no_request_connections: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ProxyTrafficMetricsSnapshot {
-    pub proxied_requests: u64,
-    pub proxy_successes: u64,
-    pub proxy_failures: u64,
-    pub average_proxy_latency_micros: u64,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ProxySegmentUpdate {
-    Attempt { latency_micros: Option<u64> },
-    Success { latency_micros: Option<u64> },
-    Failure { latency_micros: Option<u64> },
-}
-
-#[derive(Debug, Clone, Copy)]
-enum ProxySegmentScope {
-    Host,
-    Route,
-    HostRoute,
-}
-
-fn update_segment_map(
-    segments: &Mutex<HashMap<String, ProxyTrafficSegmentAccumulator>>,
-    key: String,
-    update: ProxySegmentUpdate,
-) {
-    let mut guard = segments.lock().expect("segment metrics lock poisoned");
-    let key = bounded_segment_key(&key, guard.len());
-    let entry = guard
-        .entry(key)
-        .or_insert_with(ProxyTrafficSegmentAccumulator::default);
-    match update {
-        ProxySegmentUpdate::Attempt { latency_micros } => {
-            entry.proxied_requests = entry.proxied_requests.saturating_add(1);
-            if let Some(value) = latency_micros {
-                entry.latency_micros_total = entry.latency_micros_total.saturating_add(value);
-            }
-        }
-        ProxySegmentUpdate::Success { latency_micros } => {
-            entry.proxy_successes = entry.proxy_successes.saturating_add(1);
-            if let Some(value) = latency_micros {
-                entry.latency_micros_total = entry.latency_micros_total.saturating_add(value);
-            }
-        }
-        ProxySegmentUpdate::Failure { latency_micros } => {
-            entry.proxy_failures = entry.proxy_failures.saturating_add(1);
-            if let Some(value) = latency_micros {
-                entry.latency_micros_total = entry.latency_micros_total.saturating_add(value);
-            }
-        }
-    }
-}
-
-fn bounded_segment_key(key: &str, current_len: usize) -> String {
-    let normalized = normalize_segment_key(key);
-    if current_len < MAX_PROXY_SEGMENT_ENTRIES {
-        return normalized;
-    }
-
-    let mut parts = normalized.split('|').collect::<Vec<_>>();
-    if parts.is_empty() {
-        return overflow_segment_key("", "", "other");
-    }
-    let request_kind = parts.pop().unwrap_or("other");
-    let host = parts.first().copied().unwrap_or_default();
-    let route = parts.get(1).copied().unwrap_or_default();
-    overflow_segment_key(host, route, request_kind)
-}
-
-fn normalize_segment_key(key: &str) -> String {
-    key.split('|')
-        .map(compact_segment_component)
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
-fn compact_segment_component(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.len() <= MAX_SEGMENT_COMPONENT_LEN {
-        return trimmed.to_string();
-    }
-
-    let mut hasher = DefaultHasher::new();
-    trimmed.hash(&mut hasher);
-    let hash = hasher.finish();
-    let prefix_len = MAX_SEGMENT_COMPONENT_LEN.saturating_sub(18);
-    let prefix = trimmed.chars().take(prefix_len).collect::<String>();
-    format!("{prefix}:seg-{hash:016x}")
-}
-
-fn overflow_segment_key(host: &str, route: &str, request_kind: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    host.hash(&mut hasher);
-    route.hash(&mut hasher);
-    request_kind.hash(&mut hasher);
-    format!("__overflow__|{:03}|{}", hasher.finish() % 128, request_kind)
-}
-
-fn build_segment_snapshot(
-    scope: ProxySegmentScope,
-    key: &str,
-    value: &ProxyTrafficSegmentAccumulator,
-) -> ProxyTrafficSegmentSnapshot {
-    let (host, route, request_kind) = match scope {
-        ProxySegmentScope::Host => {
-            let mut parts = key.splitn(2, '|');
-            let host = parts.next().unwrap_or_default().to_string();
-            let request_kind = parts.next().unwrap_or("other").to_string();
-            (Some(host), None, request_kind)
-        }
-        ProxySegmentScope::Route => {
-            let mut parts = key.splitn(2, '|');
-            let route = parts.next().unwrap_or_default().to_string();
-            let request_kind = parts.next().unwrap_or("other").to_string();
-            (None, Some(route), request_kind)
-        }
-        ProxySegmentScope::HostRoute => {
-            let mut parts = key.splitn(3, '|');
-            let host = parts.next().unwrap_or_default().to_string();
-            let route = parts.next().unwrap_or_default().to_string();
-            let request_kind = parts.next().unwrap_or("other").to_string();
-            (Some(host), Some(route), request_kind)
-        }
-    };
-    let successes = value.proxy_successes.max(1);
-    ProxyTrafficSegmentSnapshot {
-        scope_type: match scope {
-            ProxySegmentScope::Host => "host".to_string(),
-            ProxySegmentScope::Route => "route".to_string(),
-            ProxySegmentScope::HostRoute => "host_route".to_string(),
-        },
-        scope_key: key.to_string(),
-        host,
-        route,
-        request_kind,
-        proxied_requests: value.proxied_requests,
-        proxy_successes: value.proxy_successes,
-        proxy_failures: value.proxy_failures,
-        average_proxy_latency_micros: if value.proxy_successes == 0 {
-            0
-        } else {
-            value.latency_micros_total / successes
-        },
-    }
-}
-
-fn host_segment_key(labels: &ProxyMetricLabels) -> String {
-    format!("{}|{}", labels.host, labels.request_kind)
-}
-
-fn route_segment_key(labels: &ProxyMetricLabels) -> String {
-    format!("{}|{}", labels.route, labels.request_kind)
-}
-
-fn host_route_segment_key(labels: &ProxyMetricLabels) -> String {
-    format!("{}|{}|{}", labels.host, labels.route, labels.request_kind)
 }
 
 impl Default for MetricsCollector {
@@ -843,23 +590,5 @@ mod tests {
         assert_eq!(snapshot.other_proxy.proxy_successes, 1);
         assert_eq!(snapshot.other_proxy.proxy_failures, 1);
         assert_eq!(snapshot.other_proxy.average_proxy_latency_micros, 4_000);
-    }
-
-    #[test]
-    fn segment_keys_are_folded_when_cardinality_grows_too_high() {
-        let key = bounded_segment_key(
-            "very-long-host.example.com|/hot/route|api",
-            MAX_PROXY_SEGMENT_ENTRIES,
-        );
-        assert!(key.starts_with("__overflow__|"));
-        assert!(key.ends_with("|api"));
-    }
-
-    #[test]
-    fn long_segment_components_are_compacted() {
-        let compacted =
-            normalize_segment_key(&format!("{}|{}|api", "h".repeat(256), "r".repeat(256)));
-        assert!(compacted.len() < 256);
-        assert!(compacted.contains(":seg-"));
     }
 }

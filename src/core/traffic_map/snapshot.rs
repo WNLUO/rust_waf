@@ -64,7 +64,7 @@ pub(super) fn build_snapshot_from_observations(
     let mut peak_bandwidth_mbps = 0.0_f64;
 
     for (node_id, aggregate) in &node_aggregates {
-        let Some(node) = geo_cache.iter().find(|item| item.value().id == node_id) else {
+        let Some(node) = geo_cache.iter().find(|item| item.value().id == *node_id) else {
             continue;
         };
         let bandwidth_mbps =
@@ -77,6 +77,9 @@ pub(super) fn build_snapshot_from_observations(
             role: "cdn".to_string(),
             lat: Some(node.value().lat),
             lng: Some(node.value().lng),
+            country_code: node.value().country_code.clone(),
+            country_name: node.value().country_name.clone(),
+            geo_scope: node.value().geo_scope.clone(),
             traffic_weight: clamp_f64(
                 node.value().traffic_weight
                     + (aggregate.ingress_requests as f64 / 12.0)
@@ -141,7 +144,7 @@ pub(super) fn build_snapshot_from_observations(
         .sum::<u64>();
 
     TrafficMapSnapshot {
-        scope: "china".to_string(),
+        scope: "global".to_string(),
         window_seconds,
         generated_at: now_ms,
         origin_node,

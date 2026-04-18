@@ -1,6 +1,10 @@
 use super::*;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
+use std::sync::OnceLock;
+
+static CHINA_NODES: OnceLock<Vec<GeoNode>> = OnceLock::new();
+static GLOBAL_FALLBACK_NODES: OnceLock<Vec<GeoNode>> = OnceLock::new();
 
 pub(super) fn is_internal_ip(ip: IpAddr) -> bool {
     match ip {
@@ -23,12 +27,15 @@ pub(super) fn is_internal_ip(ip: IpAddr) -> bool {
 
 pub(super) fn pending_origin_node() -> TrafficMapNodeSnapshot {
     TrafficMapNodeSnapshot {
-        id: "origin-cn".to_string(),
+        id: "origin-pending".to_string(),
         name: "本服务器".to_string(),
         region: "后端正在获取物理位置中".to_string(),
         role: "origin".to_string(),
         lat: None,
         lng: None,
+        country_code: None,
+        country_name: None,
+        geo_scope: "unknown".to_string(),
         traffic_weight: 1.0,
         request_count: 0,
         blocked_count: 0,
@@ -40,15 +47,6 @@ pub(super) fn pending_origin_node() -> TrafficMapNodeSnapshot {
 pub(super) fn origin_node_from_geo_payload(
     payload: &IpWhoisResponse,
 ) -> Option<TrafficMapNodeSnapshot> {
-    let country_code = payload
-        .country_code
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default();
-    if !country_code.eq_ignore_ascii_case("CN") {
-        return None;
-    }
-
     let region = payload
         .region
         .as_deref()
@@ -68,6 +66,8 @@ pub(super) fn origin_node_from_geo_payload(
         label,
         payload.latitude?,
         payload.longitude?,
+        optional_country_code(payload.country_code.as_deref()),
+        optional_label(payload.country.as_deref()),
         unix_timestamp_ms(),
     )
 }
@@ -80,7 +80,7 @@ pub(super) fn origin_node_from_ipip_payload(
         .map(String::as_str)
         .map(str::trim)
         .unwrap_or_default();
-    if country != "中国" && !country.eq_ignore_ascii_case("CN") {
+    if !is_china_country(country) {
         return None;
     }
 
@@ -103,21 +103,19 @@ pub(super) fn origin_node_from_ipip_payload(
         .map(|city| format!("{region} {city}"))
         .unwrap_or_else(|| region.to_string());
 
-    origin_node_snapshot(label, geo_node.lat, geo_node.lng, unix_timestamp_ms())
+    origin_node_snapshot(
+        label,
+        geo_node.lat,
+        geo_node.lng,
+        Some("CN".to_string()),
+        Some("中国".to_string()),
+        unix_timestamp_ms(),
+    )
 }
 
 pub(super) fn origin_node_from_ip_sb_payload(
     payload: &IpSbGeoResponse,
 ) -> Option<TrafficMapNodeSnapshot> {
-    let country_code = payload
-        .country_code
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default();
-    if !country_code.eq_ignore_ascii_case("CN") {
-        return None;
-    }
-
     let region = payload
         .region
         .as_deref()
@@ -137,6 +135,8 @@ pub(super) fn origin_node_from_ip_sb_payload(
         label,
         payload.latitude?,
         payload.longitude?,
+        optional_country_code(payload.country_code.as_deref()),
+        optional_label(payload.country.as_deref()),
         unix_timestamp_ms(),
     )
 }
@@ -145,15 +145,29 @@ pub(super) fn origin_node_snapshot(
     region: String,
     lat: f64,
     lng: f64,
+    country_code: Option<String>,
+    country_name: Option<String>,
     last_seen_at: i64,
 ) -> Option<TrafficMapNodeSnapshot> {
+    let country_code = country_code.filter(|value| !value.is_empty());
+    let geo_scope = if country_code
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case("CN"))
+    {
+        "domestic"
+    } else {
+        "global"
+    };
     Some(TrafficMapNodeSnapshot {
-        id: "origin-cn".to_string(),
+        id: "origin".to_string(),
         name: "本服务器".to_string(),
         region,
         role: "origin".to_string(),
         lat: Some(lat),
         lng: Some(lng),
+        country_code,
+        country_name,
+        geo_scope: geo_scope.to_string(),
         traffic_weight: 1.0,
         request_count: 0,
         blocked_count: 0,
@@ -174,34 +188,29 @@ pub(super) fn find_china_node(normalized: &str) -> Option<GeoNode> {
 
 pub(super) fn internal_node() -> GeoNode {
     GeoNode {
-        id: "cn-internal",
-        name: "内网",
-        region: "内网来源",
+        id: "internal".to_string(),
+        name: "内网".to_string(),
+        region: "内网来源".to_string(),
         lat: 30.95,
         lng: 121.22,
+        country_code: Some("CN".to_string()),
+        country_name: Some("中国".to_string()),
+        geo_scope: "internal".to_string(),
         traffic_weight: 0.48,
     }
 }
 
-pub(super) fn overseas_node() -> GeoNode {
-    GeoNode {
-        id: "cn-overseas",
-        name: "境外",
-        region: "境外来源",
-        lat: 43.8,
-        lng: 82.1,
-        traffic_weight: 0.62,
-    }
-}
-
-pub(super) fn map_remote_region_to_node(payload: &IpWhoisResponse) -> Option<GeoNode> {
+pub(super) fn map_remote_region_to_node(
+    source_ip: &str,
+    payload: &IpWhoisResponse,
+) -> Option<GeoNode> {
     let country_code = payload
         .country_code
         .as_deref()
         .map(str::trim)
         .unwrap_or_default();
     if !country_code.eq_ignore_ascii_case("CN") {
-        return Some(overseas_node());
+        return Some(global_node_from_ipwhois(source_ip, payload));
     }
 
     let region = payload.region.as_deref().unwrap_or_default();
@@ -218,7 +227,7 @@ pub(super) fn map_remote_region_to_node(payload: &IpWhoisResponse) -> Option<Geo
 }
 
 pub(super) fn node_matches_region(node: &GeoNode, normalized: &str) -> bool {
-    province_aliases(node.id)
+    province_aliases(&node.id)
         .iter()
         .any(|alias| normalized.contains(alias))
 }
@@ -288,8 +297,106 @@ pub(super) fn fallback_node(source_ip: &str) -> GeoNode {
     if parsed_ip.map(is_internal_ip).unwrap_or(false) {
         return internal_node();
     }
-    let pool = china_nodes();
+    let pool = global_fallback_nodes();
     pool[stable_index(source_ip, pool.len())].clone()
+}
+
+fn global_node_from_ipwhois(source_ip: &str, payload: &IpWhoisResponse) -> GeoNode {
+    let country_code = optional_country_code(payload.country_code.as_deref());
+    let country_name = optional_label(payload.country.as_deref());
+    let region = optional_label(payload.region.as_deref());
+    let city = optional_label(payload.city.as_deref());
+
+    if let (Some(lat), Some(lng)) = (payload.latitude, payload.longitude) {
+        if valid_coordinate(lat, lng) {
+            let label = match (region.as_deref(), city.as_deref()) {
+                (Some(region), Some(city)) if region != city => format!("{region} {city}"),
+                (_, Some(city)) => city.to_string(),
+                (Some(region), _) => region.to_string(),
+                _ => country_name
+                    .clone()
+                    .or_else(|| country_code.clone())
+                    .unwrap_or_else(|| "境外来源".to_string()),
+            };
+            let id_suffix = country_code
+                .as_deref()
+                .unwrap_or("global")
+                .to_ascii_lowercase();
+            let source_bucket = stable_index(source_ip, 64);
+            return GeoNode {
+                id: format!("global-{id_suffix}-{source_bucket}"),
+                name: country_name
+                    .clone()
+                    .or_else(|| country_code.clone())
+                    .unwrap_or_else(|| "境外".to_string()),
+                region: label,
+                lat,
+                lng,
+                country_code,
+                country_name,
+                geo_scope: "global".to_string(),
+                traffic_weight: 0.62,
+            };
+        }
+    }
+
+    fallback_global_node(
+        source_ip,
+        country_code.as_deref(),
+        country_name.as_deref(),
+        region.as_deref(),
+    )
+}
+
+fn fallback_global_node(
+    source_ip: &str,
+    country_code: Option<&str>,
+    country_name: Option<&str>,
+    region: Option<&str>,
+) -> GeoNode {
+    let pool = global_fallback_nodes();
+    let mut node = pool[stable_index(
+        country_code
+            .filter(|value| !value.is_empty())
+            .unwrap_or(source_ip),
+        pool.len(),
+    )]
+    .clone();
+
+    if let Some(country_code) = optional_country_code(country_code) {
+        node.id = format!("global-{}", country_code.to_ascii_lowercase());
+        node.country_code = Some(country_code);
+    }
+    if let Some(country_name) = optional_label(country_name) {
+        node.name = country_name.clone();
+        node.country_name = Some(country_name);
+    }
+    if let Some(region) = optional_label(region) {
+        node.region = region;
+    }
+    node
+}
+
+fn valid_coordinate(lat: f64, lng: f64) -> bool {
+    (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lng) && (lat != 0.0 || lng != 0.0)
+}
+
+fn optional_country_code(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase())
+}
+
+fn optional_label(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn is_china_country(value: &str) -> bool {
+    value == "中国" || value.eq_ignore_ascii_case("CN") || value.eq_ignore_ascii_case("China")
 }
 
 pub(super) fn stable_index(value: &str, len: usize) -> usize {
@@ -300,279 +407,166 @@ pub(super) fn stable_index(value: &str, len: usize) -> usize {
     (hasher.finish() as usize) % len.max(1)
 }
 
+fn global_fallback_nodes() -> &'static [GeoNode] {
+    GLOBAL_FALLBACK_NODES
+        .get_or_init(|| {
+            vec![
+                global_node("global-us", "美国", "北美", 39.5, -98.35, "US", 0.72),
+                global_node("global-ca", "加拿大", "北美", 56.13, -106.35, "CA", 0.46),
+                global_node("global-br", "巴西", "南美", -14.24, -51.93, "BR", 0.44),
+                global_node("global-gb", "英国", "欧洲", 55.38, -3.44, "GB", 0.58),
+                global_node("global-de", "德国", "欧洲", 51.17, 10.45, "DE", 0.58),
+                global_node("global-fr", "法国", "欧洲", 46.23, 2.21, "FR", 0.52),
+                global_node("global-ru", "俄罗斯", "欧亚", 61.52, 105.32, "RU", 0.48),
+                global_node("global-in", "印度", "南亚", 20.59, 78.96, "IN", 0.56),
+                global_node("global-jp", "日本", "东亚", 36.2, 138.25, "JP", 0.62),
+                global_node("global-sg", "新加坡", "东南亚", 1.35, 103.82, "SG", 0.64),
+                global_node(
+                    "global-au",
+                    "澳大利亚",
+                    "大洋洲",
+                    -25.27,
+                    133.78,
+                    "AU",
+                    0.42,
+                ),
+                global_node("global-za", "南非", "非洲", -30.56, 22.94, "ZA", 0.38),
+            ]
+        })
+        .as_slice()
+}
+
+fn global_node(
+    id: &str,
+    name: &str,
+    region: &str,
+    lat: f64,
+    lng: f64,
+    country_code: &str,
+    traffic_weight: f64,
+) -> GeoNode {
+    GeoNode {
+        id: id.to_string(),
+        name: name.to_string(),
+        region: region.to_string(),
+        lat,
+        lng,
+        country_code: Some(country_code.to_string()),
+        country_name: Some(name.to_string()),
+        geo_scope: "global".to_string(),
+        traffic_weight,
+    }
+}
+
+fn china_geo_node(
+    id: &str,
+    name: &str,
+    region: &str,
+    lat: f64,
+    lng: f64,
+    traffic_weight: f64,
+) -> GeoNode {
+    GeoNode {
+        id: id.to_string(),
+        name: name.to_string(),
+        region: region.to_string(),
+        lat,
+        lng,
+        country_code: Some("CN".to_string()),
+        country_name: Some("中国".to_string()),
+        geo_scope: "domestic".to_string(),
+        traffic_weight,
+    }
+}
+
 pub(super) fn china_nodes() -> &'static [GeoNode] {
-    &[
-        GeoNode {
-            id: "cn-110000",
-            name: "北京",
-            region: "北京市",
-            lat: 40.18994,
-            lng: 116.41995,
-            traffic_weight: 0.90,
-        },
-        GeoNode {
-            id: "cn-120000",
-            name: "天津",
-            region: "天津市",
-            lat: 39.288036,
-            lng: 117.347043,
-            traffic_weight: 0.72,
-        },
-        GeoNode {
-            id: "cn-130000",
-            name: "河北",
-            region: "河北省",
-            lat: 38.045474,
-            lng: 114.502461,
-            traffic_weight: 0.64,
-        },
-        GeoNode {
-            id: "cn-140000",
-            name: "山西",
-            region: "山西省",
-            lat: 37.618179,
-            lng: 112.304436,
-            traffic_weight: 0.45,
-        },
-        GeoNode {
-            id: "cn-150000",
-            name: "内蒙古",
-            region: "内蒙古自治区",
-            lat: 44.331087,
-            lng: 114.077429,
-            traffic_weight: 0.34,
-        },
-        GeoNode {
-            id: "cn-210000",
-            name: "辽宁",
-            region: "辽宁省",
-            lat: 41.299712,
-            lng: 122.604994,
-            traffic_weight: 0.52,
-        },
-        GeoNode {
-            id: "cn-220000",
-            name: "吉林",
-            region: "吉林省",
-            lat: 43.703954,
-            lng: 126.171208,
-            traffic_weight: 0.31,
-        },
-        GeoNode {
-            id: "cn-230000",
-            name: "黑龙江",
-            region: "黑龙江省",
-            lat: 48.040465,
-            lng: 127.693027,
-            traffic_weight: 0.28,
-        },
-        GeoNode {
-            id: "cn-310000",
-            name: "上海",
-            region: "上海市",
-            lat: 31.072559,
-            lng: 121.438737,
-            traffic_weight: 1.0,
-        },
-        GeoNode {
-            id: "cn-320000",
-            name: "江苏",
-            region: "江苏省",
-            lat: 32.983991,
-            lng: 119.486506,
-            traffic_weight: 0.86,
-        },
-        GeoNode {
-            id: "cn-330000",
-            name: "浙江",
-            region: "浙江省",
-            lat: 29.181466,
-            lng: 120.109913,
-            traffic_weight: 0.84,
-        },
-        GeoNode {
-            id: "cn-340000",
-            name: "安徽",
-            region: "安徽省",
-            lat: 31.849254,
-            lng: 117.226884,
-            traffic_weight: 0.57,
-        },
-        GeoNode {
-            id: "cn-350000",
-            name: "福建",
-            region: "福建省",
-            lat: 26.069925,
-            lng: 118.006468,
-            traffic_weight: 0.67,
-        },
-        GeoNode {
-            id: "cn-360000",
-            name: "江西",
-            region: "江西省",
-            lat: 27.636112,
-            lng: 115.732975,
-            traffic_weight: 0.44,
-        },
-        GeoNode {
-            id: "cn-370000",
-            name: "山东",
-            region: "山东省",
-            lat: 36.376092,
-            lng: 118.187759,
-            traffic_weight: 0.76,
-        },
-        GeoNode {
-            id: "cn-410000",
-            name: "河南",
-            region: "河南省",
-            lat: 33.902648,
-            lng: 113.619717,
-            traffic_weight: 0.62,
-        },
-        GeoNode {
-            id: "cn-420000",
-            name: "湖北",
-            region: "湖北省",
-            lat: 30.987527,
-            lng: 112.271301,
-            traffic_weight: 0.59,
-        },
-        GeoNode {
-            id: "cn-430000",
-            name: "湖南",
-            region: "湖南省",
-            lat: 27.629216,
-            lng: 111.711649,
-            traffic_weight: 0.51,
-        },
-        GeoNode {
-            id: "cn-440000",
-            name: "广东",
-            region: "广东省",
-            lat: 23.334643,
-            lng: 113.429919,
-            traffic_weight: 0.92,
-        },
-        GeoNode {
-            id: "cn-450000",
-            name: "广西",
-            region: "广西壮族自治区",
-            lat: 23.833381,
-            lng: 108.7944,
-            traffic_weight: 0.38,
-        },
-        GeoNode {
-            id: "cn-460000",
-            name: "海南",
-            region: "海南省",
-            lat: 19.189767,
-            lng: 109.754859,
-            traffic_weight: 0.29,
-        },
-        GeoNode {
-            id: "cn-500000",
-            name: "重庆",
-            region: "重庆市",
-            lat: 30.067297,
-            lng: 107.8839,
-            traffic_weight: 0.50,
-        },
-        GeoNode {
-            id: "cn-510000",
-            name: "四川",
-            region: "四川省",
-            lat: 30.674545,
-            lng: 102.693453,
-            traffic_weight: 0.56,
-        },
-        GeoNode {
-            id: "cn-520000",
-            name: "贵州",
-            region: "贵州省",
-            lat: 26.826368,
-            lng: 106.880455,
-            traffic_weight: 0.36,
-        },
-        GeoNode {
-            id: "cn-530000",
-            name: "云南",
-            region: "云南省",
-            lat: 25.008643,
-            lng: 101.485106,
-            traffic_weight: 0.33,
-        },
-        GeoNode {
-            id: "cn-540000",
-            name: "西藏",
-            region: "西藏自治区",
-            lat: 31.56375,
-            lng: 88.388277,
-            traffic_weight: 0.16,
-        },
-        GeoNode {
-            id: "cn-610000",
-            name: "陕西",
-            region: "陕西省",
-            lat: 35.263661,
-            lng: 108.887114,
-            traffic_weight: 0.48,
-        },
-        GeoNode {
-            id: "cn-620000",
-            name: "甘肃",
-            region: "甘肃省",
-            lat: 36.058039,
-            lng: 103.823557,
-            traffic_weight: 0.24,
-        },
-        GeoNode {
-            id: "cn-630000",
-            name: "青海",
-            region: "青海省",
-            lat: 35.726403,
-            lng: 96.043533,
-            traffic_weight: 0.18,
-        },
-        GeoNode {
-            id: "cn-640000",
-            name: "宁夏",
-            region: "宁夏回族自治区",
-            lat: 37.291332,
-            lng: 106.169866,
-            traffic_weight: 0.22,
-        },
-        GeoNode {
-            id: "cn-650000",
-            name: "新疆",
-            region: "新疆维吾尔自治区",
-            lat: 41.371801,
-            lng: 85.294711,
-            traffic_weight: 0.20,
-        },
-        GeoNode {
-            id: "cn-710000",
-            name: "台湾",
-            region: "台湾省",
-            lat: 23.749452,
-            lng: 120.971485,
-            traffic_weight: 0.54,
-        },
-        GeoNode {
-            id: "cn-810000",
-            name: "香港",
-            region: "香港特别行政区",
-            lat: 22.377366,
-            lng: 114.134357,
-            traffic_weight: 0.60,
-        },
-        GeoNode {
-            id: "cn-820000",
-            name: "澳门",
-            region: "澳门特别行政区",
-            lat: 22.159307,
-            lng: 113.566988,
-            traffic_weight: 0.32,
-        },
-    ]
+    CHINA_NODES
+        .get_or_init(|| {
+            vec![
+                china_geo_node("cn-110000", "北京", "北京市", 40.18994, 116.41995, 0.90),
+                china_geo_node("cn-120000", "天津", "天津市", 39.288036, 117.347043, 0.72),
+                china_geo_node("cn-130000", "河北", "河北省", 38.045474, 114.502461, 0.64),
+                china_geo_node("cn-140000", "山西", "山西省", 37.618179, 112.304436, 0.45),
+                china_geo_node(
+                    "cn-150000",
+                    "内蒙古",
+                    "内蒙古自治区",
+                    44.331087,
+                    114.077429,
+                    0.34,
+                ),
+                china_geo_node("cn-210000", "辽宁", "辽宁省", 41.299712, 122.604994, 0.52),
+                china_geo_node("cn-220000", "吉林", "吉林省", 43.703954, 126.171208, 0.31),
+                china_geo_node(
+                    "cn-230000",
+                    "黑龙江",
+                    "黑龙江省",
+                    48.040465,
+                    127.693027,
+                    0.28,
+                ),
+                china_geo_node("cn-310000", "上海", "上海市", 31.072559, 121.438737, 1.0),
+                china_geo_node("cn-320000", "江苏", "江苏省", 32.983991, 119.486506, 0.86),
+                china_geo_node("cn-330000", "浙江", "浙江省", 29.181466, 120.109913, 0.84),
+                china_geo_node("cn-340000", "安徽", "安徽省", 31.849254, 117.226884, 0.57),
+                china_geo_node("cn-350000", "福建", "福建省", 26.069925, 118.006468, 0.67),
+                china_geo_node("cn-360000", "江西", "江西省", 27.636112, 115.732975, 0.44),
+                china_geo_node("cn-370000", "山东", "山东省", 36.376092, 118.187759, 0.76),
+                china_geo_node("cn-410000", "河南", "河南省", 33.902648, 113.619717, 0.62),
+                china_geo_node("cn-420000", "湖北", "湖北省", 30.987527, 112.271301, 0.59),
+                china_geo_node("cn-430000", "湖南", "湖南省", 27.629216, 111.711649, 0.51),
+                china_geo_node("cn-440000", "广东", "广东省", 23.334643, 113.429919, 0.92),
+                china_geo_node(
+                    "cn-450000",
+                    "广西",
+                    "广西壮族自治区",
+                    23.833381,
+                    108.7944,
+                    0.38,
+                ),
+                china_geo_node("cn-460000", "海南", "海南省", 19.189767, 109.754859, 0.29),
+                china_geo_node("cn-500000", "重庆", "重庆市", 30.067297, 107.8839, 0.50),
+                china_geo_node("cn-510000", "四川", "四川省", 30.674545, 102.693453, 0.56),
+                china_geo_node("cn-520000", "贵州", "贵州省", 26.826368, 106.880455, 0.36),
+                china_geo_node("cn-530000", "云南", "云南省", 25.008643, 101.485106, 0.33),
+                china_geo_node("cn-540000", "西藏", "西藏自治区", 31.56375, 88.388277, 0.16),
+                china_geo_node("cn-610000", "陕西", "陕西省", 35.263661, 108.887114, 0.48),
+                china_geo_node("cn-620000", "甘肃", "甘肃省", 36.058039, 103.823557, 0.24),
+                china_geo_node("cn-630000", "青海", "青海省", 35.726403, 96.043533, 0.18),
+                china_geo_node(
+                    "cn-640000",
+                    "宁夏",
+                    "宁夏回族自治区",
+                    37.291332,
+                    106.169866,
+                    0.22,
+                ),
+                china_geo_node(
+                    "cn-650000",
+                    "新疆",
+                    "新疆维吾尔自治区",
+                    41.371801,
+                    85.294711,
+                    0.20,
+                ),
+                china_geo_node("cn-710000", "台湾", "台湾省", 23.749452, 120.971485, 0.54),
+                china_geo_node(
+                    "cn-810000",
+                    "香港",
+                    "香港特别行政区",
+                    22.377366,
+                    114.134357,
+                    0.60,
+                ),
+                china_geo_node(
+                    "cn-820000",
+                    "澳门",
+                    "澳门特别行政区",
+                    22.159307,
+                    113.566988,
+                    0.32,
+                ),
+            ]
+        })
+        .as_slice()
 }

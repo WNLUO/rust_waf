@@ -38,6 +38,9 @@ pub struct TrafficMapNodeSnapshot {
     pub role: String,
     pub lat: Option<f64>,
     pub lng: Option<f64>,
+    pub country_code: Option<String>,
+    pub country_name: Option<String>,
+    pub geo_scope: String,
     pub traffic_weight: f64,
     pub request_count: u64,
     pub blocked_count: u64,
@@ -91,6 +94,9 @@ pub struct TrafficRealtimeNode {
     pub role: String,
     pub lat: Option<f64>,
     pub lng: Option<f64>,
+    pub country_code: Option<String>,
+    pub country_name: Option<String>,
+    pub geo_scope: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,11 +122,14 @@ pub(super) struct TrafficObservation {
 
 #[derive(Debug, Clone)]
 pub(super) struct GeoNode {
-    pub(super) id: &'static str,
-    pub(super) name: &'static str,
-    pub(super) region: &'static str,
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) region: String,
     pub(super) lat: f64,
     pub(super) lng: f64,
+    pub(super) country_code: Option<String>,
+    pub(super) country_name: Option<String>,
+    pub(super) geo_scope: String,
     pub(super) traffic_weight: f64,
 }
 
@@ -135,6 +144,7 @@ pub(super) struct CachedOriginNode {
 pub(super) struct IpWhoisResponse {
     pub(super) success: bool,
     pub(super) country_code: Option<String>,
+    pub(super) country: Option<String>,
     pub(super) region: Option<String>,
     pub(super) city: Option<String>,
     pub(super) latitude: Option<f64>,
@@ -151,6 +161,7 @@ pub(super) type IpipRegionResponse = Vec<String>;
 #[derive(Debug, Deserialize)]
 pub(super) struct IpSbGeoResponse {
     pub(super) country_code: Option<String>,
+    pub(super) country: Option<String>,
     pub(super) region: Option<String>,
     pub(super) city: Option<String>,
     pub(super) latitude: Option<f64>,

@@ -31,6 +31,8 @@ const props = defineProps<{
 
 const chartRef = ref<HTMLElement | null>(null)
 let chart: ECharts | null = null
+type MapMode = 'china' | 'global'
+const mapMode = ref<MapMode>('china')
 
 const { snapshot } = useAdminEventMap({
   trafficMap: toRef(props, 'trafficMap'),
@@ -42,6 +44,8 @@ type GeoNode = EventMapNode & { lat: number; lng: number }
 
 type RealtimeNodeRecord = {
   node: GeoNode
+  decision: TrafficEventDelta['decision']
+  direction: TrafficEventDelta['direction']
   expireAt: number
 }
 
@@ -83,6 +87,45 @@ const activeRealtimeNodes = new Map<string, RealtimeNodeRecord>()
 let cleanupTimer: number | null = null
 let renderTimeout: number | null = null
 let lastRenderTime = 0
+let mapsReady = false
+
+const MAP_CONTEXT = 'waf-world-context'
+const CHINA_REGION_NAMES = [
+  '北京市',
+  '天津市',
+  '河北省',
+  '山西省',
+  '内蒙古自治区',
+  '辽宁省',
+  '吉林省',
+  '黑龙江省',
+  '上海市',
+  '江苏省',
+  '浙江省',
+  '安徽省',
+  '福建省',
+  '江西省',
+  '山东省',
+  '河南省',
+  '湖北省',
+  '湖南省',
+  '广东省',
+  '广西壮族自治区',
+  '海南省',
+  '重庆市',
+  '四川省',
+  '贵州省',
+  '云南省',
+  '西藏自治区',
+  '陕西省',
+  '甘肃省',
+  '青海省',
+  '宁夏回族自治区',
+  '新疆维吾尔自治区',
+  '台湾省',
+  '香港特别行政区',
+  '澳门特别行政区',
+]
 
 // 防抖/节流图表渲染，避免 ECharts 频繁 setOption 导致主线程阻塞
 const scheduleRender = () => {
@@ -193,6 +236,8 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
     ) {
       activeRealtimeNodes.set(event.node.id, {
         node: event.node as GeoNode,
+        decision: event.decision,
+        direction: event.direction,
         expireAt: now + 5000, // 节点小圆圈 5 秒后渐渐消失
       })
     } else {
@@ -231,10 +276,12 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
         effect: {
           show: true,
           period: Math.max(durationMs / 1000, 0.5),
-          trailLength: 0.22,
+          trailLength: event.decision === 'block' ? 0.34 : 0.22,
           symbol: 'path://M5 0 L10 5 L5 10 L0 5 Z',
           symbolSize: palette.symbolSize,
           color: palette.color,
+          shadowBlur: event.decision === 'block' ? 12 : 8,
+          shadowColor: palette.color,
           loop: false, // 动画播放一次即停止
         },
         expireAt: now + durationMs + 800,
@@ -264,23 +311,75 @@ function emitProjectiles(events: TrafficEventDelta[], originNode: GeoNode) {
   }
 }
 
-const baseGeoConfig = {
-  map: 'china',
-  roam: false,
-  zoom: 1.75,
-  center: [104.5, 36.5],
-  emphasis: { disabled: true },
-  label: { show: false },
-  itemStyle: {
-    areaColor: '#1e293b',
-    borderColor: '#334155',
-    borderWidth: 1,
-    shadowColor: 'rgba(0, 0, 0, 0.5)',
-    shadowBlur: 10,
+function isChinaWorldFeature(feature: {
+  properties?: Record<string, unknown>
+}) {
+  const name = String(feature.properties?.name || '').toLowerCase()
+  return (
+    name === 'china' ||
+    name === "people's republic of china" ||
+    name === 'republic of china'
+  )
+}
+
+function buildContextMap(
+  worldGeoJson: {
+    type: 'FeatureCollection'
+    features: Array<{ properties?: Record<string, unknown> }>
   },
-  regions: [
-    { name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } },
-  ],
+  chinaGeoJson: {
+    features: Array<{ properties?: Record<string, unknown> }>
+  },
+) {
+  return {
+    ...worldGeoJson,
+    type: 'FeatureCollection' as const,
+    features: [
+      ...worldGeoJson.features.filter(
+        (feature) => !isChinaWorldFeature(feature),
+      ),
+      ...chinaGeoJson.features,
+    ],
+  }
+}
+
+function geoConfigForMode(mode: MapMode) {
+  const chinaMode = mode === 'china'
+  return {
+    map: MAP_CONTEXT,
+    roam: false,
+    zoom: chinaMode ? 2.55 : 1.08,
+    center: chinaMode ? [104.5, 35.5] : [16, 18],
+    scaleLimit: { min: 0.8, max: 4 },
+    emphasis: { disabled: true },
+    label: { show: false },
+    itemStyle: {
+      areaColor: chinaMode ? '#111827' : '#172033',
+      borderColor: chinaMode ? 'rgba(100, 116, 139, 0.36)' : '#334155',
+      borderWidth: chinaMode ? 0.6 : 0.8,
+      shadowColor: 'rgba(0, 0, 0, 0.42)',
+      shadowBlur: chinaMode ? 4 : 8,
+    },
+    regions: [
+      ...CHINA_REGION_NAMES.map((name) => ({
+        name,
+        itemStyle: {
+          areaColor: chinaMode ? '#1f3b57' : '#1d3a4f',
+          borderColor: chinaMode ? '#38bdf8' : 'rgba(56, 189, 248, 0.45)',
+          borderWidth: chinaMode ? 0.9 : 0.45,
+        },
+      })),
+      { name: '南海诸岛', itemStyle: { opacity: 0 }, label: { show: false } },
+    ],
+    animation: true,
+    animationDurationUpdate: 720,
+    animationEasingUpdate: 'cubicOut',
+  }
+}
+
+function setMapMode(mode: MapMode) {
+  if (mapMode.value === mode) return
+  mapMode.value = mode
 }
 
 // 加载地图并初始化
@@ -288,17 +387,32 @@ const initMap = async () => {
   if (!chartRef.value) return
 
   try {
-    const response = await fetch('/maps/china-full.geojson')
-    const geoJson = await response.json()
+    const [worldResponse, chinaResponse] = await Promise.all([
+      fetch('/maps/world.geojson'),
+      fetch('/maps/china-full.geojson'),
+    ])
+    const [worldGeoJson, chinaGeoJson] = await Promise.all([
+      worldResponse.json(),
+      chinaResponse.json(),
+    ])
 
-    registerMap('china', geoJson)
+    registerMap(
+      MAP_CONTEXT,
+      buildContextMap(worldGeoJson, chinaGeoJson) as unknown as Parameters<
+        typeof registerMap
+      >[1],
+    )
+    mapsReady = true
 
     chart = init(chartRef.value)
 
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { show: false },
-      geo: baseGeoConfig,
+      geo: geoConfigForMode(mapMode.value),
+      animation: true,
+      animationDurationUpdate: 720,
+      animationEasingUpdate: 'cubicOut',
       series: [],
     })
 
@@ -309,7 +423,7 @@ const initMap = async () => {
 }
 
 const renderChart = () => {
-  if (!chart) return
+  if (!chart || !mapsReady) return
 
   const { nodes, originNode } = snapshot.value
   if (!hasGeo(originNode)) {
@@ -329,7 +443,28 @@ const renderChart = () => {
     name: node.name,
     value: [node.lng, node.lat, node.trafficWeight],
     itemStyle: {
-      color: node.id === snapshot.value.hottestNode?.id ? '#fbbf24' : '#60a5fa',
+      color: activeRealtimeNodes.has(node.id)
+        ? activeRealtimeNodes.get(node.id)?.decision === 'block'
+          ? '#ff4d4f'
+          : '#70ff00'
+        : node.id === snapshot.value.hottestNode?.id
+          ? '#fbbf24'
+          : node.geoScope === 'global'
+            ? '#a78bfa'
+            : '#60a5fa',
+    },
+  }))
+
+  const burstData = Array.from(activeRealtimeNodes.values()).map((record) => ({
+    name: record.node.name,
+    value: [record.node.lng, record.node.lat, 2.2],
+    itemStyle: {
+      color:
+        record.decision === 'block'
+          ? '#ff4d4f'
+          : record.direction === 'egress'
+            ? '#00f2fe'
+            : '#70ff00',
     },
   }))
 
@@ -342,6 +477,7 @@ const renderChart = () => {
   })
 
   const linesSeries: LinesSeriesOption = {
+    id: 'traffic-projectiles',
     type: 'lines',
     coordinateSystem: 'geo',
     zlevel: 3,
@@ -358,6 +494,7 @@ const renderChart = () => {
   }
 
   const scatterSeries: EffectScatterSeriesOption = {
+    id: 'traffic-nodes',
     type: 'effectScatter',
     coordinateSystem: 'geo',
     zlevel: 2,
@@ -376,8 +513,28 @@ const renderChart = () => {
     data: scatterData,
   }
 
+  const burstSeries: EffectScatterSeriesOption = {
+    id: 'request-source-bursts',
+    type: 'effectScatter',
+    coordinateSystem: 'geo',
+    zlevel: 4,
+    rippleEffect: {
+      brushType: 'stroke',
+      scale: mapMode.value === 'china' ? 5.2 : 4.2,
+      period: 2,
+    },
+    label: { show: false },
+    symbolSize: (val: unknown) => {
+      const point = Array.isArray(val) ? val : []
+      const weight = typeof point[2] === 'number' ? point[2] : 1
+      return 4 + weight * 2.2
+    },
+    data: burstData,
+  }
+
   chart.setOption({
-    series: [linesSeries, scatterSeries],
+    geo: geoConfigForMode(mapMode.value),
+    series: [linesSeries, scatterSeries, burstSeries],
   })
 }
 
@@ -402,6 +559,10 @@ watch(
     emitProjectiles(events, originNode)
   },
 )
+
+watch(mapMode, () => {
+  scheduleRender()
+})
 
 onMounted(() => {
   initMap()
@@ -434,18 +595,48 @@ onBeforeUnmount(() => {
           实时流量监控 (CDN ↔ 源站)
         </h3>
       </div>
-      <div class="hidden items-center gap-3 text-xs text-slate-500 sm:flex">
-        <div class="flex items-center gap-1">
-          <span class="w-2 h-[2px] bg-blue-500"></span>
-          <span>CDN 请求</span>
+      <div class="flex items-center gap-3">
+        <div
+          class="flex items-center overflow-hidden rounded-md border border-slate-700 bg-slate-950/40 p-0.5 text-[11px] text-slate-400"
+        >
+          <button
+            type="button"
+            class="h-7 px-2.5 transition-colors"
+            :class="
+              mapMode === 'china'
+                ? 'bg-sky-500/20 text-sky-200'
+                : 'hover:text-slate-200'
+            "
+            @click="setMapMode('china')"
+          >
+            全国
+          </button>
+          <button
+            type="button"
+            class="h-7 px-2.5 transition-colors"
+            :class="
+              mapMode === 'global'
+                ? 'bg-sky-500/20 text-sky-200'
+                : 'hover:text-slate-200'
+            "
+            @click="setMapMode('global')"
+          >
+            全球
+          </button>
         </div>
-        <div class="flex items-center gap-1">
-          <span class="w-2 h-[2px] bg-emerald-500"></span>
-          <span>源站响应</span>
-        </div>
-        <div class="flex items-center gap-1">
-          <span class="w-2 h-[2px] bg-red-500"></span>
-          <span>拦截异常</span>
+        <div class="hidden items-center gap-3 text-xs text-slate-500 lg:flex">
+          <div class="flex items-center gap-1">
+            <span class="w-2 h-[2px] bg-blue-500"></span>
+            <span>CDN 请求</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-2 h-[2px] bg-emerald-500"></span>
+            <span>源站响应</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-2 h-[2px] bg-red-500"></span>
+            <span>拦截异常</span>
+          </div>
         </div>
       </div>
     </div>

@@ -18,6 +18,9 @@ function toNode(node: TrafficMapResponse['nodes'][number]): EventMapNode {
     role: node.role === 'origin' ? 'origin' : 'cdn',
     lat: node.lat,
     lng: node.lng,
+    countryCode: node.country_code,
+    countryName: node.country_name,
+    geoScope: node.geo_scope,
     trafficWeight: node.traffic_weight,
     requestCount: node.request_count,
     blockedCount: node.blocked_count,
@@ -59,6 +62,9 @@ export function useAdminEventMap({ trafficMap }: UseAdminEventMapOptions) {
       role: 'origin',
       lat: payload.origin_node.lat,
       lng: payload.origin_node.lng,
+      countryCode: payload.origin_node.country_code,
+      countryName: payload.origin_node.country_name,
+      geoScope: payload.origin_node.geo_scope,
       trafficWeight: payload.origin_node.traffic_weight,
       requestCount: payload.origin_node.request_count,
       blockedCount: payload.origin_node.blocked_count,
@@ -96,9 +102,10 @@ export function useAdminEventMap({ trafficMap }: UseAdminEventMapOptions) {
     })
 
     const hottestNode =
-      nodes.find((node) =>
-        node.bandwidthMbps ===
-        Math.max(...nodes.map((item) => item.bandwidthMbps || 0), 0),
+      nodes.find(
+        (node) =>
+          node.bandwidthMbps ===
+          Math.max(...nodes.map((item) => item.bandwidthMbps || 0), 0),
       ) ?? null
 
     return {

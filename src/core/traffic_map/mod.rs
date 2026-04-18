@@ -136,6 +136,9 @@ impl TrafficMapCollector {
                 role: "cdn".to_string(),
                 lat: Some(entry.lat),
                 lng: Some(entry.lng),
+                country_code: entry.country_code.clone(),
+                country_name: entry.country_name.clone(),
+                geo_scope: entry.geo_scope.clone(),
             })
             .unwrap_or_else(|| {
                 let fallback = fallback_node(&event.source_ip);
@@ -146,6 +149,9 @@ impl TrafficMapCollector {
                     role: "cdn".to_string(),
                     lat: Some(fallback.lat),
                     lng: Some(fallback.lng),
+                    country_code: fallback.country_code,
+                    country_name: fallback.country_name,
+                    geo_scope: fallback.geo_scope,
                 }
             });
 
@@ -237,7 +243,7 @@ impl TrafficMapCollector {
         }
 
         if let Some(payload) = self.lookup_remote_region(source_ip).await {
-            if let Some(node) = map_remote_region_to_node(&payload) {
+            if let Some(node) = map_remote_region_to_node(source_ip, &payload) {
                 return node;
             }
         }

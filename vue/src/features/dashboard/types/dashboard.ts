@@ -478,6 +478,9 @@ export interface EventMapNode {
   role: 'cdn' | 'origin'
   lat?: number
   lng?: number
+  countryCode?: string | null
+  countryName?: string | null
+  geoScope?: 'domestic' | 'global' | 'internal' | 'unknown' | string
   trafficWeight: number
   requestCount?: number
   blockedCount?: number
@@ -522,6 +525,9 @@ export interface TrafficMapNodeResponse {
   role: 'cdn' | 'origin' | string
   lat?: number
   lng?: number
+  country_code?: string | null
+  country_name?: string | null
+  geo_scope?: 'domestic' | 'global' | 'internal' | 'unknown' | string
   traffic_weight: number
   request_count: number
   blocked_count: number
@@ -562,6 +568,9 @@ export interface TrafficEventDeltaNode {
   role: 'cdn' | 'origin' | string
   lat?: number
   lng?: number
+  country_code?: string | null
+  country_name?: string | null
+  geo_scope?: 'domestic' | 'global' | 'internal' | 'unknown' | string
 }
 
 export interface TrafficEventDelta {

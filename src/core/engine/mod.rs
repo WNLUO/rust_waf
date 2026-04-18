@@ -78,7 +78,7 @@ use self::policy::{
 use self::proxy::{
     apply_safeline_upstream_action, enforce_http1_request_safety, proxy_http_request,
     proxy_http_request_with_session_affinity, resolve_runtime_custom_response,
-    write_http1_upstream_response, UpstreamResponseDisposition,
+    write_http1_upstream_response, UpstreamClientConnection, UpstreamResponseDisposition,
 };
 #[cfg(feature = "http3")]
 pub(crate) use self::runtime::sync_http3_listener_runtime;

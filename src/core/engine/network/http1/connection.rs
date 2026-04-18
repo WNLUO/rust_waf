@@ -1,4 +1,7 @@
 use super::decision::result_should_drop_http1;
+use super::feedback::{enforce_and_record_l7_block_feedback, record_l7_block_feedback};
+use super::proxy_flow::{handle_http1_proxy_or_local_response, Http1RequestFlow};
+use super::response::write_custom_http1_response;
 use super::slow_attack::handle_slow_attack_error;
 use super::*;
 use crate::core::engine::policy::persist_http_identity_debug_event;
@@ -190,16 +193,7 @@ pub(crate) async fn handle_http1_connection(
 
         if let Some(result) = inspect_blocked_client_ip(context.as_ref(), &request).await {
             persist_http_inspection_event(context.as_ref(), packet, &request, &result);
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
@@ -233,36 +227,22 @@ pub(crate) async fn handle_http1_connection(
                 if result.should_persist_event() {
                     persist_http_inspection_event(context.as_ref(), packet, &request, &result);
                 }
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_block(result.layer.clone());
-                }
-                if let Some(inspector) = context.l4_inspector() {
-                    inspector.record_l7_feedback(
-                        packet,
-                        &request,
-                        crate::l4::behavior::FeedbackSource::L7Block,
-                    );
-                }
+                record_l7_block_feedback(context.as_ref(), packet, &request, &result);
                 if result_should_drop_http1(&result, &request) {
                     let _ = stream.shutdown().await;
                     return Ok(());
                 }
                 if let Some(response) = result.custom_response.as_ref() {
-                    let response =
-                        crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                            context.as_ref(),
-                            &resolve_runtime_custom_response(response),
-                        );
-                    let body = body_for_request(&request, &response.body);
-                    http1_handler
-                        .write_response_with_headers(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                        )
-                        .await?;
+                    write_custom_http1_response(
+                        context.as_ref(),
+                        &http1_handler,
+                        &mut stream,
+                        &request,
+                        response,
+                        true,
+                        false,
+                    )
+                    .await?;
                 } else {
                     http1_handler
                         .write_response(&mut stream, 403, "Forbidden", result.reason.as_bytes())
@@ -279,16 +259,7 @@ pub(crate) async fn handle_http1_connection(
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);
             }
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
@@ -347,59 +318,32 @@ pub(crate) async fn handle_http1_connection(
                     &early_inspection_result,
                 );
             }
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(early_inspection_result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            record_l7_block_feedback(context.as_ref(), packet, &request, &early_inspection_result);
             if result_should_drop_http1(&early_inspection_result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
             if let Some(response) = early_inspection_result.custom_response.as_ref() {
-                let response =
-                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                        context.as_ref(),
-                        &resolve_runtime_custom_response(response),
-                    );
+                let status_code = write_custom_http1_response(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    &request,
+                    response,
+                    true,
+                    false,
+                )
+                .await?;
                 context.note_ai_route_result(
                     &request,
                     AiRouteResultObservation {
-                        status_code: response.status_code,
+                        status_code,
                         latency_ms: None,
                         upstream_error: false,
                         local_response: true,
                         blocked: true,
                     },
                 );
-                let body = body_for_request(&request, &response.body);
-                if let Some(tarpit) = response.tarpit.as_ref() {
-                    http1_handler
-                        .write_response_with_headers_tarpit(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                            tarpit,
-                        )
-                        .await?;
-                } else {
-                    http1_handler
-                        .write_response_with_headers(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                        )
-                        .await?;
-                }
             } else {
                 http1_handler
                     .write_response(
@@ -428,55 +372,22 @@ pub(crate) async fn handle_http1_connection(
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);
             }
-            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                context.as_ref(),
-                packet,
-                &request,
-                &result,
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
-                let response =
-                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                        context.as_ref(),
-                        &resolve_runtime_custom_response(response),
-                    );
-                let body = body_for_request(&request, &response.body);
-                if let Some(tarpit) = response.tarpit.as_ref() {
-                    http1_handler
-                        .write_response_with_headers_tarpit(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                            tarpit,
-                        )
-                        .await?;
-                } else {
-                    http1_handler
-                        .write_response_with_headers(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                        )
-                        .await?;
-                }
+                write_custom_http1_response(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    &request,
+                    response,
+                    true,
+                    false,
+                )
+                .await?;
             } else {
                 http1_handler
                     .write_response(
@@ -503,55 +414,22 @@ pub(crate) async fn handle_http1_connection(
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);
             }
-            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                context.as_ref(),
-                packet,
-                &request,
-                &result,
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
-                let response =
-                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                        context.as_ref(),
-                        &resolve_runtime_custom_response(response),
-                    );
-                let body = body_for_request(&request, &response.body);
-                if let Some(tarpit) = response.tarpit.as_ref() {
-                    http1_handler
-                        .write_response_with_headers_tarpit(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                            tarpit,
-                        )
-                        .await?;
-                } else {
-                    http1_handler
-                        .write_response_with_headers(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                        )
-                        .await?;
-                }
+                write_custom_http1_response(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    &request,
+                    response,
+                    true,
+                    false,
+                )
+                .await?;
             } else {
                 http1_handler
                     .write_response(
@@ -604,16 +482,7 @@ pub(crate) async fn handle_http1_connection(
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);
             }
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
@@ -650,38 +519,22 @@ pub(crate) async fn handle_http1_connection(
             if result.should_persist_event() {
                 persist_http_inspection_event(context.as_ref(), packet, &request, &result);
             }
-            crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                context.as_ref(),
-                packet,
-                &request,
-                &result,
-            );
-            if let Some(metrics) = context.metrics.as_ref() {
-                metrics.record_block(result.layer.clone());
-            }
-            if let Some(inspector) = context.l4_inspector() {
-                inspector.record_l7_feedback(
-                    packet,
-                    &request,
-                    crate::l4::behavior::FeedbackSource::L7Block,
-                );
-            }
+            enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
-                let response = resolve_runtime_custom_response(response);
-                let body = body_for_request(&request, &response.body);
-                http1_handler
-                    .write_response_with_headers(
-                        &mut stream,
-                        response.status_code,
-                        http_status_text(response.status_code),
-                        &response.headers,
-                        &body,
-                    )
-                    .await?;
+                write_custom_http1_response(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    &request,
+                    response,
+                    false,
+                    false,
+                )
+                .await?;
             }
             if !should_keep_client_connection_open(&request) {
                 return Ok(());
@@ -705,38 +558,22 @@ pub(crate) async fn handle_http1_connection(
                 if result.should_persist_event() {
                     persist_http_inspection_event(context.as_ref(), packet, &request, &result);
                 }
-                crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                    context.as_ref(),
-                    packet,
-                    &request,
-                    &result,
-                );
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_block(result.layer.clone());
-                }
-                if let Some(inspector) = context.l4_inspector() {
-                    inspector.record_l7_feedback(
-                        packet,
-                        &request,
-                        crate::l4::behavior::FeedbackSource::L7Block,
-                    );
-                }
+                enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
                 if result_should_drop_http1(&result, &request) {
                     let _ = stream.shutdown().await;
                     return Ok(());
                 }
                 if let Some(response) = result.custom_response.as_ref() {
-                    let response = resolve_runtime_custom_response(response);
-                    let body = body_for_request(&request, &response.body);
-                    http1_handler
-                        .write_response_with_headers(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                        )
-                        .await?;
+                    write_custom_http1_response(
+                        context.as_ref(),
+                        &http1_handler,
+                        &mut stream,
+                        &request,
+                        response,
+                        false,
+                        false,
+                    )
+                    .await?;
                 } else {
                     http1_handler
                         .write_response(
@@ -766,55 +603,22 @@ pub(crate) async fn handle_http1_connection(
                 if result.should_persist_event() {
                     persist_http_inspection_event(context.as_ref(), packet, &request, &result);
                 }
-                crate::core::engine::policy::enforce_runtime_http_block_if_needed(
-                    context.as_ref(),
-                    packet,
-                    &request,
-                    &result,
-                );
-                if let Some(metrics) = context.metrics.as_ref() {
-                    metrics.record_block(result.layer.clone());
-                }
-                if let Some(inspector) = context.l4_inspector() {
-                    inspector.record_l7_feedback(
-                        packet,
-                        &request,
-                        crate::l4::behavior::FeedbackSource::L7Block,
-                    );
-                }
+                enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
                 if result_should_drop_http1(&result, &request) {
                     let _ = stream.shutdown().await;
                     return Ok(());
                 }
                 if let Some(response) = result.custom_response.as_ref() {
-                    let response =
-                        crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                            context.as_ref(),
-                            &resolve_runtime_custom_response(response),
-                        );
-                    let body = body_for_request(&request, &response.body);
-                    if let Some(tarpit) = response.tarpit.as_ref() {
-                        http1_handler
-                            .write_response_with_headers_tarpit(
-                                &mut stream,
-                                response.status_code,
-                                http_status_text(response.status_code),
-                                &response.headers,
-                                &body,
-                                tarpit,
-                            )
-                            .await?;
-                    } else {
-                        http1_handler
-                            .write_response_with_headers(
-                                &mut stream,
-                                response.status_code,
-                                http_status_text(response.status_code),
-                                &response.headers,
-                                &body,
-                            )
-                            .await?;
-                    }
+                    write_custom_http1_response(
+                        context.as_ref(),
+                        &http1_handler,
+                        &mut stream,
+                        &request,
+                        response,
+                        true,
+                        false,
+                    )
+                    .await?;
                 } else {
                     context.note_ai_route_result(
                         &request,
@@ -910,34 +714,16 @@ pub(crate) async fn handle_http1_connection(
                 return Ok(());
             }
             if let Some(response) = inspection_result.custom_response.as_ref() {
-                let response =
-                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                        context.as_ref(),
-                        &resolve_runtime_custom_response(response),
-                    );
-                let body = body_for_request(&request, &response.body);
-                if let Some(tarpit) = response.tarpit.as_ref() {
-                    http1_handler
-                        .write_response_with_headers_tarpit(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                            tarpit,
-                        )
-                        .await?;
-                } else {
-                    http1_handler
-                        .write_response_with_headers(
-                            &mut stream,
-                            response.status_code,
-                            http_status_text(response.status_code),
-                            &response.headers,
-                            &body,
-                        )
-                        .await?;
-                }
+                write_custom_http1_response(
+                    context.as_ref(),
+                    &http1_handler,
+                    &mut stream,
+                    &request,
+                    response,
+                    true,
+                    false,
+                )
+                .await?;
             } else {
                 context.note_ai_route_result(
                     &request,
@@ -958,271 +744,24 @@ pub(crate) async fn handle_http1_connection(
                     )
                     .await?;
             }
-        } else {
-            let upstream_addr = select_upstream_target(matched_site.as_ref());
-            if let Some(upstream_addr) = upstream_addr.as_deref() {
-                if let Err(reason) = enforce_upstream_policy(context.as_ref()) {
-                    context.traffic_map.record_ingress(
-                        traffic_source_ip.clone(),
-                        request_dump.len(),
-                        false,
-                    );
-                    if let Some(metrics) = context.metrics.as_ref() {
-                        metrics.record_fail_close_rejection();
-                    }
-                    http1_handler
-                        .write_response(
-                            &mut stream,
-                            503,
-                            "Service Unavailable",
-                            reason.to_string().as_bytes(),
-                        )
-                        .await?;
-                    return Ok(());
-                }
-                if let Some(metrics) = context.metrics.as_ref() {
-                    let labels = proxy_metric_labels(&request);
-                    metrics.record_proxy_attempt_with_labels(proxy_traffic_kind(&request), &labels);
-                }
-                let proxy_started_at = Instant::now();
-                let proxy_result = if config.gateway_config.enable_ntlm
-                    && config.l7_config.upstream_http1_allow_connection_reuse
-                    && !config.l7_config.upstream_http1_strict_mode
-                {
-                    proxy_http_request_with_session_affinity(
-                        context.as_ref(),
-                        &request,
-                        upstream_addr,
-                        config.l7_config.proxy_connect_timeout_ms,
-                        config.l7_config.proxy_write_timeout_ms,
-                        config.l7_config.proxy_read_timeout_ms,
-                        &mut reusable_upstream_connection,
-                    )
-                    .await
-                } else {
-                    proxy_http_request(
-                        context.as_ref(),
-                        &request,
-                        upstream_addr,
-                        config.l7_config.proxy_connect_timeout_ms,
-                        config.l7_config.proxy_write_timeout_ms,
-                        config.l7_config.proxy_read_timeout_ms,
-                    )
-                    .await
-                };
-                match proxy_result {
-                    Ok(response) => {
-                        if let Some(metrics) = context.metrics.as_ref() {
-                            let labels = proxy_metric_labels(&request);
-                            metrics.record_proxy_success_with_labels(
-                                proxy_traffic_kind(&request),
-                                proxy_started_at.elapsed(),
-                                &labels,
-                            );
-                        }
-                        context.traffic_map.record_egress(
-                            traffic_source_ip.clone(),
-                            response.body.len(),
-                            proxy_started_at.elapsed(),
-                        );
-                        match apply_safeline_upstream_action(
-                            context.as_ref(),
-                            packet,
-                            &request,
-                            matched_site.as_ref(),
-                            resolve_safeline_intercept_config(&config, matched_site.as_ref()),
-                            response,
-                        ) {
-                            UpstreamResponseDisposition::Forward(response) => {
-                                context.traffic_map.record_ingress(
-                                    traffic_source_ip.clone(),
-                                    request_dump.len(),
-                                    false,
-                                );
-                                context.note_ai_route_result(
-                                    &request,
-                                    AiRouteResultObservation {
-                                        status_code: response.status_code,
-                                        latency_ms: Some(
-                                            proxy_started_at.elapsed().as_millis() as u64
-                                        ),
-                                        upstream_error: response.status_code >= 500,
-                                        local_response: false,
-                                        blocked: false,
-                                    },
-                                );
-                                write_http1_upstream_response(
-                                    context.as_ref(),
-                                    &mut stream,
-                                    &response,
-                                )
-                                .await?;
-                            }
-                            UpstreamResponseDisposition::Custom(response) => {
-                                context.traffic_map.record_ingress(
-                                    traffic_source_ip.clone(),
-                                    request_dump.len(),
-                                    true,
-                                );
-                                let response = crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
-                                    context.as_ref(),
-                                    &resolve_runtime_custom_response(&response),
-                                );
-                                let body = body_for_request(&request, &response.body);
-                                let mut headers = response.headers.clone();
-                                apply_response_policies(
-                                    context.as_ref(),
-                                    &mut headers,
-                                    response.status_code,
-                                );
-                                context.note_ai_route_result(
-                                    &request,
-                                    AiRouteResultObservation {
-                                        status_code: response.status_code,
-                                        latency_ms: Some(
-                                            proxy_started_at.elapsed().as_millis() as u64
-                                        ),
-                                        upstream_error: false,
-                                        local_response: true,
-                                        blocked: response.status_code >= 400,
-                                    },
-                                );
-                                if let Some(tarpit) = response.tarpit.as_ref() {
-                                    http1_handler
-                                        .write_response_with_headers_tarpit(
-                                            &mut stream,
-                                            response.status_code,
-                                            http_status_text(response.status_code),
-                                            &headers,
-                                            &body,
-                                            tarpit,
-                                        )
-                                        .await?;
-                                } else {
-                                    http1_handler
-                                        .write_response_with_headers(
-                                            &mut stream,
-                                            response.status_code,
-                                            http_status_text(response.status_code),
-                                            &headers,
-                                            &body,
-                                        )
-                                        .await?;
-                                }
-                            }
-                            UpstreamResponseDisposition::Drop => {
-                                context.traffic_map.record_ingress(
-                                    traffic_source_ip.clone(),
-                                    request_dump.len(),
-                                    true,
-                                );
-                                context.note_ai_route_result(
-                                    &request,
-                                    AiRouteResultObservation {
-                                        status_code: 499,
-                                        latency_ms: Some(
-                                            proxy_started_at.elapsed().as_millis() as u64
-                                        ),
-                                        upstream_error: false,
-                                        local_response: true,
-                                        blocked: true,
-                                    },
-                                );
-                                let _ = stream.shutdown().await;
-                                return Ok(());
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        context.traffic_map.record_ingress(
-                            traffic_source_ip.clone(),
-                            request_dump.len(),
-                            false,
-                        );
-                        if let Some(metrics) = context.metrics.as_ref() {
-                            let labels = proxy_metric_labels(&request);
-                            metrics.record_proxy_failure_with_labels(
-                                proxy_traffic_kind(&request),
-                                &labels,
-                            );
-                        }
-                        context.set_upstream_health(false, Some(err.to_string()));
-                        warn!(
-                            "Failed to proxy HTTP/1.1 request from {} to {}: {}",
-                            peer_addr, upstream_addr, err
-                        );
-                        http1_handler
-                            .write_response(
-                                &mut stream,
-                                502,
-                                "Bad Gateway",
-                                b"upstream proxy failed",
-                            )
-                            .await?;
-                        context.note_ai_route_result(
-                            &request,
-                            AiRouteResultObservation {
-                                status_code: 502,
-                                latency_ms: Some(proxy_started_at.elapsed().as_millis() as u64),
-                                upstream_error: true,
-                                local_response: false,
-                                blocked: false,
-                            },
-                        );
-                    }
-                }
-            } else if matched_site.is_some() {
-                context.traffic_map.record_ingress(
-                    traffic_source_ip.clone(),
-                    request_dump.len(),
-                    false,
-                );
-                http1_handler
-                    .write_response(
-                        &mut stream,
-                        502,
-                        "Bad Gateway",
-                        b"site upstream not configured",
-                    )
-                    .await?;
-            } else if should_reject_unmatched_site(context.as_ref(), &request) {
-                context.traffic_map.record_ingress(
-                    traffic_source_ip.clone(),
-                    request_dump.len(),
-                    false,
-                );
-                if config.console_settings.drop_unmatched_requests {
-                    let _ = stream.shutdown().await;
-                    return Ok(());
-                }
-                http1_handler
-                    .write_response(&mut stream, 404, "Not Found", b"site not found")
-                    .await?;
-            } else {
-                context.traffic_map.record_ingress(
-                    traffic_source_ip.clone(),
-                    request_dump.len(),
-                    false,
-                );
-                let metrics = context.metrics_snapshot();
-                let metrics_line = metrics
-                    .map(|snapshot| {
-                        format!(
-                            "packets={},blocked={},blocked_l4={},blocked_l7={},bytes={}",
-                            snapshot.total_packets,
-                            snapshot.blocked_packets,
-                            snapshot.blocked_l4,
-                            snapshot.blocked_l7,
-                            snapshot.total_bytes
-                        )
-                    })
-                    .unwrap_or_else(|| "metrics=disabled".to_string());
-
-                let body = format!("allowed\n{}\n", metrics_line);
-                http1_handler
-                    .write_response(&mut stream, 200, "OK", body.as_bytes())
-                    .await?;
-            }
+        } else if matches!(
+            handle_http1_proxy_or_local_response(
+                context.as_ref(),
+                &http1_handler,
+                &mut stream,
+                packet,
+                peer_addr,
+                &config,
+                matched_site.as_ref(),
+                &request,
+                &traffic_source_ip,
+                request_dump.len(),
+                &mut reusable_upstream_connection,
+            )
+            .await?,
+            Http1RequestFlow::Close
+        ) {
+            return Ok(());
         }
 
         if !should_keep_client_connection_open(&request) {

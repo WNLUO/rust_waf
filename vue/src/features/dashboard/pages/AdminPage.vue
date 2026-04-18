@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, onMounted, onBeforeUnmount } from 'vue'
 import AppLayout from '@/app/layout/AppLayout.vue'
-import MetricWidget from '@/shared/ui/MetricWidget.vue'
-import StatusBadge from '@/shared/ui/StatusBadge.vue'
+import AdminDashboardAiAutomationPanel from '@/features/dashboard/components/AdminDashboardAiAutomationPanel.vue'
+import AdminDashboardDefenseMatrix from '@/features/dashboard/components/AdminDashboardDefenseMatrix.vue'
+import AdminDashboardPerformanceGrid from '@/features/dashboard/components/AdminDashboardPerformanceGrid.vue'
 import { RefreshCw } from 'lucide-vue-next'
 import { useAdminDashboardPage } from '@/features/dashboard/composables/useAdminDashboardPage'
+import type { PerformanceCard } from '@/features/dashboard/components/AdminDashboardPerformanceGrid.vue'
 import {
   aiPolicyDetailLine,
   aiPolicyStatusLabel,
@@ -341,35 +343,6 @@ const hiddenAiPolicyFeedbackCount = computed(() =>
     : Math.max((aiAutomation.value?.recent_policy_feedback.length || 0) - 2, 0),
 )
 
-type PerformanceGaugeCard = {
-  kind: 'gauge'
-  label: string
-  value: string
-  gaugeValue: string
-  primaryLabel: string
-  primaryValue: string
-  secondaryLabel: string
-  secondaryValue: string
-  percent: number
-  tone: string
-  color: string
-  track: string
-}
-
-type PerformanceIoCard = {
-  kind: 'io'
-  label: string
-  readValue: string
-  writeValue: string
-  readPercent: number
-  writePercent: number
-  tone: string
-  color: string
-  track: string
-}
-
-type PerformanceCard = PerformanceGaugeCard | PerformanceIoCard
-
 const smoothIoReadPercent = ref(0)
 const smoothIoWritePercent = ref(0)
 const smoothTotalPackets = ref(0)
@@ -695,150 +668,32 @@ const defenseMatrix = computed(() => {
     </div>
 
     <div v-else class="space-y-3">
-      <section class="grid grid-cols-2 gap-2 lg:grid-cols-4 2xl:grid-cols-7">
-        <div
-          v-for="card in performanceCards"
-          :key="card.label"
-          class="flex min-h-[5.75rem] min-w-0 flex-col rounded-xl border px-2.5 py-2 shadow-sm"
-          :class="card.tone"
-        >
-          <p class="truncate text-xs font-medium opacity-75">
-            {{ card.label }}
-          </p>
-          <div
-            v-if="card.kind === 'gauge'"
-            class="mt-1.5 flex min-w-0 items-center gap-2.5"
-          >
-            <div
-              class="relative grid h-12 w-12 shrink-0 place-items-center rounded-full"
-              :style="{
-                background: `conic-gradient(${card.color} ${card.percent * 3.6}deg, ${card.track} 0deg)`,
-              }"
-            >
-              <div
-                class="grid h-9 w-9 place-items-center rounded-full bg-white text-[10px] font-semibold text-slate-950 shadow-inner"
-                :title="card.value"
-              >
-                {{ card.gaugeValue }}
-              </div>
-            </div>
-            <div class="grid min-w-0 flex-1 gap-1 leading-none">
-              <div class="flex min-w-0 items-baseline justify-between gap-2">
-                <p class="text-[10px] leading-3 text-slate-500">
-                  {{ card.primaryLabel }}
-                </p>
-                <p
-                  class="truncate text-xs font-semibold leading-4 text-slate-950"
-                  :title="card.primaryValue"
-                >
-                  {{ card.primaryValue }}
-                </p>
-              </div>
-              <div class="flex min-w-0 items-baseline justify-between gap-2">
-                <p class="text-[10px] leading-3 text-slate-500">
-                  {{ card.secondaryLabel }}
-                </p>
-                <p
-                  class="truncate text-xs font-semibold leading-4 text-slate-950"
-                  :title="card.secondaryValue"
-                >
-                  {{ card.secondaryValue }}
-                </p>
-              </div>
-            </div>
-          </div>
-          <div v-else class="mt-2 min-w-0">
-            <div class="grid gap-1.5 text-[11px]">
-              <div class="min-w-0">
-                <div class="flex min-w-0 items-baseline justify-between gap-2">
-                  <p class="text-slate-500">Read</p>
-                  <p
-                    class="truncate font-semibold leading-4 text-slate-950"
-                    :title="card.readValue"
-                  >
-                    {{ card.readValue }}
-                  </p>
-                </div>
-                <div
-                  class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"
-                >
-                  <div
-                    class="h-full rounded-full bg-indigo-600"
-                    :style="{ width: `${card.readPercent}%` }"
-                  ></div>
-                </div>
-              </div>
-              <div class="min-w-0">
-                <div class="flex min-w-0 items-baseline justify-between gap-2">
-                  <p class="text-slate-500">Write</p>
-                  <p
-                    class="truncate font-semibold leading-4 text-slate-950"
-                    :title="card.writeValue"
-                  >
-                    {{ card.writeValue }}
-                  </p>
-                </div>
-                <div
-                  class="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100"
-                >
-                  <div
-                    class="h-full rounded-full bg-cyan-600"
-                    :style="{ width: `${card.writePercent}%` }"
-                  ></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <MetricWidget
-          label="累计处理报文"
-          :value="formatNumber(Math.round(smoothTotalPackets))"
-          :hint="`累计处理 ${formatBytes(dashboard?.metrics.total_bytes || 0)}`"
-          :series="metricsHistory.totalPackets"
-          :series-min="0"
-          :series-max="packetSparkMax"
-          ambient-series
-          no-top-line
-          trend-placement="corner"
-          filled
-        />
-        <MetricWidget
-          label="平均代理延迟"
-          :value="
-            formatLatencyEnglish(
-              smoothLatencyMicros,
-            )
-          "
-          :hint="`失败关闭次数 ${formatNumber(dashboard?.metrics.proxy_fail_close_rejections || 0)}`"
-          :trend="metricTrends.latency"
-          :series="metricsHistory.latency"
-          :series-min="0"
-          :series-max="latencySparkMax"
-          ambient-series
-          no-top-line
-          trend-placement="corner"
-          filled
-        />
-        <MetricWidget
-          label="代理成功率"
-          :value="successRate"
-          :hint="`成功 ${formatNumber(dashboard?.metrics.proxy_successes || 0)} / 失败 ${formatNumber(dashboard?.metrics.proxy_failures || 0)}`"
-          :trend="metricTrends.successRate"
-          :progress="proxySuccessPercent"
-          no-top-line
-          trend-placement="corner"
-          filled
-        />
-        <MetricWidget
-          label="累计拦截次数"
-          :value="formatNumber(dashboard?.metrics.blocked_packets || 0)"
-          :hint="`四层 ${formatNumber(dashboard?.metrics.blocked_l4 || 0)} / HTTP ${formatNumber(dashboard?.metrics.blocked_l7 || 0)}`"
-          :trend="metricTrends.blocked"
-          no-top-line
-          trend-placement="corner"
-          filled
-        />
-      </section>
+      <AdminDashboardPerformanceGrid
+        :cards="performanceCards"
+        :total-packets="smoothTotalPackets"
+        :total-bytes="dashboard?.metrics.total_bytes || 0"
+        :total-packet-series="metricsHistory.totalPackets"
+        :packet-spark-max="packetSparkMax"
+        :latency-value="smoothLatencyMicros"
+        :proxy-fail-close-rejections="
+          dashboard?.metrics.proxy_fail_close_rejections || 0
+        "
+        :latency-trend="metricTrends.latency"
+        :latency-series="metricsHistory.latency"
+        :latency-spark-max="latencySparkMax"
+        :success-rate="successRate"
+        :proxy-successes="dashboard?.metrics.proxy_successes || 0"
+        :proxy-failures="dashboard?.metrics.proxy_failures || 0"
+        :success-rate-trend="metricTrends.successRate"
+        :proxy-success-percent="proxySuccessPercent"
+        :blocked-packets="dashboard?.metrics.blocked_packets || 0"
+        :blocked-l4="dashboard?.metrics.blocked_l4 || 0"
+        :blocked-l7="dashboard?.metrics.blocked_l7 || 0"
+        :blocked-trend="metricTrends.blocked"
+        :format-number="formatNumber"
+        :format-bytes="formatBytes"
+        :format-latency="formatLatencyEnglish"
+      />
 
       <section class="grid gap-3 xl:grid transition-[grid-template-columns] duration-500 ease-in-out" :class="trafficOverviewGridClass">
         <AdminEventMapSection
@@ -863,277 +718,33 @@ const defenseMatrix = computed(() => {
       <section
         class="grid gap-3 xl:grid-cols-[minmax(0,0.92fr)_minmax(430px,1.08fr)]"
       >
-        <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-          <div
-            v-for="item in defenseMatrix"
-            :key="item.label"
-            class="relative min-h-[8.25rem] min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
-          >
-            <div class="flex min-w-0 items-start justify-between gap-2">
-              <p class="truncate text-xs font-semibold text-slate-900">
-                {{ item.label }}
-              </p>
-              <StatusBadge :text="item.badge" :type="item.type" compact />
-            </div>
+        <AdminDashboardDefenseMatrix :items="defenseMatrix" />
 
-            <div class="mt-2 grid grid-cols-2 gap-2">
-              <div
-                v-for="stat in item.primaryStats"
-                :key="stat.label"
-                class="flex min-w-0 items-baseline justify-between gap-2 border-l border-slate-200 pl-2 first:border-l-0 first:pl-0"
-              >
-                <p class="shrink-0 truncate text-[10px] text-slate-500">
-                  {{ stat.label }}
-                </p>
-                <p
-                  class="min-w-0 truncate text-right text-base font-semibold leading-5 text-slate-950"
-                  :class="stat.class"
-                  :title="stat.value"
-                >
-                  {{ stat.value }}
-                </p>
-              </div>
-            </div>
-
-            <div
-              class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2"
-            >
-              <div
-                v-for="stat in item.secondaryStats"
-                :key="stat.label"
-                class="flex min-w-0 items-baseline justify-between gap-2 text-[11px]"
-              >
-                <span class="shrink-0 text-slate-500">{{ stat.label }}</span>
-                <span
-                  class="min-w-0 truncate text-right font-semibold text-slate-900"
-                  :class="stat.class"
-                  :title="stat.value"
-                >
-                  {{ stat.value }}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
-        >
-          <div
-            class="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-blue-50/80 to-transparent"
-          ></div>
-          <div class="relative flex min-w-0 items-start justify-between gap-3">
-            <div
-              class="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 pr-2"
-            >
-              <p class="truncate text-xs font-semibold text-slate-950">
-                AI自动化
-              </p>
-              <div
-                class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-slate-500"
-              >
-                <span>{{ providerLabel(aiAutomation?.provider) }}</span>
-                <span class="text-slate-300">/</span>
-                <span>
-                  {{
-                    aiAutomation?.auto_apply_temp_policies
-                      ? '自动应用'
-                      : '仅建议'
-                  }}
-                </span>
-                <span class="text-slate-300">/</span>
-                <span>{{
-                  pressureLabel(aiAutomation?.runtime_pressure_level)
-                }}</span>
-                <span class="text-slate-300">/</span>
-                <span class="font-medium text-slate-700">
-                  上次运行 {{ aiLastRunLabel }}
-                </span>
-              </div>
-            </div>
-            <StatusBadge
-              :text="aiAutomationStatusLabel"
-              :type="aiAutomationStatusType"
-              compact
-            />
-          </div>
-
-          <div
-            class="relative mx-auto mt-3 grid w-full max-w-[42rem] grid-cols-3 gap-2 text-center md:grid-cols-6"
-          >
-            <div
-              v-for="item in aiAutomationStats"
-              :key="item.label"
-              class="min-w-0"
-            >
-              <p class="truncate text-[10px] text-slate-500">
-                {{ item.label }}
-              </p>
-              <p
-                class="mt-0.5 truncate text-sm font-semibold text-slate-950"
-                :class="item.class"
-                :title="item.value"
-              >
-                {{ item.value }}
-              </p>
-            </div>
-          </div>
-
-          <div class="relative mt-3 grid grid-cols-3 gap-3">
-            <div
-              v-for="row in aiAutomationPressureRows"
-              :key="row.label"
-              class="min-w-0 text-[11px]"
-            >
-              <div class="mb-1 flex min-w-0 items-center justify-between gap-2">
-                <span class="truncate text-slate-500">{{ row.label }}</span>
-                <span class="shrink-0 font-semibold text-slate-800">
-                  {{ formatPercent(row.value) }}
-                </span>
-              </div>
-              <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  class="h-full rounded-full"
-                  :class="row.color"
-                  :style="{ width: `${clampPercent(row.value)}%` }"
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            class="relative mt-3 grid gap-3 border-t border-slate-100 pt-2 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
-          >
-            <div class="min-w-0">
-              <div class="mb-1.5 flex items-center justify-between text-[11px]">
-                <span class="font-medium text-slate-700">AI判定窗口</span>
-                <span class="text-slate-400">
-                  {{ formatNumber(aiAutomation?.active_rules || 0) }} 条规则
-                </span>
-              </div>
-              <div class="grid grid-cols-3 gap-1.5">
-                <div
-                  v-for="window in aiTrendWindows"
-                  :key="window.label"
-                  class="min-w-0"
-                  :title="`${window.labelText}: ${formatNumber(window.total_events)} 事件 / ${formatNumber(window.blocked_events)} 拦截 / ${formatNumber(window.challenged_events)} 挑战 / ${formatNumber(window.delayed_events)} 延迟`"
-                >
-                  <div class="flex h-9 items-end gap-0.5">
-                    <span
-                      v-for="bar in window.bars"
-                      :key="bar.label"
-                      class="block min-h-1 flex-1 rounded-sm"
-                      :class="bar.color"
-                      :style="{
-                        height: `${Math.max(4, (bar.value / aiTrendMax) * 36)}px`,
-                        opacity: bar.value > 0 ? 1 : 0.25,
-                      }"
-                    ></span>
-                  </div>
-                  <span
-                    class="mx-auto mt-1 block max-w-full truncate text-center text-[10px] text-slate-500"
-                  >
-                    {{ window.labelText }}
-                  </span>
-                  <div
-                    class="mt-0.5 grid grid-cols-2 gap-x-1 gap-y-0.5 text-[10px]"
-                  >
-                    <span
-                      v-for="bar in window.bars"
-                      :key="`${bar.label}-value`"
-                      class="flex min-w-0 justify-between gap-1 text-slate-500"
-                    >
-                      <span class="truncate">{{ bar.label }}</span>
-                      <span class="font-semibold text-slate-800">
-                        {{ formatNumber(bar.value) }}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-                <div
-                  v-if="!aiTrendWindows.length"
-                  class="col-span-3 grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
-                >
-                  暂无趋势样本
-                </div>
-              </div>
-            </div>
-
-            <div class="min-w-0">
-              <div class="mb-1.5 flex items-center justify-between text-[11px]">
-                <span class="font-medium text-slate-700">策略反馈</span>
-                <span class="text-slate-400">
-                  {{
-                    formatNumber(
-                      aiAutomation?.recent_policy_feedback.length || 0,
-                    )
-                  }}
-                  条<span v-if="hiddenAiPolicyFeedbackCount > 0">
-                    · 还有{{
-                      formatNumber(hiddenAiPolicyFeedbackCount)
-                    }}条</span
-                  >
-                </span>
-              </div>
-              <div
-                class="grid gap-1.5"
-                :class="
-                  aiPolicyFeedbackExpanded
-                    ? 'max-h-[5.75rem] overflow-y-auto pr-1'
-                    : ''
-                "
-              >
-                <div
-                  v-for="policy in visibleAiPolicyFeedback"
-                  :key="policy.policy_key"
-                  class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b border-slate-100 pb-1.5 text-[11px] last:border-b-0 last:pb-0"
-                >
-                  <span
-                    class="min-w-0 truncate font-medium leading-4 text-slate-800"
-                    :title="aiPolicyDetailLine(policy) || aiPolicyTitle(policy)"
-                  >
-                    {{ aiPolicyTitle(policy) }}
-                  </span>
-                  <span
-                    class="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
-                    :title="aiPolicyStatusLabel(policy.action_status)"
-                  >
-                    {{ aiPolicyStatusLabel(policy.action_status) }}
-                  </span>
-                  <span
-                    class="shrink-0 whitespace-nowrap text-[10px] font-semibold text-slate-900"
-                  >
-                    {{ formatNumber(policy.hit_count) }} 命中
-                  </span>
-                  <span
-                    class="shrink-0 whitespace-nowrap text-right text-[10px] text-slate-500"
-                    :title="formatPolicyTime(policy.updated_at)"
-                  >
-                    {{ formatPolicyTime(policy.updated_at) }}
-                  </span>
-                </div>
-                <div
-                  v-if="!(aiAutomation?.recent_policy_feedback || []).length"
-                  class="grid min-h-[3.4rem] place-items-center text-[11px] text-slate-400"
-                >
-                  暂无自动策略命中
-                </div>
-              </div>
-              <button
-                v-if="(aiAutomation?.recent_policy_feedback.length || 0) > 2"
-                type="button"
-                class="mt-1 h-6 w-full rounded-md border border-slate-200 bg-white text-[11px] font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                @click="aiPolicyFeedbackExpanded = !aiPolicyFeedbackExpanded"
-              >
-                {{
-                  aiPolicyFeedbackExpanded
-                    ? '收起'
-                    : `查看更多 ${formatNumber(hiddenAiPolicyFeedbackCount)} 条`
-                }}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AdminDashboardAiAutomationPanel
+          :overview="aiAutomation"
+          :status-label="aiAutomationStatusLabel"
+          :status-type="aiAutomationStatusType"
+          :last-run-label="aiLastRunLabel"
+          :stats="aiAutomationStats"
+          :pressure-rows="aiAutomationPressureRows"
+          :trend-windows="aiTrendWindows"
+          :trend-max="aiTrendMax"
+          :visible-policy-feedback="visibleAiPolicyFeedback"
+          :hidden-policy-feedback-count="hiddenAiPolicyFeedbackCount"
+          :policy-feedback-expanded="aiPolicyFeedbackExpanded"
+          :provider-label="providerLabel"
+          :pressure-label="pressureLabel"
+          :format-percent="formatPercent"
+          :clamp-percent="clampPercent"
+          :format-number="formatNumber"
+          :format-policy-time="formatPolicyTime"
+          :ai-policy-title="aiPolicyTitle"
+          :ai-policy-detail-line="aiPolicyDetailLine"
+          :ai-policy-status-label="aiPolicyStatusLabel"
+          @update:policy-feedback-expanded="
+            aiPolicyFeedbackExpanded = $event
+          "
+        />
       </section>
     </div>
   </AppLayout>

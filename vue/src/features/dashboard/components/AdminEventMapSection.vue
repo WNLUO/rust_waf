@@ -426,15 +426,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="cyber-card h-[500px] flex flex-col overflow-hidden">
-    <div class="flex items-center justify-between mb-4 px-2">
+  <div class="cyber-card h-[410px] flex flex-col overflow-hidden">
+    <div class="mb-2 flex items-center justify-between px-1">
       <div class="flex items-center gap-2">
         <div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
         <h3 class="text-sm font-medium text-slate-300 uppercase tracking-wider">
           实时流量监控 (CDN ↔ 源站)
         </h3>
       </div>
-      <div class="flex items-center gap-4 text-xs text-slate-500">
+      <div class="hidden items-center gap-3 text-xs text-slate-500 sm:flex">
         <div class="flex items-center gap-1">
           <span class="w-2 h-[2px] bg-blue-500"></span>
           <span>CDN 请求</span>
@@ -478,7 +478,7 @@ onBeforeUnmount(() => {
 
       <!-- 状态覆盖层 -->
       <div
-        class="absolute bottom-4 left-4 bg-slate-900/60 backdrop-blur-md border border-slate-700 p-3 rounded-lg flex flex-col gap-2 min-w-[140px]"
+        class="absolute bottom-3 left-3 flex min-w-[132px] flex-col gap-1.5 rounded-lg border border-slate-700 bg-slate-900/60 p-2.5 backdrop-blur-md"
       >
         <div
           class="flex justify-between items-center text-[10px] text-slate-400"
@@ -514,7 +514,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
   border: 1px solid #334155;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-  padding: 1.5rem;
+  padding: 1rem;
   border-radius: 0.75rem;
 }
 </style>

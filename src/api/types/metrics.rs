@@ -64,6 +64,20 @@ pub struct MetricsResponse {
     pub(crate) runtime_behavior_sample_stride: u64,
     pub(crate) storage_degraded_reasons: Vec<String>,
     pub(crate) storage_attack_insights: StorageAttackInsightsResponse,
+    pub(crate) system: SystemMetricsResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct SystemMetricsResponse {
+    pub(crate) cpu_usage_percent: f32,
+    pub(crate) cpu_core_count: usize,
+    pub(crate) memory_used_bytes: u64,
+    pub(crate) memory_total_bytes: u64,
+    pub(crate) memory_usage_percent: f32,
+    pub(crate) network_rx_bytes_per_sec: u64,
+    pub(crate) network_tx_bytes_per_sec: u64,
+    pub(crate) process_disk_read_bytes_per_sec: u64,
+    pub(crate) process_disk_write_bytes_per_sec: u64,
 }
 
 #[derive(Debug, Serialize, Default)]

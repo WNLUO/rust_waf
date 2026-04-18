@@ -1,5 +1,11 @@
-use super::types::{MetricsResponse, StorageAttackHotspotResponse, StorageAttackInsightsResponse};
+use super::types::{
+    MetricsResponse, StorageAttackHotspotResponse, StorageAttackInsightsResponse,
+    SystemMetricsResponse,
+};
 use crate::core::RuntimePressureSnapshot;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+use sysinfo::{get_current_pid, Networks, Pid, ProcessRefreshKind, System};
 
 pub(super) fn build_metrics_response(
     metrics: Option<crate::metrics::MetricsSnapshot>,
@@ -116,7 +122,139 @@ pub(super) fn build_metrics_response(
                 })
                 .collect(),
         },
+        system: sample_system_metrics(),
     }
+}
+
+struct SystemMetricsSampler {
+    system: System,
+    networks: Networks,
+    process_pid: Option<Pid>,
+    previous_network_rx_bytes: u64,
+    previous_network_tx_bytes: u64,
+    previous_process_disk_read_bytes: u64,
+    previous_process_disk_write_bytes: u64,
+    previous_sample_at: Instant,
+}
+
+impl SystemMetricsSampler {
+    fn new() -> Self {
+        let mut system = System::new_all();
+        system.refresh_cpu();
+        system.refresh_memory();
+
+        let networks = Networks::new_with_refreshed_list();
+        let process_pid = get_current_pid().ok();
+        if let Some(pid) = process_pid {
+            system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_disk_usage());
+        }
+        let (network_rx, network_tx) = network_totals(&networks);
+        let (process_disk_read, process_disk_write) = process_disk_totals(&system, process_pid);
+
+        Self {
+            system,
+            networks,
+            process_pid,
+            previous_network_rx_bytes: network_rx,
+            previous_network_tx_bytes: network_tx,
+            previous_process_disk_read_bytes: process_disk_read,
+            previous_process_disk_write_bytes: process_disk_write,
+            previous_sample_at: Instant::now(),
+        }
+    }
+
+    fn sample(&mut self) -> SystemMetricsResponse {
+        self.system.refresh_cpu();
+        self.system.refresh_memory();
+        if let Some(pid) = self.process_pid {
+            self.system
+                .refresh_process_specifics(pid, ProcessRefreshKind::new().with_disk_usage());
+        }
+        self.networks.refresh();
+
+        let now = Instant::now();
+        let elapsed_secs = now
+            .duration_since(self.previous_sample_at)
+            .as_secs_f64()
+            .max(0.001);
+        let (network_rx, network_tx) = network_totals(&self.networks);
+        let (process_disk_read, process_disk_write) =
+            process_disk_totals(&self.system, self.process_pid);
+        let network_rx_bytes_per_sec =
+            rate_per_second(network_rx, self.previous_network_rx_bytes, elapsed_secs);
+        let network_tx_bytes_per_sec =
+            rate_per_second(network_tx, self.previous_network_tx_bytes, elapsed_secs);
+        let process_disk_read_bytes_per_sec = rate_per_second(
+            process_disk_read,
+            self.previous_process_disk_read_bytes,
+            elapsed_secs,
+        );
+        let process_disk_write_bytes_per_sec = rate_per_second(
+            process_disk_write,
+            self.previous_process_disk_write_bytes,
+            elapsed_secs,
+        );
+
+        self.previous_network_rx_bytes = network_rx;
+        self.previous_network_tx_bytes = network_tx;
+        self.previous_process_disk_read_bytes = process_disk_read;
+        self.previous_process_disk_write_bytes = process_disk_write;
+        self.previous_sample_at = now;
+
+        let memory_total_bytes = self.system.total_memory();
+        let memory_used_bytes = self.system.used_memory();
+        let memory_usage_percent = if memory_total_bytes == 0 {
+            0.0
+        } else {
+            (memory_used_bytes as f64 * 100.0 / memory_total_bytes as f64) as f32
+        };
+
+        SystemMetricsResponse {
+            cpu_usage_percent: self.system.global_cpu_info().cpu_usage(),
+            cpu_core_count: self.system.cpus().len(),
+            memory_used_bytes,
+            memory_total_bytes,
+            memory_usage_percent,
+            network_rx_bytes_per_sec,
+            network_tx_bytes_per_sec,
+            process_disk_read_bytes_per_sec,
+            process_disk_write_bytes_per_sec,
+        }
+    }
+}
+
+fn sample_system_metrics() -> SystemMetricsResponse {
+    static SAMPLER: OnceLock<Mutex<SystemMetricsSampler>> = OnceLock::new();
+    let sampler = SAMPLER.get_or_init(|| Mutex::new(SystemMetricsSampler::new()));
+    match sampler.lock() {
+        Ok(mut guard) => guard.sample(),
+        Err(err) => {
+            log::warn!("Failed to sample system metrics: {}", err);
+            SystemMetricsResponse::default()
+        }
+    }
+}
+
+fn network_totals(networks: &Networks) -> (u64, u64) {
+    networks.iter().fold((0_u64, 0_u64), |(rx, tx), (_, data)| {
+        (
+            rx.saturating_add(data.total_received()),
+            tx.saturating_add(data.total_transmitted()),
+        )
+    })
+}
+
+fn process_disk_totals(system: &System, pid: Option<Pid>) -> (u64, u64) {
+    pid.and_then(|pid| system.process(pid))
+        .map(|process| {
+            let usage = process.disk_usage();
+            (usage.total_read_bytes, usage.total_written_bytes)
+        })
+        .unwrap_or_default()
+}
+
+fn rate_per_second(current: u64, previous: u64, elapsed_secs: f64) -> u64 {
+    (current.saturating_sub(previous) as f64 / elapsed_secs).round() as u64
 }
 
 fn build_storage_degraded_reasons(

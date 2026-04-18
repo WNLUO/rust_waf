@@ -62,6 +62,19 @@ export interface MetricsResponse {
   runtime_pressure_storage_queue_percent: number
   storage_degraded_reasons: string[]
   storage_attack_insights: StorageAttackInsights
+  system: SystemMetrics
+}
+
+export interface SystemMetrics {
+  cpu_usage_percent: number
+  cpu_core_count: number
+  memory_used_bytes: number
+  memory_total_bytes: number
+  memory_usage_percent: number
+  network_rx_bytes_per_sec: number
+  network_tx_bytes_per_sec: number
+  process_disk_read_bytes_per_sec: number
+  process_disk_write_bytes_per_sec: number
 }
 
 export interface StorageAttackInsights {

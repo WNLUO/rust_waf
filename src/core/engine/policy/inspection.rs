@@ -584,6 +584,7 @@ fn build_request_identity_details_with_header(
         "bot": {
             "known": request.get_metadata("bot.known").cloned(),
             "name": request.get_metadata("bot.name").cloned(),
+            "provider": request.get_metadata("bot.provider").cloned(),
             "category": request.get_metadata("bot.category").cloned(),
             "verification": request.get_metadata("bot.verification").cloned(),
             "policy": request.get_metadata("bot.policy").cloned(),
@@ -598,6 +599,7 @@ fn build_request_identity_details_with_header(
             "hot_path_clients": request.get_metadata("l7.cc.hot_path_clients").cloned(),
             "challenge_verified": request.get_metadata("l7.cc.challenge_verified").cloned(),
             "known_bot_threshold_multiplier": request.get_metadata("l7.cc.known_bot_threshold_multiplier").cloned(),
+            "bot_threshold_scale_percent": request.get_metadata("l7.cc.bot_threshold_scale_percent").cloned(),
         },
         "l7_behavior": {
             "action": request.get_metadata("l7.behavior.action").cloned(),

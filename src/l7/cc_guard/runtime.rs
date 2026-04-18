@@ -61,6 +61,15 @@ impl L7CcGuard {
         } else {
             1
         };
+        let bot_threshold_scale_percent = if request
+            .get_metadata("client.trust_class")
+            .map(String::as_str)
+            == Some("suspect_bot")
+        {
+            60
+        } else {
+            100
+        };
         let reduce_friction = bot_reduce_friction
             || request
                 .get_metadata("ai.visitor.reduce_friction")
@@ -316,6 +325,10 @@ impl L7CcGuard {
             "l7.cc.known_bot_threshold_multiplier".to_string(),
             known_bot_threshold_multiplier.to_string(),
         );
+        request.add_metadata(
+            "l7.cc.bot_threshold_scale_percent".to_string(),
+            bot_threshold_scale_percent.to_string(),
+        );
 
         self.maybe_cleanup(unix_now, &config);
 
@@ -345,28 +358,37 @@ impl L7CcGuard {
             .get_metadata("ai.cc.extra_delay_ms")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(0);
+        let bot_scaled = |value: u32| value.saturating_mul(bot_threshold_scale_percent) / 100;
 
-        let route_block_threshold = config
-            .route_block_threshold
-            .saturating_mul(block_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier)
-            .saturating_mul(route_scale_percent)
-            / 100;
-        let host_block_threshold = config
-            .host_block_threshold
-            .saturating_mul(block_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier)
-            .saturating_mul(interactive_host_ip_block_multiplier);
+        let route_block_threshold = bot_scaled(
+            config
+                .route_block_threshold
+                .saturating_mul(block_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier)
+                .saturating_mul(route_scale_percent)
+                / 100,
+        );
+        let host_block_threshold = bot_scaled(
+            config
+                .host_block_threshold
+                .saturating_mul(block_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier)
+                .saturating_mul(interactive_host_ip_block_multiplier),
+        );
         let host_block_threshold = host_block_threshold.saturating_mul(host_scale_percent) / 100;
-        let ip_block_threshold = config
-            .ip_block_threshold
-            .saturating_mul(block_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier)
-            .saturating_mul(interactive_host_ip_block_multiplier);
-        let hot_path_block_threshold = config
-            .hot_path_block_threshold
-            .saturating_mul(block_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier);
+        let ip_block_threshold = bot_scaled(
+            config
+                .ip_block_threshold
+                .saturating_mul(block_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier)
+                .saturating_mul(interactive_host_ip_block_multiplier),
+        );
+        let hot_path_block_threshold = bot_scaled(
+            config
+                .hot_path_block_threshold
+                .saturating_mul(block_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier),
+        );
 
         let hard_route_block_threshold =
             route_block_threshold.saturating_mul(u32::from(config.hard_route_block_multiplier));
@@ -430,28 +452,36 @@ impl L7CcGuard {
             ));
         }
 
-        let route_challenge_threshold = config
-            .route_challenge_threshold
-            .saturating_mul(challenge_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier)
-            .saturating_mul(route_scale_percent)
-            / 100;
-        let host_challenge_threshold = config
-            .host_challenge_threshold
-            .saturating_mul(challenge_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier)
-            .saturating_mul(interactive_host_ip_multiplier)
-            .saturating_mul(host_scale_percent)
-            / 100;
-        let ip_challenge_threshold = config
-            .ip_challenge_threshold
-            .saturating_mul(challenge_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier)
-            .saturating_mul(interactive_host_ip_multiplier);
-        let hot_path_challenge_threshold = config
-            .hot_path_challenge_threshold
-            .saturating_mul(challenge_multiplier)
-            .saturating_mul(known_bot_threshold_multiplier);
+        let route_challenge_threshold = bot_scaled(
+            config
+                .route_challenge_threshold
+                .saturating_mul(challenge_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier)
+                .saturating_mul(route_scale_percent)
+                / 100,
+        );
+        let host_challenge_threshold = bot_scaled(
+            config
+                .host_challenge_threshold
+                .saturating_mul(challenge_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier)
+                .saturating_mul(interactive_host_ip_multiplier)
+                .saturating_mul(host_scale_percent)
+                / 100,
+        );
+        let ip_challenge_threshold = bot_scaled(
+            config
+                .ip_challenge_threshold
+                .saturating_mul(challenge_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier)
+                .saturating_mul(interactive_host_ip_multiplier),
+        );
+        let hot_path_challenge_threshold = bot_scaled(
+            config
+                .hot_path_challenge_threshold
+                .saturating_mul(challenge_multiplier)
+                .saturating_mul(known_bot_threshold_multiplier),
+        );
         let global_hot_path_client_challenge_threshold =
             global_hot_path_client_challenge_threshold(&config);
         let global_hot_path_effective_challenge_threshold =

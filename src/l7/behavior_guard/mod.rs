@@ -261,11 +261,10 @@ impl L7BehaviorGuard {
             assessment.score = DELAY_SCORE;
             assessment.flags.push("ai_temp_watch");
         }
-        if request
+        let client_trust_class = request
             .get_metadata("client.trust_class")
-            .map(String::as_str)
-            == Some("claimed_good_bot")
-        {
+            .map(String::as_str);
+        if client_trust_class == Some("claimed_good_bot") {
             let reduction = if request.get_metadata("bot.policy").map(String::as_str)
                 == Some("reduce_friction")
             {
@@ -275,6 +274,10 @@ impl L7BehaviorGuard {
             };
             assessment.score = assessment.score.saturating_sub(reduction);
             assessment.flags.push("known_crawler_library");
+        }
+        if client_trust_class == Some("suspect_bot") {
+            assessment.score = assessment.score.saturating_add(20).min(100);
+            assessment.flags.push("crawler_ua_ip_mismatch");
         }
 
         request.add_metadata(

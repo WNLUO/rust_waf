@@ -4,6 +4,7 @@ mod ai_temp_policy;
 mod ai_temp_policy_runtime;
 mod auto_tuning;
 pub(crate) mod bot_intelligence;
+pub(crate) mod bot_verifier;
 pub mod engine;
 mod engine_maintenance;
 mod engine_tls;
@@ -99,6 +100,7 @@ pub struct WafContext {
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
+    bot_ip_verifier: Arc<bot_verifier::BotIpVerifier>,
     visitor_intelligence_buckets:
         DashMap<String, std::sync::Mutex<visitor_intelligence::VisitorIntelligenceBucket>>,
     rule_count: AtomicU64,
@@ -485,6 +487,7 @@ impl WafContext {
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
             server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),
+            bot_ip_verifier: Arc::new(bot_verifier::BotIpVerifier::new()),
             visitor_intelligence_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
@@ -642,6 +645,10 @@ impl WafContext {
             .read()
             .expect("l7_behavior_guard lock poisoned")
             .clone()
+    }
+
+    pub(crate) fn bot_ip_verifier(&self) -> Arc<bot_verifier::BotIpVerifier> {
+        Arc::clone(&self.bot_ip_verifier)
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {

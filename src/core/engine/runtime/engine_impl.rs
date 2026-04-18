@@ -51,6 +51,10 @@ impl WafEngine {
         tokio::spawn(async move {
             let _ = context.refresh_server_public_ip_allowlist(true).await;
         });
+        let verifier = self.context.bot_ip_verifier();
+        tokio::spawn(async move {
+            crate::core::bot_verifier::run_bot_ip_refresh_loop(verifier).await;
+        });
 
         #[cfg(feature = "api")]
         if startup_config.api_enabled {

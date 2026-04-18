@@ -221,6 +221,35 @@ impl SettingsUpdateRequest {
         current.sqlite_enabled = true;
         current.console_settings.notes = self.notes;
         current.integrations.safeline = self.safeline.into_config(&current.integrations.safeline);
+        current.bot_detection = crate::config::BotDetectionConfig {
+            enabled: self.bot_detection.enabled,
+            crawlers: self
+                .bot_detection
+                .crawlers
+                .into_iter()
+                .map(|crawler| crate::config::BotCrawlerConfig {
+                    enabled: crawler.enabled,
+                    name: crawler.name,
+                    provider: crawler.provider,
+                    category: crawler.category,
+                    policy: crawler.policy,
+                    tokens: crawler.tokens,
+                })
+                .collect(),
+            providers: self
+                .bot_detection
+                .providers
+                .into_iter()
+                .map(|provider| crate::config::BotProviderConfig {
+                    enabled: provider.enabled,
+                    id: provider.id,
+                    urls: provider.urls,
+                    format: provider.format,
+                    reverse_dns_enabled: provider.reverse_dns_enabled,
+                    reverse_dns_suffixes: provider.reverse_dns_suffixes,
+                })
+                .collect(),
+        };
 
         Ok(current.normalized())
     }

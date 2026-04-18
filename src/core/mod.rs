@@ -101,6 +101,7 @@ pub struct WafContext {
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
     bot_ip_verifier: Arc<bot_verifier::BotIpVerifier>,
+    bot_provider_config: Arc<RwLock<Vec<crate::config::BotProviderConfig>>>,
     visitor_intelligence_buckets:
         DashMap<String, std::sync::Mutex<visitor_intelligence::VisitorIntelligenceBucket>>,
     rule_count: AtomicU64,
@@ -488,6 +489,7 @@ impl WafContext {
             route_defense_buckets: DashMap::new(),
             server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),
             bot_ip_verifier: Arc::new(bot_verifier::BotIpVerifier::new()),
+            bot_provider_config: Arc::new(RwLock::new(config.bot_detection.providers.clone())),
             visitor_intelligence_buckets: DashMap::new(),
             rule_count: AtomicU64::new(rule_count),
             rule_version: AtomicI64::new(rule_version),
@@ -546,6 +548,11 @@ impl WafContext {
         self.refresh_l7_bloom_filter_from_config();
         self.refresh_l4_behavior_tuning_from_config();
         self.refresh_http3_runtime_metadata();
+        *self
+            .bot_provider_config
+            .write()
+            .expect("bot_provider_config lock poisoned") =
+            self.config_snapshot().bot_detection.providers.clone();
     }
 
     pub fn learn_trusted_cdn_peer(&self, peer_ip: std::net::IpAddr, evidence_header: &str) -> bool {
@@ -658,7 +665,16 @@ impl WafContext {
     }
 
     pub(crate) fn bot_verifier_snapshot(&self) -> bot_verifier::BotVerifierSnapshot {
-        self.bot_ip_verifier.snapshot()
+        let providers = self
+            .bot_provider_config
+            .read()
+            .expect("bot_provider_config lock poisoned")
+            .clone();
+        self.bot_ip_verifier.snapshot(&providers)
+    }
+
+    pub(crate) fn bot_provider_config(&self) -> Arc<RwLock<Vec<crate::config::BotProviderConfig>>> {
+        Arc::clone(&self.bot_provider_config)
     }
 
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {

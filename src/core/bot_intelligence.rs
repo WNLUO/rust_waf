@@ -3,109 +3,6 @@ use crate::core::WafContext;
 use crate::protocol::UnifiedHttpRequest;
 use std::net::IpAddr;
 
-#[derive(Debug, Clone, Copy)]
-struct KnownCrawler {
-    name: &'static str,
-    provider: Option<&'static str>,
-    category: &'static str,
-    policy: &'static str,
-    tokens: &'static [&'static str],
-}
-
-const KNOWN_CRAWLERS: &[KnownCrawler] = &[
-    KnownCrawler {
-        name: "Googlebot",
-        provider: Some("google"),
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["googlebot", "adsbot-google", "google-inspectiontool"],
-    },
-    KnownCrawler {
-        name: "Bingbot",
-        provider: Some("bing"),
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["bingbot", "msnbot"],
-    },
-    KnownCrawler {
-        name: "Baiduspider",
-        provider: None,
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["baiduspider"],
-    },
-    KnownCrawler {
-        name: "Sogou Spider",
-        provider: None,
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["sogou web spider", "sogou spider"],
-    },
-    KnownCrawler {
-        name: "YandexBot",
-        provider: None,
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["yandexbot"],
-    },
-    KnownCrawler {
-        name: "DuckDuckBot",
-        provider: None,
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["duckduckbot"],
-    },
-    KnownCrawler {
-        name: "Applebot",
-        provider: None,
-        category: "search",
-        policy: "reduce_friction",
-        tokens: &["applebot"],
-    },
-    KnownCrawler {
-        name: "GPTBot",
-        provider: None,
-        category: "ai",
-        policy: "observe",
-        tokens: &["gptbot", "chatgpt-user", "oai-searchbot"],
-    },
-    KnownCrawler {
-        name: "ClaudeBot",
-        provider: None,
-        category: "ai",
-        policy: "observe",
-        tokens: &["claudebot", "anthropic-ai"],
-    },
-    KnownCrawler {
-        name: "PerplexityBot",
-        provider: None,
-        category: "ai",
-        policy: "observe",
-        tokens: &["perplexitybot"],
-    },
-    KnownCrawler {
-        name: "Bytespider",
-        provider: None,
-        category: "ai",
-        policy: "observe",
-        tokens: &["bytespider"],
-    },
-    KnownCrawler {
-        name: "AhrefsBot",
-        provider: None,
-        category: "seo",
-        policy: "observe",
-        tokens: &["ahrefsbot"],
-    },
-    KnownCrawler {
-        name: "SemrushBot",
-        provider: None,
-        category: "seo",
-        policy: "observe",
-        tokens: &["semrushbot"],
-    },
-];
-
 pub(crate) fn annotate_request(context: &WafContext, request: &mut UnifiedHttpRequest) {
     let path = request.uri.split('?').next().unwrap_or("/").to_string();
     if is_internal_task(context, request, &path) {
@@ -128,8 +25,16 @@ pub(crate) fn annotate_request(context: &WafContext, request: &mut UnifiedHttpRe
         return;
     };
     let lower_ua = user_agent.to_ascii_lowercase();
-    let Some(crawler) = KNOWN_CRAWLERS
+    let bot_detection = context.config_snapshot().bot_detection;
+    if !bot_detection.enabled {
+        request.add_metadata("client.trust_class".to_string(), "unknown".to_string());
+        request.add_metadata("client.policy".to_string(), "standard".to_string());
+        return;
+    }
+    let Some(crawler) = bot_detection
+        .crawlers
         .iter()
+        .filter(|crawler| crawler.enabled)
         .find(|crawler| crawler.tokens.iter().any(|token| lower_ua.contains(token)))
     else {
         request.add_metadata("client.trust_class".to_string(), "unknown".to_string());
@@ -138,10 +43,10 @@ pub(crate) fn annotate_request(context: &WafContext, request: &mut UnifiedHttpRe
     };
 
     request.add_metadata("bot.known".to_string(), "true".to_string());
-    request.add_metadata("bot.name".to_string(), crawler.name.to_string());
-    request.add_metadata("bot.category".to_string(), crawler.category.to_string());
-    request.add_metadata("bot.policy".to_string(), crawler.policy.to_string());
-    if let Some(provider) = crawler.provider {
+    request.add_metadata("bot.name".to_string(), crawler.name.clone());
+    request.add_metadata("bot.category".to_string(), crawler.category.clone());
+    request.add_metadata("bot.policy".to_string(), crawler.policy.clone());
+    if let Some(provider) = crawler.provider.as_deref() {
         request.add_metadata("bot.provider".to_string(), provider.to_string());
     }
 
@@ -149,10 +54,25 @@ pub(crate) fn annotate_request(context: &WafContext, request: &mut UnifiedHttpRe
         .client_ip
         .as_deref()
         .and_then(|value| value.parse::<IpAddr>().ok());
-    let verification = match (crawler.provider, client_ip) {
+    let verification = match (crawler.provider.as_deref(), client_ip) {
         (Some(provider), Some(ip)) => context.bot_ip_verifier().verify(provider, ip),
         _ => BotVerificationStatus::Unavailable,
     };
+    if !matches!(
+        verification,
+        BotVerificationStatus::Verified | BotVerificationStatus::VerifiedReverseDns
+    ) {
+        if let (Some(provider), Some(ip)) = (crawler.provider.as_deref(), client_ip) {
+            if let Some(suffixes) =
+                crate::core::bot_verifier::bot_dns_provider(&bot_detection.providers, provider)
+            {
+                context
+                    .bot_ip_verifier()
+                    .enqueue_dns_verification(provider, ip, &suffixes);
+                request.add_metadata("bot.reverse_dns_queued".to_string(), "true".to_string());
+            }
+        }
+    }
 
     match verification {
         BotVerificationStatus::Verified => {
@@ -161,10 +81,22 @@ pub(crate) fn annotate_request(context: &WafContext, request: &mut UnifiedHttpRe
                 "client.trust_class".to_string(),
                 "verified_good_bot".to_string(),
             );
-            request.add_metadata("client.policy".to_string(), crawler.policy.to_string());
+            request.add_metadata("client.policy".to_string(), crawler.policy.clone());
             request.add_metadata(
                 "client.trust_reason".to_string(),
                 "known_crawler_official_ip".to_string(),
+            );
+        }
+        BotVerificationStatus::VerifiedReverseDns => {
+            request.add_metadata("bot.verification".to_string(), "reverse_dns".to_string());
+            request.add_metadata(
+                "client.trust_class".to_string(),
+                "verified_good_bot".to_string(),
+            );
+            request.add_metadata("client.policy".to_string(), crawler.policy.clone());
+            request.add_metadata(
+                "client.trust_reason".to_string(),
+                "known_crawler_reverse_dns".to_string(),
             );
         }
         BotVerificationStatus::NotVerified => {
@@ -185,7 +117,7 @@ pub(crate) fn annotate_request(context: &WafContext, request: &mut UnifiedHttpRe
                 "client.trust_class".to_string(),
                 "claimed_good_bot".to_string(),
             );
-            request.add_metadata("client.policy".to_string(), crawler.policy.to_string());
+            request.add_metadata("client.policy".to_string(), crawler.policy.clone());
             request.add_metadata(
                 "client.trust_reason".to_string(),
                 "known_crawler_ua".to_string(),

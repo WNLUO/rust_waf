@@ -104,6 +104,25 @@ export function useAdminSettingsState() {
         password: systemSettings.safeline.password,
         verify_tls: systemSettings.safeline.verify_tls,
       },
+      bot_detection: {
+        enabled: systemSettings.bot_detection.enabled,
+        crawlers: systemSettings.bot_detection.crawlers.map((crawler) => ({
+          enabled: crawler.enabled,
+          name: crawler.name,
+          provider: crawler.provider,
+          category: crawler.category,
+          policy: crawler.policy,
+          tokens: [...crawler.tokens],
+        })),
+        providers: systemSettings.bot_detection.providers.map((provider) => ({
+          enabled: provider.enabled,
+          id: provider.id,
+          urls: [...provider.urls],
+          format: provider.format,
+          reverse_dns_enabled: provider.reverse_dns_enabled,
+          reverse_dns_suffixes: [...provider.reverse_dns_suffixes],
+        })),
+      },
     }
   }
 

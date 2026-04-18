@@ -6,27 +6,32 @@ use std::net::IpAddr;
 use std::sync::RwLock;
 use std::time::Duration;
 
+use crate::config::BotProviderConfig;
 use crate::storage::{BotIpCacheEntry, SqliteStore};
 
 const REFRESH_INTERVAL_SECS: u64 = 6 * 60 * 60;
 const INITIAL_REFRESH_RETRY_SECS: u64 = 5 * 60;
+const DNS_VERIFICATION_TTL_SECS: i64 = 24 * 60 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BotVerificationStatus {
     Verified,
+    VerifiedReverseDns,
     NotVerified,
     Unavailable,
 }
 
 #[derive(Debug, Clone)]
 struct BotIpProvider {
-    id: &'static str,
-    urls: &'static [&'static str],
+    id: String,
+    urls: Vec<String>,
 }
 
 #[derive(Debug, Default)]
 struct BotIpCache {
     providers: BTreeMap<String, BotIpProviderCache>,
+    dns_verifications: BTreeMap<String, BotDnsVerificationCache>,
+    dns_pending: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Default)]
@@ -35,6 +40,12 @@ struct BotIpProviderCache {
     last_refresh_at: Option<i64>,
     last_success_at: Option<i64>,
     last_error: Option<String>,
+}
+
+#[derive(Debug)]
+struct BotDnsVerificationCache {
+    verified: bool,
+    expires_at: i64,
 }
 
 #[derive(Debug, Default)]
@@ -58,42 +69,102 @@ pub struct BotVerifierProviderSnapshot {
     pub status: String,
 }
 
-const PROVIDERS: &[BotIpProvider] = &[
-    BotIpProvider {
-        id: "google",
-        urls: &[
-            "https://developers.google.com/static/search/apis/ipranges/googlebot.json",
-            "https://developers.google.com/static/search/apis/ipranges/special-crawlers.json",
-            "https://developers.google.com/static/search/apis/ipranges/user-triggered-fetchers.json",
-            "https://developers.google.com/crawling/ipranges/common-crawlers.json",
-            "https://developers.google.com/crawling/ipranges/special-crawlers.json",
-            "https://developers.google.com/crawling/ipranges/user-triggered-fetchers.json",
-        ],
-    },
-    BotIpProvider {
-        id: "bing",
-        urls: &["https://www.bing.com/toolbox/bingbot.json"],
-    },
-];
-
 impl BotIpVerifier {
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
     pub(crate) fn verify(&self, provider: &str, ip: IpAddr) -> BotVerificationStatus {
+        let now = unix_timestamp();
         let guard = self.cache.read().expect("bot verifier cache lock poisoned");
-        let Some(cache) = guard.providers.get(provider) else {
-            return BotVerificationStatus::Unavailable;
-        };
-        if cache.ranges.is_empty() || cache.last_success_at.is_none() {
-            return BotVerificationStatus::Unavailable;
-        }
-        if cache.ranges.iter().any(|range| range.contains(&ip)) {
+        let ip_cache = guard.providers.get(provider);
+        if ip_cache
+            .filter(|cache| cache.last_success_at.is_some())
+            .is_some_and(|cache| cache.ranges.iter().any(|range| range.contains(&ip)))
+        {
             BotVerificationStatus::Verified
+        } else if let Some(dns_cache) = guard.dns_verifications.get(&dns_key(provider, ip)) {
+            if dns_cache.expires_at < now {
+                ip_cache_status(ip_cache)
+            } else if dns_cache.verified {
+                BotVerificationStatus::VerifiedReverseDns
+            } else {
+                BotVerificationStatus::NotVerified
+            }
         } else {
-            BotVerificationStatus::NotVerified
+            ip_cache_status(ip_cache)
         }
+    }
+
+    pub(crate) fn enqueue_dns_verification(
+        self: &std::sync::Arc<Self>,
+        provider: &str,
+        ip: IpAddr,
+        suffixes: &[String],
+    ) {
+        if suffixes.is_empty() {
+            return;
+        }
+        let now = unix_timestamp();
+        let key = dns_key(provider, ip);
+        {
+            let mut guard = self
+                .cache
+                .write()
+                .expect("bot verifier cache lock poisoned");
+            if guard
+                .dns_verifications
+                .get(&key)
+                .is_some_and(|cached| cached.expires_at > now)
+            {
+                return;
+            }
+            if guard
+                .dns_pending
+                .get(&key)
+                .is_some_and(|started_at| now.saturating_sub(*started_at) < 300)
+            {
+                return;
+            }
+            guard.dns_pending.insert(key.clone(), now);
+        }
+
+        let verifier = std::sync::Arc::clone(self);
+        let provider = provider.to_string();
+        let suffixes = suffixes.to_vec();
+        tokio::spawn(async move {
+            let result = verify_reverse_dns(ip, &suffixes).await;
+            verifier.finish_dns_verification(&provider, ip, result);
+        });
+    }
+
+    fn finish_dns_verification(&self, provider: &str, ip: IpAddr, result: anyhow::Result<bool>) {
+        let key = dns_key(provider, ip);
+        let now = unix_timestamp();
+        let verified = match result {
+            Ok(verified) => verified,
+            Err(err) => {
+                log::warn!(
+                    "Bot reverse DNS verification failed provider={} ip={}: {}",
+                    provider,
+                    ip,
+                    err
+                );
+                false
+            }
+        };
+        let mut guard = self
+            .cache
+            .write()
+            .expect("bot verifier cache lock poisoned");
+        guard.dns_pending.remove(&key);
+        guard.dns_verifications.insert(
+            key,
+            BotDnsVerificationCache {
+                verified,
+                expires_at: now.saturating_add(DNS_VERIFICATION_TTL_SECS),
+            },
+        );
     }
 
     pub(crate) fn hydrate_from_entries(&self, entries: Vec<BotIpCacheEntry>) {
@@ -119,12 +190,15 @@ impl BotIpVerifier {
         }
     }
 
-    pub(crate) fn snapshot(&self) -> BotVerifierSnapshot {
+    pub(crate) fn snapshot(
+        &self,
+        configured_providers: &[BotProviderConfig],
+    ) -> BotVerifierSnapshot {
         let guard = self.cache.read().expect("bot verifier cache lock poisoned");
-        let mut providers = PROVIDERS
-            .iter()
+        let mut providers = bot_ip_providers(configured_providers)
+            .into_iter()
             .map(|provider| {
-                let cache = guard.providers.get(provider.id);
+                let cache = guard.providers.get(&provider.id);
                 let range_count = cache.map(|cache| cache.ranges.len()).unwrap_or(0);
                 let last_refresh_at = cache.and_then(|cache| cache.last_refresh_at);
                 let last_success_at = cache.and_then(|cache| cache.last_success_at);
@@ -137,7 +211,7 @@ impl BotIpVerifier {
                     "empty"
                 };
                 BotVerifierProviderSnapshot {
-                    provider: provider.id.to_string(),
+                    provider: provider.id,
                     range_count,
                     last_refresh_at,
                     last_success_at,
@@ -153,7 +227,11 @@ impl BotIpVerifier {
         }
     }
 
-    pub(crate) async fn refresh_once(&self, store: Option<&SqliteStore>) {
+    pub(crate) async fn refresh_once(
+        &self,
+        configured_providers: &[BotProviderConfig],
+        store: Option<&SqliteStore>,
+    ) {
         let client = match Client::builder()
             .timeout(Duration::from_secs(8))
             .connect_timeout(Duration::from_secs(3))
@@ -167,14 +245,14 @@ impl BotIpVerifier {
             }
         };
 
-        for provider in PROVIDERS {
-            let result = fetch_provider_ranges(&client, provider).await;
+        for provider in bot_ip_providers(configured_providers) {
+            let result = fetch_provider_ranges(&client, &provider).await;
             let refresh_result = {
                 let mut guard = self
                     .cache
                     .write()
                     .expect("bot verifier cache lock poisoned");
-                let cache = guard.providers.entry(provider.id.to_string()).or_default();
+                let cache = guard.providers.entry(provider.id.clone()).or_default();
                 cache.last_refresh_at = Some(unix_timestamp());
                 match result {
                     Ok(ranges) if !ranges.is_empty() => {
@@ -235,7 +313,7 @@ impl BotIpVerifier {
             if let Some(store) = store {
                 if let Err(err) = store
                     .upsert_bot_ip_cache_entry(
-                        provider.id,
+                        &provider.id,
                         &refresh_result.ranges_json,
                         refresh_result.last_refresh_at,
                         refresh_result.last_success_at,
@@ -263,17 +341,63 @@ struct ProviderRefreshPersistence {
 
 pub(crate) async fn run_bot_ip_refresh_loop(
     verifier: std::sync::Arc<BotIpVerifier>,
+    configured_providers: std::sync::Arc<std::sync::RwLock<Vec<BotProviderConfig>>>,
     store: Option<std::sync::Arc<SqliteStore>>,
 ) {
-    verifier.refresh_once(store.as_deref()).await;
+    let providers = configured_providers
+        .read()
+        .expect("bot provider config lock poisoned")
+        .clone();
+    verifier.refresh_once(&providers, store.as_deref()).await;
     let mut interval = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECS));
     loop {
         interval.tick().await;
-        verifier.refresh_once(store.as_deref()).await;
+        let providers = configured_providers
+            .read()
+            .expect("bot provider config lock poisoned")
+            .clone();
+        verifier.refresh_once(&providers, store.as_deref()).await;
         if !has_any_success(&verifier) {
             tokio::time::sleep(Duration::from_secs(INITIAL_REFRESH_RETRY_SECS)).await;
         }
     }
+}
+
+fn bot_ip_providers(configured: &[BotProviderConfig]) -> Vec<BotIpProvider> {
+    configured
+        .iter()
+        .filter(|provider| provider.enabled)
+        .filter(|provider| !provider.id.trim().is_empty() && !provider.urls.is_empty())
+        .map(|provider| BotIpProvider {
+            id: provider.id.trim().to_ascii_lowercase(),
+            urls: provider.urls.clone(),
+        })
+        .collect()
+}
+
+pub(crate) fn bot_dns_provider<'a>(
+    configured: &'a [BotProviderConfig],
+    provider_id: &str,
+) -> Option<Vec<String>> {
+    configured
+        .iter()
+        .find(|provider| provider.enabled && provider.id.eq_ignore_ascii_case(provider_id))
+        .filter(|provider| provider.reverse_dns_enabled)
+        .map(|provider| provider.reverse_dns_suffixes.clone())
+        .filter(|suffixes| !suffixes.is_empty())
+}
+
+fn ip_cache_status(cache: Option<&BotIpProviderCache>) -> BotVerificationStatus {
+    match cache {
+        Some(cache) if !cache.ranges.is_empty() && cache.last_success_at.is_some() => {
+            BotVerificationStatus::NotVerified
+        }
+        _ => BotVerificationStatus::Unavailable,
+    }
+}
+
+fn dns_key(provider: &str, ip: IpAddr) -> String {
+    format!("{}|{}", provider.to_ascii_lowercase(), ip)
 }
 
 fn has_any_success(verifier: &BotIpVerifier) -> bool {
@@ -292,7 +416,7 @@ async fn fetch_provider_ranges(
 ) -> anyhow::Result<Vec<IpNet>> {
     let mut ranges = Vec::new();
     let mut errors = Vec::new();
-    for url in provider.urls {
+    for url in &provider.urls {
         match fetch_ranges_from_url(client, url).await {
             Ok(mut fetched) => ranges.append(&mut fetched),
             Err(err) => errors.push(format!("{url}: {err}")),
@@ -304,6 +428,34 @@ async fn fetch_provider_ranges(
         anyhow::bail!("{}", errors.join("; "));
     }
     Ok(ranges)
+}
+
+async fn verify_reverse_dns(ip: IpAddr, suffixes: &[String]) -> anyhow::Result<bool> {
+    let resolver = hickory_resolver::Resolver::builder_tokio()?.build()?;
+    let ptr_lookup =
+        tokio::time::timeout(Duration::from_secs(3), resolver.reverse_lookup(ip)).await??;
+    for record in ptr_lookup.answers() {
+        let hostname = record
+            .data
+            .to_string()
+            .trim_end_matches('.')
+            .to_ascii_lowercase();
+        if !suffixes
+            .iter()
+            .any(|suffix| hostname.ends_with(suffix.trim_end_matches('.')))
+        {
+            continue;
+        }
+        let forward_lookup = tokio::time::timeout(
+            Duration::from_secs(3),
+            resolver.lookup_ip(hostname.as_str()),
+        )
+        .await??;
+        if forward_lookup.iter().any(|resolved_ip| resolved_ip == ip) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 async fn fetch_ranges_from_url(client: &Client, url: &str) -> anyhow::Result<Vec<IpNet>> {

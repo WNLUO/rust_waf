@@ -567,3 +567,78 @@ fn trim_or_default(value: &str, default: &str) -> String {
         trimmed.to_string()
     }
 }
+
+pub(super) fn normalize_bot_detection(config: &mut Config) {
+    if config.bot_detection.crawlers.is_empty() {
+        config.bot_detection.crawlers = crate::config::normalize::defaults::default_bot_crawlers();
+    }
+    if config.bot_detection.providers.is_empty() {
+        config.bot_detection.providers =
+            crate::config::normalize::defaults::default_bot_providers();
+    }
+
+    for crawler in &mut config.bot_detection.crawlers {
+        crawler.name = crawler.name.trim().to_string();
+        crawler.category = crawler.category.trim().to_ascii_lowercase();
+        if crawler.category.is_empty() {
+            crawler.category = "custom".to_string();
+        }
+        crawler.policy = crawler.policy.trim().to_ascii_lowercase();
+        if !matches!(
+            crawler.policy.as_str(),
+            "reduce_friction" | "observe" | "strict"
+        ) {
+            crawler.policy = "observe".to_string();
+        }
+        crawler.provider = crawler
+            .provider
+            .take()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        crawler.tokens = crawler
+            .tokens
+            .iter()
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect();
+    }
+    config
+        .bot_detection
+        .crawlers
+        .retain(|crawler| !crawler.name.is_empty() && !crawler.tokens.is_empty());
+
+    for provider in &mut config.bot_detection.providers {
+        provider.id = provider.id.trim().to_ascii_lowercase();
+        provider.format = provider.format.trim().to_ascii_lowercase();
+        if provider.format.is_empty() {
+            provider.format = "json_recursive".to_string();
+        }
+        provider.urls = provider
+            .urls
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
+        provider.reverse_dns_suffixes = provider
+            .reverse_dns_suffixes
+            .iter()
+            .map(|value| normalize_dns_suffix(value))
+            .filter(|value| !value.is_empty())
+            .collect();
+    }
+    config.bot_detection.providers.retain(|provider| {
+        !provider.id.is_empty()
+            && (!provider.urls.is_empty() || !provider.reverse_dns_suffixes.is_empty())
+    });
+}
+
+fn normalize_dns_suffix(value: &str) -> String {
+    let trimmed = value.trim().trim_end_matches('.').to_ascii_lowercase();
+    if trimmed.is_empty() {
+        String::new()
+    } else if trimmed.starts_with('.') {
+        trimmed
+    } else {
+        format!(".{trimmed}")
+    }
+}

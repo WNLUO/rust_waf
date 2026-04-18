@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub(super) struct ManagementRuntimePolicy {
@@ -191,10 +192,118 @@ pub(super) async fn refresh_bot_verifier_handler(
     State(state): State<ApiState>,
 ) -> ApiResult<Json<BotVerifierStatusResponse>> {
     let verifier = state.context.bot_ip_verifier();
+    let providers = state.context.config_snapshot().bot_detection.providers;
     verifier
-        .refresh_once(state.context.sqlite_store.as_deref())
+        .refresh_once(&providers, state.context.sqlite_store.as_deref())
         .await;
     Ok(bot_verifier_status_handler(State(state)).await)
+}
+
+pub(super) async fn bot_insights_handler(
+    State(state): State<ApiState>,
+) -> ApiResult<Json<BotInsightsResponse>> {
+    let store = sqlite_store(&state)?;
+    let now = unix_timestamp();
+    let window_start = now.saturating_sub(24 * 3600);
+    let query = crate::storage::SecurityEventQuery {
+        limit: 200,
+        offset: 0,
+        created_from: Some(window_start),
+        sort_by: crate::storage::EventSortField::CreatedAt,
+        sort_direction: crate::storage::SortDirection::Desc,
+        ..Default::default()
+    };
+    let mut offset = 0;
+    let mut by_trust_class = BTreeMap::new();
+    let mut top_bot_names = BTreeMap::new();
+    let mut top_mismatch_ips = BTreeMap::new();
+    let mut top_routes = BTreeMap::new();
+    let mut total_bot_events = 0_u64;
+
+    loop {
+        let mut page_query = query.clone();
+        page_query.offset = offset;
+        let page = store
+            .list_security_events(&page_query)
+            .await
+            .map_err(ApiError::internal)?;
+        let fetched = page.items.len();
+        for event in page.items {
+            let Some(details) = event
+                .details_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            else {
+                continue;
+            };
+            let bot_known =
+                nested_str_value(&details, &["bot", "known"]) == Some("true".to_string());
+            let bot_name = nested_str_value(&details, &["bot", "name"]);
+            if !bot_known && bot_name.is_none() {
+                continue;
+            }
+            total_bot_events = total_bot_events.saturating_add(1);
+            let trust_class = nested_str_value(&details, &["client_trust", "trust_class"])
+                .unwrap_or_else(|| "unknown".to_string());
+            increment_count(&mut by_trust_class, trust_class.clone());
+            increment_count(
+                &mut top_bot_names,
+                bot_name.unwrap_or_else(|| "unknown".to_string()),
+            );
+            if trust_class == "suspect_bot" {
+                increment_count(&mut top_mismatch_ips, event.source_ip.clone());
+            }
+            let route = nested_str_value(&details, &["l7_cc", "route"])
+                .or_else(|| nested_str_value(&details, &["l7_behavior", "dominant_route"]))
+                .or_else(|| event.uri.clone())
+                .unwrap_or_else(|| "-".to_string());
+            increment_count(&mut top_routes, route);
+        }
+        if fetched < 200 || u64::from(offset) + fetched as u64 >= page.total {
+            break;
+        }
+        offset = offset.saturating_add(200);
+        if offset >= 5_000 {
+            break;
+        }
+    }
+
+    Ok(Json(BotInsightsResponse {
+        generated_at: now,
+        window_start,
+        total_bot_events,
+        by_trust_class: top_count_items(by_trust_class, 12),
+        top_bot_names: top_count_items(top_bot_names, 12),
+        top_mismatch_ips: top_count_items(top_mismatch_ips, 12),
+        top_routes: top_count_items(top_routes, 12),
+    }))
+}
+
+fn nested_str_value(value: &serde_json::Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current.as_str().map(ToOwned::to_owned)
+}
+
+fn increment_count(map: &mut BTreeMap<String, u64>, key: String) {
+    *map.entry(key).or_insert(0) += 1;
+}
+
+fn top_count_items(map: BTreeMap<String, u64>, limit: usize) -> Vec<AiAuditCountItem> {
+    let mut items = map
+        .into_iter()
+        .map(|(key, count)| AiAuditCountItem { key, count })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    items.truncate(limit);
+    items
 }
 
 mod ai_audit;

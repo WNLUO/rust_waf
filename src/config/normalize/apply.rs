@@ -49,6 +49,7 @@ impl Config {
 
         gateway_and_integrations::normalize_console_and_gateway(&mut self);
         gateway_and_integrations::normalize_integrations_and_admin(&mut self);
+        gateway_and_integrations::normalize_bot_detection(&mut self);
 
         self
     }

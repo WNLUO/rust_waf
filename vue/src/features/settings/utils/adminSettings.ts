@@ -30,6 +30,11 @@ export function createDefaultSystemSettings(): SystemSettingsForm {
       blocklist_delete_path: '/api/open/ipgroup',
       blocklist_ip_group_ids: [],
     },
+    bot_detection: {
+      enabled: true,
+      crawlers: [],
+      providers: [],
+    },
   }
 }
 

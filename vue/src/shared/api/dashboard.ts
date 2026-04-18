@@ -19,6 +19,7 @@ import type {
   AiTempPoliciesResponse,
   AiVisitorIntelligenceResponse,
   BotVerifierStatusResponse,
+  BotInsightsResponse,
   TrafficMapQuery,
   TrafficMapResponse,
   WriteStatusResponse,
@@ -127,6 +128,10 @@ export async function refreshBotVerifierStatus(): Promise<BotVerifierStatusRespo
   return apiRequest<BotVerifierStatusResponse>('/dashboard/bot-verifier/refresh', {
     method: 'POST',
   })
+}
+
+export async function fetchBotInsights(): Promise<BotInsightsResponse> {
+  return apiRequest<BotInsightsResponse>('/dashboard/bot-insights')
 }
 
 export async function deleteAiTempPolicy(

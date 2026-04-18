@@ -20,6 +20,34 @@ pub struct SettingsResponse {
     pub(crate) api_endpoint: String,
     pub(crate) notes: String,
     pub(crate) safeline: SafeLineSettingsResponse,
+    pub(crate) bot_detection: BotDetectionSettingsResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotDetectionSettingsResponse {
+    pub(crate) enabled: bool,
+    pub(crate) crawlers: Vec<BotCrawlerSettingsPayload>,
+    pub(crate) providers: Vec<BotProviderSettingsPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotCrawlerSettingsPayload {
+    pub(crate) enabled: bool,
+    pub(crate) name: String,
+    pub(crate) provider: Option<String>,
+    pub(crate) category: String,
+    pub(crate) policy: String,
+    pub(crate) tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotProviderSettingsPayload {
+    pub(crate) enabled: bool,
+    pub(crate) id: String,
+    pub(crate) urls: Vec<String>,
+    pub(crate) format: String,
+    pub(crate) reverse_dns_enabled: bool,
+    pub(crate) reverse_dns_suffixes: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,6 +168,7 @@ pub struct SettingsUpdateRequest {
     pub(crate) api_endpoint: String,
     pub(crate) notes: String,
     pub(crate) safeline: SafeLineSettingsRequest,
+    pub(crate) bot_detection: BotDetectionSettingsResponse,
 }
 
 #[derive(Debug, Deserialize)]

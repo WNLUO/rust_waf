@@ -36,6 +36,35 @@ impl SettingsResponse {
             api_endpoint: config.api_bind.clone(),
             notes: config.console_settings.notes.clone(),
             safeline: SafeLineSettingsResponse::from_config(&config.integrations.safeline),
+            bot_detection: BotDetectionSettingsResponse {
+                enabled: config.bot_detection.enabled,
+                crawlers: config
+                    .bot_detection
+                    .crawlers
+                    .iter()
+                    .map(|crawler| BotCrawlerSettingsPayload {
+                        enabled: crawler.enabled,
+                        name: crawler.name.clone(),
+                        provider: crawler.provider.clone(),
+                        category: crawler.category.clone(),
+                        policy: crawler.policy.clone(),
+                        tokens: crawler.tokens.clone(),
+                    })
+                    .collect(),
+                providers: config
+                    .bot_detection
+                    .providers
+                    .iter()
+                    .map(|provider| BotProviderSettingsPayload {
+                        enabled: provider.enabled,
+                        id: provider.id.clone(),
+                        urls: provider.urls.clone(),
+                        format: provider.format.clone(),
+                        reverse_dns_enabled: provider.reverse_dns_enabled,
+                        reverse_dns_suffixes: provider.reverse_dns_suffixes.clone(),
+                    })
+                    .collect(),
+            },
         }
     }
 }

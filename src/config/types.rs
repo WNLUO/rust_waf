@@ -48,6 +48,60 @@ pub struct Config {
     pub auto_tuning: AutoTuningConfig,
     #[serde(default)]
     pub adaptive_protection: AdaptiveProtectionConfig,
+    #[serde(default)]
+    pub bot_detection: BotDetectionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotDetectionConfig {
+    #[serde(default = "default_bot_detection_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub crawlers: Vec<BotCrawlerConfig>,
+    #[serde(default)]
+    pub providers: Vec<BotProviderConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotCrawlerConfig {
+    #[serde(default = "default_bot_crawler_enabled")]
+    pub enabled: bool,
+    pub name: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub policy: String,
+    #[serde(default)]
+    pub tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BotProviderConfig {
+    #[serde(default = "default_bot_provider_enabled")]
+    pub enabled: bool,
+    pub id: String,
+    #[serde(default)]
+    pub urls: Vec<String>,
+    #[serde(default)]
+    pub format: String,
+    #[serde(default)]
+    pub reverse_dns_enabled: bool,
+    #[serde(default)]
+    pub reverse_dns_suffixes: Vec<String>,
+}
+
+fn default_bot_detection_enabled() -> bool {
+    true
+}
+
+fn default_bot_crawler_enabled() -> bool {
+    true
+}
+
+fn default_bot_provider_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

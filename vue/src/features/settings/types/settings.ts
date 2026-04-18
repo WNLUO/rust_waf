@@ -52,6 +52,7 @@ export interface SettingsPayload {
   api_endpoint: string
   notes: string
   safeline: SafeLineSettingsForm
+  bot_detection: BotDetectionSettings
 }
 
 export interface SettingsUpdatePayload {
@@ -63,6 +64,31 @@ export interface SettingsUpdatePayload {
   api_endpoint: string
   notes: string
   safeline: SafeLineSettingsUpdatePayload
+  bot_detection: BotDetectionSettings
 }
 
 export type AdaptiveProtectionSettingsPayload = Record<string, never>
+
+export interface BotDetectionSettings {
+  enabled: boolean
+  crawlers: BotCrawlerSettings[]
+  providers: BotProviderSettings[]
+}
+
+export interface BotCrawlerSettings {
+  enabled: boolean
+  name: string
+  provider: string | null
+  category: string
+  policy: string
+  tokens: string[]
+}
+
+export interface BotProviderSettings {
+  enabled: boolean
+  id: string
+  urls: string[]
+  format: string
+  reverse_dns_enabled: boolean
+  reverse_dns_suffixes: string[]
+}

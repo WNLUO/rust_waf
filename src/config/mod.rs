@@ -19,7 +19,8 @@ pub use self::rules::{
 pub use self::types::{
     AdaptiveProtectionConfig, AdaptiveProtectionGoal, AdaptiveProtectionMode, AdminApiAuthConfig,
     AiAuditConfig, AiAuditProviderConfig, AutoSloTargets, AutoTuningConfig, AutoTuningIntent,
-    AutoTuningMode, Config, ConsoleSettings, IntegrationsConfig, RuntimeProfile, SafeLineConfig,
+    AutoTuningMode, BotCrawlerConfig, BotDetectionConfig, BotProviderConfig, Config,
+    ConsoleSettings, IntegrationsConfig, RuntimeProfile, SafeLineConfig,
 };
 pub use gateway::{
     GatewayConfig, HeaderOperation, HeaderOperationAction, HeaderOperationScope, SourceIpStrategy,

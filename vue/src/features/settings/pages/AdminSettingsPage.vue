@@ -7,11 +7,12 @@ import AdminSettingsSystemSection from '@/features/settings/components/AdminSett
 import AdminUploadCertificateDialog from '@/features/settings/components/AdminUploadCertificateDialog.vue'
 import { useAdminSettings } from '@/features/settings/composables/useAdminSettings'
 import {
+  fetchBotInsights,
   fetchBotVerifierStatus,
   refreshBotVerifierStatus,
 } from '@/shared/api/dashboard'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
-import type { BotVerifierStatusResponse } from '@/shared/types'
+import type { BotInsightsResponse, BotVerifierStatusResponse } from '@/shared/types'
 
 const {
   error,
@@ -46,6 +47,7 @@ const savingAll = ref(false)
 const botVerifierLoading = ref(false)
 const botVerifierRefreshing = ref(false)
 const botVerifierStatus = ref<BotVerifierStatusResponse | null>(null)
+const botInsights = ref<BotInsightsResponse | null>(null)
 const advancedGlobalSectionRef = ref<{
   saveSettings: () => Promise<boolean>
 } | null>(null)
@@ -88,12 +90,65 @@ const botVerifierStatusText = (status: string) => {
 const loadBotVerifierStatus = async () => {
   botVerifierLoading.value = true
   try {
-    botVerifierStatus.value = await fetchBotVerifierStatus()
+    const [status, insights] = await Promise.all([
+      fetchBotVerifierStatus(),
+      fetchBotInsights(),
+    ])
+    botVerifierStatus.value = status
+    botInsights.value = insights
   } catch (e) {
     error.value = e instanceof Error ? e.message : '读取爬虫校验状态失败'
   } finally {
     botVerifierLoading.value = false
   }
+}
+
+const addBotCrawler = () => {
+  systemSettings.bot_detection.crawlers.push({
+    enabled: true,
+    name: 'CustomBot',
+    provider: null,
+    category: 'custom',
+    policy: 'observe',
+    tokens: ['custombot'],
+  })
+}
+
+const removeBotCrawler = (index: number) => {
+  systemSettings.bot_detection.crawlers.splice(index, 1)
+}
+
+const updateCrawlerTokens = (index: number, value: string) => {
+  const crawler = systemSettings.bot_detection.crawlers[index]
+  if (!crawler) return
+  crawler.tokens = value.split(',').map((item) => item.trim()).filter(Boolean)
+}
+
+const addBotProvider = () => {
+  systemSettings.bot_detection.providers.push({
+    enabled: true,
+    id: 'custom',
+    urls: ['https://example.com/bot-ranges.json'],
+    format: 'json_recursive',
+    reverse_dns_enabled: false,
+    reverse_dns_suffixes: [],
+  })
+}
+
+const removeBotProvider = (index: number) => {
+  systemSettings.bot_detection.providers.splice(index, 1)
+}
+
+const updateProviderUrls = (index: number, value: string) => {
+  const provider = systemSettings.bot_detection.providers[index]
+  if (!provider) return
+  provider.urls = value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
+}
+
+const updateProviderDnsSuffixes = (index: number, value: string) => {
+  const provider = systemSettings.bot_detection.providers[index]
+  if (!provider) return
+  provider.reverse_dns_suffixes = value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
 }
 
 const refreshBotVerifier = async () => {
@@ -223,6 +278,117 @@ useFlashMessages({
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div class="mt-4 grid gap-3 md:grid-cols-4">
+            <div class="rounded-md border border-slate-200 p-3">
+              <div class="text-xs text-slate-500">Bot 事件</div>
+              <div class="mt-1 text-xl font-semibold text-slate-900">
+                {{ botInsights?.total_bot_events || 0 }}
+              </div>
+            </div>
+            <div
+              v-for="item in botInsights?.by_trust_class || []"
+              :key="item.key"
+              class="rounded-md border border-slate-200 p-3"
+            >
+              <div class="text-xs text-slate-500">{{ item.key }}</div>
+              <div class="mt-1 text-xl font-semibold text-slate-900">
+                {{ item.count }}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-md border border-slate-200 bg-white p-4">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-sm font-semibold text-slate-900">爬虫识别库</h2>
+              <p class="mt-1 text-xs text-slate-500">
+                UA token 命中后进入 claimed / verified / suspect 分层。
+              </p>
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input
+                v-model="systemSettings.bot_detection.enabled"
+                type="checkbox"
+                class="accent-blue-600"
+              />
+              启用识别
+            </label>
+          </div>
+          <div class="mt-4 space-y-3">
+            <div
+              v-for="(crawler, index) in systemSettings.bot_detection.crawlers"
+              :key="`${crawler.name}-${index}`"
+              class="grid gap-2 rounded-md border border-slate-200 p-3 md:grid-cols-6"
+            >
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input v-model="crawler.enabled" type="checkbox" class="accent-blue-600" />
+                启用
+              </label>
+              <input v-model="crawler.name" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+              <input v-model="crawler.provider" placeholder="provider" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+              <input v-model="crawler.category" placeholder="category" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+              <select v-model="crawler.policy" class="rounded-md border border-slate-300 px-2 py-1 text-sm">
+                <option value="reduce_friction">reduce_friction</option>
+                <option value="observe">observe</option>
+                <option value="strict">strict</option>
+              </select>
+              <button class="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" @click="removeBotCrawler(index)">
+                删除
+              </button>
+              <input
+                class="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-6"
+                :value="crawler.tokens.join(', ')"
+                placeholder="tokens, comma separated"
+                @input="updateCrawlerTokens(index, ($event.target as HTMLInputElement).value)"
+              />
+            </div>
+            <button class="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700" @click="addBotCrawler">
+              新增爬虫
+            </button>
+          </div>
+        </section>
+
+        <section class="rounded-md border border-slate-200 bg-white p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-semibold text-slate-900">官方 IP Provider</h2>
+            <button class="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700" @click="addBotProvider">
+              新增 Provider
+            </button>
+          </div>
+          <div class="mt-4 space-y-3">
+            <div
+              v-for="(provider, index) in systemSettings.bot_detection.providers"
+              :key="`${provider.id}-${index}`"
+              class="grid gap-2 rounded-md border border-slate-200 p-3 md:grid-cols-4"
+            >
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input v-model="provider.enabled" type="checkbox" class="accent-blue-600" />
+                启用
+              </label>
+              <label class="flex items-center gap-2 text-xs text-slate-600">
+                <input v-model="provider.reverse_dns_enabled" type="checkbox" class="accent-blue-600" />
+                PTR
+              </label>
+              <input v-model="provider.id" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+              <input v-model="provider.format" class="rounded-md border border-slate-300 px-2 py-1 text-sm" />
+              <button class="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" @click="removeBotProvider(index)">
+                删除
+              </button>
+              <textarea
+                class="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-4"
+                rows="2"
+                :value="provider.urls.join('\n')"
+                @input="updateProviderUrls(index, ($event.target as HTMLTextAreaElement).value)"
+              ></textarea>
+              <input
+                class="rounded-md border border-slate-300 px-2 py-1 text-sm md:col-span-4"
+                :value="provider.reverse_dns_suffixes.join(', ')"
+                placeholder=".googlebot.com, .search.msn.com"
+                @input="updateProviderDnsSuffixes(index, ($event.target as HTMLInputElement).value)"
+              />
+            </div>
           </div>
         </section>
       </div>

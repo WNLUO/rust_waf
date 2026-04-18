@@ -37,8 +37,134 @@ impl Default for Config {
             admin_api_auth: AdminApiAuthConfig::default(),
             auto_tuning: AutoTuningConfig::default(),
             adaptive_protection: AdaptiveProtectionConfig::default(),
+            bot_detection: BotDetectionConfig::default(),
         }
         .normalized()
+    }
+}
+
+impl Default for BotDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            crawlers: default_bot_crawlers(),
+            providers: default_bot_providers(),
+        }
+    }
+}
+
+pub(crate) fn default_bot_crawlers() -> Vec<BotCrawlerConfig> {
+    vec![
+        bot_crawler(
+            "Googlebot",
+            Some("google"),
+            "search",
+            "reduce_friction",
+            &["googlebot", "adsbot-google", "google-inspectiontool"],
+        ),
+        bot_crawler(
+            "Bingbot",
+            Some("bing"),
+            "search",
+            "reduce_friction",
+            &["bingbot", "msnbot"],
+        ),
+        bot_crawler(
+            "Baiduspider",
+            None,
+            "search",
+            "reduce_friction",
+            &["baiduspider"],
+        ),
+        bot_crawler(
+            "Sogou Spider",
+            None,
+            "search",
+            "reduce_friction",
+            &["sogou web spider", "sogou spider"],
+        ),
+        bot_crawler(
+            "YandexBot",
+            None,
+            "search",
+            "reduce_friction",
+            &["yandexbot"],
+        ),
+        bot_crawler(
+            "DuckDuckBot",
+            None,
+            "search",
+            "reduce_friction",
+            &["duckduckbot"],
+        ),
+        bot_crawler("Applebot", None, "search", "reduce_friction", &["applebot"]),
+        bot_crawler(
+            "GPTBot",
+            None,
+            "ai",
+            "observe",
+            &["gptbot", "chatgpt-user", "oai-searchbot"],
+        ),
+        bot_crawler(
+            "ClaudeBot",
+            None,
+            "ai",
+            "observe",
+            &["claudebot", "anthropic-ai"],
+        ),
+        bot_crawler("PerplexityBot", None, "ai", "observe", &["perplexitybot"]),
+        bot_crawler("Bytespider", None, "ai", "observe", &["bytespider"]),
+        bot_crawler("AhrefsBot", None, "seo", "observe", &["ahrefsbot"]),
+        bot_crawler("SemrushBot", None, "seo", "observe", &["semrushbot"]),
+    ]
+}
+
+pub(crate) fn default_bot_providers() -> Vec<BotProviderConfig> {
+    vec![
+        BotProviderConfig {
+            enabled: true,
+            id: "google".to_string(),
+            urls: vec![
+                "https://developers.google.com/static/search/apis/ipranges/googlebot.json".to_string(),
+                "https://developers.google.com/static/search/apis/ipranges/special-crawlers.json".to_string(),
+                "https://developers.google.com/static/search/apis/ipranges/user-triggered-fetchers.json".to_string(),
+                "https://developers.google.com/crawling/ipranges/common-crawlers.json".to_string(),
+                "https://developers.google.com/crawling/ipranges/special-crawlers.json".to_string(),
+                "https://developers.google.com/crawling/ipranges/user-triggered-fetchers.json".to_string(),
+            ],
+            format: "json_recursive".to_string(),
+            reverse_dns_enabled: true,
+            reverse_dns_suffixes: vec![
+                ".googlebot.com".to_string(),
+                ".google.com".to_string(),
+                ".googleusercontent.com".to_string(),
+            ],
+        },
+        BotProviderConfig {
+            enabled: true,
+            id: "bing".to_string(),
+            urls: vec!["https://www.bing.com/toolbox/bingbot.json".to_string()],
+            format: "json_recursive".to_string(),
+            reverse_dns_enabled: true,
+            reverse_dns_suffixes: vec![".search.msn.com".to_string()],
+        },
+    ]
+}
+
+fn bot_crawler(
+    name: &str,
+    provider: Option<&str>,
+    category: &str,
+    policy: &str,
+    tokens: &[&str],
+) -> BotCrawlerConfig {
+    BotCrawlerConfig {
+        enabled: true,
+        name: name.to_string(),
+        provider: provider.map(ToOwned::to_owned),
+        category: category.to_string(),
+        policy: policy.to_string(),
+        tokens: tokens.iter().map(|item| item.to_string()).collect(),
     }
 }
 

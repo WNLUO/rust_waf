@@ -298,6 +298,16 @@ export interface BotVerifierProviderStatus {
   status: string
 }
 
+export interface BotInsightsResponse {
+  generated_at: number
+  window_start: number
+  total_bot_events: number
+  by_trust_class: AiAuditCountItem[]
+  top_bot_names: AiAuditCountItem[]
+  top_mismatch_ips: AiAuditCountItem[]
+  top_routes: AiAuditCountItem[]
+}
+
 export interface AiTempPolicyItem {
   id: number
   created_at: number

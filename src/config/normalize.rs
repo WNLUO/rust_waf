@@ -1,5 +1,5 @@
 mod apply;
-mod defaults;
+pub(crate) mod defaults;
 mod gateway_and_integrations;
 mod profile;
 

@@ -68,6 +68,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(system_handlers::bot_verifier_status_handler),
         )
         .route(
+            "/dashboard/bot-insights",
+            get(system_handlers::bot_insights_handler),
+        )
+        .route(
             "/dashboard/bot-verifier/refresh",
             post(system_handlers::refresh_bot_verifier_handler),
         )

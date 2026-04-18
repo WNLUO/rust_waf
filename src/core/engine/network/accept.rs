@@ -200,24 +200,30 @@ pub(crate) async fn handle_tls_connection(
             }
             if assessment.should_block_ip {
                 if let Some(ip) = assessment.block_ip {
-                    if let Some(inspector) = context.l4_inspector() {
-                        inspector.block_ip(
-                            &ip,
-                            &assessment.reason,
-                            std::time::Duration::from_secs(assessment.block_duration_secs),
-                        );
-                    }
-                    if let Some(store) = context.sqlite_store.as_ref() {
-                        let blocked_at = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as i64;
-                        store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
-                            ip.to_string(),
-                            assessment.reason.clone(),
-                            blocked_at,
-                            blocked_at + assessment.block_duration_secs as i64,
-                        ));
+                    if context.is_server_public_ip(ip) {
+                        context
+                            .remove_server_public_ip_from_local_blocks(&ip.to_string())
+                            .await;
+                    } else {
+                        if let Some(inspector) = context.l4_inspector() {
+                            inspector.block_ip(
+                                &ip,
+                                &assessment.reason,
+                                std::time::Duration::from_secs(assessment.block_duration_secs),
+                            );
+                        }
+                        if let Some(store) = context.sqlite_store.as_ref() {
+                            let blocked_at = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64;
+                            store.enqueue_blocked_ip(crate::storage::BlockedIpRecord::new(
+                                ip.to_string(),
+                                assessment.reason.clone(),
+                                blocked_at,
+                                blocked_at + assessment.block_duration_secs as i64,
+                            ));
+                        }
                     }
                 }
             }

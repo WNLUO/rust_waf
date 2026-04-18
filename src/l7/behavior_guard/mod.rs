@@ -96,6 +96,21 @@ impl L7BehaviorGuard {
             );
             return None;
         }
+        if matches!(
+            request
+                .get_metadata("client.trust_class")
+                .map(String::as_str),
+            Some("internal" | "verified_good_bot")
+        ) {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                request
+                    .get_metadata("client.trust_class")
+                    .map(|value| format!("client_trust:{value}"))
+                    .unwrap_or_else(|| "client_trust".to_string()),
+            );
+            return None;
+        }
         let defense_depth = runtime_defense_depth(request);
         if defense_depth == crate::core::DefenseDepth::Survival {
             request.add_metadata(
@@ -245,6 +260,21 @@ impl L7BehaviorGuard {
         if ai_force_watch && assessment.score < DELAY_SCORE {
             assessment.score = DELAY_SCORE;
             assessment.flags.push("ai_temp_watch");
+        }
+        if request
+            .get_metadata("client.trust_class")
+            .map(String::as_str)
+            == Some("claimed_good_bot")
+        {
+            let reduction = if request.get_metadata("bot.policy").map(String::as_str)
+                == Some("reduce_friction")
+            {
+                30
+            } else {
+                15
+            };
+            assessment.score = assessment.score.saturating_sub(reduction);
+            assessment.flags.push("known_crawler_library");
         }
 
         request.add_metadata(

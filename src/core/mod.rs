@@ -3,6 +3,7 @@ mod ai_defense_runtime;
 mod ai_temp_policy;
 mod ai_temp_policy_runtime;
 mod auto_tuning;
+pub(crate) mod bot_intelligence;
 pub mod engine;
 mod engine_maintenance;
 mod engine_tls;

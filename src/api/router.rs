@@ -103,6 +103,10 @@ pub(super) fn build_router(state: ApiState) -> Router {
             get(events_handlers::list_security_events_handler),
         )
         .route(
+            "/events/summary",
+            get(events_handlers::security_events_summary_handler),
+        )
+        .route(
             "/behavior/profiles",
             get(events_handlers::list_behavior_profiles_handler),
         )

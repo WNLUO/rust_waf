@@ -47,6 +47,7 @@ pub struct SafeLineSecurityEventSummary {
     pub provider_site_name: Option<String>,
     pub provider_site_domain: Option<String>,
     pub action: String,
+    pub raw_action: Option<String>,
     pub reason: String,
     pub source_ip: String,
     pub dest_ip: String,

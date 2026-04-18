@@ -1,8 +1,16 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { fetchSecurityEvents } from '@/shared/api/events'
+import {
+  fetchSecurityEvents,
+  fetchSecurityEventsSummary,
+} from '@/shared/api/events'
 import { syncSafeLineEvents } from '@/shared/api/safeline'
-import type { SecurityEventItem, SecurityEventsResponse } from '@/shared/types'
+import type {
+  EventsQuery,
+  SecurityEventItem,
+  SecurityEventsResponse,
+  SecurityEventsSummaryResponse,
+} from '@/shared/types'
 import { useFormatters } from '@/shared/composables/useFormatters'
 import { useFlashMessages } from '@/shared/composables/useNotifications'
 import {
@@ -33,6 +41,26 @@ export function useAdminEventsPage() {
     limit: 0,
     offset: 0,
     events: [],
+  })
+  const eventsSummary = ref<SecurityEventsSummaryResponse>({
+    total_events: 0,
+    sampled_events: 0,
+    generated_at: 0,
+    by_action: [],
+    by_layer: [],
+    by_provider: [],
+    by_primary_signal: [],
+    top_source_ips: [],
+    top_routes: [],
+    top_reasons: [],
+    hourly: [],
+    aggregated: {
+      summary_events: 0,
+      represented_events: 0,
+      hotspot_events: 0,
+      long_tail_events: 0,
+    },
+    representative_events: [],
   })
 
   useFlashMessages({
@@ -148,6 +176,34 @@ export function useAdminEventsPage() {
       eventsFilters.sort_direction === 'desc',
   )
 
+  const buildEventsQuery = (includePagination: boolean): EventsQuery => ({
+    limit: includePagination ? PAGE_SIZE : undefined,
+    offset: includePagination ? (currentPage.value - 1) * PAGE_SIZE : undefined,
+    sort_by: includePagination ? eventsFilters.sort_by : undefined,
+    sort_direction: includePagination ? eventsFilters.sort_direction : undefined,
+    blocked_only: eventsFilters.blocked_only,
+    layer: eventsFilters.layer === 'all' ? undefined : eventsFilters.layer,
+    provider: eventsFilters.provider === 'all' ? undefined : eventsFilters.provider,
+    provider_site_id:
+      eventsFilters.provider_site_id === 'all'
+        ? undefined
+        : eventsFilters.provider_site_id,
+    action: eventsFilters.action === 'all' ? undefined : eventsFilters.action,
+    identity_state:
+      eventsFilters.identity_state === 'all'
+        ? undefined
+        : eventsFilters.identity_state,
+    primary_signal: eventsFilters.primary_signal.trim() || undefined,
+    labels: eventsFilters.labels.trim() || undefined,
+    handled_only:
+      eventsFilters.handled === 'all'
+        ? undefined
+        : eventsFilters.handled === 'handled',
+    source_ip: eventsFilters.source_ip.trim() || undefined,
+    created_from: toUnixTimestamp(eventsFilters.created_from),
+    created_to: toUnixTimestamp(eventsFilters.created_to),
+  })
+
   const matchesRealtimeFilters = (event: SecurityEventItem) => {
     if (
       eventsFilters.layer !== 'all' &&
@@ -251,35 +307,12 @@ export function useAdminEventsPage() {
     if (showLoader) loading.value = true
     refreshing.value = true
     try {
-      eventsPayload.value = await fetchSecurityEvents({
-        limit: PAGE_SIZE,
-        offset: (currentPage.value - 1) * PAGE_SIZE,
-        sort_by: eventsFilters.sort_by,
-        sort_direction: eventsFilters.sort_direction,
-        blocked_only: eventsFilters.blocked_only,
-        layer: eventsFilters.layer === 'all' ? undefined : eventsFilters.layer,
-        provider:
-          eventsFilters.provider === 'all' ? undefined : eventsFilters.provider,
-        provider_site_id:
-          eventsFilters.provider_site_id === 'all'
-            ? undefined
-            : eventsFilters.provider_site_id,
-        action:
-          eventsFilters.action === 'all' ? undefined : eventsFilters.action,
-        identity_state:
-          eventsFilters.identity_state === 'all'
-            ? undefined
-            : eventsFilters.identity_state,
-        primary_signal: eventsFilters.primary_signal.trim() || undefined,
-        labels: eventsFilters.labels.trim() || undefined,
-        handled_only:
-          eventsFilters.handled === 'all'
-            ? undefined
-            : eventsFilters.handled === 'handled',
-        source_ip: eventsFilters.source_ip.trim() || undefined,
-        created_from: toUnixTimestamp(eventsFilters.created_from),
-        created_to: toUnixTimestamp(eventsFilters.created_to),
-      })
+      const [events, summary] = await Promise.all([
+        fetchSecurityEvents(buildEventsQuery(true)),
+        fetchSecurityEventsSummary(buildEventsQuery(false)),
+      ])
+      eventsPayload.value = events
+      eventsSummary.value = summary
       error.value = ''
 
       if (currentPage.value > totalPages.value) {
@@ -408,6 +441,8 @@ export function useAdminEventsPage() {
       action === 'block' ||
       action === 'allow' ||
       action === 'alert' ||
+      action === 'respond' ||
+      action === 'drop' ||
       action === 'log' ||
       action === 'summary'
     ) {
@@ -551,6 +586,7 @@ export function useAdminEventsPage() {
     syncingFiltersFromRoute,
     realtimeState,
     eventsPayload,
+    eventsSummary,
     eventsFilters,
     showAdvancedFiltersDialog,
     advancedFiltersDraft,

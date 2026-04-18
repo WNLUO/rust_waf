@@ -10,6 +10,7 @@ import type {
   BehaviorSessionsResponse,
   EventsQuery,
   FingerprintProfilesResponse,
+  SecurityEventsSummaryResponse,
   SecurityEventsResponse,
   WriteStatusResponse,
 } from '@/shared/types'
@@ -23,6 +24,12 @@ export function unblockIp(id: number) {
 
 export function fetchSecurityEvents(query?: EventsQuery) {
   return apiRequest<SecurityEventsResponse>(`/events${buildQuery(query)}`)
+}
+
+export function fetchSecurityEventsSummary(query?: EventsQuery) {
+  return apiRequest<SecurityEventsSummaryResponse>(
+    `/events/summary${buildQuery(query)}`,
+  )
 }
 
 export function fetchBehaviorProfiles() {

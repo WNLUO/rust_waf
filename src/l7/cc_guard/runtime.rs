@@ -31,9 +31,40 @@ impl L7CcGuard {
             request.add_metadata("l7.cc.skipped".to_string(), "server_public_ip".to_string());
             return None;
         }
-        let reduce_friction = request
-            .get_metadata("ai.visitor.reduce_friction")
-            .is_some_and(|value| value == "true");
+        if matches!(
+            request
+                .get_metadata("client.trust_class")
+                .map(String::as_str),
+            Some("internal" | "verified_good_bot")
+        ) {
+            request.add_metadata(
+                "l7.cc.skipped".to_string(),
+                request
+                    .get_metadata("client.trust_class")
+                    .map(|value| format!("client_trust:{value}"))
+                    .unwrap_or_else(|| "client_trust".to_string()),
+            );
+            return None;
+        }
+        let bot_reduce_friction =
+            request.get_metadata("bot.policy").map(String::as_str) == Some("reduce_friction");
+        let known_bot_threshold_multiplier = if request
+            .get_metadata("client.trust_class")
+            .map(String::as_str)
+            == Some("claimed_good_bot")
+        {
+            if bot_reduce_friction {
+                3
+            } else {
+                2
+            }
+        } else {
+            1
+        };
+        let reduce_friction = bot_reduce_friction
+            || request
+                .get_metadata("ai.visitor.reduce_friction")
+                .is_some_and(|value| value == "true");
         let defense_depth = runtime_defense_depth(request);
         let rich_tracking = matches!(
             defense_depth,
@@ -281,6 +312,10 @@ impl L7CcGuard {
             client_identity_unresolved.to_string(),
         );
         request.add_metadata("l7.cc.rich_tracking".to_string(), rich_tracking.to_string());
+        request.add_metadata(
+            "l7.cc.known_bot_threshold_multiplier".to_string(),
+            known_bot_threshold_multiplier.to_string(),
+        );
 
         self.maybe_cleanup(unix_now, &config);
 
@@ -314,20 +349,24 @@ impl L7CcGuard {
         let route_block_threshold = config
             .route_block_threshold
             .saturating_mul(block_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier)
             .saturating_mul(route_scale_percent)
             / 100;
         let host_block_threshold = config
             .host_block_threshold
             .saturating_mul(block_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier)
             .saturating_mul(interactive_host_ip_block_multiplier);
         let host_block_threshold = host_block_threshold.saturating_mul(host_scale_percent) / 100;
         let ip_block_threshold = config
             .ip_block_threshold
             .saturating_mul(block_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier)
             .saturating_mul(interactive_host_ip_block_multiplier);
         let hot_path_block_threshold = config
             .hot_path_block_threshold
-            .saturating_mul(block_multiplier);
+            .saturating_mul(block_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier);
 
         let hard_route_block_threshold =
             route_block_threshold.saturating_mul(u32::from(config.hard_route_block_multiplier));
@@ -394,21 +433,25 @@ impl L7CcGuard {
         let route_challenge_threshold = config
             .route_challenge_threshold
             .saturating_mul(challenge_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier)
             .saturating_mul(route_scale_percent)
             / 100;
         let host_challenge_threshold = config
             .host_challenge_threshold
             .saturating_mul(challenge_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier)
             .saturating_mul(interactive_host_ip_multiplier)
             .saturating_mul(host_scale_percent)
             / 100;
         let ip_challenge_threshold = config
             .ip_challenge_threshold
             .saturating_mul(challenge_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier)
             .saturating_mul(interactive_host_ip_multiplier);
         let hot_path_challenge_threshold = config
             .hot_path_challenge_threshold
-            .saturating_mul(challenge_multiplier);
+            .saturating_mul(challenge_multiplier)
+            .saturating_mul(known_bot_threshold_multiplier);
         let global_hot_path_client_challenge_threshold =
             global_hot_path_client_challenge_threshold(&config);
         let global_hot_path_effective_challenge_threshold =

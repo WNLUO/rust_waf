@@ -108,8 +108,8 @@ pub(super) fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecu
     )
     .unwrap_or_else(|| "0.0.0.0".to_string());
     let dest_ip = pick_string(object, &["dst_ip", "dest_ip", "server_ip"]).unwrap_or_default();
-    let action = pick_string(object, &["action", "decision", "event_type", "type"])
-        .unwrap_or_else(|| "alert".to_string());
+    let raw_action = pick_string(object, &["action", "decision", "event_type", "type"]);
+    let action = normalize_safeline_action(raw_action.as_deref());
     let attack_type = pick_string(object, &["attack_type", "rule_type", "category"]);
     let reason = pick_string(object, &["reason", "message", "description", "rule_name"])
         .or(attack_type.clone())
@@ -167,6 +167,7 @@ pub(super) fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecu
         provider_site_name,
         provider_site_domain,
         action,
+        raw_action,
         reason: attack_type
             .map(|kind| format!("safeline:{kind}:{reason}"))
             .unwrap_or_else(|| format!("safeline:{reason}")),
@@ -181,6 +182,19 @@ pub(super) fn parse_security_event_summary(value: &Value) -> Option<SafeLineSecu
         created_at: normalize_timestamp(created_at),
         raw: value.clone(),
     })
+}
+
+fn normalize_safeline_action(raw: Option<&str>) -> String {
+    match raw.unwrap_or("alert").trim().to_ascii_lowercase().as_str() {
+        "1" | "block" | "blocked" | "deny" | "denied" | "forbid" | "intercept" | "intercepted"
+        | "reject" | "kill" => "block".to_string(),
+        "2" | "drop" | "dropped" => "drop".to_string(),
+        "3" | "respond" | "captcha" | "challenge" => "respond".to_string(),
+        "0" | "alert" | "detect" | "detected" | "log" | "pass" | "allow" | "allowed" => {
+            "alert".to_string()
+        }
+        _ => "alert".to_string(),
+    }
 }
 
 pub(super) fn parse_blocked_ip_summaries(value: &Value) -> Vec<SafeLineBlockedIpSummary> {

@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
 pub(super) async fn list_security_events_handler(
@@ -22,6 +22,249 @@ pub(super) async fn list_security_events_handler(
             .map(SecurityEventResponse::from)
             .collect(),
     }))
+}
+
+pub(super) async fn security_events_summary_handler(
+    State(state): State<ApiState>,
+    Query(params): Query<EventsQueryParams>,
+) -> ApiResult<Json<SecurityEventsSummaryResponse>> {
+    const SUMMARY_LIMIT: usize = 5_000;
+    const PAGE_SIZE: u32 = 200;
+
+    let store = sqlite_store(&state)?;
+    let mut offset = 0_u32;
+    let mut sampled = Vec::new();
+
+    let total_events = loop {
+        let mut page_params = params.clone();
+        page_params.limit = Some(PAGE_SIZE);
+        page_params.offset = Some(offset);
+        page_params.sort_by = Some("created_at".to_string());
+        page_params.sort_direction = Some("desc".to_string());
+        let page = store
+            .list_security_events(&page_params.into_query().map_err(ApiError::bad_request)?)
+            .await
+            .map_err(ApiError::internal)?;
+        let fetched = page.items.len();
+        let total = page.total;
+        sampled.extend(page.items);
+        if fetched < PAGE_SIZE as usize || sampled.len() >= SUMMARY_LIMIT {
+            break total;
+        }
+        offset = offset.saturating_add(PAGE_SIZE);
+        if u64::from(offset) >= total {
+            break total;
+        }
+    };
+
+    let mut by_action = BTreeMap::new();
+    let mut by_layer = BTreeMap::new();
+    let mut by_provider = BTreeMap::new();
+    let mut by_primary_signal = BTreeMap::new();
+    let mut top_source_ips = BTreeMap::new();
+    let mut top_routes = BTreeMap::new();
+    let mut top_reasons = BTreeMap::new();
+    let mut hourly = BTreeMap::<i64, HourlyAccumulator>::new();
+    let mut aggregated = SecurityEventsAggregatedSummary::default();
+    let mut representative_events = Vec::new();
+
+    for entry in sampled {
+        increment(&mut by_action, entry.action.clone());
+        increment(&mut by_layer, entry.layer.clone());
+        increment(
+            &mut by_provider,
+            entry
+                .provider
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "local".to_string()),
+        );
+        increment(&mut top_source_ips, entry.source_ip.clone());
+        increment(&mut top_routes, summarize_event_route(&entry));
+        increment(&mut top_reasons, summarize_reason(&entry.reason));
+
+        let response = SecurityEventResponse::from(entry.clone());
+        let primary_signal = response
+            .decision_summary
+            .as_ref()
+            .map(|summary| summary.primary_signal.clone())
+            .unwrap_or_else(|| fallback_primary_signal(&response));
+        increment(&mut by_primary_signal, primary_signal);
+
+        let bucket = entry.created_at - entry.created_at.rem_euclid(3600);
+        hourly.entry(bucket).or_default().observe(&entry.action);
+
+        if entry.action == "summary" {
+            aggregated.summary_events = aggregated.summary_events.saturating_add(1);
+            if let Some(details) = entry
+                .details_json
+                .as_deref()
+                .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+            {
+                let represented = nested_u64(&details, &["storage_pressure", "count"]);
+                aggregated.represented_events = aggregated
+                    .represented_events
+                    .saturating_add(represented.unwrap_or(0));
+                match nested_str(&details, &["storage_pressure", "source_scope"]).as_deref() {
+                    Some("hotspot") => {
+                        aggregated.hotspot_events = aggregated.hotspot_events.saturating_add(1);
+                    }
+                    Some("long_tail") => {
+                        aggregated.long_tail_events = aggregated.long_tail_events.saturating_add(1);
+                    }
+                    _ => {}
+                }
+            }
+        } else if representative_events.len() < 12 {
+            representative_events.push(response);
+        }
+    }
+
+    let mut hourly = hourly
+        .into_iter()
+        .map(|(bucket_start, item)| SecurityEventHourlyItem {
+            bucket_start,
+            count: item.count,
+            blocked: item.blocked,
+            alerted: item.alerted,
+            challenged: item.challenged,
+            dropped: item.dropped,
+        })
+        .collect::<Vec<_>>();
+    hourly.sort_by_key(|item| item.bucket_start);
+
+    Ok(Json(SecurityEventsSummaryResponse {
+        total_events,
+        sampled_events: count_map_total(&by_action),
+        generated_at: unix_timestamp(),
+        by_action: top_counts(by_action, 12),
+        by_layer: top_counts(by_layer, 8),
+        by_provider: top_counts(by_provider, 8),
+        by_primary_signal: top_counts(by_primary_signal, 12),
+        top_source_ips: top_counts(top_source_ips, 12),
+        top_routes: top_counts(top_routes, 12),
+        top_reasons: top_counts(top_reasons, 12),
+        hourly,
+        aggregated,
+        representative_events,
+    }))
+}
+
+#[derive(Default)]
+struct HourlyAccumulator {
+    count: u64,
+    blocked: u64,
+    alerted: u64,
+    challenged: u64,
+    dropped: u64,
+}
+
+impl HourlyAccumulator {
+    fn observe(&mut self, action: &str) {
+        self.count = self.count.saturating_add(1);
+        match action {
+            "block" => self.blocked = self.blocked.saturating_add(1),
+            "alert" => self.alerted = self.alerted.saturating_add(1),
+            "respond" => self.challenged = self.challenged.saturating_add(1),
+            "drop" => self.dropped = self.dropped.saturating_add(1),
+            _ => {}
+        }
+    }
+}
+
+fn increment(map: &mut BTreeMap<String, u64>, key: String) {
+    let key = if key.trim().is_empty() {
+        "unknown".to_string()
+    } else {
+        key
+    };
+    *map.entry(key).or_insert(0) += 1;
+}
+
+fn count_map_total(map: &BTreeMap<String, u64>) -> u64 {
+    map.values().copied().sum()
+}
+
+fn top_counts(map: BTreeMap<String, u64>, limit: usize) -> Vec<SecurityEventCountItem> {
+    let mut items = map
+        .into_iter()
+        .map(|(key, count)| SecurityEventCountItem { key, count })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    items.truncate(limit);
+    items
+}
+
+fn summarize_event_route(entry: &crate::storage::SecurityEventEntry) -> String {
+    if let Some(details) = entry
+        .details_json
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
+    {
+        if let Some(route) = nested_str(&details, &["l7_cc", "route"])
+            .or_else(|| nested_str(&details, &["l7_behavior", "dominant_route"]))
+        {
+            return route;
+        }
+    }
+    entry
+        .uri
+        .as_deref()
+        .and_then(|uri| uri.split('?').next())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("-")
+        .to_string()
+}
+
+fn summarize_reason(reason: &str) -> String {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("slow attack") {
+        "slow_attack".to_string()
+    } else if lower.contains("safeline") {
+        "safeline".to_string()
+    } else if lower.contains("l7 cc") {
+        "l7_cc".to_string()
+    } else if lower.contains("behavior") {
+        "l7_behavior".to_string()
+    } else if lower.contains("rule") || lower.contains("signature") {
+        "rule_engine".to_string()
+    } else if lower.contains("blocked ip") {
+        "blocked_ip".to_string()
+    } else {
+        reason.chars().take(80).collect()
+    }
+}
+
+fn fallback_primary_signal(event: &SecurityEventResponse) -> String {
+    let lower = event.reason.to_ascii_lowercase();
+    if lower.contains("slow attack") {
+        "slow_attack".to_string()
+    } else if lower.contains("safeline") || event.provider.as_deref() == Some("safeline") {
+        "safeline".to_string()
+    } else {
+        event.action.clone()
+    }
+}
+
+fn nested_str(value: &serde_json::Value, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_str().map(ToOwned::to_owned)
+}
+
+fn nested_u64(value: &serde_json::Value, path: &[&str]) -> Option<u64> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current.as_u64()
 }
 
 pub(super) async fn list_behavior_profiles_handler(

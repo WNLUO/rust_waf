@@ -464,9 +464,11 @@ fn derive_security_event_summary(entry: &SecurityEventEntry) -> DerivedSecurityE
         details.as_ref(),
         &["inspection_runtime", "rule_inspection_mode"],
     );
-    let cc_action = nested_str_from_option(details.as_ref(), &["l7", "cc", "action"])
+    let cc_action = nested_str_from_option(details.as_ref(), &["l7_cc", "action"])
+        .or_else(|| nested_str_from_option(details.as_ref(), &["l7", "cc", "action"]))
         .or_else(|| nested_str_from_option(details.as_ref(), &["cc_action"]));
-    let behavior_action = nested_str_from_option(details.as_ref(), &["l7", "behavior", "action"])
+    let behavior_action = nested_str_from_option(details.as_ref(), &["l7_behavior", "action"])
+        .or_else(|| nested_str_from_option(details.as_ref(), &["l7", "behavior", "action"]))
         .or_else(|| nested_str_from_option(details.as_ref(), &["behavior_action"]));
     let primary_signal = derive_primary_signal(
         &entry.reason,
@@ -521,13 +523,14 @@ fn derive_primary_signal(
     if let Some(action) = behavior_action {
         return format!("l7_behavior:{action}");
     }
-    if reason.contains("slow attack") {
+    let lower = reason.to_ascii_lowercase();
+    if lower.contains("slow attack") {
         return "slow_attack".to_string();
     }
-    if reason.contains("SafeLine") {
+    if lower.contains("safeline") {
         return "safeline".to_string();
     }
-    if reason.contains("rule") || reason.contains("signature") {
+    if lower.contains("rule") || lower.contains("signature") {
         return "rule_engine".to_string();
     }
     reason.to_ascii_lowercase().replace(' ', "_")

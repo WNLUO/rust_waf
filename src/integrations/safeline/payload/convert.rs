@@ -8,6 +8,7 @@ impl From<SafeLineSecurityEventSummary> for SecurityEventRecord {
             provider_site_name,
             provider_site_domain,
             action,
+            raw_action,
             reason,
             source_ip,
             dest_ip,
@@ -27,6 +28,11 @@ impl From<SafeLineSecurityEventSummary> for SecurityEventRecord {
             .map(|(_, value)| value.clone())
             .or_else(|| extract_string_by_keys(&raw, &["event_id", "eventId", "log_id", "id"]));
         let details_json = serde_json::to_string_pretty(&serde_json::json!({
+            "provider": {
+                "name": "safeline",
+                "raw_action": raw_action,
+                "normalized_action": action,
+            },
             "raw": raw,
             "identity_markers": identity_markers
                 .iter()

@@ -9,6 +9,47 @@ pub struct SecurityEventsResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct SecurityEventsSummaryResponse {
+    pub(crate) total_events: u64,
+    pub(crate) sampled_events: u64,
+    pub(crate) generated_at: i64,
+    pub(crate) by_action: Vec<SecurityEventCountItem>,
+    pub(crate) by_layer: Vec<SecurityEventCountItem>,
+    pub(crate) by_provider: Vec<SecurityEventCountItem>,
+    pub(crate) by_primary_signal: Vec<SecurityEventCountItem>,
+    pub(crate) top_source_ips: Vec<SecurityEventCountItem>,
+    pub(crate) top_routes: Vec<SecurityEventCountItem>,
+    pub(crate) top_reasons: Vec<SecurityEventCountItem>,
+    pub(crate) hourly: Vec<SecurityEventHourlyItem>,
+    pub(crate) aggregated: SecurityEventsAggregatedSummary,
+    pub(crate) representative_events: Vec<SecurityEventResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SecurityEventCountItem {
+    pub(crate) key: String,
+    pub(crate) count: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SecurityEventHourlyItem {
+    pub(crate) bucket_start: i64,
+    pub(crate) count: u64,
+    pub(crate) blocked: u64,
+    pub(crate) alerted: u64,
+    pub(crate) challenged: u64,
+    pub(crate) dropped: u64,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct SecurityEventsAggregatedSummary {
+    pub(crate) summary_events: u64,
+    pub(crate) represented_events: u64,
+    pub(crate) hotspot_events: u64,
+    pub(crate) long_tail_events: u64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct BehaviorProfilesResponse {
     pub(crate) total: u64,
     pub(crate) profiles: Vec<BehaviorProfileResponse>,
@@ -207,7 +248,7 @@ pub struct BlockedIpsCleanupExpiredResponse {
     pub(crate) message: String,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct EventsQueryParams {
     pub(crate) limit: Option<u32>,
     pub(crate) offset: Option<u32>,

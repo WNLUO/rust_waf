@@ -139,6 +139,7 @@ pub(crate) fn apply_server_public_ip_metadata(
 
 pub(crate) fn prepare_request_for_routing(context: &WafContext, request: &mut UnifiedHttpRequest) {
     ensure_request_id(request);
+    crate::core::bot_intelligence::annotate_request(context, request);
     if context.config_snapshot().gateway_config.enable_ntlm
         && context
             .config_snapshot()

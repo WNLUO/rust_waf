@@ -111,10 +111,14 @@ impl SlowAttackGuard {
 
         SlowAttackAssessment {
             reason: format!(
-                "slow attack detected: kind={} {} events_in_window={}{} detail={}",
+                "slow attack detected: kind={} {} events_in_window={} threshold={} window_secs={} identity_state={} trusted_proxy_peer={}{} detail={}",
                 observation.kind.as_str(),
                 scope,
                 event_count,
+                block_threshold,
+                window_secs,
+                observation.identity_state,
+                observation.trusted_proxy_peer,
                 host_suffix,
                 observation.detail,
             ),
@@ -220,7 +224,7 @@ fn slow_attack_window_secs(config: &SlowAttackDefenseConfig, kind: SlowAttackKin
 
 fn slow_attack_block_threshold(config: &SlowAttackDefenseConfig, kind: SlowAttackKind) -> u32 {
     match kind {
-        SlowAttackKind::SlowTlsHandshake => config.max_events_per_window.min(3).max(1),
+        SlowAttackKind::SlowTlsHandshake => config.max_events_per_window.min(2).max(1),
         _ => config.max_events_per_window.max(1),
     }
 }
@@ -362,7 +366,6 @@ mod tests {
             detail: "listener=0.0.0.0:660 timeout_ms=3000".to_string(),
         };
 
-        assert!(!guard.assess(make_observation()).should_block_ip);
         assert!(!guard.assess(make_observation()).should_block_ip);
         assert!(guard.assess(make_observation()).should_block_ip);
     }

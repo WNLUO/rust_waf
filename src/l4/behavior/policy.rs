@@ -250,6 +250,33 @@ pub(super) fn apply_identity_state_policy(
     overload_level: &L4OverloadLevel,
     tuning: &L4BehaviorTuning,
 ) -> L4AdaptivePolicy {
+    if matches!(
+        request
+            .get_metadata("client.trust_class")
+            .map(String::as_str),
+        Some("internal" | "verified_good_bot")
+    ) {
+        policy.reject_new_connections = false;
+        policy.disable_keepalive = false;
+        policy.prefer_early_close = false;
+        policy.suggested_delay_ms = 0;
+        policy.connection_budget_per_minute = policy
+            .connection_budget_per_minute
+            .max(tuning.normal_connection_budget_per_minute.saturating_mul(2));
+        return policy;
+    }
+
+    if request
+        .get_metadata("client.trust_class")
+        .map(String::as_str)
+        == Some("claimed_good_bot")
+    {
+        policy.connection_budget_per_minute = policy.connection_budget_per_minute.saturating_mul(2);
+        if request.get_metadata("bot.policy").map(String::as_str) == Some("reduce_friction") {
+            policy.suggested_delay_ms /= 2;
+        }
+    }
+
     match request
         .get_metadata("network.identity_state")
         .map(String::as_str)

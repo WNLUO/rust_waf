@@ -57,6 +57,43 @@ export interface SecurityEventsResponse {
   events: SecurityEventItem[]
 }
 
+export interface SecurityEventsSummaryResponse {
+  total_events: number
+  sampled_events: number
+  generated_at: number
+  by_action: SecurityEventCountItem[]
+  by_layer: SecurityEventCountItem[]
+  by_provider: SecurityEventCountItem[]
+  by_primary_signal: SecurityEventCountItem[]
+  top_source_ips: SecurityEventCountItem[]
+  top_routes: SecurityEventCountItem[]
+  top_reasons: SecurityEventCountItem[]
+  hourly: SecurityEventHourlyItem[]
+  aggregated: SecurityEventsAggregatedSummary
+  representative_events: SecurityEventItem[]
+}
+
+export interface SecurityEventCountItem {
+  key: string
+  count: number
+}
+
+export interface SecurityEventHourlyItem {
+  bucket_start: number
+  count: number
+  blocked: number
+  alerted: number
+  challenged: number
+  dropped: number
+}
+
+export interface SecurityEventsAggregatedSummary {
+  summary_events: number
+  represented_events: number
+  hotspot_events: number
+  long_tail_events: number
+}
+
 export interface BehaviorProfileItem {
   identity: string
   source_ip: string | null

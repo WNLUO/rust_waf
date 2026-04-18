@@ -575,6 +575,19 @@ fn build_request_identity_details_with_header(
             "http_version": request.version.to_string(),
             "headers": headers,
         },
+        "client_trust": {
+            "trust_class": request.get_metadata("client.trust_class").cloned(),
+            "policy": request.get_metadata("client.policy").cloned(),
+            "reason": request.get_metadata("client.trust_reason").cloned(),
+            "internal_task": request.get_metadata("internal.task").cloned(),
+        },
+        "bot": {
+            "known": request.get_metadata("bot.known").cloned(),
+            "name": request.get_metadata("bot.name").cloned(),
+            "category": request.get_metadata("bot.category").cloned(),
+            "verification": request.get_metadata("bot.verification").cloned(),
+            "policy": request.get_metadata("bot.policy").cloned(),
+        },
         "l7_cc": {
             "action": request.get_metadata("l7.cc.action").cloned(),
             "request_kind": request.get_metadata("l7.cc.request_kind").cloned(),
@@ -584,6 +597,7 @@ fn build_request_identity_details_with_header(
             "hot_path_weighted": request.get_metadata("l7.cc.hot_path_weighted").cloned(),
             "hot_path_clients": request.get_metadata("l7.cc.hot_path_clients").cloned(),
             "challenge_verified": request.get_metadata("l7.cc.challenge_verified").cloned(),
+            "known_bot_threshold_multiplier": request.get_metadata("l7.cc.known_bot_threshold_multiplier").cloned(),
         },
         "l7_behavior": {
             "action": request.get_metadata("l7.behavior.action").cloned(),

@@ -16,6 +16,7 @@ const {
   pendingRealtimeCount,
   realtimeState,
   eventsPayload,
+  eventsSummary,
   eventsFilters,
   showAdvancedFiltersDialog,
   advancedFiltersDraft,
@@ -116,6 +117,8 @@ const {
           <option value="block">拦截</option>
           <option value="allow">放行</option>
           <option value="alert">告警</option>
+          <option value="respond">响应</option>
+          <option value="drop">丢弃</option>
           <option value="log">记录</option>
         </select>
         <select
@@ -160,6 +163,48 @@ const {
 
       <div
         v-else
+        class="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
+      >
+        <div class="rounded-md border border-slate-200 bg-white p-3">
+          <div class="text-xs text-slate-500">事件总量</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-900">
+            {{ eventsSummary.total_events }}
+          </div>
+          <div class="mt-1 text-xs text-slate-500">
+            采样 {{ eventsSummary.sampled_events }}
+          </div>
+        </div>
+        <div class="rounded-md border border-slate-200 bg-white p-3">
+          <div class="text-xs text-slate-500">主信号</div>
+          <div class="mt-1 text-lg font-semibold text-slate-900">
+            {{ eventsSummary.by_primary_signal[0]?.key || '-' }}
+          </div>
+          <div class="mt-1 text-xs text-slate-500">
+            {{ eventsSummary.by_primary_signal[0]?.count || 0 }} 次
+          </div>
+        </div>
+        <div class="rounded-md border border-slate-200 bg-white p-3">
+          <div class="text-xs text-slate-500">高频来源</div>
+          <div class="mt-1 font-mono text-lg font-semibold text-slate-900">
+            {{ eventsSummary.top_source_ips[0]?.key || '-' }}
+          </div>
+          <div class="mt-1 text-xs text-slate-500">
+            {{ eventsSummary.top_source_ips[0]?.count || 0 }} 次
+          </div>
+        </div>
+        <div class="rounded-md border border-slate-200 bg-white p-3">
+          <div class="text-xs text-slate-500">聚合摘要</div>
+          <div class="mt-1 text-2xl font-semibold text-slate-900">
+            {{ eventsSummary.aggregated.summary_events }}
+          </div>
+          <div class="mt-1 text-xs text-slate-500">
+            代表 {{ eventsSummary.aggregated.represented_events }} 次
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="!loading"
         class="overflow-hidden rounded-md border border-slate-200 bg-white"
       >
         <div class="overflow-x-auto">

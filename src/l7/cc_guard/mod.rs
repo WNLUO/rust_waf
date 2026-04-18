@@ -5,9 +5,11 @@ use rand::Rng;
 use std::sync::atomic::AtomicU64;
 use std::sync::RwLock;
 
+mod challenge;
 mod counters;
 mod helpers;
 mod runtime;
+mod tracking;
 mod types;
 
 use helpers::*;

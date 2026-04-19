@@ -77,6 +77,8 @@ pub struct MetricsResponse {
     pub(crate) resource_sentinel_pre_admission_rejections: u64,
     pub(crate) resource_sentinel_aggregated_events: u64,
     pub(crate) resource_sentinel_automated_defense_actions: u64,
+    pub(crate) resource_sentinel_automated_defense_extensions: u64,
+    pub(crate) resource_sentinel_automated_defense_relaxations: u64,
     pub(crate) resource_sentinel_top_attack_clusters:
         Vec<crate::core::ResourceSentinelClusterSnapshot>,
     pub(crate) storage_degraded_reasons: Vec<String>,

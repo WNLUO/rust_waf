@@ -167,6 +167,8 @@ fn test_build_metrics_response_with_sources() {
             pre_admission_rejections: 7,
             aggregated_events: 9,
             automated_defense_actions: 4,
+            automated_defense_extensions: 2,
+            automated_defense_relaxations: 1,
             top_attack_clusters: vec![crate::core::ResourceSentinelClusterSnapshot {
                 cluster: "203.0.113.0/24".to_string(),
                 attack_type: "slow_tls_handshake".to_string(),
@@ -236,6 +238,8 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.resource_sentinel_attack_score, 88);
     assert_eq!(response.resource_sentinel_pre_admission_rejections, 7);
     assert_eq!(response.resource_sentinel_automated_defense_actions, 4);
+    assert_eq!(response.resource_sentinel_automated_defense_extensions, 2);
+    assert_eq!(response.resource_sentinel_automated_defense_relaxations, 1);
     assert_eq!(response.resource_sentinel_tracked_attack_clusters, 1);
     assert_eq!(response.resource_sentinel_active_cooldowns, 1);
     assert_eq!(

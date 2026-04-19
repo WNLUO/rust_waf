@@ -32,6 +32,12 @@ const HOT_CLUSTER_DEFENSE_COUNT: u64 = 24;
 const HOT_CLUSTER_DEFENSE_SCORE: u64 = 120;
 const HOT_CLUSTER_DEFENSE_COOLDOWN_MS: u64 = 20_000;
 const SURVIVAL_CLUSTER_DEFENSE_COOLDOWN_MS: u64 = 45_000;
+const DEFENSE_EFFECT_EVAL_INTERVAL_MS: u64 = 1_000;
+const DEFENSE_EFFECT_EXTEND_MS: u64 = 10_000;
+const DEFENSE_EFFECT_SURVIVAL_EXTEND_MS: u64 = 30_000;
+const DEFENSE_EFFECT_MAX_LIFETIME_MS: u64 = 120_000;
+const DEFENSE_EFFECT_RELAX_TO_MS: u64 = 2_000;
+const DEFENSE_EFFECT_REJECTION_DELTA: u64 = 3;
 
 #[derive(Debug)]
 pub(crate) struct ResourceSentinel {
@@ -47,6 +53,8 @@ pub(crate) struct ResourceSentinel {
     pre_admission_rejections: AtomicU64,
     aggregated_events: AtomicU64,
     automated_defense_actions: AtomicU64,
+    automated_defense_extensions: AtomicU64,
+    automated_defense_relaxations: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -58,6 +66,12 @@ struct DebtBucket {
 #[derive(Debug)]
 struct CooldownBucket {
     until_ms: AtomicU64,
+    created_ms: u64,
+    last_evaluated_ms: AtomicU64,
+    last_rejections: AtomicU64,
+    last_attack_score: AtomicU64,
+    extensions: AtomicU64,
+    relaxations: AtomicU64,
     reason: String,
 }
 
@@ -89,6 +103,8 @@ pub struct ResourceSentinelSnapshot {
     pub pre_admission_rejections: u64,
     pub aggregated_events: u64,
     pub automated_defense_actions: u64,
+    pub automated_defense_extensions: u64,
+    pub automated_defense_relaxations: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
 }
 
@@ -130,6 +146,8 @@ impl ResourceSentinel {
             pre_admission_rejections: AtomicU64::new(0),
             aggregated_events: AtomicU64::new(0),
             automated_defense_actions: AtomicU64::new(0),
+            automated_defense_extensions: AtomicU64::new(0),
+            automated_defense_relaxations: AtomicU64::new(0),
         }
     }
 
@@ -328,6 +346,10 @@ impl ResourceSentinel {
             pre_admission_rejections: self.pre_admission_rejections.load(Ordering::Relaxed),
             aggregated_events: self.aggregated_events.load(Ordering::Relaxed),
             automated_defense_actions: self.automated_defense_actions.load(Ordering::Relaxed),
+            automated_defense_extensions: self.automated_defense_extensions.load(Ordering::Relaxed),
+            automated_defense_relaxations: self
+                .automated_defense_relaxations
+                .load(Ordering::Relaxed),
             top_attack_clusters: self.top_attack_clusters(8),
         }
     }
@@ -398,6 +420,7 @@ impl ResourceSentinel {
         self.attack_score.store(next, Ordering::Relaxed);
         self.refresh_mode(next);
         self.prune_stale_debt(now);
+        self.evaluate_defense_effects(now);
     }
 
     fn refresh_mode(&self, score: u64) {
@@ -697,6 +720,7 @@ impl ResourceSentinel {
     }
 
     fn set_cooldown(&self, key: String, until_ms: u64, reason: &'static str) -> bool {
+        let now = now_millis();
         let previous = self
             .cooldowns
             .get(&key)
@@ -707,6 +731,12 @@ impl ResourceSentinel {
         }
         let bucket = self.cooldowns.entry(key).or_insert_with(|| CooldownBucket {
             until_ms: AtomicU64::new(until_ms),
+            created_ms: now,
+            last_evaluated_ms: AtomicU64::new(now),
+            last_rejections: AtomicU64::new(self.pre_admission_rejections.load(Ordering::Relaxed)),
+            last_attack_score: AtomicU64::new(self.attack_score.load(Ordering::Relaxed)),
+            extensions: AtomicU64::new(0),
+            relaxations: AtomicU64::new(0),
             reason: reason.to_string(),
         });
         let mut current = bucket.until_ms.load(Ordering::Relaxed);
@@ -722,6 +752,101 @@ impl ResourceSentinel {
             }
         }
         true
+    }
+
+    fn evaluate_defense_effects(&self, now: u64) {
+        let current_rejections = self.pre_admission_rejections.load(Ordering::Relaxed);
+        let current_score = self.attack_score.load(Ordering::Relaxed);
+        for entry in self.cooldowns.iter() {
+            let bucket = entry.value();
+            let until = bucket.until_ms.load(Ordering::Relaxed);
+            if until <= now {
+                continue;
+            }
+
+            let last_eval = bucket.last_evaluated_ms.load(Ordering::Relaxed);
+            if now.saturating_sub(last_eval) < DEFENSE_EFFECT_EVAL_INTERVAL_MS {
+                continue;
+            }
+            if bucket
+                .last_evaluated_ms
+                .compare_exchange(last_eval, now, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+            {
+                continue;
+            }
+
+            let previous_rejections = bucket
+                .last_rejections
+                .swap(current_rejections, Ordering::Relaxed);
+            bucket
+                .last_attack_score
+                .store(current_score, Ordering::Relaxed);
+            let rejection_delta = current_rejections.saturating_sub(previous_rejections);
+            if rejection_delta >= DEFENSE_EFFECT_REJECTION_DELTA
+                && current_score >= SCORE_UNDER_ATTACK
+            {
+                self.extend_effective_cooldown(bucket, now, until, current_score);
+            } else if rejection_delta == 0 && current_score < SCORE_ELEVATED {
+                self.relax_quiet_cooldown(bucket, now, until);
+            }
+        }
+    }
+
+    fn extend_effective_cooldown(
+        &self,
+        bucket: &CooldownBucket,
+        now: u64,
+        observed_until: u64,
+        current_score: u64,
+    ) {
+        let extension = if current_score >= SCORE_SURVIVAL {
+            DEFENSE_EFFECT_SURVIVAL_EXTEND_MS
+        } else {
+            DEFENSE_EFFECT_EXTEND_MS
+        };
+        let max_until = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_MAX_LIFETIME_MS);
+        let target_until = observed_until.saturating_add(extension).min(max_until);
+        if target_until <= observed_until || target_until <= now {
+            return;
+        }
+        if bucket
+            .until_ms
+            .compare_exchange(
+                observed_until,
+                target_until,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            bucket.extensions.fetch_add(1, Ordering::Relaxed);
+            self.automated_defense_extensions
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn relax_quiet_cooldown(&self, bucket: &CooldownBucket, now: u64, observed_until: u64) {
+        let target_until = now.saturating_add(DEFENSE_EFFECT_RELAX_TO_MS);
+        if target_until >= observed_until {
+            return;
+        }
+        if bucket
+            .until_ms
+            .compare_exchange(
+                observed_until,
+                target_until,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            bucket.relaxations.fetch_add(1, Ordering::Relaxed);
+            self.automated_defense_relaxations
+                .fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     fn is_new_cluster(&self, peer_ip: IpAddr) -> bool {
@@ -1145,5 +1270,82 @@ mod tests {
         let decision = sentinel.admit_connection("203.0.113.200".parse().unwrap(), "tls", 128, 0);
         assert!(decision.allow);
         assert_eq!(sentinel.snapshot().automated_defense_actions, 0);
+    }
+
+    #[test]
+    fn active_defense_extends_when_cooldown_is_still_rejecting_under_pressure() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        let key = "cluster:203.0.113.0/24";
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("hot cluster should create cooldown");
+        let before_until = bucket.until_ms.load(Ordering::Relaxed);
+        let eval_at = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_EVAL_INTERVAL_MS + 1);
+        drop(bucket);
+
+        sentinel
+            .attack_score
+            .store(SCORE_UNDER_ATTACK, Ordering::Relaxed);
+        sentinel
+            .pre_admission_rejections
+            .fetch_add(DEFENSE_EFFECT_REJECTION_DELTA, Ordering::Relaxed);
+        sentinel.evaluate_defense_effects(eval_at);
+
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("cooldown should still exist");
+        assert!(bucket.until_ms.load(Ordering::Relaxed) > before_until);
+        assert_eq!(bucket.extensions.load(Ordering::Relaxed), 1);
+        assert_eq!(sentinel.snapshot().automated_defense_extensions, 1);
+    }
+
+    #[test]
+    fn active_defense_relaxes_when_pressure_disappears() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        let key = "cluster:203.0.113.0/24";
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("hot cluster should create cooldown");
+        let before_until = bucket.until_ms.load(Ordering::Relaxed);
+        let eval_at = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_EVAL_INTERVAL_MS + 1);
+        drop(bucket);
+
+        sentinel.attack_score.store(0, Ordering::Relaxed);
+        sentinel.evaluate_defense_effects(eval_at);
+
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("cooldown should still exist");
+        let after_until = bucket.until_ms.load(Ordering::Relaxed);
+        assert!(after_until < before_until);
+        assert!(after_until <= eval_at.saturating_add(DEFENSE_EFFECT_RELAX_TO_MS));
+        assert_eq!(bucket.relaxations.load(Ordering::Relaxed), 1);
+        assert_eq!(sentinel.snapshot().automated_defense_relaxations, 1);
+    }
+
+    fn activate_hot_tls_cluster(sentinel: &ResourceSentinel) {
+        for index in 1..=10 {
+            let event = SecurityEventRecord::now(
+                "L4",
+                "alert",
+                "tls handshake timed out before first request",
+                format!("203.0.113.{index}"),
+                "192.0.2.10",
+                44321,
+                443,
+                "TCP",
+            );
+            let _ = sentinel.should_aggregate_security_event(&event);
+        }
     }
 }

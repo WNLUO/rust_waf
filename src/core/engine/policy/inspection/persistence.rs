@@ -76,7 +76,7 @@ pub(crate) fn persist_http_inspection_event(
     event.uri = Some(request.uri.clone());
     event.http_version = Some(request.version.to_string());
 
-    if should_aggregate_runtime_event(request, result) {
+    if should_aggregate_runtime_event(context, request, result) {
         context
             .resource_sentinel
             .note_security_event_aggregated(&event);
@@ -104,11 +104,22 @@ pub(crate) fn persist_http_inspection_event(
     }
 }
 
-fn should_aggregate_runtime_event(request: &UnifiedHttpRequest, result: &InspectionResult) -> bool {
-    if !request
+fn should_aggregate_runtime_event(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    result: &InspectionResult,
+) -> bool {
+    let request_aggregate = request
         .get_metadata("runtime.aggregate_events")
         .map(|value| value == "true")
-        .unwrap_or(false)
+        .unwrap_or(false);
+    let request_trim = request
+        .get_metadata("runtime.pressure.trim_event_persistence")
+        .map(|value| value == "true")
+        .unwrap_or(false);
+    if !(request_aggregate
+        || request_trim
+        || context.runtime_pressure_snapshot().trim_event_persistence)
     {
         return false;
     }

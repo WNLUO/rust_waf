@@ -436,7 +436,7 @@ impl SqliteStore {
         entry.time_window_end =
             entry.time_window_end.max(aggregated_security_event_window_end(event.created_at));
         log::info!(
-            "Aggregating low-priority security event under storage pressure: action={}, trigger={}, queue_depth={}, aggregate_count={}, long_tail={}",
+            "Aggregating repeated security event under storage pressure: action={}, trigger={}, queue_depth={}, aggregate_count={}, long_tail={}",
             entry.action,
             trigger,
             queue_depth,
@@ -590,11 +590,14 @@ fn should_drop_security_event_under_pressure(
         return true;
     }
 
-    critical_pressure && matches!(event.action.as_str(), "respond" | "allow")
+    critical_pressure && matches!(event.action.as_str(), "respond" | "allow" | "block" | "drop")
 }
 
 fn should_aggregate_security_event(event: &SecurityEventRecord) -> bool {
-    matches!(event.action.as_str(), "log" | "alert" | "respond" | "allow")
+    matches!(
+        event.action.as_str(),
+        "log" | "alert" | "respond" | "allow" | "block" | "drop"
+    )
 }
 
 fn aggregated_security_event_key(event: &SecurityEventRecord) -> String {
@@ -680,7 +683,7 @@ fn aggregated_bucket_to_event(bucket: AggregatedSecurityEventBucket) -> Security
     let mut event = SecurityEventRecord::now(
         bucket.layer,
         "summary",
-        format!("aggregated {} repeated low-priority events", bucket.count),
+        format!("aggregated {} repeated security events", bucket.count),
         bucket.source_ip,
         bucket.dest_ip,
         0,

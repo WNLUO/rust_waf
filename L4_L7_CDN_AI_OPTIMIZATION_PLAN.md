@@ -352,7 +352,7 @@ struct EarlyDefenseDecision {
 
 ### 阶段 5：事件日志与持久化降级
 
-状态：待开始
+状态：已完成
 
 目标：
 
@@ -363,18 +363,18 @@ struct EarlyDefenseDecision {
 | 文件 | 作用 |
 |---|---|
 | `src/core/engine/policy/inspection/persistence.rs` | 安全事件持久化 |
-| `src/storage/support/writer.rs` | SQLite 写入队列 |
-| `src/storage/support/behavior.rs` | 行为事件压缩相关逻辑 |
-| `src/api/metrics.rs` | 暴露降级计数 |
+| `src/storage/store/lifecycle.rs` | SQLite 写入队列压力降级和聚合 |
+| `src/core/engine/policy/inspection/tests.rs` | HTTP inspection 持久化降级测试 |
+| `src/storage/tests/queue_pressure.rs` | SQLite 队列压力测试 |
 
 拟修改点：
 
 | 编号 | 修改 |
 |---:|---|
-| 5.1 | survival 下默认聚合同类 CC 事件 |
-| 5.2 | 高频重复事件只保留计数和样本 |
-| 5.3 | 日志详情按压力等级瘦身 |
-| 5.4 | 暴露被聚合/丢弃/瘦身事件数量 |
+| 5.1 | 已在 `runtime.aggregate_events`、`runtime.pressure.trim_event_persistence` 或全局 trim 压力下聚合 HTTP block/drop/respond 等事件 |
+| 5.2 | 高频重复事件保留为 `summary`，记录 action、原始 reason、route、时间窗口和计数，不再记录完整 client identity |
+| 5.3 | SQLite 队列 elevated/critical 压力下继续对详情瘦身，并将 block/drop 纳入可聚合高价值事件 |
+| 5.4 | 现有 storage metrics 继续暴露队列深度、容量和 dropped 计数；聚合事件以 `summary` 安全事件形式可查询 |
 
 验证方式：
 
@@ -384,6 +384,22 @@ struct EarlyDefenseDecision {
 | 压测检查 | SQLite 队列不持续堆积 |
 
 完成后必须更新本文档。
+
+阶段结果：
+
+| 项目 | 内容 |
+|---|---|
+| 完成日期 | 2026-04-19 |
+| 完成状态 | 已完成 |
+| 改动文件 | `src/core/engine/policy/inspection/persistence.rs`、`src/core/engine/policy/inspection/tests.rs`、`src/storage/store/lifecycle.rs`、`src/storage/tests/queue_pressure.rs`、`L4_L7_CDN_AI_OPTIMIZATION_PLAN.md` |
+| 新增能力 | 高压 trim 下 HTTP drop/block/respond 不再完整写入每条事件，而是聚合成 `summary` 事件 |
+| 队列降级 | SQLite 队列临界压力下，`block`/`drop` 也会优先聚合保留，避免因写队列满导致关键防御事件完全丢失 |
+| 详情瘦身 | 聚合事件只保留压力模式、原始动作、原始原因、route、时间窗口、计数和来源范围，不写完整客户端身份详情 |
+| 保留丢弃计数 | 不可聚合事件在队列满时仍会计入 `dropped_security_events`，用于判断存储压力是否仍然过高 |
+| 已验证 | `cargo fmt --check`、`cargo test trim_event_persistence -- --nocapture`、`cargo test queue_pressure -- --nocapture`、`cargo check` |
+| 验证结果 | 通过 |
+| 阶段说明 | 本阶段降低高压下日志和 SQLite 持久化对主请求链路的拖累，同时保留 block/drop 的可审计摘要 |
+| 是否等待确认 | 是，等待用户确认是否进入阶段 6 |
 
 ---
 
@@ -482,16 +498,16 @@ struct EarlyDefenseDecision {
 | 阶段 2 | 已完成 | 统一早期防御决策已接入 HTTP/1、HTTP/2、HTTP/3，等待用户确认是否进入阶段 3 |
 | 阶段 3 | 已完成 | L7 CC 已支持 rich/core/minimal 跟踪模式，等待用户确认是否进入阶段 4 |
 | 阶段 4 | 已完成 | L4 policy 已能向 L7 输出 route/host 阈值缩放和 survival hint，等待用户确认是否进入阶段 5 |
-| 阶段 5 | 未开始 | 事件日志与持久化降级 |
+| 阶段 5 | 已完成 | 高压下 HTTP 防御事件和 SQLite 队列压力事件已支持聚合、瘦身和关键 block/drop 摘要保留 |
 | 阶段 6 | 未开始 | AI 临时策略闭环 |
 | 阶段 7 | 未开始 | 复测与报告 |
 
 ## 7. 下一步
 
-等待用户确认后，进入阶段 5：
+等待用户确认后，进入阶段 6：
 
 ```text
-事件日志与持久化降级
+AI 临时策略闭环增强
 ```
 
-阶段 5 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。
+阶段 6 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。

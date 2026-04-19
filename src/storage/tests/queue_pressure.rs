@@ -15,10 +15,10 @@ async fn test_sqlite_store_drops_low_priority_writes_under_queue_pressure() {
             provider_site_id: None,
             provider_site_name: None,
             provider_site_domain: None,
-            action: if idx % 2 == 0 {
-                "respond".to_string()
-            } else {
-                "block".to_string()
+            action: match idx % 3 {
+                0 => "respond".to_string(),
+                1 => "block".to_string(),
+                _ => "challenge".to_string(),
             },
             reason: "queue pressure".to_string(),
             details_json: None,
@@ -64,6 +64,21 @@ async fn test_sqlite_store_drops_low_priority_writes_under_queue_pressure() {
         .await
         .unwrap();
     assert!(aggregated.total > 0);
+
+    let details = aggregated
+        .items
+        .iter()
+        .map(|item| {
+            serde_json::from_str::<serde_json::Value>(item.details_json.as_deref().unwrap())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(details.iter().any(|value| {
+        matches!(
+            value["storage_pressure"]["action"].as_str(),
+            Some("respond" | "block")
+        )
+    }));
 }
 
 #[tokio::test]

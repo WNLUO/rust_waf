@@ -115,6 +115,7 @@ pub(super) fn build_metrics_response(
         resource_sentinel_high_debt_buckets: resource_sentinel.high_debt_buckets,
         resource_sentinel_extreme_debt_buckets: resource_sentinel.extreme_debt_buckets,
         resource_sentinel_tracked_attack_clusters: resource_sentinel.tracked_attack_clusters,
+        resource_sentinel_active_cooldowns: resource_sentinel.active_cooldowns,
         resource_sentinel_pre_admission_rejections: resource_sentinel.pre_admission_rejections,
         resource_sentinel_aggregated_events: resource_sentinel.aggregated_events,
         resource_sentinel_top_attack_clusters: resource_sentinel.top_attack_clusters,

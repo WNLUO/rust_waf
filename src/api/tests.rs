@@ -163,6 +163,7 @@ fn test_build_metrics_response_with_sources() {
             high_debt_buckets: 3,
             extreme_debt_buckets: 1,
             tracked_attack_clusters: 1,
+            active_cooldowns: 1,
             pre_admission_rejections: 7,
             aggregated_events: 9,
             top_attack_clusters: vec![crate::core::ResourceSentinelClusterSnapshot {
@@ -172,6 +173,9 @@ fn test_build_metrics_response_with_sources() {
                 reason: "timeout".to_string(),
                 sample_ip: "203.0.113.9".to_string(),
                 count: 20,
+                admitted: 1,
+                rejected: 2,
+                aggregated: 3,
                 score: 200,
                 first_seen_ms: 1,
                 last_seen_ms: 2,
@@ -231,9 +235,14 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.resource_sentinel_attack_score, 88);
     assert_eq!(response.resource_sentinel_pre_admission_rejections, 7);
     assert_eq!(response.resource_sentinel_tracked_attack_clusters, 1);
+    assert_eq!(response.resource_sentinel_active_cooldowns, 1);
     assert_eq!(
         response.resource_sentinel_top_attack_clusters[0].attack_type,
         "slow_tls_handshake"
+    );
+    assert_eq!(
+        response.resource_sentinel_top_attack_clusters[0].rejected,
+        2
     );
     assert!(response
         .storage_degraded_reasons

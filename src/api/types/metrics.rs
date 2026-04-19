@@ -73,6 +73,7 @@ pub struct MetricsResponse {
     pub(crate) resource_sentinel_high_debt_buckets: u64,
     pub(crate) resource_sentinel_extreme_debt_buckets: u64,
     pub(crate) resource_sentinel_tracked_attack_clusters: u64,
+    pub(crate) resource_sentinel_active_cooldowns: u64,
     pub(crate) resource_sentinel_pre_admission_rejections: u64,
     pub(crate) resource_sentinel_aggregated_events: u64,
     pub(crate) resource_sentinel_top_attack_clusters:

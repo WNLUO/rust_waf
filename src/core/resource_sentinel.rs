@@ -19,6 +19,11 @@ const SCORE_CAP: u64 = 500;
 const DEBT_HIGH: i64 = 70;
 const DEBT_EXTREME: i64 = 120;
 const DEBT_CAP: i64 = 240;
+const NEW_CLUSTER_BUDGET_WINDOW_MS: u64 = 100;
+const UNDER_ATTACK_NEW_CLUSTER_BUDGET: u64 = 64;
+const SURVIVAL_NEW_CLUSTER_BUDGET: u64 = 16;
+const IP_COOLDOWN_MS: u64 = 30_000;
+const CLUSTER_COOLDOWN_MS: u64 = 10_000;
 
 #[derive(Debug)]
 pub(crate) struct ResourceSentinel {
@@ -27,7 +32,10 @@ pub(crate) struct ResourceSentinel {
     last_decay_ms: AtomicU64,
     last_escalation_ms: AtomicU64,
     connection_debt: DashMap<String, DebtBucket>,
+    cooldowns: DashMap<String, CooldownBucket>,
     attack_clusters: DashMap<String, AttackClusterBucket>,
+    new_cluster_budget_window_ms: AtomicU64,
+    new_cluster_budget_used: AtomicU64,
     pre_admission_rejections: AtomicU64,
     aggregated_events: AtomicU64,
 }
@@ -39,6 +47,12 @@ struct DebtBucket {
 }
 
 #[derive(Debug)]
+struct CooldownBucket {
+    until_ms: AtomicU64,
+    reason: String,
+}
+
+#[derive(Debug)]
 struct AttackClusterBucket {
     cluster: String,
     attack_type: String,
@@ -46,6 +60,9 @@ struct AttackClusterBucket {
     reason: String,
     sample_ip: String,
     count: AtomicU64,
+    admitted: AtomicU64,
+    rejected: AtomicU64,
+    aggregated: AtomicU64,
     score: AtomicU64,
     first_seen_ms: u64,
     last_seen_ms: AtomicU64,
@@ -59,6 +76,7 @@ pub struct ResourceSentinelSnapshot {
     pub high_debt_buckets: u64,
     pub extreme_debt_buckets: u64,
     pub tracked_attack_clusters: u64,
+    pub active_cooldowns: u64,
     pub pre_admission_rejections: u64,
     pub aggregated_events: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
@@ -72,6 +90,9 @@ pub struct ResourceSentinelClusterSnapshot {
     pub reason: String,
     pub sample_ip: String,
     pub count: u64,
+    pub admitted: u64,
+    pub rejected: u64,
+    pub aggregated: u64,
     pub score: u64,
     pub first_seen_ms: u64,
     pub last_seen_ms: u64,
@@ -92,7 +113,10 @@ impl ResourceSentinel {
             last_decay_ms: AtomicU64::new(now),
             last_escalation_ms: AtomicU64::new(now),
             connection_debt: DashMap::new(),
+            cooldowns: DashMap::new(),
             attack_clusters: DashMap::new(),
+            new_cluster_budget_window_ms: AtomicU64::new(window_start(now)),
+            new_cluster_budget_used: AtomicU64::new(0),
             pre_admission_rejections: AtomicU64::new(0),
             aggregated_events: AtomicU64::new(0),
         }
@@ -109,31 +133,52 @@ impl ResourceSentinel {
 
         let mode = self.mode.load(Ordering::Relaxed);
         let debt = self.debt_score(peer_ip);
+        if let Some(reason) = self.active_cooldown_reason(peer_ip) {
+            self.pre_admission_rejections
+                .fetch_add(1, Ordering::Relaxed);
+            self.record_cluster_rejected(peer_ip, "cooldown_reject", transport, &reason, 18);
+            self.note_signal(18);
+            return AdmissionDecision {
+                allow: false,
+                reason: Some(format!(
+                    "resource sentinel rejected {transport} connection: mode={} cooldown={} debt={} available_connection_permits={} storage_queue={}%",
+                    mode_label(mode),
+                    reason,
+                    debt,
+                    available_connection_permits,
+                    storage_queue_usage_percent
+                )),
+            };
+        }
         let permits_low = available_connection_permits <= 4;
         let storage_hot = storage_queue_usage_percent >= 90;
-        let reject = match mode {
+        let high_debt_reject = match mode {
             MODE_SURVIVAL => debt >= DEBT_HIGH || (permits_low && debt >= 25) || storage_hot,
             MODE_UNDER_ATTACK => debt >= DEBT_EXTREME || (permits_low && debt >= 45),
             MODE_ELEVATED => permits_low && debt >= DEBT_EXTREME,
             _ => false,
         };
+        let budget_reject = !high_debt_reject
+            && mode >= MODE_UNDER_ATTACK
+            && self.is_new_cluster(peer_ip)
+            && !self.consume_new_cluster_budget(mode);
 
-        if reject {
+        if high_debt_reject || budget_reject {
             self.pre_admission_rejections
                 .fetch_add(1, Ordering::Relaxed);
-            self.record_cluster(
-                peer_ip,
-                "pre_admission_reject",
-                transport,
-                "resource_debt",
-                18,
-            );
+            let reason = if budget_reject {
+                "new_cluster_budget"
+            } else {
+                "resource_debt"
+            };
+            self.record_cluster_rejected(peer_ip, "pre_admission_reject", transport, reason, 18);
             self.note_signal(18);
             return AdmissionDecision {
                 allow: false,
                 reason: Some(format!(
-                    "resource sentinel rejected {transport} connection: mode={} debt={} available_connection_permits={} storage_queue={}%",
+                    "resource sentinel rejected {transport} connection: mode={} reason={} debt={} available_connection_permits={} storage_queue={}%",
                     mode_label(mode),
+                    reason,
                     debt,
                     available_connection_permits,
                     storage_queue_usage_percent
@@ -141,6 +186,10 @@ impl ResourceSentinel {
             };
         }
 
+        if mode >= MODE_UNDER_ATTACK {
+            self.add_debt(peer_ip, 0);
+            self.record_cluster_admitted(peer_ip, "admitted", transport, "resource_budget", 0);
+        }
         AdmissionDecision {
             allow: true,
             reason: None,
@@ -149,13 +198,14 @@ impl ResourceSentinel {
 
     pub(crate) fn note_tls_timeout(&self, peer_ip: IpAddr) {
         self.add_debt(peer_ip, 12);
-        self.record_cluster(peer_ip, "slow_tls_handshake", "tls", "timeout", 10);
+        self.record_cluster_observed(peer_ip, "slow_tls_handshake", "tls", "timeout", 10);
         self.note_signal(10);
+        self.cooldown_if_extreme(peer_ip, "slow_tls_handshake");
     }
 
     pub(crate) fn note_tls_failure(&self, peer_ip: IpAddr) {
         self.add_debt(peer_ip, 6);
-        self.record_cluster(
+        self.record_cluster_observed(
             peer_ip,
             "tls_handshake_failure",
             "tls",
@@ -163,17 +213,19 @@ impl ResourceSentinel {
             4,
         );
         self.note_signal(4);
+        self.cooldown_if_extreme(peer_ip, "tls_handshake_failure");
     }
 
     pub(crate) fn note_no_request_timeout(&self, peer_ip: IpAddr) {
         self.add_debt(peer_ip, 10);
-        self.record_cluster(peer_ip, "idle_no_request", "http", "no_request_timeout", 8);
+        self.record_cluster_observed(peer_ip, "idle_no_request", "http", "no_request_timeout", 8);
         self.note_signal(8);
+        self.cooldown_if_extreme(peer_ip, "idle_no_request");
     }
 
     pub(crate) fn note_l4_rejection(&self, peer_ip: IpAddr) {
         self.add_debt(peer_ip, 8);
-        self.record_cluster(
+        self.record_cluster_observed(
             peer_ip,
             "l4_admission_reject",
             "tcp",
@@ -181,6 +233,7 @@ impl ResourceSentinel {
             8,
         );
         self.note_signal(8);
+        self.cooldown_if_extreme(peer_ip, "l4_admission_reject");
     }
 
     pub(crate) fn note_http_request(&self, peer_ip: IpAddr) {
@@ -201,6 +254,12 @@ impl ResourceSentinel {
 
     pub(crate) fn note_aggregated_event(&self) {
         self.aggregated_events.fetch_add(1, Ordering::Relaxed);
+        self.note_signal(1);
+    }
+
+    pub(crate) fn note_aggregated_event_for_source(&self, peer_ip: IpAddr, reason: &str) {
+        self.aggregated_events.fetch_add(1, Ordering::Relaxed);
+        self.record_cluster_aggregated(peer_ip, "event_aggregation", "storage", reason, 1);
         self.note_signal(1);
     }
 
@@ -225,6 +284,7 @@ impl ResourceSentinel {
             high_debt_buckets,
             extreme_debt_buckets,
             tracked_attack_clusters: self.attack_clusters.len() as u64,
+            active_cooldowns: self.active_cooldown_count(),
             pre_admission_rejections: self.pre_admission_rejections.load(Ordering::Relaxed),
             aggregated_events: self.aggregated_events.load(Ordering::Relaxed),
             top_attack_clusters: self.top_attack_clusters(8),
@@ -373,6 +433,8 @@ impl ResourceSentinel {
             let idle_ms = now.saturating_sub(bucket.last_seen_ms.load(Ordering::Relaxed));
             score >= DEBT_HIGH || idle_ms < 300_000
         });
+        self.cooldowns
+            .retain(|_, bucket| bucket.until_ms.load(Ordering::Relaxed) > now);
         self.attack_clusters.retain(|_, bucket| {
             let score = bucket.score.load(Ordering::Relaxed);
             let idle_ms = now.saturating_sub(bucket.last_seen_ms.load(Ordering::Relaxed));
@@ -380,7 +442,7 @@ impl ResourceSentinel {
         });
     }
 
-    fn record_cluster(
+    fn record_cluster_observed(
         &self,
         peer_ip: IpAddr,
         attack_type: &'static str,
@@ -388,11 +450,65 @@ impl ResourceSentinel {
         reason: &'static str,
         score_delta: u64,
     ) {
+        let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
+        bucket.count.fetch_add(1, Ordering::Relaxed);
+        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+    }
+
+    fn record_cluster_admitted(
+        &self,
+        peer_ip: IpAddr,
+        attack_type: &'static str,
+        transport: &str,
+        reason: &'static str,
+        score_delta: u64,
+    ) {
+        let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
+        bucket.admitted.fetch_add(1, Ordering::Relaxed);
+        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+    }
+
+    fn record_cluster_rejected(
+        &self,
+        peer_ip: IpAddr,
+        attack_type: &'static str,
+        transport: &str,
+        reason: &str,
+        score_delta: u64,
+    ) {
+        let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
+        bucket.rejected.fetch_add(1, Ordering::Relaxed);
+        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+    }
+
+    fn record_cluster_aggregated(
+        &self,
+        peer_ip: IpAddr,
+        attack_type: &'static str,
+        transport: &str,
+        reason: &str,
+        score_delta: u64,
+    ) {
+        let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
+        bucket.aggregated.fetch_add(1, Ordering::Relaxed);
+        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+    }
+
+    fn cluster_bucket(
+        &self,
+        peer_ip: IpAddr,
+        attack_type: &str,
+        transport: &str,
+        reason: &str,
+    ) -> dashmap::mapref::one::RefMut<'_, String, AttackClusterBucket> {
         let now = now_millis();
         let cluster = cluster_key(peer_ip);
         let key = format!("{cluster}\u{1f}{attack_type}\u{1f}{transport}\u{1f}{reason}");
-        let bucket = self
-            .attack_clusters
+        self.attack_clusters
             .entry(key)
             .or_insert_with(|| AttackClusterBucket {
                 cluster: cluster.clone(),
@@ -401,13 +517,13 @@ impl ResourceSentinel {
                 reason: reason.to_string(),
                 sample_ip: peer_ip.to_string(),
                 count: AtomicU64::new(0),
+                admitted: AtomicU64::new(0),
+                rejected: AtomicU64::new(0),
+                aggregated: AtomicU64::new(0),
                 score: AtomicU64::new(0),
                 first_seen_ms: now,
                 last_seen_ms: AtomicU64::new(now),
-            });
-        bucket.count.fetch_add(1, Ordering::Relaxed);
-        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
-        bucket.last_seen_ms.store(now, Ordering::Relaxed);
+            })
     }
 
     fn top_attack_clusters(&self, limit: usize) -> Vec<ResourceSentinelClusterSnapshot> {
@@ -423,6 +539,9 @@ impl ResourceSentinel {
                     reason: bucket.reason.clone(),
                     sample_ip: bucket.sample_ip.clone(),
                     count: bucket.count.load(Ordering::Relaxed),
+                    admitted: bucket.admitted.load(Ordering::Relaxed),
+                    rejected: bucket.rejected.load(Ordering::Relaxed),
+                    aggregated: bucket.aggregated.load(Ordering::Relaxed),
                     score: bucket.score.load(Ordering::Relaxed),
                     first_seen_ms: bucket.first_seen_ms,
                     last_seen_ms: bucket.last_seen_ms.load(Ordering::Relaxed),
@@ -438,6 +557,93 @@ impl ResourceSentinel {
         });
         items.truncate(limit);
         items
+    }
+
+    fn active_cooldown_reason(&self, peer_ip: IpAddr) -> Option<String> {
+        let now = now_millis();
+        for key in cooldown_keys(peer_ip) {
+            if let Some(bucket) = self.cooldowns.get(&key) {
+                if bucket.until_ms.load(Ordering::Relaxed) > now {
+                    return Some(bucket.reason.clone());
+                }
+            }
+        }
+        None
+    }
+
+    fn active_cooldown_count(&self) -> u64 {
+        let now = now_millis();
+        self.cooldowns
+            .iter()
+            .filter(|entry| entry.until_ms.load(Ordering::Relaxed) > now)
+            .count() as u64
+    }
+
+    fn cooldown_if_extreme(&self, peer_ip: IpAddr, reason: &'static str) {
+        let debt = self.debt_score(peer_ip);
+        if debt < DEBT_EXTREME {
+            return;
+        }
+        let now = now_millis();
+        self.set_cooldown(format!("ip:{peer_ip}"), now + IP_COOLDOWN_MS, reason);
+        self.set_cooldown(
+            format!("cluster:{}", cluster_key(peer_ip)),
+            now + CLUSTER_COOLDOWN_MS,
+            reason,
+        );
+    }
+
+    fn set_cooldown(&self, key: String, until_ms: u64, reason: &'static str) {
+        let bucket = self.cooldowns.entry(key).or_insert_with(|| CooldownBucket {
+            until_ms: AtomicU64::new(until_ms),
+            reason: reason.to_string(),
+        });
+        let mut current = bucket.until_ms.load(Ordering::Relaxed);
+        while until_ms > current {
+            match bucket.until_ms.compare_exchange_weak(
+                current,
+                until_ms,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    fn is_new_cluster(&self, peer_ip: IpAddr) -> bool {
+        !self
+            .connection_debt
+            .contains_key(&format!("cluster:{}", cluster_key(peer_ip)))
+    }
+
+    fn consume_new_cluster_budget(&self, mode: u8) -> bool {
+        let budget = if mode >= MODE_SURVIVAL {
+            SURVIVAL_NEW_CLUSTER_BUDGET
+        } else {
+            UNDER_ATTACK_NEW_CLUSTER_BUDGET
+        };
+        let now_window = window_start(now_millis());
+        let current_window = self.new_cluster_budget_window_ms.load(Ordering::Relaxed);
+        if now_window != current_window
+            && self
+                .new_cluster_budget_window_ms
+                .compare_exchange(
+                    current_window,
+                    now_window,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+        {
+            self.new_cluster_budget_used.store(0, Ordering::Relaxed);
+        }
+        self.new_cluster_budget_used
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                (current < budget).then_some(current + 1)
+            })
+            .is_ok()
     }
 }
 
@@ -459,7 +665,12 @@ impl WafContext {
         trigger: &'static str,
     ) {
         if self.resource_sentinel.should_aggregate_event(&event.action) {
-            self.resource_sentinel.note_aggregated_event();
+            if let Ok(ip) = event.source_ip.parse::<IpAddr>() {
+                self.resource_sentinel
+                    .note_aggregated_event_for_source(ip, trigger);
+            } else {
+                self.resource_sentinel.note_aggregated_event();
+            }
             store.enqueue_security_event_aggregated(event, trigger);
         } else {
             store.enqueue_security_event(event);
@@ -472,6 +683,10 @@ fn debt_keys(peer_ip: IpAddr) -> [String; 2] {
         format!("ip:{peer_ip}"),
         format!("cluster:{}", cluster_key(peer_ip)),
     ]
+}
+
+fn cooldown_keys(peer_ip: IpAddr) -> [String; 2] {
+    debt_keys(peer_ip)
 }
 
 fn cluster_key(peer_ip: IpAddr) -> String {
@@ -513,6 +728,10 @@ fn now_millis() -> u64 {
         .unwrap_or_default()
         .as_millis()
         .min(u128::from(u64::MAX)) as u64
+}
+
+fn window_start(now_ms: u64) -> u64 {
+    now_ms / NEW_CLUSTER_BUDGET_WINDOW_MS * NEW_CLUSTER_BUDGET_WINDOW_MS
 }
 
 #[cfg(test)]
@@ -580,5 +799,48 @@ mod tests {
             snapshot.top_attack_clusters[1].attack_type,
             "l4_admission_reject"
         );
+    }
+
+    #[test]
+    fn survival_limits_brand_new_clusters_before_debt_exists() {
+        let sentinel = ResourceSentinel::new();
+        for index in 1..=20 {
+            sentinel.note_tls_timeout(format!("198.51.100.{index}").parse().unwrap());
+        }
+        assert_eq!(sentinel.snapshot().mode, "survival");
+
+        let mut allowed = 0usize;
+        let mut rejected = 0usize;
+        for index in 1..=32 {
+            let ip: IpAddr = format!("10.0.{index}.1").parse().unwrap();
+            let decision = sentinel.admit_connection(ip, "tls", 128, 0);
+            if decision.allow {
+                allowed += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+
+        assert_eq!(allowed, SURVIVAL_NEW_CLUSTER_BUDGET as usize);
+        assert_eq!(rejected, 32 - SURVIVAL_NEW_CLUSTER_BUDGET as usize);
+    }
+
+    #[test]
+    fn extreme_debt_enters_ttl_cooldown() {
+        let sentinel = ResourceSentinel::new();
+        let ip: IpAddr = "203.0.113.55".parse().unwrap();
+
+        for _ in 0..10 {
+            sentinel.note_tls_timeout(ip);
+        }
+
+        let decision = sentinel.admit_connection(ip, "tls", 128, 0);
+        assert!(!decision.allow);
+        assert!(decision
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("cooldown"));
+        assert!(sentinel.snapshot().active_cooldowns >= 1);
     }
 }

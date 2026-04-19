@@ -157,10 +157,26 @@ impl L4BehaviorEngine {
         let mut policy = self
             .policy_for_key(&key, overload_level.clone())
             .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
+        request.add_metadata(
+            "l4.client_bucket_risk".to_string(),
+            risk_label(&policy.risk_level).to_string(),
+        );
+        request.add_metadata(
+            "l4.client_bucket_score".to_string(),
+            policy.risk_score.to_string(),
+        );
         if let Some(peer_key) = peer_key.as_ref() {
             let peer_policy = self
                 .policy_for_key(peer_key, overload_level.clone())
                 .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
+            request.add_metadata(
+                "l4.peer_bucket_risk".to_string(),
+                risk_label(&peer_policy.risk_level).to_string(),
+            );
+            request.add_metadata(
+                "l4.peer_bucket_score".to_string(),
+                peer_policy.risk_score.to_string(),
+            );
             policy = merge_policies(policy, peer_policy);
             request.add_metadata("l4.dual_identity_budget".to_string(), "true".to_string());
             request.add_metadata(
@@ -215,6 +231,32 @@ impl L4BehaviorEngine {
             request.add_metadata(
                 "l4.suggested_delay_ms".to_string(),
                 policy.suggested_delay_ms.to_string(),
+            );
+        }
+        if let Some(value) = policy.l7_route_threshold_scale_percent {
+            set_min_percent_metadata(request, "ai.cc.route_threshold_scale_percent", value);
+            request.add_metadata(
+                "l4.l7_route_threshold_scale_percent".to_string(),
+                value.to_string(),
+            );
+        }
+        if let Some(value) = policy.l7_host_threshold_scale_percent {
+            set_min_percent_metadata(request, "ai.cc.host_threshold_scale_percent", value);
+            request.add_metadata(
+                "l4.l7_host_threshold_scale_percent".to_string(),
+                value.to_string(),
+            );
+        }
+        if policy.route_survival_hint {
+            request.add_metadata("l4.route_survival_hint".to_string(), "true".to_string());
+            request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+            request.add_metadata(
+                "runtime.route.defense_depth".to_string(),
+                "survival".to_string(),
+            );
+            request.add_metadata(
+                "runtime.site.defense_reason".to_string(),
+                "l4_dual_identity_pressure".to_string(),
             );
         }
 
@@ -506,4 +548,14 @@ fn trusted_forwarded_peer_bucket_key(
 
     let peer_key = BucketKey::from_request(packet.source_ip, request);
     (peer_key != *client_key).then_some(peer_key)
+}
+
+fn set_min_percent_metadata(request: &mut UnifiedHttpRequest, key: &str, value: u32) {
+    let next = request
+        .get_metadata(key)
+        .and_then(|current| current.parse::<u32>().ok())
+        .map(|current| current.min(value))
+        .unwrap_or(value)
+        .clamp(10, 100);
+    request.add_metadata(key.to_string(), next.to_string());
 }

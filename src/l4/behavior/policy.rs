@@ -232,6 +232,13 @@ pub(super) fn policy_from_runtime(
             L4OverloadLevel::Critical => delay_ms.max(tuning.critical_overload_delay_ms.max(60)),
         };
     }
+    let (l7_route_threshold_scale_percent, l7_host_threshold_scale_percent, route_survival_hint) =
+        l7_hints_for_policy(
+            &bucket.risk_level,
+            trusted_proxy,
+            &overload_level,
+            disable_keepalive,
+        );
 
     L4AdaptivePolicy {
         risk_level: bucket.risk_level.clone(),
@@ -241,6 +248,9 @@ pub(super) fn policy_from_runtime(
         reject_new_connections,
         connection_budget_per_minute: budget.max(5),
         suggested_delay_ms: delay_ms,
+        l7_route_threshold_scale_percent,
+        l7_host_threshold_scale_percent,
+        route_survival_hint,
     }
 }
 
@@ -284,6 +294,10 @@ pub(super) fn apply_identity_state_policy(
         Some("trusted_cdn_unresolved") => {
             policy.disable_keepalive = true;
             policy.prefer_early_close = true;
+            policy.l7_route_threshold_scale_percent =
+                min_optional_percent(policy.l7_route_threshold_scale_percent, 60);
+            policy.l7_host_threshold_scale_percent =
+                min_optional_percent(policy.l7_host_threshold_scale_percent, 75);
             policy.suggested_delay_ms = policy.suggested_delay_ms.max(
                 tuning
                     .soft_delay_ms
@@ -292,11 +306,17 @@ pub(super) fn apply_identity_state_policy(
             );
             if matches!(overload_level, L4OverloadLevel::Critical) {
                 policy.reject_new_connections = true;
+                policy.route_survival_hint = true;
             }
         }
         Some("spoofed_forward_header") => {
             policy.disable_keepalive = true;
             policy.prefer_early_close = true;
+            policy.l7_route_threshold_scale_percent =
+                min_optional_percent(policy.l7_route_threshold_scale_percent, 20);
+            policy.l7_host_threshold_scale_percent =
+                min_optional_percent(policy.l7_host_threshold_scale_percent, 30);
+            policy.route_survival_hint = true;
             policy.suggested_delay_ms = policy.suggested_delay_ms.max(
                 tuning
                     .hard_delay_ms
@@ -326,6 +346,15 @@ pub(super) fn merge_policies(
             .connection_budget_per_minute
             .min(secondary.connection_budget_per_minute),
         suggested_delay_ms: primary.suggested_delay_ms.max(secondary.suggested_delay_ms),
+        l7_route_threshold_scale_percent: merge_optional_percent(
+            primary.l7_route_threshold_scale_percent,
+            secondary.l7_route_threshold_scale_percent,
+        ),
+        l7_host_threshold_scale_percent: merge_optional_percent(
+            primary.l7_host_threshold_scale_percent,
+            secondary.l7_host_threshold_scale_percent,
+        ),
+        route_survival_hint: primary.route_survival_hint || secondary.route_survival_hint,
     }
 }
 
@@ -342,6 +371,9 @@ pub(super) fn policy_snapshot(policy: &L4AdaptivePolicy) -> L4BucketPolicySnapsh
             L4BucketRiskLevel::High => "tighten".to_string(),
         },
         suggested_delay_ms: policy.suggested_delay_ms,
+        l7_route_threshold_scale_percent: policy.l7_route_threshold_scale_percent,
+        l7_host_threshold_scale_percent: policy.l7_host_threshold_scale_percent,
+        route_survival_hint: policy.route_survival_hint,
     }
 }
 
@@ -362,7 +394,86 @@ pub(super) fn default_policy(
         reject_new_connections: false,
         connection_budget_per_minute: tuning.normal_connection_budget_per_minute,
         suggested_delay_ms,
+        l7_route_threshold_scale_percent: match overload_level {
+            L4OverloadLevel::Critical => Some(70),
+            L4OverloadLevel::High => Some(85),
+            L4OverloadLevel::Normal => None,
+        },
+        l7_host_threshold_scale_percent: match overload_level {
+            L4OverloadLevel::Critical => Some(80),
+            L4OverloadLevel::High => Some(90),
+            L4OverloadLevel::Normal => None,
+        },
+        route_survival_hint: matches!(overload_level, L4OverloadLevel::Critical),
     }
+}
+
+fn l7_hints_for_policy(
+    risk_level: &L4BucketRiskLevel,
+    trusted_proxy: bool,
+    overload_level: &L4OverloadLevel,
+    proxy_degraded: bool,
+) -> (Option<u32>, Option<u32>, bool) {
+    let base = match risk_level {
+        L4BucketRiskLevel::Normal => {
+            if matches!(overload_level, L4OverloadLevel::Critical) {
+                (Some(70), Some(80), true)
+            } else if proxy_degraded || matches!(overload_level, L4OverloadLevel::High) {
+                (Some(85), Some(90), false)
+            } else {
+                (None, None, false)
+            }
+        }
+        L4BucketRiskLevel::Suspicious => {
+            if trusted_proxy {
+                (Some(70), Some(80), false)
+            } else {
+                (Some(75), Some(85), false)
+            }
+        }
+        L4BucketRiskLevel::High => {
+            if trusted_proxy {
+                (
+                    Some(50),
+                    Some(65),
+                    matches!(overload_level, L4OverloadLevel::Critical),
+                )
+            } else {
+                (
+                    Some(45),
+                    Some(60),
+                    matches!(overload_level, L4OverloadLevel::Critical),
+                )
+            }
+        }
+    };
+
+    if matches!(overload_level, L4OverloadLevel::Critical) {
+        (
+            min_optional_percent(base.0, 45),
+            min_optional_percent(base.1, 60),
+            true,
+        )
+    } else {
+        base
+    }
+}
+
+fn merge_optional_percent(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn min_optional_percent(current: Option<u32>, value: u32) -> Option<u32> {
+    Some(
+        current
+            .map(|current| current.min(value))
+            .unwrap_or(value)
+            .clamp(10, 100),
+    )
 }
 
 pub(super) fn derive_overload_level(

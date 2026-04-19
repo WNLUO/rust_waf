@@ -297,7 +297,7 @@ struct EarlyDefenseDecision {
 
 ### 阶段 4：L4 与 L7 的 CDN 双身份联动增强
 
-状态：待开始
+状态：已完成
 
 目标：
 
@@ -316,11 +316,11 @@ struct EarlyDefenseDecision {
 
 | 编号 | 修改 |
 |---:|---|
-| 4.1 | L4 policy 增加 `l7_route_threshold_scale_percent` |
-| 4.2 | L4 policy 增加 `l7_host_threshold_scale_percent` |
-| 4.3 | CDN peer 高压时不封 CDN，但对其承载的热点 route 收紧 |
-| 4.4 | 真实用户 bucket 高风险时，优先对用户维度收紧 |
-| 4.5 | unresolved CDN 身份在高压时更快进入 close/drop |
+| 4.1 | 已在 L4 policy 增加 `l7_route_threshold_scale_percent` |
+| 4.2 | 已在 L4 policy 增加 `l7_host_threshold_scale_percent` |
+| 4.3 | CDN peer 高压时仍不直接封 CDN，但会通过 L7 阈值缩放收紧其承载的 route/host |
+| 4.4 | 已输出真实用户 bucket 风险和 CDN peer bucket 风险，合并策略时取更严格 L7 hint |
+| 4.5 | unresolved CDN 身份和 spoofed forwarded header 会输出更强的 L7 收紧和 survival hint |
 
 验证方式：
 
@@ -330,6 +330,23 @@ struct EarlyDefenseDecision {
 | 压测检查 | CDN 高级 CC 下拦截更早，后端成功请求更可控 |
 
 完成后必须更新本文档。
+
+阶段结果：
+
+| 项目 | 内容 |
+|---|---|
+| 完成日期 | 2026-04-19 |
+| 完成状态 | 已完成 |
+| 改动文件 | `src/l4/behavior/mod.rs`、`src/l4/behavior/policy.rs`、`src/l4/behavior/engine.rs`、`L4_L7_CDN_AI_OPTIMIZATION_PLAN.md` |
+| 新增 L4 policy 字段 | `l7_route_threshold_scale_percent`、`l7_host_threshold_scale_percent`、`route_survival_hint` |
+| 新增 metadata | `l4.client_bucket_risk`、`l4.client_bucket_score`、`l4.peer_bucket_risk`、`l4.peer_bucket_score`、`l4.l7_route_threshold_scale_percent`、`l4.l7_host_threshold_scale_percent`、`l4.route_survival_hint` |
+| L7 联动方式 | L4 将阈值缩放写入 `ai.cc.route_threshold_scale_percent` 和 `ai.cc.host_threshold_scale_percent`，L7 CC 会直接读取这些值 |
+| CDN 处理方式 | `trusted_cdn_forwarded` 同时计算真实用户 bucket 和 CDN peer bucket，不封 CDN 节点，但会合并更严格的 L7 策略 |
+| 身份异常处理 | `trusted_cdn_unresolved` 会收紧 route/host 阈值并关闭 keep-alive；`spoofed_forward_header` 会更激进收紧并给出 survival hint |
+| 已验证 | `cargo fmt --check`、`cargo test l4::behavior -- --nocapture`、`cargo test early_defense -- --nocapture`、`cargo check` |
+| 验证结果 | 通过 |
+| 阶段说明 | 本阶段完成 L4 到 L7 的策略桥接；后续阶段 5 将减少高压下事件持久化和日志写入成本 |
+| 是否等待确认 | 是，等待用户确认是否进入阶段 5 |
 
 ---
 
@@ -464,17 +481,17 @@ struct EarlyDefenseDecision {
 | 阶段 1 | 已完成 | CPU 压力感知已接入运行时压力模型 |
 | 阶段 2 | 已完成 | 统一早期防御决策已接入 HTTP/1、HTTP/2、HTTP/3，等待用户确认是否进入阶段 3 |
 | 阶段 3 | 已完成 | L7 CC 已支持 rich/core/minimal 跟踪模式，等待用户确认是否进入阶段 4 |
-| 阶段 4 | 未开始 | L4/L7 CDN 双身份联动 |
+| 阶段 4 | 已完成 | L4 policy 已能向 L7 输出 route/host 阈值缩放和 survival hint，等待用户确认是否进入阶段 5 |
 | 阶段 5 | 未开始 | 事件日志与持久化降级 |
 | 阶段 6 | 未开始 | AI 临时策略闭环 |
 | 阶段 7 | 未开始 | 复测与报告 |
 
 ## 7. 下一步
 
-等待用户确认后，进入阶段 4：
+等待用户确认后，进入阶段 5：
 
 ```text
-L4 与 L7 的 CDN 双身份联动增强
+事件日志与持久化降级
 ```
 
-阶段 4 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。
+阶段 5 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。

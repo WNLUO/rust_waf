@@ -163,6 +163,9 @@ pub struct L4BucketPolicySnapshot {
     pub reject_new_connections: bool,
     pub mode: String,
     pub suggested_delay_ms: u64,
+    pub l7_route_threshold_scale_percent: Option<u32>,
+    pub l7_host_threshold_scale_percent: Option<u32>,
+    pub route_survival_hint: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,6 +227,9 @@ pub struct L4AdaptivePolicy {
     pub reject_new_connections: bool,
     pub connection_budget_per_minute: u32,
     pub suggested_delay_ms: u64,
+    pub l7_route_threshold_scale_percent: Option<u32>,
+    pub l7_host_threshold_scale_percent: Option<u32>,
+    pub route_survival_hint: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -462,6 +468,8 @@ mod tests {
         assert!(policy.prefer_early_close);
         assert!(policy.suggested_delay_ms > 0);
         assert!(!policy.reject_new_connections);
+        assert_eq!(policy.l7_route_threshold_scale_percent, Some(60));
+        assert_eq!(policy.l7_host_threshold_scale_percent, Some(75));
     }
 
     #[tokio::test]
@@ -481,6 +489,9 @@ mod tests {
         assert!(policy.prefer_early_close);
         assert!(policy.reject_new_connections);
         assert!(policy.suggested_delay_ms >= 60);
+        assert_eq!(policy.l7_route_threshold_scale_percent, Some(20));
+        assert_eq!(policy.l7_host_threshold_scale_percent, Some(30));
+        assert!(policy.route_survival_hint);
     }
 
     #[tokio::test]
@@ -537,6 +548,24 @@ mod tests {
             Some("203.0.113.55")
         );
         assert!(policy.disable_keepalive || policy.suggested_delay_ms > 0);
+        assert_eq!(
+            request
+                .get_metadata("l4.peer_bucket_risk")
+                .map(String::as_str),
+            Some("suspicious")
+        );
+        assert_eq!(
+            request
+                .get_metadata("l4.l7_route_threshold_scale_percent")
+                .map(String::as_str),
+            Some("70")
+        );
+        assert_eq!(
+            request
+                .get_metadata("ai.cc.route_threshold_scale_percent")
+                .map(String::as_str),
+            Some("70")
+        );
     }
 
     #[tokio::test]

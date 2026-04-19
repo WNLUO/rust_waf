@@ -22,6 +22,8 @@ const DEFENSE_OUTCOME_EFFECTIVE: u8 = 1;
 const DEFENSE_OUTCOME_WEAK: u8 = 2;
 const DEFENSE_OUTCOME_HARMFUL: u8 = 3;
 const DEFENSE_OUTCOME_RECOVERED: u8 = 4;
+const DEFENSE_ACTION_TLS_PRE_ADMISSION: &str = "tls_pre_admission_cooldown";
+const DEFENSE_ACTION_CLUSTER_CONNECTION: &str = "cluster_connection_cooldown";
 
 const SCORE_ELEVATED: u64 = 30;
 const SCORE_UNDER_ATTACK: u64 = 80;
@@ -135,6 +137,16 @@ struct DefenseMemoryBucket {
     last_rejection_delta: AtomicU64,
     last_score_delta: AtomicI64,
     last_seen_ms: AtomicU64,
+}
+
+#[derive(Debug, Clone)]
+struct DefenseActionMemorySnapshot {
+    preferred_action: String,
+    effective_score: u64,
+    ineffective_score: u64,
+    weak_score: u64,
+    harmful_score: u64,
+    last_outcome: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -947,36 +959,33 @@ impl ResourceSentinel {
         attack_type: &str,
         mode: u8,
     ) -> Option<DefenseActionPlan> {
-        let remembered = self.defense_memory.get(attack_type).and_then(|bucket| {
-            let effective = bucket.effective_score.load(Ordering::Relaxed);
-            let ineffective = bucket.ineffective_score.load(Ordering::Relaxed);
-            (effective > ineffective).then(|| bucket.preferred_action.clone())
-        });
-        let plan = match remembered.as_deref().unwrap_or_default() {
-            "tls_pre_admission_cooldown"
-                if matches!(attack_type, "slow_tls_handshake" | "tls_handshake_failure") =>
-            {
-                Some(tls_cluster_plan(peer_ip, attack_type, mode))
-            }
-            "cluster_connection_cooldown" => {
+        let memory = self.defense_action_memory(attack_type);
+        let action = select_defense_action(attack_type, mode, memory.as_ref())?;
+        let plan = match action {
+            DEFENSE_ACTION_TLS_PRE_ADMISSION => Some(tls_cluster_plan(peer_ip, attack_type, mode)),
+            DEFENSE_ACTION_CLUSTER_CONNECTION => {
                 Some(cluster_connection_plan(peer_ip, attack_type, mode))
             }
-            _ => match attack_type {
-                "slow_tls_handshake" | "tls_handshake_failure" => {
-                    Some(tls_cluster_plan(peer_ip, attack_type, mode))
-                }
-                "idle_no_request" | "l4_admission_reject" => {
-                    Some(cluster_connection_plan(peer_ip, attack_type, mode))
-                }
-                "provider_intercept" | "l7_security_event" | "l4_security_event" => None,
-                _ => None,
-            },
+            _ => None,
         };
-        if remembered.is_some() && plan.is_some() {
+        if memory.is_some() && plan.is_some() {
             self.automated_defense_memory_hits
                 .fetch_add(1, Ordering::Relaxed);
         }
         plan
+    }
+
+    fn defense_action_memory(&self, attack_type: &str) -> Option<DefenseActionMemorySnapshot> {
+        self.defense_memory
+            .get(attack_type)
+            .map(|bucket| DefenseActionMemorySnapshot {
+                preferred_action: bucket.preferred_action.clone(),
+                effective_score: bucket.effective_score.load(Ordering::Relaxed),
+                ineffective_score: bucket.ineffective_score.load(Ordering::Relaxed),
+                weak_score: bucket.weak_score.load(Ordering::Relaxed),
+                harmful_score: bucket.harmful_score.load(Ordering::Relaxed),
+                last_outcome: bucket.last_outcome.load(Ordering::Relaxed),
+            })
     }
 
     fn set_cooldown(
@@ -1191,7 +1200,7 @@ impl ResourceSentinel {
         score_delta: i64,
     ) {
         let now = now_millis();
-        let bucket = self
+        let mut bucket = self
             .defense_memory
             .entry(attack_type.to_string())
             .or_insert_with(|| DefenseMemoryBucket {
@@ -1216,6 +1225,7 @@ impl ResourceSentinel {
         match outcome {
             DEFENSE_OUTCOME_EFFECTIVE => {
                 bucket.effective_score.fetch_add(1, Ordering::Relaxed);
+                bucket.preferred_action = action.to_string();
             }
             DEFENSE_OUTCOME_WEAK => {
                 bucket.weak_score.fetch_add(1, Ordering::Relaxed);
@@ -1716,6 +1726,87 @@ fn cluster_defense_allowed(attack_type: &str, mode: u8, count: u64, score: u64) 
                 && score >= HOT_CLUSTER_DEFENSE_SCORE.saturating_mul(2)
         }
         _ => false,
+    }
+}
+
+fn select_defense_action(
+    attack_type: &str,
+    mode: u8,
+    memory: Option<&DefenseActionMemorySnapshot>,
+) -> Option<&'static str> {
+    let default_action = default_defense_action(attack_type)?;
+    let Some(memory) = memory else {
+        return Some(default_action);
+    };
+
+    if action_looks_harmful(memory) {
+        return alternative_defense_action(attack_type, default_action);
+    }
+
+    if action_looks_weak(memory) && mode >= MODE_SURVIVAL {
+        return alternative_defense_action(attack_type, default_action).or(Some(default_action));
+    }
+
+    if memory.effective_score > memory.ineffective_score
+        && is_compatible_defense_action(attack_type, memory.preferred_action.as_str())
+    {
+        return Some(canonical_defense_action(memory.preferred_action.as_str()));
+    }
+
+    Some(default_action)
+}
+
+fn default_defense_action(attack_type: &str) -> Option<&'static str> {
+    match attack_type {
+        "slow_tls_handshake" | "tls_handshake_failure" => Some(DEFENSE_ACTION_TLS_PRE_ADMISSION),
+        "idle_no_request" | "l4_admission_reject" => Some(DEFENSE_ACTION_CLUSTER_CONNECTION),
+        "provider_intercept" | "l7_security_event" | "l4_security_event" => None,
+        _ => None,
+    }
+}
+
+fn alternative_defense_action(attack_type: &str, current: &str) -> Option<&'static str> {
+    match (attack_type, current) {
+        ("slow_tls_handshake" | "tls_handshake_failure", DEFENSE_ACTION_TLS_PRE_ADMISSION) => {
+            Some(DEFENSE_ACTION_CLUSTER_CONNECTION)
+        }
+        ("slow_tls_handshake" | "tls_handshake_failure", DEFENSE_ACTION_CLUSTER_CONNECTION) => {
+            Some(DEFENSE_ACTION_TLS_PRE_ADMISSION)
+        }
+        _ => None,
+    }
+}
+
+fn action_looks_harmful(memory: &DefenseActionMemorySnapshot) -> bool {
+    memory.last_outcome == DEFENSE_OUTCOME_HARMFUL
+        || memory.harmful_score > memory.effective_score.max(1)
+}
+
+fn action_looks_weak(memory: &DefenseActionMemorySnapshot) -> bool {
+    memory.weak_score > 0 && memory.effective_score <= memory.ineffective_score
+}
+
+fn is_compatible_defense_action(attack_type: &str, action: &str) -> bool {
+    match action {
+        DEFENSE_ACTION_TLS_PRE_ADMISSION => {
+            matches!(attack_type, "slow_tls_handshake" | "tls_handshake_failure")
+        }
+        DEFENSE_ACTION_CLUSTER_CONNECTION => matches!(
+            attack_type,
+            "slow_tls_handshake"
+                | "tls_handshake_failure"
+                | "idle_no_request"
+                | "l4_admission_reject"
+        ),
+        _ => false,
+    }
+}
+
+fn canonical_defense_action(action: &str) -> &'static str {
+    match action {
+        DEFENSE_ACTION_TLS_PRE_ADMISSION => DEFENSE_ACTION_TLS_PRE_ADMISSION,
+        DEFENSE_ACTION_CLUSTER_CONNECTION => DEFENSE_ACTION_CLUSTER_CONNECTION,
+        _ => DEFENSE_ACTION_CLUSTER_CONNECTION,
     }
 }
 
@@ -2619,6 +2710,44 @@ mod tests {
             snapshot.defense_action_effects[0].last_score_delta,
             SCORE_UNDER_ATTACK as i64 - SCORE_ELEVATED as i64
         );
+    }
+
+    #[test]
+    fn defense_strategy_selector_switches_away_from_harmful_tls_action() {
+        let sentinel = ResourceSentinel::new();
+        let ip: IpAddr = "203.0.113.99".parse().unwrap();
+        sentinel.note_defense_effect(
+            "slow_tls_handshake",
+            DEFENSE_ACTION_TLS_PRE_ADMISSION,
+            DEFENSE_OUTCOME_HARMFUL,
+            0,
+            SCORE_UNDER_ATTACK as i64,
+        );
+
+        let plan = sentinel
+            .defense_plan(ip, "slow_tls_handshake", MODE_UNDER_ATTACK)
+            .expect("harmful TLS action should fall back to broader cluster plan");
+        assert_eq!(plan.action, DEFENSE_ACTION_CLUSTER_CONNECTION);
+        assert_eq!(plan.key, "cluster:203.0.113.0/24");
+        assert_eq!(sentinel.snapshot().automated_defense_memory_hits, 1);
+    }
+
+    #[test]
+    fn defense_strategy_selector_reuses_effective_cluster_action() {
+        let sentinel = ResourceSentinel::new();
+        let ip: IpAddr = "203.0.113.99".parse().unwrap();
+        sentinel.note_defense_effect(
+            "slow_tls_handshake",
+            DEFENSE_ACTION_CLUSTER_CONNECTION,
+            DEFENSE_OUTCOME_EFFECTIVE,
+            DEFENSE_EFFECT_REJECTION_DELTA,
+            -10,
+        );
+
+        let plan = sentinel
+            .defense_plan(ip, "slow_tls_handshake", MODE_ELEVATED)
+            .expect("effective remembered action should be reused");
+        assert_eq!(plan.action, DEFENSE_ACTION_CLUSTER_CONNECTION);
     }
 
     fn activate_hot_tls_cluster(sentinel: &ResourceSentinel) {

@@ -121,6 +121,121 @@ async fn test_sqlite_store_persists_ai_audit_reports_and_feedback() {
 }
 
 #[tokio::test]
+async fn test_sqlite_store_persists_resource_sentinel_session_and_memory() {
+    let path = unique_test_db_path("resource_sentinel");
+    let store = SqliteStore::new(path, true).await.unwrap();
+
+    let session = crate::core::ResourceSentinelAttackSession {
+        session_id: 7,
+        phase: "ended".to_string(),
+        started_at_ms: 100,
+        ended_at_ms: Some(900),
+        duration_ms: 800,
+        peak_severity: "critical".to_string(),
+        peak_attack_score: 220,
+        primary_pressure: "tls_handshake_resource".to_string(),
+        top_clusters: vec![],
+        defense_actions: 2,
+        defense_extensions: 1,
+        defense_relaxations: 1,
+        audit_event_count: 1,
+        pre_admission_rejections: 12,
+        aggregated_events: 34,
+        final_outcome: "recovered".to_string(),
+        summary: "攻击会话 #7 已恢复。".to_string(),
+    };
+    let snapshot = crate::core::ResourceSentinelPersistenceSnapshot {
+        session,
+        lifecycle: crate::core::ResourceSentinelAttackLifecycle {
+            phase: "ended".to_string(),
+            previous_phase: "mitigating".to_string(),
+            phase_since_ms: 1,
+            transitioned: true,
+        },
+        diagnosis: crate::core::ResourceSentinelAttackDiagnosis {
+            severity: "normal".to_string(),
+            primary_pressure: "stable".to_string(),
+            summary: "已恢复".to_string(),
+            active_defense: "monitoring".to_string(),
+            recommended_next_action: "review_final_report".to_string(),
+            evidence: vec![],
+            top_cluster: None,
+        },
+        top_clusters: vec![],
+        defense_effects: vec![],
+        decision_traces: vec![],
+        ingress_gap_analysis: crate::core::ResourceSentinelIngressGapAnalysis {
+            cdn_observed_requests: None,
+            rust_observed_intercepts: 46,
+            estimated_outer_layer_absorption_ratio: None,
+            likely_absorption_layer: "rust_pre_admission".to_string(),
+            confidence: "medium".to_string(),
+            summary: "Rust 侧前置 admission 正在吸收压力。".to_string(),
+        },
+        resource_pressure_feedback: crate::core::ResourceSentinelResourcePressureFeedback {
+            pressure_level: "high".to_string(),
+            storage_queue_usage_percent: 91,
+            fast_path_activations: 1,
+            resource_outcome: "fast_path_guard_active".to_string(),
+            scoring_hint: "prefer_highest_confidence_or_survival_action".to_string(),
+            summary: "资源压力 high。".to_string(),
+        },
+        attack_migrations: vec![],
+        attack_report: Some(crate::core::ResourceSentinelAttackReport {
+            session_id: 7,
+            generated_at_ms: 901,
+            summary: "攻击会话 #7 当前阶段 ended。".to_string(),
+            what_worked: vec!["tls 有效".to_string()],
+            what_was_weak: vec![],
+            what_was_harmful: vec![],
+            cdn_rust_gap_analysis: "Rust 侧前置 admission 正在吸收压力。".to_string(),
+            resource_pressure_summary: "资源压力 high。".to_string(),
+            recommendations: vec!["保留自动化策略。".to_string()],
+        }),
+    };
+    store
+        .upsert_resource_sentinel_attack_session(&snapshot)
+        .await
+        .unwrap();
+
+    let memory = crate::core::ResourceSentinelDefenseMemoryExport {
+        attack_type: "slow_tls_handshake".to_string(),
+        preferred_action: "tls_pre_admission_cooldown".to_string(),
+        effective_score: 3,
+        ineffective_score: 1,
+        weak_score: 1,
+        harmful_score: 0,
+        last_outcome: "effective".to_string(),
+        last_rejection_delta: 9,
+        last_score_delta: -10,
+        last_seen_ms: 902,
+    };
+    store
+        .upsert_resource_sentinel_defense_memory(&memory)
+        .await
+        .unwrap();
+
+    let sessions = store
+        .list_resource_sentinel_attack_sessions(10)
+        .await
+        .unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].session_id, 7);
+    assert_eq!(sessions[0].final_outcome, "recovered");
+    assert!(sessions[0]
+        .report_json
+        .as_deref()
+        .unwrap_or_default()
+        .contains("攻击会话 #7"));
+
+    let memory = store.list_resource_sentinel_defense_memory().await.unwrap();
+    assert_eq!(memory.len(), 1);
+    assert_eq!(memory[0].attack_type, "slow_tls_handshake");
+    assert_eq!(memory[0].preferred_action, "tls_pre_admission_cooldown");
+    assert_eq!(memory[0].effective_score, 3);
+}
+
+#[tokio::test]
 async fn test_sqlite_store_metrics_cache_tracks_deletes() {
     let path = unique_test_db_path("metrics_cache_deletes");
     let store = SqliteStore::new(path, true).await.unwrap();

@@ -87,6 +87,14 @@ pub struct MetricsResponse {
         Vec<crate::core::ResourceSentinelDefenseActionEffect>,
     pub(crate) resource_sentinel_defense_decision_traces:
         Vec<crate::core::ResourceSentinelDefenseDecisionTrace>,
+    pub(crate) resource_sentinel_ingress_gap_analysis:
+        crate::core::ResourceSentinelIngressGapAnalysis,
+    pub(crate) resource_sentinel_resource_pressure_feedback:
+        crate::core::ResourceSentinelResourcePressureFeedback,
+    pub(crate) resource_sentinel_attack_migrations:
+        Vec<crate::core::ResourceSentinelAttackMigration>,
+    pub(crate) resource_sentinel_attack_report_preview:
+        Option<crate::core::ResourceSentinelAttackReport>,
     pub(crate) resource_sentinel_attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis,
     pub(crate) resource_sentinel_attack_lifecycle: crate::core::ResourceSentinelAttackLifecycle,
     pub(crate) resource_sentinel_attack_session: crate::core::ResourceSentinelAttackSession,

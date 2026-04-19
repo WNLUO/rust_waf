@@ -54,6 +54,8 @@ const DEFENSE_EFFECT_RELAX_TO_MS: u64 = 2_000;
 const DEFENSE_EFFECT_REJECTION_DELTA: u64 = 3;
 const ATTACK_AUDIT_MIN_INTERVAL_MS: u64 = 10_000;
 const ATTACK_AUDIT_REPEAT_COOLDOWN_MS: u64 = 60_000;
+const ATTACK_SESSION_PERSIST_INTERVAL_MS: u64 = 5_000;
+const FAST_PATH_STORAGE_QUEUE_PERCENT: u64 = 90;
 
 #[derive(Debug)]
 pub(crate) struct ResourceSentinel {
@@ -89,6 +91,11 @@ pub(crate) struct ResourceSentinel {
     attack_session_start_defense_extensions: AtomicU64,
     attack_session_start_defense_relaxations: AtomicU64,
     attack_session_start_audit_events: AtomicU64,
+    last_runtime_storage_queue_percent: AtomicU64,
+    last_runtime_pressure_level: AtomicU8,
+    fast_path_activations: AtomicU64,
+    last_attack_session_persist_ms: AtomicU64,
+    last_persisted_attack_session_id: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -196,6 +203,10 @@ pub struct ResourceSentinelSnapshot {
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
     pub defense_action_effects: Vec<ResourceSentinelDefenseActionEffect>,
     pub defense_decision_traces: Vec<ResourceSentinelDefenseDecisionTrace>,
+    pub ingress_gap_analysis: ResourceSentinelIngressGapAnalysis,
+    pub resource_pressure_feedback: ResourceSentinelResourcePressureFeedback,
+    pub attack_migrations: Vec<ResourceSentinelAttackMigration>,
+    pub attack_report_preview: Option<ResourceSentinelAttackReport>,
     pub attack_diagnosis: ResourceSentinelAttackDiagnosis,
     pub attack_lifecycle: ResourceSentinelAttackLifecycle,
     pub attack_session: ResourceSentinelAttackSession,
@@ -248,6 +259,78 @@ pub struct ResourceSentinelDefenseDecisionTrace {
     pub used_memory: bool,
     pub switched_action: bool,
     pub observed_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelIngressGapAnalysis {
+    pub cdn_observed_requests: Option<u64>,
+    pub rust_observed_intercepts: u64,
+    pub estimated_outer_layer_absorption_ratio: Option<u64>,
+    pub likely_absorption_layer: String,
+    pub confidence: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelResourcePressureFeedback {
+    pub pressure_level: String,
+    pub storage_queue_usage_percent: u64,
+    pub fast_path_activations: u64,
+    pub resource_outcome: String,
+    pub scoring_hint: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelAttackMigration {
+    pub from_cluster: String,
+    pub to_cluster: String,
+    pub from_attack_type: String,
+    pub to_attack_type: String,
+    pub detected_at_ms: u64,
+    pub reason: String,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelAttackReport {
+    pub session_id: u64,
+    pub generated_at_ms: u64,
+    pub summary: String,
+    pub what_worked: Vec<String>,
+    pub what_was_weak: Vec<String>,
+    pub what_was_harmful: Vec<String>,
+    pub cdn_rust_gap_analysis: String,
+    pub resource_pressure_summary: String,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResourceSentinelPersistenceSnapshot {
+    pub session: ResourceSentinelAttackSession,
+    pub lifecycle: ResourceSentinelAttackLifecycle,
+    pub diagnosis: ResourceSentinelAttackDiagnosis,
+    pub top_clusters: Vec<ResourceSentinelClusterSnapshot>,
+    pub defense_effects: Vec<ResourceSentinelDefenseActionEffect>,
+    pub decision_traces: Vec<ResourceSentinelDefenseDecisionTrace>,
+    pub ingress_gap_analysis: ResourceSentinelIngressGapAnalysis,
+    pub resource_pressure_feedback: ResourceSentinelResourcePressureFeedback,
+    pub attack_migrations: Vec<ResourceSentinelAttackMigration>,
+    pub attack_report: Option<ResourceSentinelAttackReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelDefenseMemoryExport {
+    pub attack_type: String,
+    pub preferred_action: String,
+    pub effective_score: u64,
+    pub ineffective_score: u64,
+    pub weak_score: u64,
+    pub harmful_score: u64,
+    pub last_outcome: String,
+    pub last_rejection_delta: u64,
+    pub last_score_delta: i64,
+    pub last_seen_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -332,6 +415,11 @@ impl ResourceSentinel {
             attack_session_start_defense_extensions: AtomicU64::new(0),
             attack_session_start_defense_relaxations: AtomicU64::new(0),
             attack_session_start_audit_events: AtomicU64::new(0),
+            last_runtime_storage_queue_percent: AtomicU64::new(0),
+            last_runtime_pressure_level: AtomicU8::new(0),
+            fast_path_activations: AtomicU64::new(0),
+            last_attack_session_persist_ms: AtomicU64::new(0),
+            last_persisted_attack_session_id: AtomicU64::new(0),
         }
     }
 
@@ -536,6 +624,22 @@ impl ResourceSentinel {
         let top_attack_clusters = self.top_attack_clusters(8);
         let defense_action_effects = self.defense_action_effects(8);
         let defense_decision_traces = self.defense_decision_traces(8);
+        let ingress_gap_analysis = build_ingress_gap_analysis(
+            pre_admission_rejections,
+            aggregated_events,
+            &top_attack_clusters,
+            self.last_runtime_storage_queue_percent
+                .load(Ordering::Relaxed),
+        );
+        let resource_pressure_feedback = build_resource_pressure_feedback(
+            self.last_runtime_pressure_level.load(Ordering::Relaxed),
+            self.last_runtime_storage_queue_percent
+                .load(Ordering::Relaxed),
+            self.fast_path_activations.load(Ordering::Relaxed),
+            attack_score,
+        );
+        let attack_migrations =
+            build_attack_migrations(attack_score, &top_attack_clusters, now_millis());
         let attack_diagnosis = build_attack_diagnosis(
             &mode,
             attack_score,
@@ -563,6 +667,14 @@ impl ResourceSentinel {
             &attack_lifecycle,
             &top_attack_clusters,
         );
+        let attack_report_preview = build_attack_report_preview(
+            &attack_session,
+            &defense_action_effects,
+            &defense_decision_traces,
+            &ingress_gap_analysis,
+            &resource_pressure_feedback,
+            &attack_migrations,
+        );
 
         ResourceSentinelSnapshot {
             mode,
@@ -582,6 +694,10 @@ impl ResourceSentinel {
             top_attack_clusters,
             defense_action_effects,
             defense_decision_traces,
+            ingress_gap_analysis,
+            resource_pressure_feedback,
+            attack_migrations,
+            attack_report_preview,
             attack_diagnosis,
             attack_lifecycle,
             attack_session,
@@ -590,6 +706,16 @@ impl ResourceSentinel {
 
     pub(crate) fn apply_runtime_pressure(&self, pressure: &mut RuntimePressureSnapshot) {
         let mode = self.current_mode();
+        self.last_runtime_storage_queue_percent
+            .store(pressure.storage_queue_usage_percent, Ordering::Relaxed);
+        self.last_runtime_pressure_level
+            .store(pressure_level_code(pressure.level), Ordering::Relaxed);
+        if pressure.storage_queue_usage_percent >= FAST_PATH_STORAGE_QUEUE_PERCENT
+            || matches!(pressure.level, "attack")
+        {
+            self.fast_path_activations.fetch_add(1, Ordering::Relaxed);
+            self.note_signal(12);
+        }
         if mode >= MODE_ELEVATED && matches!(pressure.level, "normal") {
             pressure.level = "elevated";
         }
@@ -606,6 +732,111 @@ impl ResourceSentinel {
             pressure.trim_event_persistence = true;
             pressure.prefer_drop = true;
         }
+    }
+
+    pub(crate) fn maybe_persistence_snapshot(
+        &self,
+        force: bool,
+    ) -> Option<ResourceSentinelPersistenceSnapshot> {
+        let now = now_millis();
+        let last = self.last_attack_session_persist_ms.load(Ordering::Relaxed);
+        if !force && now.saturating_sub(last) < ATTACK_SESSION_PERSIST_INTERVAL_MS {
+            return None;
+        }
+        let snapshot = self.snapshot();
+        if snapshot.attack_session.session_id == 0 {
+            return None;
+        }
+        let already_final = snapshot.attack_lifecycle.phase == "ended"
+            && self
+                .last_persisted_attack_session_id
+                .load(Ordering::Relaxed)
+                == snapshot.attack_session.session_id;
+        if !force
+            && already_final
+            && snapshot.attack_session.ended_at_ms.is_some()
+            && now.saturating_sub(last) < ATTACK_AUDIT_REPEAT_COOLDOWN_MS
+        {
+            return None;
+        }
+        if self
+            .last_attack_session_persist_ms
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+            && !force
+        {
+            return None;
+        }
+        if snapshot.attack_session.ended_at_ms.is_some() {
+            self.last_persisted_attack_session_id
+                .store(snapshot.attack_session.session_id, Ordering::Relaxed);
+        }
+        Some(ResourceSentinelPersistenceSnapshot {
+            session: snapshot.attack_session,
+            lifecycle: snapshot.attack_lifecycle,
+            diagnosis: snapshot.attack_diagnosis,
+            top_clusters: snapshot.top_attack_clusters,
+            defense_effects: snapshot.defense_action_effects,
+            decision_traces: snapshot.defense_decision_traces,
+            ingress_gap_analysis: snapshot.ingress_gap_analysis,
+            resource_pressure_feedback: snapshot.resource_pressure_feedback,
+            attack_migrations: snapshot.attack_migrations,
+            attack_report: snapshot.attack_report_preview,
+        })
+    }
+
+    pub(crate) fn defense_memory_exports(&self) -> Vec<ResourceSentinelDefenseMemoryExport> {
+        self.defense_memory
+            .iter()
+            .map(|entry| {
+                let bucket = entry.value();
+                ResourceSentinelDefenseMemoryExport {
+                    attack_type: entry.key().clone(),
+                    preferred_action: bucket.preferred_action.clone(),
+                    effective_score: bucket.effective_score.load(Ordering::Relaxed),
+                    ineffective_score: bucket.ineffective_score.load(Ordering::Relaxed),
+                    weak_score: bucket.weak_score.load(Ordering::Relaxed),
+                    harmful_score: bucket.harmful_score.load(Ordering::Relaxed),
+                    last_outcome: defense_outcome_label(
+                        bucket.last_outcome.load(Ordering::Relaxed),
+                    )
+                    .to_string(),
+                    last_rejection_delta: bucket.last_rejection_delta.load(Ordering::Relaxed),
+                    last_score_delta: bucket.last_score_delta.load(Ordering::Relaxed),
+                    last_seen_ms: bucket.last_seen_ms.load(Ordering::Relaxed),
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn restore_defense_memory(
+        &self,
+        attack_type: &str,
+        preferred_action: &str,
+        effective_score: u64,
+        ineffective_score: u64,
+        weak_score: u64,
+        harmful_score: u64,
+        last_outcome: &str,
+        last_rejection_delta: u64,
+        last_score_delta: i64,
+        last_seen_ms: u64,
+    ) {
+        let outcome = defense_outcome_code(last_outcome);
+        self.defense_memory.insert(
+            attack_type.to_string(),
+            DefenseMemoryBucket {
+                preferred_action: preferred_action.to_string(),
+                effective_score: AtomicU64::new(effective_score),
+                ineffective_score: AtomicU64::new(ineffective_score),
+                weak_score: AtomicU64::new(weak_score),
+                harmful_score: AtomicU64::new(harmful_score),
+                last_outcome: AtomicU8::new(outcome),
+                last_rejection_delta: AtomicU64::new(last_rejection_delta),
+                last_score_delta: AtomicI64::new(last_score_delta),
+                last_seen_ms: AtomicU64::new(last_seen_ms),
+            },
+        );
     }
 
     fn current_mode(&self) -> u8 {
@@ -1641,7 +1872,38 @@ impl WafContext {
         }
         if let Some(audit_event) = self.resource_sentinel.maybe_attack_audit_event() {
             store.enqueue_security_event(audit_event);
+            self.persist_resource_sentinel_state(store, true);
+        } else {
+            self.persist_resource_sentinel_state(store, false);
         }
+    }
+
+    fn persist_resource_sentinel_state(&self, store: &SqliteStore, force: bool) {
+        let Some(snapshot) = self.resource_sentinel.maybe_persistence_snapshot(force) else {
+            return;
+        };
+        let memory = self.resource_sentinel.defense_memory_exports();
+        let store = store.clone();
+        tokio::spawn(async move {
+            if let Err(err) = store
+                .upsert_resource_sentinel_attack_session(&snapshot)
+                .await
+            {
+                log::warn!(
+                    "Failed to persist resource sentinel attack session: {}",
+                    err
+                );
+            }
+            for record in memory {
+                if let Err(err) = store.upsert_resource_sentinel_defense_memory(&record).await {
+                    log::warn!(
+                        "Failed to persist resource sentinel defense memory for {}: {}",
+                        record.attack_type,
+                        err
+                    );
+                }
+            }
+        });
     }
 }
 
@@ -1715,6 +1977,24 @@ fn mode_label(mode: u8) -> &'static str {
     }
 }
 
+fn pressure_level_code(level: &str) -> u8 {
+    match level {
+        "attack" => 3,
+        "high" => 2,
+        "elevated" => 1,
+        _ => 0,
+    }
+}
+
+fn pressure_level_label(level: u8) -> &'static str {
+    match level {
+        3 => "attack",
+        2 => "high",
+        1 => "elevated",
+        _ => "normal",
+    }
+}
+
 fn attack_phase_label(phase: u8) -> &'static str {
     match phase {
         ATTACK_PHASE_STARTED => "started",
@@ -1732,6 +2012,16 @@ fn defense_outcome_label(outcome: u8) -> &'static str {
         DEFENSE_OUTCOME_HARMFUL => "harmful",
         DEFENSE_OUTCOME_RECOVERED => "recovered",
         _ => "unknown",
+    }
+}
+
+fn defense_outcome_code(outcome: &str) -> u8 {
+    match outcome {
+        "effective" => DEFENSE_OUTCOME_EFFECTIVE,
+        "weak" => DEFENSE_OUTCOME_WEAK,
+        "harmful" => DEFENSE_OUTCOME_HARMFUL,
+        "recovered" => DEFENSE_OUTCOME_RECOVERED,
+        _ => DEFENSE_OUTCOME_UNKNOWN,
     }
 }
 
@@ -1818,6 +2108,186 @@ fn build_attack_session_summary(
     format!(
         "攻击会话 #{session_id} 持续 {duration_ms}ms，峰值等级 {peak_severity}，主压力 {primary_pressure}。{cluster_text}自动防御动作 {defense_actions} 次，延长 {defense_extensions} 次，收缩 {defense_relaxations} 次，当前结果 {final_outcome}。"
     )
+}
+
+fn build_ingress_gap_analysis(
+    pre_admission_rejections: u64,
+    aggregated_events: u64,
+    top_attack_clusters: &[ResourceSentinelClusterSnapshot],
+    storage_queue_usage_percent: u64,
+) -> ResourceSentinelIngressGapAnalysis {
+    let rust_observed_intercepts = pre_admission_rejections.saturating_add(aggregated_events);
+    let tls_or_idle_pressure = top_attack_clusters.iter().any(|cluster| {
+        matches!(
+            cluster.attack_type.as_str(),
+            "slow_tls_handshake" | "tls_handshake_failure" | "idle_no_request"
+        )
+    });
+    let likely_absorption_layer = if tls_or_idle_pressure && rust_observed_intercepts > 0 {
+        "transport_or_cdn_edge"
+    } else if aggregated_events > pre_admission_rejections {
+        "rust_event_aggregation"
+    } else if pre_admission_rejections > 0 {
+        "rust_pre_admission"
+    } else {
+        "unknown"
+    };
+    let confidence = if rust_observed_intercepts == 0 {
+        "low"
+    } else if storage_queue_usage_percent >= FAST_PATH_STORAGE_QUEUE_PERCENT || tls_or_idle_pressure
+    {
+        "medium"
+    } else {
+        "watch"
+    };
+    let summary = match likely_absorption_layer {
+        "transport_or_cdn_edge" => {
+            "Rust 侧观测以传输层/连接型压力为主，CDN 计数可能显著高于本进程完整事件记录。"
+        }
+        "rust_event_aggregation" => "Rust 侧已大量聚合低价值事件，本地明细记录会低于真实到达压力。",
+        "rust_pre_admission" => "Rust 侧前置 admission 正在吸收压力，后端完整 L7 记录会相对较低。",
+        _ => "当前 Rust 侧证据不足，暂时无法可靠判断 CDN 与本进程计数差异来源。",
+    }
+    .to_string();
+
+    ResourceSentinelIngressGapAnalysis {
+        cdn_observed_requests: None,
+        rust_observed_intercepts,
+        estimated_outer_layer_absorption_ratio: None,
+        likely_absorption_layer: likely_absorption_layer.to_string(),
+        confidence: confidence.to_string(),
+        summary,
+    }
+}
+
+fn build_resource_pressure_feedback(
+    pressure_level: u8,
+    storage_queue_usage_percent: u64,
+    fast_path_activations: u64,
+    attack_score: u64,
+) -> ResourceSentinelResourcePressureFeedback {
+    let pressure_label = pressure_level_label(pressure_level);
+    let resource_outcome = if fast_path_activations > 0 {
+        "fast_path_guard_active"
+    } else if storage_queue_usage_percent >= FAST_PATH_STORAGE_QUEUE_PERCENT {
+        "storage_survival_pressure"
+    } else if attack_score >= SCORE_SURVIVAL {
+        "attack_survival_pressure"
+    } else if attack_score >= SCORE_UNDER_ATTACK || matches!(pressure_label, "high" | "attack") {
+        "resource_under_attack"
+    } else {
+        "resource_monitoring"
+    };
+    let scoring_hint = match resource_outcome {
+        "fast_path_guard_active" => "prefer_highest_confidence_or_survival_action",
+        "storage_survival_pressure" => "prioritize_event_aggregation_and_low_value_write_trim",
+        "attack_survival_pressure" => "prioritize_pre_admission_and_cluster_budget",
+        "resource_under_attack" => "continue_effect_scoring",
+        _ => "observe",
+    };
+    let summary = format!(
+        "资源压力 {pressure_label}，SQLite 队列 {storage_queue_usage_percent}%，fast path 触发 {fast_path_activations} 次，评分提示 {scoring_hint}。"
+    );
+
+    ResourceSentinelResourcePressureFeedback {
+        pressure_level: pressure_label.to_string(),
+        storage_queue_usage_percent,
+        fast_path_activations,
+        resource_outcome: resource_outcome.to_string(),
+        scoring_hint: scoring_hint.to_string(),
+        summary,
+    }
+}
+
+fn build_attack_migrations(
+    attack_score: u64,
+    top_attack_clusters: &[ResourceSentinelClusterSnapshot],
+    now: u64,
+) -> Vec<ResourceSentinelAttackMigration> {
+    if attack_score < SCORE_UNDER_ATTACK || top_attack_clusters.len() < 2 {
+        return Vec::new();
+    }
+    let first = &top_attack_clusters[0];
+    let second = &top_attack_clusters[1];
+    if first.cluster == second.cluster && first.attack_type == second.attack_type {
+        return Vec::new();
+    }
+    let score_gap = first.score.saturating_sub(second.score);
+    if second.score == 0 || score_gap > first.score / 2 {
+        return Vec::new();
+    }
+    vec![ResourceSentinelAttackMigration {
+        from_cluster: second.cluster.clone(),
+        to_cluster: first.cluster.clone(),
+        from_attack_type: second.attack_type.clone(),
+        to_attack_type: first.attack_type.clone(),
+        detected_at_ms: now,
+        reason: "top_attack_cluster_shift_with_continuous_pressure".to_string(),
+        confidence: "medium".to_string(),
+    }]
+}
+
+fn build_attack_report_preview(
+    session: &ResourceSentinelAttackSession,
+    effects: &[ResourceSentinelDefenseActionEffect],
+    decisions: &[ResourceSentinelDefenseDecisionTrace],
+    ingress_gap: &ResourceSentinelIngressGapAnalysis,
+    pressure: &ResourceSentinelResourcePressureFeedback,
+    migrations: &[ResourceSentinelAttackMigration],
+) -> Option<ResourceSentinelAttackReport> {
+    if session.session_id == 0 {
+        return None;
+    }
+    let what_worked = effects
+        .iter()
+        .filter(|effect| effect.effective_score > effect.ineffective_score)
+        .map(|effect| {
+            format!(
+                "{} 使用 {} 置信度 {}%",
+                effect.attack_type, effect.preferred_action, effect.confidence
+            )
+        })
+        .collect::<Vec<_>>();
+    let what_was_weak = effects
+        .iter()
+        .filter(|effect| effect.weak_score > 0)
+        .map(|effect| format!("{} 最近存在 weak 评分", effect.attack_type))
+        .collect::<Vec<_>>();
+    let what_was_harmful = effects
+        .iter()
+        .filter(|effect| effect.harmful_score > 0)
+        .map(|effect| format!("{} 最近存在 harmful 评分", effect.attack_type))
+        .collect::<Vec<_>>();
+    let mut recommendations = Vec::new();
+    if decisions.iter().any(|decision| decision.switched_action) {
+        recommendations
+            .push("继续保留基于效果评分的动作切换，避免重复使用弱/有害动作。".to_string());
+    }
+    if pressure.fast_path_activations > 0 {
+        recommendations
+            .push("保留 fast path 快速保护，优先保护 admission、聚合与存储队列。".to_string());
+    }
+    if !migrations.is_empty() {
+        recommendations.push("攻击簇存在迁移迹象，后续策略应按会话连续性处理新簇。".to_string());
+    }
+    if recommendations.is_empty() {
+        recommendations.push("继续观察当前自动化策略效果评分。".to_string());
+    }
+
+    Some(ResourceSentinelAttackReport {
+        session_id: session.session_id,
+        generated_at_ms: now_millis(),
+        summary: format!(
+            "攻击会话 #{} 当前阶段 {}，峰值 {}，结果 {}。",
+            session.session_id, session.phase, session.peak_severity, session.final_outcome
+        ),
+        what_worked,
+        what_was_weak,
+        what_was_harmful,
+        cdn_rust_gap_analysis: ingress_gap.summary.clone(),
+        resource_pressure_summary: pressure.summary.clone(),
+        recommendations,
+    })
 }
 
 fn now_millis() -> u64 {
@@ -2296,6 +2766,10 @@ fn build_attack_audit_event(snapshot: ResourceSentinelSnapshot) -> SecurityEvent
         "top_attack_clusters": snapshot.top_attack_clusters,
         "defense_action_effects": snapshot.defense_action_effects,
         "defense_decision_traces": snapshot.defense_decision_traces,
+        "ingress_gap_analysis": snapshot.ingress_gap_analysis,
+        "resource_pressure_feedback": snapshot.resource_pressure_feedback,
+        "attack_migrations": snapshot.attack_migrations,
+        "attack_report_preview": snapshot.attack_report_preview,
         "cdn_rust_count_note": "CDN 请求数可能远高于 Rust 记录数，因为 CDN/L4/L7 会在不同层提前拦截，Rust 本地审计只代表到达本进程或本进程已聚合的后端视角。"
     }))
     .ok();
@@ -2985,6 +3459,84 @@ mod tests {
             .expect("unsupported attack type should still explain the decision");
         assert_eq!(unsupported_trace.reason, "unsupported_attack_type");
         assert_eq!(unsupported_trace.selected_action, "none");
+    }
+
+    #[test]
+    fn attack_replay_fixture_generates_report_gap_and_fast_path_feedback() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        sentinel
+            .attack_score
+            .store(SCORE_SURVIVAL, Ordering::Relaxed);
+        sentinel
+            .pre_admission_rejections
+            .fetch_add(400_000, Ordering::Relaxed);
+        sentinel
+            .aggregated_events
+            .fetch_add(20_000, Ordering::Relaxed);
+
+        let mut pressure = RuntimePressureSnapshot {
+            level: "attack",
+            capacity_class: "large",
+            defense_depth: "full",
+            storage_queue_usage_percent: 95,
+            drop_delay: false,
+            trim_event_persistence: false,
+            l7_bucket_limit: 1_000,
+            l7_page_window_limit: 1_000,
+            behavior_bucket_limit: 1_000,
+            behavior_sample_stride: 1,
+            prefer_drop: false,
+        };
+        sentinel.apply_runtime_pressure(&mut pressure);
+
+        let snapshot = sentinel.snapshot();
+        assert_eq!(snapshot.attack_lifecycle.phase, "started");
+        assert_eq!(
+            snapshot.ingress_gap_analysis.likely_absorption_layer,
+            "transport_or_cdn_edge"
+        );
+        assert_eq!(
+            snapshot.resource_pressure_feedback.resource_outcome,
+            "fast_path_guard_active"
+        );
+        assert!(snapshot.attack_report_preview.is_some());
+        assert!(snapshot
+            .attack_report_preview
+            .as_ref()
+            .expect("report")
+            .recommendations
+            .iter()
+            .any(|item| item.contains("fast path")));
+    }
+
+    #[test]
+    fn defense_memory_restore_rehydrates_strategy_selection() {
+        let sentinel = ResourceSentinel::new();
+        let ip: IpAddr = "203.0.113.99".parse().unwrap();
+        sentinel.restore_defense_memory(
+            "slow_tls_handshake",
+            DEFENSE_ACTION_CLUSTER_CONNECTION,
+            5,
+            1,
+            0,
+            0,
+            "effective",
+            DEFENSE_EFFECT_REJECTION_DELTA,
+            -20,
+            now_millis(),
+        );
+
+        let plan = sentinel
+            .defense_plan(ip, "slow_tls_handshake", MODE_ELEVATED)
+            .expect("restored memory should select a plan");
+        assert_eq!(plan.action, DEFENSE_ACTION_CLUSTER_CONNECTION);
+        let exports = sentinel.defense_memory_exports();
+        assert_eq!(
+            exports[0].preferred_action,
+            DEFENSE_ACTION_CLUSTER_CONNECTION
+        );
+        assert_eq!(exports[0].last_outcome, "effective");
     }
 
     fn activate_hot_tls_cluster(sentinel: &ResourceSentinel) {

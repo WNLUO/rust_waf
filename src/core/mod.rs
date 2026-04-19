@@ -51,9 +51,11 @@ pub use packet::{
 pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
 pub use resource_sentinel::{
     ResourceSentinelAttackDiagnosis, ResourceSentinelAttackLifecycle,
-    ResourceSentinelAttackSession, ResourceSentinelClusterSnapshot,
-    ResourceSentinelDefenseActionEffect, ResourceSentinelDefenseDecisionTrace,
-    ResourceSentinelSnapshot,
+    ResourceSentinelAttackMigration, ResourceSentinelAttackReport, ResourceSentinelAttackSession,
+    ResourceSentinelClusterSnapshot, ResourceSentinelDefenseActionEffect,
+    ResourceSentinelDefenseDecisionTrace, ResourceSentinelDefenseMemoryExport,
+    ResourceSentinelIngressGapAnalysis, ResourceSentinelPersistenceSnapshot,
+    ResourceSentinelResourcePressureFeedback, ResourceSentinelSnapshot,
 };
 pub use self_protection::ServerPublicIpSnapshot;
 pub use visitor_intelligence::{
@@ -518,6 +520,35 @@ impl WafContext {
             match store.list_bot_ip_cache_entries().await {
                 Ok(entries) => context.bot_ip_verifier.hydrate_from_entries(entries),
                 Err(err) => log::warn!("Failed to hydrate bot verifier cache: {}", err),
+            }
+            match store.list_resource_sentinel_defense_memory().await {
+                Ok(entries) => {
+                    let count = entries.len();
+                    for entry in entries {
+                        context.resource_sentinel.restore_defense_memory(
+                            &entry.attack_type,
+                            &entry.preferred_action,
+                            entry.effective_score.max(0) as u64,
+                            entry.ineffective_score.max(0) as u64,
+                            entry.weak_score.max(0) as u64,
+                            entry.harmful_score.max(0) as u64,
+                            &entry.last_outcome,
+                            entry.last_rejection_delta.max(0) as u64,
+                            entry.last_score_delta,
+                            entry.last_seen_ms.max(0) as u64,
+                        );
+                    }
+                    if count > 0 {
+                        log::info!(
+                            "Restored {} resource sentinel defense memory record(s)",
+                            count
+                        );
+                    }
+                }
+                Err(err) => log::warn!(
+                    "Failed to restore resource sentinel defense memory: {}",
+                    err
+                ),
             }
         }
 

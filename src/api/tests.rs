@@ -214,6 +214,42 @@ fn test_build_metrics_response_with_sources() {
                 switched_action: true,
                 observed_at_ms: 4,
             }],
+            ingress_gap_analysis: crate::core::ResourceSentinelIngressGapAnalysis {
+                cdn_observed_requests: None,
+                rust_observed_intercepts: 16,
+                estimated_outer_layer_absorption_ratio: None,
+                likely_absorption_layer: "transport_or_cdn_edge".to_string(),
+                confidence: "medium".to_string(),
+                summary: "Rust 侧观测以传输层/连接型压力为主。".to_string(),
+            },
+            resource_pressure_feedback: crate::core::ResourceSentinelResourcePressureFeedback {
+                pressure_level: "high".to_string(),
+                storage_queue_usage_percent: 81,
+                fast_path_activations: 0,
+                resource_outcome: "resource_under_attack".to_string(),
+                scoring_hint: "continue_effect_scoring".to_string(),
+                summary: "资源压力 high。".to_string(),
+            },
+            attack_migrations: vec![crate::core::ResourceSentinelAttackMigration {
+                from_cluster: "203.0.114.0/24".to_string(),
+                to_cluster: "203.0.113.0/24".to_string(),
+                from_attack_type: "idle_no_request".to_string(),
+                to_attack_type: "slow_tls_handshake".to_string(),
+                detected_at_ms: 5,
+                reason: "top_attack_cluster_shift_with_continuous_pressure".to_string(),
+                confidence: "medium".to_string(),
+            }],
+            attack_report_preview: Some(crate::core::ResourceSentinelAttackReport {
+                session_id: 42,
+                generated_at_ms: 6,
+                summary: "攻击会话 #42 当前阶段 started。".to_string(),
+                what_worked: vec!["slow_tls_handshake 使用 tls_pre_admission_cooldown".to_string()],
+                what_was_weak: vec![],
+                what_was_harmful: vec![],
+                cdn_rust_gap_analysis: "Rust 侧观测以传输层/连接型压力为主。".to_string(),
+                resource_pressure_summary: "资源压力 high。".to_string(),
+                recommendations: vec!["继续观察当前自动化策略效果评分。".to_string()],
+            }),
             attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis {
                 severity: "high".to_string(),
                 primary_pressure: "tls_handshake_resource".to_string(),
@@ -350,6 +386,30 @@ fn test_build_metrics_response_with_sources() {
         "harmful_memory_switched"
     );
     assert!(response.resource_sentinel_defense_decision_traces[0].switched_action);
+    assert_eq!(
+        response
+            .resource_sentinel_ingress_gap_analysis
+            .likely_absorption_layer,
+        "transport_or_cdn_edge"
+    );
+    assert_eq!(
+        response
+            .resource_sentinel_resource_pressure_feedback
+            .storage_queue_usage_percent,
+        81
+    );
+    assert_eq!(
+        response.resource_sentinel_attack_migrations[0].to_cluster,
+        "203.0.113.0/24"
+    );
+    assert_eq!(
+        response
+            .resource_sentinel_attack_report_preview
+            .as_ref()
+            .expect("report preview")
+            .session_id,
+        42
+    );
     assert!(response
         .storage_degraded_reasons
         .contains(&"storage_low_value_event_persistence_trimmed".to_string()));

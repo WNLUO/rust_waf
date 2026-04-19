@@ -1,10 +1,12 @@
 mod ai;
 mod events;
+mod resource_sentinel;
 mod rules;
 mod sites;
 
 pub use ai::*;
 pub use events::*;
+pub use resource_sentinel::*;
 pub use rules::{
     ActionIdeaOverrideEntry, ActionIdeaOverrideUpsert, RuleActionPluginEntry,
     RuleActionPluginUpsert, RuleActionTemplateEntry, RuleActionTemplateUpsert,

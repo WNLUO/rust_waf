@@ -282,6 +282,60 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
             ON ai_route_profiles(route_pattern, match_mode);
         CREATE INDEX IF NOT EXISTS idx_ai_route_profiles_updated_at
             ON ai_route_profiles(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS resource_sentinel_attack_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL UNIQUE,
+            phase TEXT NOT NULL,
+            started_at_ms INTEGER NOT NULL,
+            ended_at_ms INTEGER,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            peak_severity TEXT NOT NULL DEFAULT 'normal',
+            peak_attack_score INTEGER NOT NULL DEFAULT 0,
+            primary_pressure TEXT NOT NULL DEFAULT 'none',
+            final_outcome TEXT NOT NULL DEFAULT 'idle',
+            summary TEXT NOT NULL DEFAULT '',
+            diagnosis_json TEXT NOT NULL DEFAULT '{}',
+            lifecycle_json TEXT NOT NULL DEFAULT '{}',
+            session_json TEXT NOT NULL DEFAULT '{}',
+            top_clusters_json TEXT NOT NULL DEFAULT '[]',
+            defense_effects_json TEXT NOT NULL DEFAULT '[]',
+            decision_traces_json TEXT NOT NULL DEFAULT '[]',
+            ingress_gap_json TEXT NOT NULL DEFAULT '{}',
+            resource_pressure_json TEXT NOT NULL DEFAULT '{}',
+            migrations_json TEXT NOT NULL DEFAULT '[]',
+            report_json TEXT,
+            pre_admission_rejections INTEGER NOT NULL DEFAULT 0,
+            aggregated_events INTEGER NOT NULL DEFAULT 0,
+            defense_actions INTEGER NOT NULL DEFAULT 0,
+            defense_extensions INTEGER NOT NULL DEFAULT 0,
+            defense_relaxations INTEGER NOT NULL DEFAULT 0,
+            audit_event_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_resource_sentinel_attack_sessions_updated_at
+            ON resource_sentinel_attack_sessions(updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_resource_sentinel_attack_sessions_phase
+            ON resource_sentinel_attack_sessions(phase, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS resource_sentinel_defense_memory (
+            attack_type TEXT PRIMARY KEY,
+            preferred_action TEXT NOT NULL,
+            effective_score INTEGER NOT NULL DEFAULT 0,
+            ineffective_score INTEGER NOT NULL DEFAULT 0,
+            weak_score INTEGER NOT NULL DEFAULT 0,
+            harmful_score INTEGER NOT NULL DEFAULT 0,
+            last_outcome TEXT NOT NULL DEFAULT 'unknown',
+            last_rejection_delta INTEGER NOT NULL DEFAULT 0,
+            last_score_delta INTEGER NOT NULL DEFAULT 0,
+            last_seen_ms INTEGER NOT NULL DEFAULT 0,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_resource_sentinel_defense_memory_updated_at
+            ON resource_sentinel_defense_memory(updated_at DESC);
         CREATE TABLE IF NOT EXISTS rules (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,

@@ -194,7 +194,7 @@ pub(super) async fn worker_loop(
         }
 
         if buckets.len() > max_buckets {
-            evict_oldest(&buckets);
+            evict_worst(&buckets);
         }
     }
 }
@@ -236,14 +236,55 @@ pub(super) fn extend_queue(target: &mut VecDeque<Instant>, source: &VecDeque<Ins
     }
 }
 
-fn evict_oldest(buckets: &DashMap<BucketKey, BucketRuntime>) {
-    if let Some(oldest_key) = buckets
+fn evict_worst(buckets: &DashMap<BucketKey, BucketRuntime>) {
+    let now = unix_timestamp();
+    if let Some(worst_key) = buckets
         .iter()
-        .min_by_key(|entry| entry.value().last_seen_at)
+        .max_by_key(|entry| eviction_priority(entry.key(), entry.value(), now))
         .map(|entry| entry.key().clone())
     {
-        buckets.remove(&oldest_key);
+        buckets.remove(&worst_key);
     }
+}
+
+fn eviction_priority(key: &BucketKey, bucket: &BucketRuntime, now: i64) -> (u8, u8, u64, u64, u64) {
+    let direct_priority = match key.peer_kind {
+        BucketPeerKind::DirectClient => 1,
+        BucketPeerKind::TrustedProxy => 0,
+    };
+    let no_request_priority = if bucket.total_requests == 0 { 1 } else { 0 };
+    let risk_score = match bucket.risk_level {
+        L4BucketRiskLevel::High => 100,
+        L4BucketRiskLevel::Suspicious => 60,
+        L4BucketRiskLevel::Normal => bucket.score_ewma.round().clamp(0.0, 50.0) as u64,
+    };
+    let unknown_priority =
+        u64::from(key.alpn == BucketAlpn::Unknown || key.transport == BucketTransport::Unknown)
+            + u64::from(bucket.authority_unknown());
+    let feedback_score = bucket
+        .l7_block_hits
+        .saturating_add(bucket.safeline_hits)
+        .saturating_add(bucket.slow_attack_hits)
+        .min(100);
+    let active_no_request_score = if bucket.total_requests == 0 {
+        u64::from(bucket.active_connections).saturating_mul(8)
+    } else {
+        0
+    };
+    let stale_score = now.saturating_sub(bucket.last_seen_at).max(0) as u64;
+    let resource_score = risk_score
+        .saturating_add(unknown_priority.saturating_mul(10))
+        .saturating_add(feedback_score.saturating_mul(4))
+        .saturating_add(active_no_request_score)
+        .saturating_add(stale_score.min(3_600));
+
+    (
+        direct_priority,
+        no_request_priority,
+        resource_score,
+        u64::from(bucket.active_connections),
+        stale_score,
+    )
 }
 
 pub(super) fn unix_timestamp() -> i64 {
@@ -311,4 +352,85 @@ fn forwarded_header_ip(request: &UnifiedHttpRequest) -> Option<IpAddr> {
                 .get_header("x-real-ip")
                 .and_then(|value| value.parse::<IpAddr>().ok())
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn key(ip: u8, authority: Option<&str>, alpn: Option<&str>) -> BucketKey {
+        BucketKey::from_parts(
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, ip)),
+            BucketPeerKind::DirectClient,
+            authority,
+            alpn,
+            "tls",
+        )
+    }
+
+    #[test]
+    fn evict_worst_prefers_direct_idle_no_request_bucket_over_normal_traffic() {
+        let buckets = DashMap::new();
+        let now = unix_timestamp();
+        let good_key = key(1, Some("www.example"), Some("h2"));
+        let bad_key = key(2, None, None);
+        let mut good = BucketRuntime::new(BucketPeerKind::DirectClient, Instant::now(), now);
+        good.total_connections = 24;
+        good.total_requests = 80;
+        good.active_connections = 1;
+        good.score_ewma = 8.0;
+
+        let mut bad = BucketRuntime::new(BucketPeerKind::DirectClient, Instant::now(), now);
+        bad.total_connections = 40;
+        bad.total_requests = 0;
+        bad.active_connections = 12;
+        bad.score_ewma = 90.0;
+        bad.risk_level = L4BucketRiskLevel::High;
+        bad.protocol_hint = "unknown".to_string();
+
+        buckets.insert(good_key.clone(), good);
+        buckets.insert(bad_key.clone(), bad);
+
+        evict_worst(&buckets);
+
+        assert!(buckets.contains_key(&good_key));
+        assert!(!buckets.contains_key(&bad_key));
+    }
+
+    #[test]
+    fn evict_worst_preserves_trusted_proxy_when_direct_bucket_is_comparable() {
+        let buckets = DashMap::new();
+        let now = unix_timestamp();
+        let proxy_key = BucketKey::from_parts(
+            IpAddr::V4(Ipv4Addr::new(203, 0, 113, 3)),
+            BucketPeerKind::TrustedProxy,
+            Some("cdn.example"),
+            Some("h2"),
+            "tls",
+        );
+        let direct_key = key(4, None, None);
+        let mut proxy = BucketRuntime::new(BucketPeerKind::TrustedProxy, Instant::now(), now);
+        proxy.total_connections = 200;
+        proxy.total_requests = 40;
+        proxy.active_connections = 20;
+        proxy.score_ewma = 75.0;
+        proxy.risk_level = L4BucketRiskLevel::Suspicious;
+
+        let mut direct = BucketRuntime::new(BucketPeerKind::DirectClient, Instant::now(), now);
+        direct.total_connections = 4;
+        direct.total_requests = 0;
+        direct.active_connections = 4;
+        direct.score_ewma = 60.0;
+        direct.risk_level = L4BucketRiskLevel::Suspicious;
+        direct.protocol_hint = "unknown".to_string();
+
+        buckets.insert(proxy_key.clone(), proxy);
+        buckets.insert(direct_key.clone(), direct);
+
+        evict_worst(&buckets);
+
+        assert!(buckets.contains_key(&proxy_key));
+        assert!(!buckets.contains_key(&direct_key));
+    }
 }

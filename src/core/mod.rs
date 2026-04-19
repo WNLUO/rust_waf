@@ -52,7 +52,8 @@ pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBud
 pub use resource_sentinel::{
     ResourceSentinelAttackDiagnosis, ResourceSentinelAttackLifecycle,
     ResourceSentinelAttackSession, ResourceSentinelClusterSnapshot,
-    ResourceSentinelDefenseActionEffect, ResourceSentinelSnapshot,
+    ResourceSentinelDefenseActionEffect, ResourceSentinelDefenseDecisionTrace,
+    ResourceSentinelSnapshot,
 };
 pub use self_protection::ServerPublicIpSnapshot;
 pub use visitor_intelligence::{

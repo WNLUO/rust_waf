@@ -128,6 +128,7 @@ pub(super) fn build_metrics_response(
         resource_sentinel_automated_audit_events: resource_sentinel.automated_audit_events,
         resource_sentinel_top_attack_clusters: resource_sentinel.top_attack_clusters,
         resource_sentinel_defense_action_effects: resource_sentinel.defense_action_effects,
+        resource_sentinel_defense_decision_traces: resource_sentinel.defense_decision_traces,
         resource_sentinel_attack_diagnosis: resource_sentinel.attack_diagnosis,
         resource_sentinel_attack_lifecycle: resource_sentinel.attack_lifecycle,
         resource_sentinel_attack_session: resource_sentinel.attack_session,

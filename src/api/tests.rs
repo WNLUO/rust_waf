@@ -198,6 +198,22 @@ fn test_build_metrics_response_with_sources() {
                 last_score_delta: -12,
                 last_seen_ms: 3,
             }],
+            defense_decision_traces: vec![crate::core::ResourceSentinelDefenseDecisionTrace {
+                attack_type: "slow_tls_handshake".to_string(),
+                selected_action: "cluster_connection_cooldown".to_string(),
+                default_action: "tls_pre_admission_cooldown".to_string(),
+                reason: "harmful_memory_switched".to_string(),
+                mode: "under_attack".to_string(),
+                memory_outcome: "harmful".to_string(),
+                confidence: 25,
+                effective_score: 1,
+                ineffective_score: 3,
+                weak_score: 1,
+                harmful_score: 2,
+                used_memory: true,
+                switched_action: true,
+                observed_at_ms: 4,
+            }],
             attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis {
                 severity: "high".to_string(),
                 primary_pressure: "tls_handshake_resource".to_string(),
@@ -329,6 +345,11 @@ fn test_build_metrics_response_with_sources() {
         response.resource_sentinel_defense_action_effects[0].confidence,
         75
     );
+    assert_eq!(
+        response.resource_sentinel_defense_decision_traces[0].reason,
+        "harmful_memory_switched"
+    );
+    assert!(response.resource_sentinel_defense_decision_traces[0].switched_action);
     assert!(response
         .storage_degraded_reasons
         .contains(&"storage_low_value_event_persistence_trimmed".to_string()));

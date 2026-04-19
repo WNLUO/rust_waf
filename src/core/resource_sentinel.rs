@@ -65,6 +65,7 @@ pub(crate) struct ResourceSentinel {
     cooldowns: DashMap<String, CooldownBucket>,
     attack_clusters: DashMap<String, AttackClusterBucket>,
     defense_memory: DashMap<String, DefenseMemoryBucket>,
+    defense_decisions: DashMap<String, DefenseDecisionBucket>,
     new_cluster_budget_window_ms: AtomicU64,
     new_cluster_budget_used: AtomicU64,
     pre_admission_rejections: AtomicU64,
@@ -149,6 +150,33 @@ struct DefenseActionMemorySnapshot {
     last_outcome: u8,
 }
 
+#[derive(Debug)]
+struct DefenseDecisionBucket {
+    attack_type: String,
+    selected_action: String,
+    default_action: String,
+    reason: String,
+    mode: String,
+    memory_outcome: String,
+    confidence: AtomicU64,
+    effective_score: AtomicU64,
+    ineffective_score: AtomicU64,
+    weak_score: AtomicU64,
+    harmful_score: AtomicU64,
+    used_memory: bool,
+    switched_action: bool,
+    observed_at_ms: AtomicU64,
+}
+
+#[derive(Debug, Clone)]
+struct DefenseActionSelection {
+    action: Option<&'static str>,
+    default_action: Option<&'static str>,
+    reason: &'static str,
+    used_memory: bool,
+    switched_action: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ResourceSentinelSnapshot {
     pub mode: String,
@@ -167,6 +195,7 @@ pub struct ResourceSentinelSnapshot {
     pub automated_audit_events: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
     pub defense_action_effects: Vec<ResourceSentinelDefenseActionEffect>,
+    pub defense_decision_traces: Vec<ResourceSentinelDefenseDecisionTrace>,
     pub attack_diagnosis: ResourceSentinelAttackDiagnosis,
     pub attack_lifecycle: ResourceSentinelAttackLifecycle,
     pub attack_session: ResourceSentinelAttackSession,
@@ -201,6 +230,24 @@ pub struct ResourceSentinelDefenseActionEffect {
     pub last_rejection_delta: u64,
     pub last_score_delta: i64,
     pub last_seen_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelDefenseDecisionTrace {
+    pub attack_type: String,
+    pub selected_action: String,
+    pub default_action: String,
+    pub reason: String,
+    pub mode: String,
+    pub memory_outcome: String,
+    pub confidence: u64,
+    pub effective_score: u64,
+    pub ineffective_score: u64,
+    pub weak_score: u64,
+    pub harmful_score: u64,
+    pub used_memory: bool,
+    pub switched_action: bool,
+    pub observed_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -261,6 +308,7 @@ impl ResourceSentinel {
             cooldowns: DashMap::new(),
             attack_clusters: DashMap::new(),
             defense_memory: DashMap::new(),
+            defense_decisions: DashMap::new(),
             new_cluster_budget_window_ms: AtomicU64::new(window_start(now)),
             new_cluster_budget_used: AtomicU64::new(0),
             pre_admission_rejections: AtomicU64::new(0),
@@ -487,6 +535,7 @@ impl ResourceSentinel {
         let automated_audit_events = self.automated_audit_events.load(Ordering::Relaxed);
         let top_attack_clusters = self.top_attack_clusters(8);
         let defense_action_effects = self.defense_action_effects(8);
+        let defense_decision_traces = self.defense_decision_traces(8);
         let attack_diagnosis = build_attack_diagnosis(
             &mode,
             attack_score,
@@ -499,6 +548,7 @@ impl ResourceSentinel {
             automated_defense_memory_hits,
             &top_attack_clusters,
             &defense_action_effects,
+            &defense_decision_traces,
         );
         let attack_lifecycle = self.update_attack_lifecycle(&attack_diagnosis);
         let attack_session = self.attack_session_snapshot(
@@ -531,6 +581,7 @@ impl ResourceSentinel {
             automated_audit_events,
             top_attack_clusters,
             defense_action_effects,
+            defense_decision_traces,
             attack_diagnosis,
             attack_lifecycle,
             attack_session,
@@ -872,6 +923,35 @@ impl ResourceSentinel {
         items
     }
 
+    fn defense_decision_traces(&self, limit: usize) -> Vec<ResourceSentinelDefenseDecisionTrace> {
+        let mut items = self
+            .defense_decisions
+            .iter()
+            .map(|entry| {
+                let bucket = entry.value();
+                ResourceSentinelDefenseDecisionTrace {
+                    attack_type: bucket.attack_type.clone(),
+                    selected_action: bucket.selected_action.clone(),
+                    default_action: bucket.default_action.clone(),
+                    reason: bucket.reason.clone(),
+                    mode: bucket.mode.clone(),
+                    memory_outcome: bucket.memory_outcome.clone(),
+                    confidence: bucket.confidence.load(Ordering::Relaxed),
+                    effective_score: bucket.effective_score.load(Ordering::Relaxed),
+                    ineffective_score: bucket.ineffective_score.load(Ordering::Relaxed),
+                    weak_score: bucket.weak_score.load(Ordering::Relaxed),
+                    harmful_score: bucket.harmful_score.load(Ordering::Relaxed),
+                    used_memory: bucket.used_memory,
+                    switched_action: bucket.switched_action,
+                    observed_at_ms: bucket.observed_at_ms.load(Ordering::Relaxed),
+                }
+            })
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| right.observed_at_ms.cmp(&left.observed_at_ms));
+        items.truncate(limit);
+        items
+    }
+
     fn active_cooldown_reason(&self, peer_ip: IpAddr, transport: &str) -> Option<String> {
         let now = now_millis();
         for key in cooldown_keys(peer_ip, transport) {
@@ -960,7 +1040,9 @@ impl ResourceSentinel {
         mode: u8,
     ) -> Option<DefenseActionPlan> {
         let memory = self.defense_action_memory(attack_type);
-        let action = select_defense_action(attack_type, mode, memory.as_ref())?;
+        let selection = select_defense_action(attack_type, mode, memory.as_ref());
+        self.record_defense_decision(attack_type, mode, &selection, memory.as_ref());
+        let action = selection.action?;
         let plan = match action {
             DEFENSE_ACTION_TLS_PRE_ADMISSION => Some(tls_cluster_plan(peer_ip, attack_type, mode)),
             DEFENSE_ACTION_CLUSTER_CONNECTION => {
@@ -973,6 +1055,50 @@ impl ResourceSentinel {
                 .fetch_add(1, Ordering::Relaxed);
         }
         plan
+    }
+
+    fn record_defense_decision(
+        &self,
+        attack_type: &str,
+        mode: u8,
+        selection: &DefenseActionSelection,
+        memory: Option<&DefenseActionMemorySnapshot>,
+    ) {
+        let now = now_millis();
+        let (effective, ineffective, weak, harmful, outcome, confidence) = memory
+            .map(|memory| {
+                let total = memory
+                    .effective_score
+                    .saturating_add(memory.ineffective_score);
+                (
+                    memory.effective_score,
+                    memory.ineffective_score,
+                    memory.weak_score,
+                    memory.harmful_score,
+                    defense_outcome_label(memory.last_outcome).to_string(),
+                    confidence_percent(memory.effective_score, total),
+                )
+            })
+            .unwrap_or((0, 0, 0, 0, "none".to_string(), 0));
+        self.defense_decisions.insert(
+            attack_type.to_string(),
+            DefenseDecisionBucket {
+                attack_type: attack_type.to_string(),
+                selected_action: selection.action.unwrap_or("none").to_string(),
+                default_action: selection.default_action.unwrap_or("none").to_string(),
+                reason: selection.reason.to_string(),
+                mode: mode_label(mode).to_string(),
+                memory_outcome: outcome,
+                confidence: AtomicU64::new(confidence),
+                effective_score: AtomicU64::new(effective),
+                ineffective_score: AtomicU64::new(ineffective),
+                weak_score: AtomicU64::new(weak),
+                harmful_score: AtomicU64::new(harmful),
+                used_memory: selection.used_memory,
+                switched_action: selection.switched_action,
+                observed_at_ms: AtomicU64::new(now),
+            },
+        );
     }
 
     fn defense_action_memory(&self, attack_type: &str) -> Option<DefenseActionMemorySnapshot> {
@@ -1733,27 +1859,78 @@ fn select_defense_action(
     attack_type: &str,
     mode: u8,
     memory: Option<&DefenseActionMemorySnapshot>,
-) -> Option<&'static str> {
-    let default_action = default_defense_action(attack_type)?;
+) -> DefenseActionSelection {
+    let default_action = default_defense_action(attack_type);
+    let Some(default_action) = default_action else {
+        return DefenseActionSelection {
+            action: None,
+            default_action: None,
+            reason: "unsupported_attack_type",
+            used_memory: memory.is_some(),
+            switched_action: false,
+        };
+    };
     let Some(memory) = memory else {
-        return Some(default_action);
+        return DefenseActionSelection {
+            action: Some(default_action),
+            default_action: Some(default_action),
+            reason: "default_without_memory",
+            used_memory: false,
+            switched_action: false,
+        };
     };
 
     if action_looks_harmful(memory) {
-        return alternative_defense_action(attack_type, default_action);
+        let alternative = alternative_defense_action(attack_type, default_action);
+        return DefenseActionSelection {
+            action: alternative,
+            default_action: Some(default_action),
+            reason: if alternative.is_some() {
+                "harmful_memory_switched"
+            } else {
+                "harmful_memory_no_safe_alternative"
+            },
+            used_memory: true,
+            switched_action: alternative.is_some_and(|action| action != default_action),
+        };
     }
 
     if action_looks_weak(memory) && mode >= MODE_SURVIVAL {
-        return alternative_defense_action(attack_type, default_action).or(Some(default_action));
+        let alternative = alternative_defense_action(attack_type, default_action);
+        let action = alternative.unwrap_or(default_action);
+        return DefenseActionSelection {
+            action: Some(action),
+            default_action: Some(default_action),
+            reason: if alternative.is_some() {
+                "weak_memory_survival_switched"
+            } else {
+                "weak_memory_survival_default"
+            },
+            used_memory: true,
+            switched_action: action != default_action,
+        };
     }
 
     if memory.effective_score > memory.ineffective_score
         && is_compatible_defense_action(attack_type, memory.preferred_action.as_str())
     {
-        return Some(canonical_defense_action(memory.preferred_action.as_str()));
+        let action = canonical_defense_action(memory.preferred_action.as_str());
+        return DefenseActionSelection {
+            action: Some(action),
+            default_action: Some(default_action),
+            reason: "effective_memory_reused",
+            used_memory: true,
+            switched_action: action != default_action,
+        };
     }
 
-    Some(default_action)
+    DefenseActionSelection {
+        action: Some(default_action),
+        default_action: Some(default_action),
+        reason: "memory_insufficient_default",
+        used_memory: true,
+        switched_action: false,
+    }
 }
 
 fn default_defense_action(attack_type: &str) -> Option<&'static str> {
@@ -1862,6 +2039,7 @@ fn build_attack_diagnosis(
     automated_defense_memory_hits: u64,
     top_attack_clusters: &[ResourceSentinelClusterSnapshot],
     defense_action_effects: &[ResourceSentinelDefenseActionEffect],
+    defense_decision_traces: &[ResourceSentinelDefenseDecisionTrace],
 ) -> ResourceSentinelAttackDiagnosis {
     let top_cluster = top_attack_clusters.first().cloned();
     let severity = if matches!(mode, "survival") || attack_score >= SCORE_SURVIVAL {
@@ -1938,6 +2116,17 @@ fn build_attack_diagnosis(
             effect.effective_score,
             effect.weak_score,
             effect.harmful_score
+        ));
+    }
+    if let Some(trace) = defense_decision_traces.first() {
+        evidence.push(format!(
+            "defense_decision attack_type={} selected_action={} reason={} mode={} switched={} confidence={}",
+            trace.attack_type,
+            trace.selected_action,
+            trace.reason,
+            trace.mode,
+            trace.switched_action,
+            trace.confidence
         ));
     }
 
@@ -2106,6 +2295,7 @@ fn build_attack_audit_event(snapshot: ResourceSentinelSnapshot) -> SecurityEvent
         "automated_defense_memory_hits": snapshot.automated_defense_memory_hits,
         "top_attack_clusters": snapshot.top_attack_clusters,
         "defense_action_effects": snapshot.defense_action_effects,
+        "defense_decision_traces": snapshot.defense_decision_traces,
         "cdn_rust_count_note": "CDN 请求数可能远高于 Rust 记录数，因为 CDN/L4/L7 会在不同层提前拦截，Rust 本地审计只代表到达本进程或本进程已聚合的后端视角。"
     }))
     .ok();
@@ -2532,6 +2722,7 @@ mod tests {
             .expect("audit event should include details");
         assert!(details.contains("resource_sentinel_attack_audit"));
         assert!(details.contains("\"session\""));
+        assert!(details.contains("\"defense_decision_traces\""));
         assert!(details.contains("CDN"));
         assert!(details.contains("Rust"));
         assert!(sentinel.maybe_attack_audit_event().is_none());
@@ -2729,7 +2920,17 @@ mod tests {
             .expect("harmful TLS action should fall back to broader cluster plan");
         assert_eq!(plan.action, DEFENSE_ACTION_CLUSTER_CONNECTION);
         assert_eq!(plan.key, "cluster:203.0.113.0/24");
-        assert_eq!(sentinel.snapshot().automated_defense_memory_hits, 1);
+        let snapshot = sentinel.snapshot();
+        assert_eq!(snapshot.automated_defense_memory_hits, 1);
+        assert_eq!(
+            snapshot.defense_decision_traces[0].reason,
+            "harmful_memory_switched"
+        );
+        assert_eq!(
+            snapshot.defense_decision_traces[0].selected_action,
+            DEFENSE_ACTION_CLUSTER_CONNECTION
+        );
+        assert!(snapshot.defense_decision_traces[0].switched_action);
     }
 
     #[test]
@@ -2748,6 +2949,42 @@ mod tests {
             .defense_plan(ip, "slow_tls_handshake", MODE_ELEVATED)
             .expect("effective remembered action should be reused");
         assert_eq!(plan.action, DEFENSE_ACTION_CLUSTER_CONNECTION);
+        let trace = &sentinel.snapshot().defense_decision_traces[0];
+        assert_eq!(trace.reason, "effective_memory_reused");
+        assert_eq!(trace.default_action, DEFENSE_ACTION_TLS_PRE_ADMISSION);
+        assert_eq!(trace.selected_action, DEFENSE_ACTION_CLUSTER_CONNECTION);
+        assert!(trace.used_memory);
+        assert!(trace.switched_action);
+    }
+
+    #[test]
+    fn defense_decision_trace_records_default_and_unsupported_choices() {
+        let sentinel = ResourceSentinel::new();
+        let ip: IpAddr = "203.0.113.99".parse().unwrap();
+
+        let plan = sentinel
+            .defense_plan(ip, "idle_no_request", MODE_ELEVATED)
+            .expect("idle attack should have a default cluster plan");
+        assert_eq!(plan.action, DEFENSE_ACTION_CLUSTER_CONNECTION);
+        let default_trace = &sentinel.snapshot().defense_decision_traces[0];
+        assert_eq!(default_trace.reason, "default_without_memory");
+        assert_eq!(
+            default_trace.selected_action,
+            DEFENSE_ACTION_CLUSTER_CONNECTION
+        );
+        assert!(!default_trace.used_memory);
+
+        assert!(sentinel
+            .defense_plan(ip, "provider_intercept", MODE_UNDER_ATTACK)
+            .is_none());
+        let snapshot = sentinel.snapshot();
+        let unsupported_trace = snapshot
+            .defense_decision_traces
+            .iter()
+            .find(|trace| trace.attack_type == "provider_intercept")
+            .expect("unsupported attack type should still explain the decision");
+        assert_eq!(unsupported_trace.reason, "unsupported_attack_type");
+        assert_eq!(unsupported_trace.selected_action, "none");
     }
 
     fn activate_hot_tls_cluster(sentinel: &ResourceSentinel) {

@@ -27,6 +27,11 @@ const CLUSTER_COOLDOWN_MS: u64 = 10_000;
 const HOT_EVENT_CLUSTER_COUNT: u64 = 32;
 const HOT_EVENT_CLUSTER_SCORE: u64 = 120;
 const HOT_EVENT_SAMPLE_INTERVAL: u64 = 16;
+const HOT_CLUSTER_DEFENSE_MIN_COUNT: u64 = 8;
+const HOT_CLUSTER_DEFENSE_COUNT: u64 = 24;
+const HOT_CLUSTER_DEFENSE_SCORE: u64 = 120;
+const HOT_CLUSTER_DEFENSE_COOLDOWN_MS: u64 = 20_000;
+const SURVIVAL_CLUSTER_DEFENSE_COOLDOWN_MS: u64 = 45_000;
 
 #[derive(Debug)]
 pub(crate) struct ResourceSentinel {
@@ -41,6 +46,7 @@ pub(crate) struct ResourceSentinel {
     new_cluster_budget_used: AtomicU64,
     pre_admission_rejections: AtomicU64,
     aggregated_events: AtomicU64,
+    automated_defense_actions: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -82,6 +88,7 @@ pub struct ResourceSentinelSnapshot {
     pub active_cooldowns: u64,
     pub pre_admission_rejections: u64,
     pub aggregated_events: u64,
+    pub automated_defense_actions: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
 }
 
@@ -122,6 +129,7 @@ impl ResourceSentinel {
             new_cluster_budget_used: AtomicU64::new(0),
             pre_admission_rejections: AtomicU64::new(0),
             aggregated_events: AtomicU64::new(0),
+            automated_defense_actions: AtomicU64::new(0),
         }
     }
 
@@ -319,6 +327,7 @@ impl ResourceSentinel {
             active_cooldowns: self.active_cooldown_count(),
             pre_admission_rejections: self.pre_admission_rejections.load(Ordering::Relaxed),
             aggregated_events: self.aggregated_events.load(Ordering::Relaxed),
+            automated_defense_actions: self.automated_defense_actions.load(Ordering::Relaxed),
             top_attack_clusters: self.top_attack_clusters(8),
         }
     }
@@ -483,9 +492,11 @@ impl ResourceSentinel {
         score_delta: u64,
     ) {
         let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
-        bucket.count.fetch_add(1, Ordering::Relaxed);
-        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        let count = bucket.count.fetch_add(1, Ordering::Relaxed) + 1;
+        let score = bucket.score.fetch_add(score_delta, Ordering::Relaxed) + score_delta;
         bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+        drop(bucket);
+        self.maybe_activate_hot_cluster_defense(peer_ip, attack_type, count, score);
     }
 
     fn record_event_cluster_observed(
@@ -499,6 +510,8 @@ impl ResourceSentinel {
         let score =
             bucket.score.fetch_add(parts.score_delta, Ordering::Relaxed) + parts.score_delta;
         bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+        drop(bucket);
+        self.maybe_activate_hot_cluster_defense(peer_ip, parts.attack_type, count, score);
         EventClusterObservation { count, score }
     }
 
@@ -526,8 +539,11 @@ impl ResourceSentinel {
     ) {
         let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
         bucket.rejected.fetch_add(1, Ordering::Relaxed);
-        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        let count = bucket.count.load(Ordering::Relaxed);
+        let score = bucket.score.fetch_add(score_delta, Ordering::Relaxed) + score_delta;
         bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+        drop(bucket);
+        self.maybe_activate_hot_cluster_defense(peer_ip, attack_type, count, score);
     }
 
     fn record_cluster_aggregated(
@@ -540,8 +556,11 @@ impl ResourceSentinel {
     ) {
         let bucket = self.cluster_bucket(peer_ip, attack_type, transport, reason);
         bucket.aggregated.fetch_add(1, Ordering::Relaxed);
-        bucket.score.fetch_add(score_delta, Ordering::Relaxed);
+        let count = bucket.count.load(Ordering::Relaxed);
+        let score = bucket.score.fetch_add(score_delta, Ordering::Relaxed) + score_delta;
         bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+        drop(bucket);
+        self.maybe_activate_hot_cluster_defense(peer_ip, attack_type, count, score);
     }
 
     fn cluster_bucket(
@@ -631,15 +650,61 @@ impl ResourceSentinel {
             return;
         }
         let now = now_millis();
-        self.set_cooldown(format!("ip:{peer_ip}"), now + IP_COOLDOWN_MS, reason);
-        self.set_cooldown(
+        let ip_activated = self.set_cooldown(format!("ip:{peer_ip}"), now + IP_COOLDOWN_MS, reason);
+        let cluster_activated = self.set_cooldown(
             format!("cluster:{}", cluster_key(peer_ip)),
             now + CLUSTER_COOLDOWN_MS,
             reason,
         );
+        if ip_activated || cluster_activated {
+            self.automated_defense_actions
+                .fetch_add(1, Ordering::Relaxed);
+        }
     }
 
-    fn set_cooldown(&self, key: String, until_ms: u64, reason: &'static str) {
+    fn maybe_activate_hot_cluster_defense(
+        &self,
+        peer_ip: IpAddr,
+        attack_type: &str,
+        count: u64,
+        score: u64,
+    ) {
+        if !cluster_defense_allowed(attack_type, self.mode.load(Ordering::Relaxed), count, score) {
+            return;
+        }
+        let hot_by_score =
+            count >= HOT_CLUSTER_DEFENSE_MIN_COUNT && score >= HOT_CLUSTER_DEFENSE_SCORE;
+        let hot_by_count = count >= HOT_CLUSTER_DEFENSE_COUNT;
+        if !hot_by_score && !hot_by_count {
+            return;
+        }
+
+        let cooldown_ms = if self.mode.load(Ordering::Relaxed) >= MODE_SURVIVAL {
+            SURVIVAL_CLUSTER_DEFENSE_COOLDOWN_MS
+        } else {
+            HOT_CLUSTER_DEFENSE_COOLDOWN_MS
+        };
+        let activated = self.set_cooldown(
+            format!("cluster:{}", cluster_key(peer_ip)),
+            now_millis() + cooldown_ms,
+            hot_cluster_cooldown_reason(attack_type),
+        );
+        if activated {
+            self.automated_defense_actions
+                .fetch_add(1, Ordering::Relaxed);
+            self.note_signal(6);
+        }
+    }
+
+    fn set_cooldown(&self, key: String, until_ms: u64, reason: &'static str) -> bool {
+        let previous = self
+            .cooldowns
+            .get(&key)
+            .map(|bucket| bucket.until_ms.load(Ordering::Relaxed))
+            .unwrap_or(0);
+        if until_ms <= previous {
+            return false;
+        }
         let bucket = self.cooldowns.entry(key).or_insert_with(|| CooldownBucket {
             until_ms: AtomicU64::new(until_ms),
             reason: reason.to_string(),
@@ -656,6 +721,7 @@ impl ResourceSentinel {
                 Err(actual) => current = actual,
             }
         }
+        true
     }
 
     fn is_new_cluster(&self, peer_ip: IpAddr) -> bool {
@@ -799,6 +865,34 @@ fn parse_event_ip(event: &SecurityEventRecord) -> Option<IpAddr> {
 
 fn is_low_value_persistence_action(action: &str) -> bool {
     matches!(action, "log" | "alert" | "respond" | "allow" | "block")
+}
+
+fn cluster_defense_allowed(attack_type: &str, mode: u8, count: u64, score: u64) -> bool {
+    match attack_type {
+        "slow_tls_handshake"
+        | "idle_no_request"
+        | "l4_admission_reject"
+        | "tls_handshake_failure" => true,
+        "provider_intercept" | "l7_security_event" | "l4_security_event" => {
+            mode >= MODE_UNDER_ATTACK
+                && count >= HOT_CLUSTER_DEFENSE_COUNT
+                && score >= HOT_CLUSTER_DEFENSE_SCORE.saturating_mul(2)
+        }
+        _ => false,
+    }
+}
+
+fn hot_cluster_cooldown_reason(attack_type: &str) -> &'static str {
+    match attack_type {
+        "slow_tls_handshake" => "hot_slow_tls_cluster",
+        "idle_no_request" => "hot_idle_no_request_cluster",
+        "l4_admission_reject" => "hot_l4_admission_cluster",
+        "tls_handshake_failure" => "hot_tls_failure_cluster",
+        "provider_intercept" => "hot_provider_intercept_cluster",
+        "l7_security_event" => "hot_l7_security_cluster",
+        "l4_security_event" => "hot_l4_security_cluster",
+        _ => "hot_attack_cluster",
+    }
 }
 
 fn event_cluster_parts(event: &SecurityEventRecord) -> EventClusterParts {
@@ -1002,5 +1096,54 @@ mod tests {
         assert_eq!(cluster.cluster, "203.0.113.0/24");
         assert!(cluster.count >= HOT_EVENT_CLUSTER_COUNT);
         assert!(cluster.aggregated > 0);
+    }
+
+    #[test]
+    fn hot_event_cluster_activates_cluster_cooldown_before_debt_builds() {
+        let sentinel = ResourceSentinel::new();
+        for index in 1..=10 {
+            let event = SecurityEventRecord::now(
+                "L4",
+                "alert",
+                "tls handshake timed out before first request",
+                format!("203.0.113.{index}"),
+                "192.0.2.10",
+                44321,
+                443,
+                "TCP",
+            );
+            let _ = sentinel.should_aggregate_security_event(&event);
+        }
+
+        let decision = sentinel.admit_connection("203.0.113.200".parse().unwrap(), "tls", 128, 0);
+        assert!(!decision.allow);
+        assert!(decision
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("hot_slow_tls_cluster"));
+        assert!(sentinel.snapshot().automated_defense_actions >= 1);
+    }
+
+    #[test]
+    fn low_frequency_event_cluster_does_not_activate_cluster_cooldown() {
+        let sentinel = ResourceSentinel::new();
+        for index in 1..=2 {
+            let event = SecurityEventRecord::now(
+                "L4",
+                "alert",
+                "tls handshake timed out before first request",
+                format!("203.0.113.{index}"),
+                "192.0.2.10",
+                44321,
+                443,
+                "TCP",
+            );
+            let _ = sentinel.should_aggregate_security_event(&event);
+        }
+
+        let decision = sentinel.admit_connection("203.0.113.200".parse().unwrap(), "tls", 128, 0);
+        assert!(decision.allow);
+        assert_eq!(sentinel.snapshot().automated_defense_actions, 0);
     }
 }

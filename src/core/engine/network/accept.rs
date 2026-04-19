@@ -12,6 +12,27 @@ pub(crate) async fn handle_connection(
     let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
+    let storage_queue_usage_percent = context
+        .sqlite_store
+        .as_ref()
+        .map(|store| store.queue_usage_percent())
+        .unwrap_or(0);
+
+    let admission = context.resource_sentinel.admit_connection(
+        packet.source_ip,
+        "tcp",
+        request_semaphore.available_permits(),
+        storage_queue_usage_percent,
+    );
+    if !admission.allow {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_l4_bucket_budget_rejection();
+        }
+        if let Some(reason) = admission.reason {
+            debug!("{reason}");
+        }
+        return Ok(());
+    }
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
     if l4_result.should_persist_event() {
@@ -25,6 +46,9 @@ pub(crate) async fn handle_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
+        context
+            .resource_sentinel
+            .note_l4_rejection(packet.source_ip);
         return Ok(());
     }
 
@@ -44,6 +68,9 @@ pub(crate) async fn handle_connection(
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_l4_bucket_budget_rejection();
                 }
+                context
+                    .resource_sentinel
+                    .note_l4_rejection(packet.source_ip);
                 return Ok(());
             }
         }
@@ -89,6 +116,33 @@ pub(crate) async fn handle_tls_connection(
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let config = context.config_snapshot();
     let handshake_timeout_ms = config.l7_config.tls_handshake_timeout_ms;
+    let storage_queue_usage_percent = context
+        .sqlite_store
+        .as_ref()
+        .map(|store| store.queue_usage_percent())
+        .unwrap_or(0);
+
+    let admission = context.resource_sentinel.admit_connection(
+        packet.source_ip,
+        "tls",
+        connection_semaphore.available_permits(),
+        storage_queue_usage_percent,
+    );
+    if !admission.allow {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_tls_pre_handshake_rejection();
+            metrics.record_l4_bucket_budget_rejection();
+        }
+        persist_tls_transport_event(
+            context.as_ref(),
+            &packet,
+            "block",
+            admission
+                .reason
+                .unwrap_or_else(|| "resource sentinel rejected tls connection".to_string()),
+        );
+        return Ok(());
+    }
 
     let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
     if l4_result.should_persist_event() {
@@ -102,6 +156,9 @@ pub(crate) async fn handle_tls_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
+        context
+            .resource_sentinel
+            .note_l4_rejection(packet.source_ip);
         return Ok(());
     }
 
@@ -122,6 +179,9 @@ pub(crate) async fn handle_tls_connection(
                     metrics.record_tls_pre_handshake_rejection();
                     metrics.record_l4_bucket_budget_rejection();
                 }
+                context
+                    .resource_sentinel
+                    .note_l4_rejection(packet.source_ip);
                 persist_tls_transport_event(
                     context.as_ref(),
                     &packet,
@@ -154,6 +214,7 @@ pub(crate) async fn handle_tls_connection(
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_tls_handshake_failure();
             }
+            context.resource_sentinel.note_tls_failure(packet.source_ip);
             warn!(
                 "TLS handshake failed for peer {} on {}: {}",
                 peer_addr, local_addr, err
@@ -198,6 +259,7 @@ pub(crate) async fn handle_tls_connection(
                     metrics.record_slow_attack_block();
                 }
             }
+            context.resource_sentinel.note_tls_timeout(packet.source_ip);
             if assessment.should_block_ip {
                 if let Some(ip) = assessment.block_ip {
                     if context.is_server_public_ip(ip) {
@@ -302,6 +364,9 @@ pub(crate) async fn handle_tls_connection(
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_l4_bucket_budget_rejection();
                 }
+                context
+                    .resource_sentinel
+                    .note_l4_rejection(packet.source_ip);
                 persist_tls_transport_event(
                     context.as_ref(),
                     &packet,
@@ -362,14 +427,18 @@ fn persist_tls_transport_event(
         return;
     };
 
-    store.enqueue_security_event(SecurityEventRecord::now(
-        "L4",
-        action,
-        reason,
-        packet.source_ip.to_string(),
-        packet.dest_ip.to_string(),
-        packet.source_port,
-        packet.dest_port,
-        format!("{:?}", packet.protocol),
-    ));
+    context.adaptive_enqueue_security_event(
+        store.as_ref(),
+        SecurityEventRecord::now(
+            "L4",
+            action,
+            reason,
+            packet.source_ip.to_string(),
+            packet.dest_ip.to_string(),
+            packet.source_port,
+            packet.dest_port,
+            format!("{:?}", packet.protocol),
+        ),
+        "resource_sentinel_transport",
+    );
 }

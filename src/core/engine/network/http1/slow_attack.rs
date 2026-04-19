@@ -65,6 +65,9 @@ pub(super) async fn handle_slow_attack_error(
         }
         metrics.record_block(crate::core::InspectionLayer::L7);
     }
+    context
+        .resource_sentinel
+        .note_no_request_timeout(packet.source_ip);
 
     persist_http1_slow_attack_event(context, packet, peer_addr, kind, &assessment);
     if let Some(inspector) = context.l4_inspector() {
@@ -157,7 +160,7 @@ fn persist_http1_slow_attack_event(
         }
     }))
     .ok();
-    store.enqueue_security_event(event);
+    context.adaptive_enqueue_security_event(store.as_ref(), event, "resource_sentinel_slow_attack");
 }
 
 fn current_unix_timestamp() -> i64 {

@@ -13,16 +13,20 @@ pub(crate) fn persist_l4_inspection_event(
         return;
     };
 
-    store.enqueue_security_event(SecurityEventRecord::now(
-        "L4",
-        result.event_action(),
-        result.reason.clone(),
-        packet.source_ip.to_string(),
-        packet.dest_ip.to_string(),
-        packet.source_port,
-        packet.dest_port,
-        format!("{:?}", packet.protocol),
-    ));
+    context.adaptive_enqueue_security_event(
+        store.as_ref(),
+        SecurityEventRecord::now(
+            "L4",
+            result.event_action(),
+            result.reason.clone(),
+            packet.source_ip.to_string(),
+            packet.dest_ip.to_string(),
+            packet.source_port,
+            packet.dest_port,
+            format!("{:?}", packet.protocol),
+        ),
+        "resource_sentinel_l4",
+    );
 
     if result.persist_blocked_ip {
         let blocked_at = unix_timestamp();
@@ -73,10 +77,11 @@ pub(crate) fn persist_http_inspection_event(
     event.http_version = Some(request.version.to_string());
 
     if should_aggregate_runtime_event(request, result) {
+        context.resource_sentinel.note_aggregated_event();
         store.enqueue_security_event_aggregated(event, "runtime_budget");
     } else {
         event.details_json = build_request_identity_details(context, request, packet, Some(result));
-        store.enqueue_security_event(event);
+        context.adaptive_enqueue_security_event(store.as_ref(), event, "resource_sentinel_http");
     }
 
     if result.persist_blocked_ip {
@@ -181,10 +186,15 @@ pub(crate) fn persist_safeline_intercept_event(
         .unwrap_or(false)
         || context.runtime_pressure_snapshot().trim_event_persistence
     {
+        context.resource_sentinel.note_aggregated_event();
         store.enqueue_security_event_aggregated(event, "runtime_budget_safeline");
     } else {
         event.details_json = build_request_identity_details(context, request, packet, None);
-        store.enqueue_security_event(event);
+        context.adaptive_enqueue_security_event(
+            store.as_ref(),
+            event,
+            "resource_sentinel_safeline",
+        );
     }
 }
 

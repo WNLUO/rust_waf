@@ -71,6 +71,11 @@ pub(crate) async fn handle_http1_connection(
                     trusted_proxy_peer,
                 )
                 .await?;
+                if requests_seen == 0 {
+                    context
+                        .resource_sentinel
+                        .note_no_request_timeout(packet.source_ip);
+                }
                 if let (Some(inspector), Some(bucket_key)) =
                     (context.l4_inspector(), bucket_key.as_ref())
                 {
@@ -81,6 +86,9 @@ pub(crate) async fn handle_http1_connection(
             Err(err) => return Err(err.into()),
         };
         requests_seen = requests_seen.saturating_add(1);
+        context
+            .resource_sentinel
+            .note_http_request(packet.source_ip);
 
         apply_client_identity(context.as_ref(), peer_addr, &mut request);
         request.add_metadata("listener_port".to_string(), packet.dest_port.to_string());

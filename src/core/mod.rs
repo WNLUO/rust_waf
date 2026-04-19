@@ -11,6 +11,7 @@ mod engine_tls;
 pub mod gateway;
 pub mod packet;
 mod resource_budget;
+mod resource_sentinel;
 mod rule_engine;
 mod runtime_state;
 mod self_protection;
@@ -48,6 +49,7 @@ pub use packet::{
     RandomStatusConfig, TarpitConfig,
 };
 pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
+pub use resource_sentinel::ResourceSentinelSnapshot;
 pub use self_protection::ServerPublicIpSnapshot;
 pub use visitor_intelligence::{
     VisitorDecisionSignal, VisitorIntelligenceSnapshot, VisitorProfileSignal, VisitorRouteSummary,
@@ -101,6 +103,7 @@ pub struct WafContext {
     ai_route_result_buckets: DashMap<String, std::sync::Mutex<AiRouteResultBucket>>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
+    resource_sentinel: resource_sentinel::ResourceSentinel,
     server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
     bot_ip_verifier: Arc<bot_verifier::BotIpVerifier>,
     bot_provider_config: Arc<RwLock<Vec<crate::config::BotProviderConfig>>>,
@@ -490,6 +493,7 @@ impl WafContext {
             ai_route_result_buckets: DashMap::new(),
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
+            resource_sentinel: resource_sentinel::ResourceSentinel::new(),
             server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),
             bot_ip_verifier: Arc::new(bot_verifier::BotIpVerifier::new()),
             bot_provider_config: Arc::new(RwLock::new(config.bot_detection.providers.clone())),

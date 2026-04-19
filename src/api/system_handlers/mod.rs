@@ -93,6 +93,7 @@ pub(super) async fn metrics_handler(State(state): State<ApiState>) -> Json<Metri
             .l4_inspector()
             .map(|inspector| inspector.get_statistics().behavior.overview),
         state.context.runtime_pressure_snapshot(),
+        state.context.resource_sentinel_snapshot(),
     ))
 }
 

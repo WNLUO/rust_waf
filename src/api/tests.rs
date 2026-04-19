@@ -40,6 +40,7 @@ fn test_build_metrics_response_without_sources() {
             behavior_sample_stride: 1,
             prefer_drop: false,
         },
+        crate::core::ResourceSentinelSnapshot::default(),
     );
 
     assert_eq!(response.total_packets, 0);
@@ -155,6 +156,15 @@ fn test_build_metrics_response_with_sources() {
             behavior_sample_stride: 2,
             prefer_drop: true,
         },
+        crate::core::ResourceSentinelSnapshot {
+            mode: "under_attack".to_string(),
+            attack_score: 88,
+            tracked_debt_buckets: 12,
+            high_debt_buckets: 3,
+            extreme_debt_buckets: 1,
+            pre_admission_rejections: 7,
+            aggregated_events: 9,
+        },
     );
 
     assert_eq!(response.total_packets, 12);
@@ -205,6 +215,9 @@ fn test_build_metrics_response_with_sources() {
     assert!(response.runtime_pressure_drop_delay);
     assert!(response.runtime_pressure_trim_event_persistence);
     assert_eq!(response.runtime_pressure_storage_queue_percent, 81);
+    assert_eq!(response.resource_sentinel_mode, "under_attack");
+    assert_eq!(response.resource_sentinel_attack_score, 88);
+    assert_eq!(response.resource_sentinel_pre_admission_rejections, 7);
     assert!(response
         .storage_degraded_reasons
         .contains(&"storage_low_value_event_persistence_trimmed".to_string()));

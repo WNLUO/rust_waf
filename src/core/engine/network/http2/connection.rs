@@ -62,6 +62,7 @@ pub(crate) async fn handle_http2_connection(
                     let config = context.config_snapshot();
                     let mut request = request;
                     let mut body = Some(body);
+                    context.resource_sentinel.note_http_request(packet.source_ip);
                     apply_client_identity(context.as_ref(), peer_addr, &mut request);
                     for (key, value) in request_metadata {
                         request.add_metadata(key, value);

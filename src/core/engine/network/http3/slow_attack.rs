@@ -56,6 +56,9 @@ pub(super) async fn handle_http3_slow_attack_error(
         }
         metrics.record_block(crate::core::InspectionLayer::L7);
     }
+    context
+        .resource_sentinel
+        .note_no_request_timeout(packet.source_ip);
     if let Some(inspector) = context.l4_inspector() {
         let mut slow_request = crate::protocol::UnifiedHttpRequest::new(
             crate::protocol::HttpVersion::Http3_0,
@@ -138,7 +141,7 @@ fn persist_http3_slow_attack_event(
         }
     }))
     .ok();
-    store.enqueue_security_event(event);
+    context.adaptive_enqueue_security_event(store.as_ref(), event, "resource_sentinel_slow_attack");
 }
 
 fn current_unix_timestamp() -> i64 {

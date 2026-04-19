@@ -222,7 +222,11 @@ fn handle_browser_fingerprint_report(
         event.uri = Some(request.uri.clone());
         event.http_version = Some(request.version.to_string());
         event.details_json = Some(details_json);
-        store.enqueue_security_event(event);
+        context.adaptive_enqueue_security_event(
+            store.as_ref(),
+            event,
+            "resource_sentinel_browser_fingerprint",
+        );
     }
 
     let mut response = json_http_response(

@@ -14,6 +14,7 @@ pub(super) fn build_metrics_response(
     aggregation_insights: Option<crate::storage::StorageAggregationInsightSummary>,
     l4_behavior: Option<crate::l4::behavior::L4BehaviorOverview>,
     runtime_pressure: RuntimePressureSnapshot,
+    resource_sentinel: crate::core::ResourceSentinelSnapshot,
 ) -> MetricsResponse {
     let snapshot = metrics.unwrap_or_default();
     let sqlite_enabled = storage_summary.is_some();
@@ -108,6 +109,13 @@ pub(super) fn build_metrics_response(
         runtime_l7_page_window_limit: runtime_pressure.l7_page_window_limit as u64,
         runtime_behavior_bucket_limit: runtime_pressure.behavior_bucket_limit as u64,
         runtime_behavior_sample_stride: runtime_pressure.behavior_sample_stride,
+        resource_sentinel_mode: resource_sentinel.mode,
+        resource_sentinel_attack_score: resource_sentinel.attack_score,
+        resource_sentinel_tracked_debt_buckets: resource_sentinel.tracked_debt_buckets,
+        resource_sentinel_high_debt_buckets: resource_sentinel.high_debt_buckets,
+        resource_sentinel_extreme_debt_buckets: resource_sentinel.extreme_debt_buckets,
+        resource_sentinel_pre_admission_rejections: resource_sentinel.pre_admission_rejections,
+        resource_sentinel_aggregated_events: resource_sentinel.aggregated_events,
         storage_degraded_reasons,
         storage_attack_insights: StorageAttackInsightsResponse {
             active_bucket_count: aggregation_insights.active_bucket_count,

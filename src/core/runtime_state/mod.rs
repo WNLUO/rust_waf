@@ -66,7 +66,7 @@ impl WafContext {
         let budget =
             resource_budget::current_runtime_resource_budget(level, storage_queue_usage_percent);
 
-        RuntimePressureSnapshot {
+        let mut pressure = RuntimePressureSnapshot {
             level,
             capacity_class: budget.capacity_class.as_str(),
             defense_depth: budget.defense_depth.as_str(),
@@ -80,7 +80,9 @@ impl WafContext {
             behavior_bucket_limit: budget.behavior_bucket_limit,
             behavior_sample_stride: budget.behavior_sample_stride,
             prefer_drop: budget.prefer_drop,
-        }
+        };
+        self.resource_sentinel.apply_runtime_pressure(&mut pressure);
+        pressure
     }
 
     pub fn annotate_runtime_pressure(&self, request: &mut UnifiedHttpRequest) {

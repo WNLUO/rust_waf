@@ -51,7 +51,8 @@ pub use packet::{
 pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
 pub use resource_sentinel::{
     ResourceSentinelAttackDiagnosis, ResourceSentinelAttackLifecycle,
-    ResourceSentinelAttackSession, ResourceSentinelClusterSnapshot, ResourceSentinelSnapshot,
+    ResourceSentinelAttackSession, ResourceSentinelClusterSnapshot,
+    ResourceSentinelDefenseActionEffect, ResourceSentinelSnapshot,
 };
 pub use self_protection::ServerPublicIpSnapshot;
 pub use visitor_intelligence::{

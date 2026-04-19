@@ -185,6 +185,19 @@ fn test_build_metrics_response_with_sources() {
                 first_seen_ms: 1,
                 last_seen_ms: 2,
             }],
+            defense_action_effects: vec![crate::core::ResourceSentinelDefenseActionEffect {
+                attack_type: "slow_tls_handshake".to_string(),
+                preferred_action: "tls_pre_admission_cooldown".to_string(),
+                effective_score: 3,
+                ineffective_score: 1,
+                weak_score: 1,
+                harmful_score: 0,
+                confidence: 75,
+                last_outcome: "effective".to_string(),
+                last_rejection_delta: 9,
+                last_score_delta: -12,
+                last_seen_ms: 3,
+            }],
             attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis {
                 severity: "high".to_string(),
                 primary_pressure: "tls_handshake_resource".to_string(),
@@ -307,6 +320,14 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(
         response.resource_sentinel_top_attack_clusters[0].rejected,
         2
+    );
+    assert_eq!(
+        response.resource_sentinel_defense_action_effects[0].preferred_action,
+        "tls_pre_admission_cooldown"
+    );
+    assert_eq!(
+        response.resource_sentinel_defense_action_effects[0].confidence,
+        75
     );
     assert!(response
         .storage_degraded_reasons

@@ -17,6 +17,11 @@ const ATTACK_PHASE_STARTED: u8 = 1;
 const ATTACK_PHASE_SUSTAINED: u8 = 2;
 const ATTACK_PHASE_MITIGATING: u8 = 3;
 const ATTACK_PHASE_ENDED: u8 = 4;
+const DEFENSE_OUTCOME_UNKNOWN: u8 = 0;
+const DEFENSE_OUTCOME_EFFECTIVE: u8 = 1;
+const DEFENSE_OUTCOME_WEAK: u8 = 2;
+const DEFENSE_OUTCOME_HARMFUL: u8 = 3;
+const DEFENSE_OUTCOME_RECOVERED: u8 = 4;
 
 const SCORE_ELEVATED: u64 = 30;
 const SCORE_UNDER_ATTACK: u64 = 80;
@@ -124,6 +129,11 @@ struct DefenseMemoryBucket {
     preferred_action: String,
     effective_score: AtomicU64,
     ineffective_score: AtomicU64,
+    weak_score: AtomicU64,
+    harmful_score: AtomicU64,
+    last_outcome: AtomicU8,
+    last_rejection_delta: AtomicU64,
+    last_score_delta: AtomicI64,
     last_seen_ms: AtomicU64,
 }
 
@@ -144,6 +154,7 @@ pub struct ResourceSentinelSnapshot {
     pub automated_defense_memory_hits: u64,
     pub automated_audit_events: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
+    pub defense_action_effects: Vec<ResourceSentinelDefenseActionEffect>,
     pub attack_diagnosis: ResourceSentinelAttackDiagnosis,
     pub attack_lifecycle: ResourceSentinelAttackLifecycle,
     pub attack_session: ResourceSentinelAttackSession,
@@ -162,6 +173,21 @@ pub struct ResourceSentinelClusterSnapshot {
     pub aggregated: u64,
     pub score: u64,
     pub first_seen_ms: u64,
+    pub last_seen_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelDefenseActionEffect {
+    pub attack_type: String,
+    pub preferred_action: String,
+    pub effective_score: u64,
+    pub ineffective_score: u64,
+    pub weak_score: u64,
+    pub harmful_score: u64,
+    pub confidence: u64,
+    pub last_outcome: String,
+    pub last_rejection_delta: u64,
+    pub last_score_delta: i64,
     pub last_seen_ms: u64,
 }
 
@@ -448,6 +474,7 @@ impl ResourceSentinel {
             self.automated_defense_memory_hits.load(Ordering::Relaxed);
         let automated_audit_events = self.automated_audit_events.load(Ordering::Relaxed);
         let top_attack_clusters = self.top_attack_clusters(8);
+        let defense_action_effects = self.defense_action_effects(8);
         let attack_diagnosis = build_attack_diagnosis(
             &mode,
             attack_score,
@@ -459,6 +486,7 @@ impl ResourceSentinel {
             automated_defense_relaxations,
             automated_defense_memory_hits,
             &top_attack_clusters,
+            &defense_action_effects,
         );
         let attack_lifecycle = self.update_attack_lifecycle(&attack_diagnosis);
         let attack_session = self.attack_session_snapshot(
@@ -490,6 +518,7 @@ impl ResourceSentinel {
             automated_defense_memory_hits,
             automated_audit_events,
             top_attack_clusters,
+            defense_action_effects,
             attack_diagnosis,
             attack_lifecycle,
             attack_session,
@@ -792,6 +821,45 @@ impl ResourceSentinel {
         items
     }
 
+    fn defense_action_effects(&self, limit: usize) -> Vec<ResourceSentinelDefenseActionEffect> {
+        let mut items = self
+            .defense_memory
+            .iter()
+            .map(|entry| {
+                let bucket = entry.value();
+                let effective_score = bucket.effective_score.load(Ordering::Relaxed);
+                let ineffective_score = bucket.ineffective_score.load(Ordering::Relaxed);
+                let total = effective_score.saturating_add(ineffective_score);
+                ResourceSentinelDefenseActionEffect {
+                    attack_type: entry.key().clone(),
+                    preferred_action: bucket.preferred_action.clone(),
+                    effective_score,
+                    ineffective_score,
+                    weak_score: bucket.weak_score.load(Ordering::Relaxed),
+                    harmful_score: bucket.harmful_score.load(Ordering::Relaxed),
+                    confidence: confidence_percent(effective_score, total),
+                    last_outcome: defense_outcome_label(
+                        bucket.last_outcome.load(Ordering::Relaxed),
+                    )
+                    .to_string(),
+                    last_rejection_delta: bucket.last_rejection_delta.load(Ordering::Relaxed),
+                    last_score_delta: bucket.last_score_delta.load(Ordering::Relaxed),
+                    last_seen_ms: bucket.last_seen_ms.load(Ordering::Relaxed),
+                }
+            })
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            right
+                .harmful_score
+                .cmp(&left.harmful_score)
+                .then_with(|| right.effective_score.cmp(&left.effective_score))
+                .then_with(|| right.ineffective_score.cmp(&left.ineffective_score))
+                .then_with(|| right.last_seen_ms.cmp(&left.last_seen_ms))
+        });
+        items.truncate(limit);
+        items
+    }
+
     fn active_cooldown_reason(&self, peer_ip: IpAddr, transport: &str) -> Option<String> {
         let now = now_millis();
         for key in cooldown_keys(peer_ip, transport) {
@@ -980,16 +1048,30 @@ impl ResourceSentinel {
             let previous_rejections = bucket
                 .last_rejections
                 .swap(current_rejections, Ordering::Relaxed);
-            bucket
+            let previous_score = bucket
                 .last_attack_score
-                .store(current_score, Ordering::Relaxed);
+                .swap(current_score, Ordering::Relaxed);
             let rejection_delta = current_rejections.saturating_sub(previous_rejections);
             if rejection_delta >= DEFENSE_EFFECT_REJECTION_DELTA
                 && current_score >= SCORE_UNDER_ATTACK
             {
-                self.extend_effective_cooldown(bucket, now, until, current_score);
+                self.extend_effective_cooldown(
+                    bucket,
+                    now,
+                    until,
+                    current_score,
+                    rejection_delta,
+                    previous_score,
+                );
             } else if rejection_delta == 0 && current_score < SCORE_ELEVATED {
                 self.relax_quiet_cooldown(bucket, now, until);
+            } else {
+                self.score_observed_cooldown(
+                    bucket,
+                    rejection_delta,
+                    previous_score,
+                    current_score,
+                );
             }
         }
     }
@@ -1000,6 +1082,8 @@ impl ResourceSentinel {
         now: u64,
         observed_until: u64,
         current_score: u64,
+        rejection_delta: u64,
+        previous_score: u64,
     ) {
         let extension = if current_score >= SCORE_SURVIVAL {
             DEFENSE_EFFECT_SURVIVAL_EXTEND_MS
@@ -1026,7 +1110,47 @@ impl ResourceSentinel {
             bucket.extensions.fetch_add(1, Ordering::Relaxed);
             self.automated_defense_extensions
                 .fetch_add(1, Ordering::Relaxed);
-            self.note_defense_memory(&bucket.attack_type, &bucket.action, true);
+            self.note_defense_effect(
+                &bucket.attack_type,
+                &bucket.action,
+                DEFENSE_OUTCOME_EFFECTIVE,
+                rejection_delta,
+                current_score as i64 - previous_score as i64,
+            );
+        }
+    }
+
+    fn score_observed_cooldown(
+        &self,
+        bucket: &CooldownBucket,
+        rejection_delta: u64,
+        previous_score: u64,
+        current_score: u64,
+    ) {
+        if current_score < SCORE_ELEVATED {
+            return;
+        }
+        let score_delta = current_score as i64 - previous_score as i64;
+        let outcome = if current_score >= SCORE_UNDER_ATTACK
+            && rejection_delta == 0
+            && score_delta >= SCORE_ELEVATED as i64
+        {
+            DEFENSE_OUTCOME_HARMFUL
+        } else if current_score >= SCORE_UNDER_ATTACK
+            && rejection_delta < DEFENSE_EFFECT_REJECTION_DELTA
+        {
+            DEFENSE_OUTCOME_WEAK
+        } else {
+            DEFENSE_OUTCOME_UNKNOWN
+        };
+        if outcome != DEFENSE_OUTCOME_UNKNOWN {
+            self.note_defense_effect(
+                &bucket.attack_type,
+                &bucket.action,
+                outcome,
+                rejection_delta,
+                score_delta,
+            );
         }
     }
 
@@ -1048,11 +1172,24 @@ impl ResourceSentinel {
             bucket.relaxations.fetch_add(1, Ordering::Relaxed);
             self.automated_defense_relaxations
                 .fetch_add(1, Ordering::Relaxed);
-            self.note_defense_memory(&bucket.attack_type, &bucket.action, false);
+            self.note_defense_effect(
+                &bucket.attack_type,
+                &bucket.action,
+                DEFENSE_OUTCOME_RECOVERED,
+                0,
+                0,
+            );
         }
     }
 
-    fn note_defense_memory(&self, attack_type: &str, action: &str, effective: bool) {
+    fn note_defense_effect(
+        &self,
+        attack_type: &str,
+        action: &str,
+        outcome: u8,
+        rejection_delta: u64,
+        score_delta: i64,
+    ) {
         let now = now_millis();
         let bucket = self
             .defense_memory
@@ -1061,13 +1198,35 @@ impl ResourceSentinel {
                 preferred_action: action.to_string(),
                 effective_score: AtomicU64::new(0),
                 ineffective_score: AtomicU64::new(0),
+                weak_score: AtomicU64::new(0),
+                harmful_score: AtomicU64::new(0),
+                last_outcome: AtomicU8::new(DEFENSE_OUTCOME_UNKNOWN),
+                last_rejection_delta: AtomicU64::new(0),
+                last_score_delta: AtomicI64::new(0),
                 last_seen_ms: AtomicU64::new(now),
             });
         bucket.last_seen_ms.store(now, Ordering::Relaxed);
-        if effective {
-            bucket.effective_score.fetch_add(1, Ordering::Relaxed);
-        } else {
-            bucket.ineffective_score.fetch_add(1, Ordering::Relaxed);
+        bucket.last_outcome.store(outcome, Ordering::Relaxed);
+        bucket
+            .last_rejection_delta
+            .store(rejection_delta, Ordering::Relaxed);
+        bucket
+            .last_score_delta
+            .store(score_delta, Ordering::Relaxed);
+        match outcome {
+            DEFENSE_OUTCOME_EFFECTIVE => {
+                bucket.effective_score.fetch_add(1, Ordering::Relaxed);
+            }
+            DEFENSE_OUTCOME_WEAK => {
+                bucket.weak_score.fetch_add(1, Ordering::Relaxed);
+                bucket.ineffective_score.fetch_add(1, Ordering::Relaxed);
+            }
+            DEFENSE_OUTCOME_HARMFUL => {
+                bucket.harmful_score.fetch_add(1, Ordering::Relaxed);
+                bucket.ineffective_score.fetch_add(1, Ordering::Relaxed);
+            }
+            DEFENSE_OUTCOME_RECOVERED => {}
+            _ => {}
         }
     }
 
@@ -1430,6 +1589,24 @@ fn attack_phase_label(phase: u8) -> &'static str {
     }
 }
 
+fn defense_outcome_label(outcome: u8) -> &'static str {
+    match outcome {
+        DEFENSE_OUTCOME_EFFECTIVE => "effective",
+        DEFENSE_OUTCOME_WEAK => "weak",
+        DEFENSE_OUTCOME_HARMFUL => "harmful",
+        DEFENSE_OUTCOME_RECOVERED => "recovered",
+        _ => "unknown",
+    }
+}
+
+fn confidence_percent(effective_score: u64, total_score: u64) -> u64 {
+    if total_score == 0 {
+        0
+    } else {
+        effective_score.saturating_mul(100) / total_score
+    }
+}
+
 fn severity_for_score(score: u64) -> &'static str {
     if score >= SCORE_SURVIVAL {
         "critical"
@@ -1593,6 +1770,7 @@ fn build_attack_diagnosis(
     automated_defense_relaxations: u64,
     automated_defense_memory_hits: u64,
     top_attack_clusters: &[ResourceSentinelClusterSnapshot],
+    defense_action_effects: &[ResourceSentinelDefenseActionEffect],
 ) -> ResourceSentinelAttackDiagnosis {
     let top_cluster = top_attack_clusters.first().cloned();
     let severity = if matches!(mode, "survival") || attack_score >= SCORE_SURVIVAL {
@@ -1658,6 +1836,18 @@ fn build_attack_diagnosis(
     }
     if aggregated_events > 0 {
         evidence.push(format!("aggregated_events={aggregated_events}"));
+    }
+    if let Some(effect) = defense_action_effects.first() {
+        evidence.push(format!(
+            "defense_effect attack_type={} action={} outcome={} confidence={} effective={} weak={} harmful={}",
+            effect.attack_type,
+            effect.preferred_action,
+            effect.last_outcome,
+            effect.confidence,
+            effect.effective_score,
+            effect.weak_score,
+            effect.harmful_score
+        ));
     }
 
     let summary = build_attack_summary(
@@ -1824,6 +2014,7 @@ fn build_attack_audit_event(snapshot: ResourceSentinelSnapshot) -> SecurityEvent
         "automated_defense_relaxations": snapshot.automated_defense_relaxations,
         "automated_defense_memory_hits": snapshot.automated_defense_memory_hits,
         "top_attack_clusters": snapshot.top_attack_clusters,
+        "defense_action_effects": snapshot.defense_action_effects,
         "cdn_rust_count_note": "CDN 请求数可能远高于 Rust 记录数，因为 CDN/L4/L7 会在不同层提前拦截，Rust 本地审计只代表到达本进程或本进程已聚合的后端视角。"
     }))
     .ok();
@@ -2130,7 +2321,18 @@ mod tests {
             .expect("cooldown should still exist");
         assert!(bucket.until_ms.load(Ordering::Relaxed) > before_until);
         assert_eq!(bucket.extensions.load(Ordering::Relaxed), 1);
-        assert_eq!(sentinel.snapshot().automated_defense_extensions, 1);
+        let snapshot = sentinel.snapshot();
+        assert_eq!(snapshot.automated_defense_extensions, 1);
+        assert_eq!(
+            snapshot.defense_action_effects[0].attack_type,
+            "slow_tls_handshake"
+        );
+        assert_eq!(snapshot.defense_action_effects[0].last_outcome, "effective");
+        assert_eq!(
+            snapshot.defense_action_effects[0].last_rejection_delta,
+            DEFENSE_EFFECT_REJECTION_DELTA
+        );
+        assert_eq!(snapshot.defense_action_effects[0].confidence, 100);
     }
 
     #[test]
@@ -2381,7 +2583,42 @@ mod tests {
         assert!(after_until < before_until);
         assert!(after_until <= eval_at.saturating_add(DEFENSE_EFFECT_RELAX_TO_MS));
         assert_eq!(bucket.relaxations.load(Ordering::Relaxed), 1);
-        assert_eq!(sentinel.snapshot().automated_defense_relaxations, 1);
+        let snapshot = sentinel.snapshot();
+        assert_eq!(snapshot.automated_defense_relaxations, 1);
+        assert_eq!(snapshot.defense_action_effects[0].last_outcome, "recovered");
+        assert_eq!(snapshot.defense_action_effects[0].ineffective_score, 0);
+    }
+
+    #[test]
+    fn defense_action_effect_scoring_marks_harmful_when_pressure_rises_without_rejections() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        let key = "transport:tls:cluster:203.0.113.0/24";
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("hot cluster should create cooldown");
+        bucket
+            .last_attack_score
+            .store(SCORE_ELEVATED, Ordering::Relaxed);
+        let eval_at = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_EVAL_INTERVAL_MS + 1);
+        drop(bucket);
+
+        sentinel
+            .attack_score
+            .store(SCORE_UNDER_ATTACK, Ordering::Relaxed);
+        sentinel.evaluate_defense_effects(eval_at);
+
+        let snapshot = sentinel.snapshot();
+        assert_eq!(snapshot.defense_action_effects[0].last_outcome, "harmful");
+        assert_eq!(snapshot.defense_action_effects[0].harmful_score, 1);
+        assert_eq!(snapshot.defense_action_effects[0].ineffective_score, 1);
+        assert_eq!(
+            snapshot.defense_action_effects[0].last_score_delta,
+            SCORE_UNDER_ATTACK as i64 - SCORE_ELEVATED as i64
+        );
     }
 
     fn activate_hot_tls_cluster(sentinel: &ResourceSentinel) {

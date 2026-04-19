@@ -83,6 +83,8 @@ pub struct MetricsResponse {
     pub(crate) resource_sentinel_automated_audit_events: u64,
     pub(crate) resource_sentinel_top_attack_clusters:
         Vec<crate::core::ResourceSentinelClusterSnapshot>,
+    pub(crate) resource_sentinel_defense_action_effects:
+        Vec<crate::core::ResourceSentinelDefenseActionEffect>,
     pub(crate) resource_sentinel_attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis,
     pub(crate) resource_sentinel_attack_lifecycle: crate::core::ResourceSentinelAttackLifecycle,
     pub(crate) resource_sentinel_attack_session: crate::core::ResourceSentinelAttackSession,

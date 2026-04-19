@@ -462,7 +462,7 @@ struct EarlyDefenseDecision {
 
 ### 阶段 7：复测与报告
 
-状态：待开始
+状态：已完成（常规 CDN CC / 高级 CDN CC 复测，长时间高级 CDN CC 待确认）
 
 目标：
 
@@ -507,6 +507,21 @@ struct EarlyDefenseDecision {
 
 完成后必须更新本文档。
 
+阶段结果：
+
+| 项目 | 内容 |
+|---|---|
+| 完成日期 | 2026-04-19 |
+| 完成状态 | 已完成常规 CDN CC 和高级 CDN CC 复测；长时间高级 CDN CC 未执行，按要求等待用户确认 |
+| 远端结果目录 | `/root/rust_waf_test/cdn-report-artifacts/2026-04-19-stage7-235144` |
+| 关键产物 | `stage7-summary.md`、`stage7-system.csv`、`stage7-metrics.csv`、`stage7-events.jsonl`、`stage7-commands.log`、`raw/` |
+| 常规 CDN CC 结果 | CPU 峰值 `201.45%`，CPU 平均 `119.76%`，内存峰值 `52.4 MB`，无 OOM，后端成功率 `100.00%`，`blocked_l7=204311`，`trusted_proxy_l4_degrade_actions=200352`，AI 命中 `6` |
+| 高级 CDN CC 结果 | CPU 峰值 `195.78%`，CPU 平均 `179.58%`，内存峰值 `121.3 MB`，无 OOM，后端成功率 `98.89%`，`blocked_l7=196123`，`l7_cc_challenges=530`，`trusted_proxy_l4_degrade_actions=192840`，活跃 AI 临时策略 `6` 条 |
+| 对旧基线结论 | 常规 CDN CC 的 CPU 峰值仅下降 `0.44` 个百分点，但内存峰值下降 `31.8 MB`；高级 CDN CC 的 CPU 峰值下降 `7.21` 个百分点，内存峰值下降 `58.7 MB` |
+| 运行时结论 | 两组正式复测都进入 `runtime_pressure_level=attack` 和 `runtime_defense_depth=survival`，说明 CPU 感知、早期防御和 L7 轻量模式已实际触发 |
+| 存储/事件结论 | SQLite 队列深度保持 `0`，未出现 dropped events，本轮复测未观察到事件持久化成为瓶颈 |
+| 风险与遗留 | 健康检查在当前脚本口径下也会迅速进入高压态；长时间高级 CDN CC 仍需用户确认后补跑 |
+
 ## 5. 阶段推进规则
 
 | 规则 | 内容 |
@@ -529,14 +544,14 @@ struct EarlyDefenseDecision {
 | 阶段 4 | 已完成 | L4 policy 已能向 L7 输出 route/host 阈值缩放和 survival hint，等待用户确认是否进入阶段 5 |
 | 阶段 5 | 已完成 | 高压下 HTTP 防御事件和 SQLite 队列压力事件已支持聚合、瘦身和关键 block/drop 摘要保留 |
 | 阶段 6 | 已完成 | AI 临时策略已补齐 hit/outcome 反馈、自动续期/撤销治理和 `/metrics` 闭环指标 |
-| 阶段 7 | 未开始 | 复测与报告 |
+| 阶段 7 | 已完成（长时间高级 CDN CC 待确认） | 已完成常规 CDN CC / 高级 CDN CC 复测并产出中文报告 |
 
 ## 7. 下一步
 
-等待用户确认后，进入阶段 7：
+下一步如果继续推进，建议只补一件事：
 
 ```text
-复测与报告
+经用户确认后，执行长时间高级 CDN CC（10-30 分钟）稳定性复测
 ```
 
-阶段 7 将在保留的远端测试环境 `/root/rust_waf_test` 中复测常规 CDN CC 和高级 CDN CC，并输出中文对比报告。
+当前阶段 7 已在保留的远端测试环境 `/root/rust_waf_test` 中完成常规 CDN CC 和高级 CDN CC 复测，并已输出中文对比报告。

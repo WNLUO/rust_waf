@@ -48,6 +48,7 @@ pub(crate) struct ResourceSentinel {
     connection_debt: DashMap<String, DebtBucket>,
     cooldowns: DashMap<String, CooldownBucket>,
     attack_clusters: DashMap<String, AttackClusterBucket>,
+    defense_memory: DashMap<String, DefenseMemoryBucket>,
     new_cluster_budget_window_ms: AtomicU64,
     new_cluster_budget_used: AtomicU64,
     pre_admission_rejections: AtomicU64,
@@ -55,6 +56,7 @@ pub(crate) struct ResourceSentinel {
     automated_defense_actions: AtomicU64,
     automated_defense_extensions: AtomicU64,
     automated_defense_relaxations: AtomicU64,
+    automated_defense_memory_hits: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -72,6 +74,8 @@ struct CooldownBucket {
     last_attack_score: AtomicU64,
     extensions: AtomicU64,
     relaxations: AtomicU64,
+    attack_type: String,
+    action: String,
     reason: String,
 }
 
@@ -91,6 +95,14 @@ struct AttackClusterBucket {
     last_seen_ms: AtomicU64,
 }
 
+#[derive(Debug)]
+struct DefenseMemoryBucket {
+    preferred_action: String,
+    effective_score: AtomicU64,
+    ineffective_score: AtomicU64,
+    last_seen_ms: AtomicU64,
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ResourceSentinelSnapshot {
     pub mode: String,
@@ -105,6 +117,7 @@ pub struct ResourceSentinelSnapshot {
     pub automated_defense_actions: u64,
     pub automated_defense_extensions: u64,
     pub automated_defense_relaxations: u64,
+    pub automated_defense_memory_hits: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
 }
 
@@ -141,6 +154,7 @@ impl ResourceSentinel {
             connection_debt: DashMap::new(),
             cooldowns: DashMap::new(),
             attack_clusters: DashMap::new(),
+            defense_memory: DashMap::new(),
             new_cluster_budget_window_ms: AtomicU64::new(window_start(now)),
             new_cluster_budget_used: AtomicU64::new(0),
             pre_admission_rejections: AtomicU64::new(0),
@@ -148,6 +162,7 @@ impl ResourceSentinel {
             automated_defense_actions: AtomicU64::new(0),
             automated_defense_extensions: AtomicU64::new(0),
             automated_defense_relaxations: AtomicU64::new(0),
+            automated_defense_memory_hits: AtomicU64::new(0),
         }
     }
 
@@ -162,7 +177,7 @@ impl ResourceSentinel {
 
         let mode = self.mode.load(Ordering::Relaxed);
         let debt = self.debt_score(peer_ip);
-        if let Some(reason) = self.active_cooldown_reason(peer_ip) {
+        if let Some(reason) = self.active_cooldown_reason(peer_ip, transport) {
             self.pre_admission_rejections
                 .fetch_add(1, Ordering::Relaxed);
             self.record_cluster_rejected(peer_ip, "cooldown_reject", transport, &reason, 18);
@@ -350,6 +365,9 @@ impl ResourceSentinel {
             automated_defense_relaxations: self
                 .automated_defense_relaxations
                 .load(Ordering::Relaxed),
+            automated_defense_memory_hits: self
+                .automated_defense_memory_hits
+                .load(Ordering::Relaxed),
             top_attack_clusters: self.top_attack_clusters(8),
         }
     }
@@ -499,6 +517,9 @@ impl ResourceSentinel {
         });
         self.cooldowns
             .retain(|_, bucket| bucket.until_ms.load(Ordering::Relaxed) > now);
+        self.defense_memory.retain(|_, bucket| {
+            now.saturating_sub(bucket.last_seen_ms.load(Ordering::Relaxed)) < 600_000
+        });
         self.attack_clusters.retain(|_, bucket| {
             let score = bucket.score.load(Ordering::Relaxed);
             let idle_ms = now.saturating_sub(bucket.last_seen_ms.load(Ordering::Relaxed));
@@ -647,9 +668,9 @@ impl ResourceSentinel {
         items
     }
 
-    fn active_cooldown_reason(&self, peer_ip: IpAddr) -> Option<String> {
+    fn active_cooldown_reason(&self, peer_ip: IpAddr, transport: &str) -> Option<String> {
         let now = now_millis();
-        for key in cooldown_keys(peer_ip) {
+        for key in cooldown_keys(peer_ip, transport) {
             if let Some(bucket) = self.cooldowns.get(&key) {
                 if bucket.until_ms.load(Ordering::Relaxed) > now {
                     return Some(bucket.reason.clone());
@@ -673,11 +694,19 @@ impl ResourceSentinel {
             return;
         }
         let now = now_millis();
-        let ip_activated = self.set_cooldown(format!("ip:{peer_ip}"), now + IP_COOLDOWN_MS, reason);
+        let ip_activated = self.set_cooldown(
+            format!("ip:{peer_ip}"),
+            now + IP_COOLDOWN_MS,
+            reason,
+            reason,
+            "ip_cluster_cooldown",
+        );
         let cluster_activated = self.set_cooldown(
             format!("cluster:{}", cluster_key(peer_ip)),
             now + CLUSTER_COOLDOWN_MS,
             reason,
+            reason,
+            "ip_cluster_cooldown",
         );
         if ip_activated || cluster_activated {
             self.automated_defense_actions
@@ -702,15 +731,16 @@ impl ResourceSentinel {
             return;
         }
 
-        let cooldown_ms = if self.mode.load(Ordering::Relaxed) >= MODE_SURVIVAL {
-            SURVIVAL_CLUSTER_DEFENSE_COOLDOWN_MS
-        } else {
-            HOT_CLUSTER_DEFENSE_COOLDOWN_MS
+        let mode = self.mode.load(Ordering::Relaxed);
+        let Some(plan) = self.defense_plan(peer_ip, attack_type, mode) else {
+            return;
         };
         let activated = self.set_cooldown(
-            format!("cluster:{}", cluster_key(peer_ip)),
-            now_millis() + cooldown_ms,
-            hot_cluster_cooldown_reason(attack_type),
+            plan.key,
+            now_millis() + plan.cooldown_ms,
+            plan.reason,
+            attack_type,
+            plan.action,
         );
         if activated {
             self.automated_defense_actions
@@ -719,7 +749,52 @@ impl ResourceSentinel {
         }
     }
 
-    fn set_cooldown(&self, key: String, until_ms: u64, reason: &'static str) -> bool {
+    fn defense_plan(
+        &self,
+        peer_ip: IpAddr,
+        attack_type: &str,
+        mode: u8,
+    ) -> Option<DefenseActionPlan> {
+        let remembered = self.defense_memory.get(attack_type).and_then(|bucket| {
+            let effective = bucket.effective_score.load(Ordering::Relaxed);
+            let ineffective = bucket.ineffective_score.load(Ordering::Relaxed);
+            (effective > ineffective).then(|| bucket.preferred_action.clone())
+        });
+        let plan = match remembered.as_deref().unwrap_or_default() {
+            "tls_pre_admission_cooldown"
+                if matches!(attack_type, "slow_tls_handshake" | "tls_handshake_failure") =>
+            {
+                Some(tls_cluster_plan(peer_ip, attack_type, mode))
+            }
+            "cluster_connection_cooldown" => {
+                Some(cluster_connection_plan(peer_ip, attack_type, mode))
+            }
+            _ => match attack_type {
+                "slow_tls_handshake" | "tls_handshake_failure" => {
+                    Some(tls_cluster_plan(peer_ip, attack_type, mode))
+                }
+                "idle_no_request" | "l4_admission_reject" => {
+                    Some(cluster_connection_plan(peer_ip, attack_type, mode))
+                }
+                "provider_intercept" | "l7_security_event" | "l4_security_event" => None,
+                _ => None,
+            },
+        };
+        if remembered.is_some() && plan.is_some() {
+            self.automated_defense_memory_hits
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        plan
+    }
+
+    fn set_cooldown(
+        &self,
+        key: String,
+        until_ms: u64,
+        reason: &'static str,
+        attack_type: &str,
+        action: &'static str,
+    ) -> bool {
         let now = now_millis();
         let previous = self
             .cooldowns
@@ -737,6 +812,8 @@ impl ResourceSentinel {
             last_attack_score: AtomicU64::new(self.attack_score.load(Ordering::Relaxed)),
             extensions: AtomicU64::new(0),
             relaxations: AtomicU64::new(0),
+            attack_type: attack_type.to_string(),
+            action: action.to_string(),
             reason: reason.to_string(),
         });
         let mut current = bucket.until_ms.load(Ordering::Relaxed);
@@ -825,6 +902,7 @@ impl ResourceSentinel {
             bucket.extensions.fetch_add(1, Ordering::Relaxed);
             self.automated_defense_extensions
                 .fetch_add(1, Ordering::Relaxed);
+            self.note_defense_memory(&bucket.attack_type, &bucket.action, true);
         }
     }
 
@@ -846,6 +924,26 @@ impl ResourceSentinel {
             bucket.relaxations.fetch_add(1, Ordering::Relaxed);
             self.automated_defense_relaxations
                 .fetch_add(1, Ordering::Relaxed);
+            self.note_defense_memory(&bucket.attack_type, &bucket.action, false);
+        }
+    }
+
+    fn note_defense_memory(&self, attack_type: &str, action: &str, effective: bool) {
+        let now = now_millis();
+        let bucket = self
+            .defense_memory
+            .entry(attack_type.to_string())
+            .or_insert_with(|| DefenseMemoryBucket {
+                preferred_action: action.to_string(),
+                effective_score: AtomicU64::new(0),
+                ineffective_score: AtomicU64::new(0),
+                last_seen_ms: AtomicU64::new(now),
+            });
+        bucket.last_seen_ms.store(now, Ordering::Relaxed);
+        if effective {
+            bucket.effective_score.fetch_add(1, Ordering::Relaxed);
+        } else {
+            bucket.ineffective_score.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -928,6 +1026,14 @@ struct EventClusterParts {
     score_delta: u64,
 }
 
+#[derive(Debug, Clone)]
+struct DefenseActionPlan {
+    key: String,
+    action: &'static str,
+    reason: &'static str,
+    cooldown_ms: u64,
+}
+
 fn debt_keys(peer_ip: IpAddr) -> [String; 2] {
     [
         format!("ip:{peer_ip}"),
@@ -935,8 +1041,12 @@ fn debt_keys(peer_ip: IpAddr) -> [String; 2] {
     ]
 }
 
-fn cooldown_keys(peer_ip: IpAddr) -> [String; 2] {
-    debt_keys(peer_ip)
+fn cooldown_keys(peer_ip: IpAddr, transport: &str) -> [String; 3] {
+    [
+        format!("ip:{peer_ip}"),
+        format!("cluster:{}", cluster_key(peer_ip)),
+        format!("transport:{}:cluster:{}", transport, cluster_key(peer_ip)),
+    ]
 }
 
 fn cluster_key(peer_ip: IpAddr) -> String {
@@ -1017,6 +1127,32 @@ fn hot_cluster_cooldown_reason(attack_type: &str) -> &'static str {
         "l7_security_event" => "hot_l7_security_cluster",
         "l4_security_event" => "hot_l4_security_cluster",
         _ => "hot_attack_cluster",
+    }
+}
+
+fn tls_cluster_plan(peer_ip: IpAddr, attack_type: &str, mode: u8) -> DefenseActionPlan {
+    DefenseActionPlan {
+        key: format!("transport:tls:cluster:{}", cluster_key(peer_ip)),
+        action: "tls_pre_admission_cooldown",
+        reason: hot_cluster_cooldown_reason(attack_type),
+        cooldown_ms: hot_cluster_cooldown_ms(mode),
+    }
+}
+
+fn cluster_connection_plan(peer_ip: IpAddr, attack_type: &str, mode: u8) -> DefenseActionPlan {
+    DefenseActionPlan {
+        key: format!("cluster:{}", cluster_key(peer_ip)),
+        action: "cluster_connection_cooldown",
+        reason: hot_cluster_cooldown_reason(attack_type),
+        cooldown_ms: hot_cluster_cooldown_ms(mode),
+    }
+}
+
+fn hot_cluster_cooldown_ms(mode: u8) -> u64 {
+    if mode >= MODE_SURVIVAL {
+        SURVIVAL_CLUSTER_DEFENSE_COOLDOWN_MS
+    } else {
+        HOT_CLUSTER_DEFENSE_COOLDOWN_MS
     }
 }
 
@@ -1251,6 +1387,25 @@ mod tests {
     }
 
     #[test]
+    fn slow_tls_hot_cluster_uses_tls_scoped_admission_action() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+
+        let tcp_decision =
+            sentinel.admit_connection("203.0.113.200".parse().unwrap(), "tcp", 128, 0);
+        assert!(tcp_decision.allow);
+
+        let tls_decision =
+            sentinel.admit_connection("203.0.113.201".parse().unwrap(), "tls", 128, 0);
+        assert!(!tls_decision.allow);
+        assert!(tls_decision
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("hot_slow_tls_cluster"));
+    }
+
+    #[test]
     fn low_frequency_event_cluster_does_not_activate_cluster_cooldown() {
         let sentinel = ResourceSentinel::new();
         for index in 1..=2 {
@@ -1276,7 +1431,7 @@ mod tests {
     fn active_defense_extends_when_cooldown_is_still_rejecting_under_pressure() {
         let sentinel = ResourceSentinel::new();
         activate_hot_tls_cluster(&sentinel);
-        let key = "cluster:203.0.113.0/24";
+        let key = "transport:tls:cluster:203.0.113.0/24";
         let bucket = sentinel
             .cooldowns
             .get(key)
@@ -1305,10 +1460,46 @@ mod tests {
     }
 
     #[test]
+    fn effective_action_memory_is_reused_for_matching_attack_type() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        let key = "transport:tls:cluster:203.0.113.0/24";
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("hot TLS cluster should create scoped cooldown");
+        let eval_at = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_EVAL_INTERVAL_MS + 1);
+        drop(bucket);
+
+        sentinel
+            .attack_score
+            .store(SCORE_UNDER_ATTACK, Ordering::Relaxed);
+        sentinel
+            .pre_admission_rejections
+            .fetch_add(DEFENSE_EFFECT_REJECTION_DELTA, Ordering::Relaxed);
+        sentinel.evaluate_defense_effects(eval_at);
+
+        let event = SecurityEventRecord::now(
+            "L4",
+            "alert",
+            "tls handshake timed out before first request",
+            "203.0.113.99",
+            "192.0.2.10",
+            44321,
+            443,
+            "TCP",
+        );
+        let _ = sentinel.should_aggregate_security_event(&event);
+        assert!(sentinel.snapshot().automated_defense_memory_hits >= 1);
+    }
+
+    #[test]
     fn active_defense_relaxes_when_pressure_disappears() {
         let sentinel = ResourceSentinel::new();
         activate_hot_tls_cluster(&sentinel);
-        let key = "cluster:203.0.113.0/24";
+        let key = "transport:tls:cluster:203.0.113.0/24";
         let bucket = sentinel
             .cooldowns
             .get(key)

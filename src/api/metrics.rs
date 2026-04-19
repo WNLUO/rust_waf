@@ -123,6 +123,8 @@ pub(super) fn build_metrics_response(
             .automated_defense_extensions,
         resource_sentinel_automated_defense_relaxations: resource_sentinel
             .automated_defense_relaxations,
+        resource_sentinel_automated_defense_memory_hits: resource_sentinel
+            .automated_defense_memory_hits,
         resource_sentinel_top_attack_clusters: resource_sentinel.top_attack_clusters,
         storage_degraded_reasons,
         storage_attack_insights: StorageAttackInsightsResponse {

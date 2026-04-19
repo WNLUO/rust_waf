@@ -194,15 +194,36 @@ impl WafEngine {
                 l7_improved,
                 identity_improved,
             );
+            let outcome_status = effect.outcome_status.as_deref().unwrap_or("warming");
+            let harmful_feedback = matches!(outcome_status, "harmful")
+                || effect.suspected_false_positive_events >= 3
+                || (effect.post_policy_observations >= 5
+                    && effect.post_policy_upstream_errors.saturating_mul(2)
+                        >= effect.post_policy_observations);
+            let effective_feedback = outcome_status == "effective"
+                || (effect.post_policy_observations >= 5 && effect.outcome_score >= 12);
 
             let should_revoke = ai_config.auto_apply_temp_policies
-                && age_secs >= ai_config.auto_revoke_warmup_secs as i64
-                && governance_mode == "cold"
+                && (harmful_feedback
+                    || (age_secs >= ai_config.auto_revoke_warmup_secs as i64
+                        && governance_mode == "cold"))
                 && !effect.auto_revoked;
             if should_revoke {
                 effect.auto_revoked = true;
-                effect.auto_revoke_reason =
-                    Some(format!("{}_after_warmup", policy.action.replace(':', "_")));
+                effect.auto_revoke_reason = Some(if harmful_feedback {
+                    format!(
+                        "harmful_effect_feedback: outcome={}, false_positive_events={}, upstream_errors={}, observations={}",
+                        outcome_status,
+                        effect.suspected_false_positive_events,
+                        effect.post_policy_upstream_errors,
+                        effect.post_policy_observations
+                    )
+                } else {
+                    format!("{}_after_warmup", policy.action.replace(':', "_"))
+                });
+                if harmful_feedback {
+                    effect.outcome_status = Some("harmful".to_string());
+                }
                 let _ = store
                     .revoke_ai_temp_policy_with_effect(policy.id, &effect, now)
                     .await?;
@@ -211,7 +232,7 @@ impl WafEngine {
 
             let should_extend = ai_config.allow_auto_extend_effective_policies
                 && ttl_remaining <= 300
-                && governance_mode == "effective"
+                && (governance_mode == "effective" || effective_feedback)
                 && effect.auto_extensions < 2;
             if should_extend {
                 effect.auto_extensions += 1;

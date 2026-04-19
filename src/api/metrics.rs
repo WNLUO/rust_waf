@@ -1,6 +1,6 @@
 use super::types::{
-    MetricsResponse, StorageAttackHotspotResponse, StorageAttackInsightsResponse,
-    SystemMetricsResponse,
+    AiTempPolicyMetricsResponse, MetricsResponse, StorageAttackHotspotResponse,
+    StorageAttackInsightsResponse, SystemMetricsResponse,
 };
 use crate::core::RuntimePressureSnapshot;
 use std::sync::{Mutex, OnceLock};
@@ -15,6 +15,8 @@ pub(super) fn build_metrics_response(
     l4_behavior: Option<crate::l4::behavior::L4BehaviorOverview>,
     runtime_pressure: RuntimePressureSnapshot,
     resource_sentinel: crate::core::ResourceSentinelSnapshot,
+    ai_temp_policies: &[crate::storage::AiTempPolicyEntry],
+    max_active_temp_policy_count: u32,
 ) -> MetricsResponse {
     let snapshot = metrics.unwrap_or_default();
     let sqlite_enabled = storage_summary.is_some();
@@ -139,6 +141,10 @@ pub(super) fn build_metrics_response(
         resource_sentinel_attack_diagnosis: resource_sentinel.attack_diagnosis,
         resource_sentinel_attack_lifecycle: resource_sentinel.attack_lifecycle,
         resource_sentinel_attack_session: resource_sentinel.attack_session,
+        ai_temp_policies: build_ai_temp_policy_metrics(
+            ai_temp_policies,
+            max_active_temp_policy_count,
+        ),
         storage_degraded_reasons,
         storage_attack_insights: StorageAttackInsightsResponse {
             active_bucket_count: aggregation_insights.active_bucket_count,
@@ -160,6 +166,44 @@ pub(super) fn build_metrics_response(
         },
         system: sample_system_metrics(),
     }
+}
+
+fn build_ai_temp_policy_metrics(
+    policies: &[crate::storage::AiTempPolicyEntry],
+    max_active_count: u32,
+) -> AiTempPolicyMetricsResponse {
+    let mut response = AiTempPolicyMetricsResponse {
+        active_count: policies.len() as u32,
+        max_active_count,
+        ..AiTempPolicyMetricsResponse::default()
+    };
+
+    for policy in policies {
+        if policy.auto_applied {
+            response.auto_applied_count = response.auto_applied_count.saturating_add(1);
+        }
+        let effect =
+            serde_json::from_str::<crate::storage::AiTempPolicyEffectStats>(&policy.effect_json)
+                .unwrap_or_default();
+        response.total_hits = response.total_hits.saturating_add(effect.total_hits);
+        response.total_observations = response
+            .total_observations
+            .saturating_add(effect.post_policy_observations);
+        response.auto_extensions = response
+            .auto_extensions
+            .saturating_add(effect.auto_extensions);
+        if effect.auto_revoked {
+            response.auto_revoked_count = response.auto_revoked_count.saturating_add(1);
+        }
+        match effect.outcome_status.as_deref().unwrap_or("warming") {
+            "effective" => response.effective_count = response.effective_count.saturating_add(1),
+            "harmful" => response.harmful_count = response.harmful_count.saturating_add(1),
+            "neutral" => response.neutral_count = response.neutral_count.saturating_add(1),
+            _ => response.warming_count = response.warming_count.saturating_add(1),
+        }
+    }
+
+    response
 }
 
 struct SystemMetricsSampler {

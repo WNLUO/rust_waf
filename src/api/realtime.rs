@@ -319,6 +319,12 @@ fn collect_metrics(
     context: &WafContext,
     storage_summary: Option<StorageMetricsSummary>,
 ) -> MetricsResponse {
+    let ai_temp_policies = context.active_ai_temp_policies();
+    let max_active_temp_policy_count = context
+        .config_snapshot()
+        .integrations
+        .ai_audit
+        .max_active_temp_policies;
     build_metrics_response(
         context.metrics_snapshot(),
         context.active_rule_count(),
@@ -332,6 +338,8 @@ fn collect_metrics(
             .map(|inspector| inspector.get_statistics().behavior.overview),
         context.runtime_pressure_snapshot(),
         context.resource_sentinel_snapshot(),
+        &ai_temp_policies,
+        max_active_temp_policy_count,
     )
 }
 

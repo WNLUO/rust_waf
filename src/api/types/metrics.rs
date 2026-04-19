@@ -101,9 +101,25 @@ pub struct MetricsResponse {
     pub(crate) resource_sentinel_attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis,
     pub(crate) resource_sentinel_attack_lifecycle: crate::core::ResourceSentinelAttackLifecycle,
     pub(crate) resource_sentinel_attack_session: crate::core::ResourceSentinelAttackSession,
+    pub(crate) ai_temp_policies: AiTempPolicyMetricsResponse,
     pub(crate) storage_degraded_reasons: Vec<String>,
     pub(crate) storage_attack_insights: StorageAttackInsightsResponse,
     pub(crate) system: SystemMetricsResponse,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct AiTempPolicyMetricsResponse {
+    pub(crate) active_count: u32,
+    pub(crate) max_active_count: u32,
+    pub(crate) auto_applied_count: u32,
+    pub(crate) effective_count: u32,
+    pub(crate) warming_count: u32,
+    pub(crate) neutral_count: u32,
+    pub(crate) harmful_count: u32,
+    pub(crate) total_hits: i64,
+    pub(crate) total_observations: i64,
+    pub(crate) auto_extensions: i64,
+    pub(crate) auto_revoked_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

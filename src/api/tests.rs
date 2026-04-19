@@ -44,6 +44,11 @@ fn test_build_metrics_response_without_sources() {
             prefer_drop: false,
         },
         crate::core::ResourceSentinelSnapshot::default(),
+        &[],
+        crate::config::Config::default()
+            .integrations
+            .ai_audit
+            .max_active_temp_policies,
     );
 
     assert_eq!(response.total_packets, 0);
@@ -65,6 +70,8 @@ fn test_build_metrics_response_without_sources() {
     assert_eq!(response.runtime_pressure_storage_queue_percent, 0);
     assert!(response.storage_degraded_reasons.is_empty());
     assert_eq!(response.storage_attack_insights.active_bucket_count, 0);
+    assert_eq!(response.ai_temp_policies.active_count, 0);
+    assert_eq!(response.ai_temp_policies.effective_count, 0);
 }
 
 #[test]
@@ -295,6 +302,71 @@ fn test_build_metrics_response_with_sources() {
                     .to_string(),
             },
         },
+        &[
+            crate::storage::AiTempPolicyEntry {
+                id: 1,
+                created_at: 100,
+                updated_at: 120,
+                expires_at: 900,
+                status: "active".to_string(),
+                source_report_id: None,
+                policy_key: "policy-effective".to_string(),
+                title: "effective policy".to_string(),
+                policy_type: "tighten_route_cc".to_string(),
+                layer: "L7".to_string(),
+                scope_type: "route".to_string(),
+                scope_value: "/api/login".to_string(),
+                action: "tighten_route_cc".to_string(),
+                operator: "exact".to_string(),
+                suggested_value: "45".to_string(),
+                rationale: "test".to_string(),
+                confidence: 90,
+                auto_applied: true,
+                hit_count: 8,
+                last_hit_at: Some(130),
+                effect_json: serde_json::to_string(&crate::storage::AiTempPolicyEffectStats {
+                    total_hits: 8,
+                    post_policy_observations: 6,
+                    auto_extensions: 1,
+                    outcome_status: Some("effective".to_string()),
+                    outcome_score: 24,
+                    ..crate::storage::AiTempPolicyEffectStats::default()
+                })
+                .unwrap(),
+            },
+            crate::storage::AiTempPolicyEntry {
+                id: 2,
+                created_at: 110,
+                updated_at: 140,
+                expires_at: 910,
+                status: "active".to_string(),
+                source_report_id: None,
+                policy_key: "policy-harmful".to_string(),
+                title: "harmful policy".to_string(),
+                policy_type: "increase_challenge".to_string(),
+                layer: "L7".to_string(),
+                scope_type: "identity".to_string(),
+                scope_value: "ipua:203.0.113.1|bot".to_string(),
+                action: "increase_challenge".to_string(),
+                operator: "exact".to_string(),
+                suggested_value: "true".to_string(),
+                rationale: "test".to_string(),
+                confidence: 85,
+                auto_applied: true,
+                hit_count: 3,
+                last_hit_at: Some(145),
+                effect_json: serde_json::to_string(&crate::storage::AiTempPolicyEffectStats {
+                    total_hits: 3,
+                    post_policy_observations: 5,
+                    auto_revoked: true,
+                    outcome_status: Some("harmful".to_string()),
+                    outcome_score: -30,
+                    ..crate::storage::AiTempPolicyEffectStats::default()
+                })
+                .unwrap(),
+            },
+        ],
+        16,
     );
 
     assert_eq!(response.total_packets, 12);
@@ -432,6 +504,15 @@ fn test_build_metrics_response_with_sources() {
         response.storage_attack_insights.hotspot_sources[0].source_ip,
         "203.0.113.8"
     );
+    assert_eq!(response.ai_temp_policies.active_count, 2);
+    assert_eq!(response.ai_temp_policies.max_active_count, 16);
+    assert_eq!(response.ai_temp_policies.auto_applied_count, 2);
+    assert_eq!(response.ai_temp_policies.effective_count, 1);
+    assert_eq!(response.ai_temp_policies.harmful_count, 1);
+    assert_eq!(response.ai_temp_policies.total_hits, 11);
+    assert_eq!(response.ai_temp_policies.total_observations, 11);
+    assert_eq!(response.ai_temp_policies.auto_extensions, 1);
+    assert_eq!(response.ai_temp_policies.auto_revoked_count, 1);
 }
 
 #[test]

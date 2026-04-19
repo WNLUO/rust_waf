@@ -341,6 +341,16 @@ async fn handle_http3_request(
         }
         enforce_and_record_l7_block_feedback(context.as_ref(), &packet, &unified, &result);
         if result_should_drop_http3(&result, &unified) {
+            context.note_ai_route_result(
+                &unified,
+                AiRouteResultObservation {
+                    status_code: 499,
+                    latency_ms: None,
+                    upstream_error: false,
+                    local_response: true,
+                    blocked: true,
+                },
+            );
             return Ok(());
         }
         if let Some(response) = result.custom_response.as_ref() {
@@ -478,6 +488,16 @@ async fn handle_http3_request(
                 response.tarpit.as_ref(),
             )
             .await?;
+            context.note_ai_route_result(
+                &unified,
+                AiRouteResultObservation {
+                    status_code: response.status_code,
+                    latency_ms: None,
+                    upstream_error: false,
+                    local_response: true,
+                    blocked: response.status_code >= 400,
+                },
+            );
         }
         return Ok(());
     }

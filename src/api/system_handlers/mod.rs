@@ -82,6 +82,13 @@ pub(super) async fn metrics_handler(State(state): State<ApiState>) -> Json<Metri
         .sqlite_store
         .as_ref()
         .map(|store| store.aggregation_insight_summary());
+    let ai_temp_policies = state.context.active_ai_temp_policies();
+    let max_active_temp_policy_count = state
+        .context
+        .config_snapshot()
+        .integrations
+        .ai_audit
+        .max_active_temp_policies;
 
     Json(build_metrics_response(
         metrics,
@@ -94,6 +101,8 @@ pub(super) async fn metrics_handler(State(state): State<ApiState>) -> Json<Metri
             .map(|inspector| inspector.get_statistics().behavior.overview),
         state.context.runtime_pressure_snapshot(),
         state.context.resource_sentinel_snapshot(),
+        &ai_temp_policies,
+        max_active_temp_policy_count,
     ))
 }
 

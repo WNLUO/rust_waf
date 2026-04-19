@@ -534,6 +534,16 @@ pub(crate) async fn handle_http2_connection(
                         }
                         enforce_and_record_l7_block_feedback(context.as_ref(), &packet, &request, &result);
                         if result_should_drop_http2(&result, &request) {
+                            context.note_ai_route_result(
+                                &request,
+                                AiRouteResultObservation {
+                                    status_code: 499,
+                                    latency_ms: None,
+                                    upstream_error: false,
+                                    local_response: true,
+                                    blocked: true,
+                                },
+                            );
                             return Err(drop_http2_result(&result.reason));
                         }
                         if let Some(response) = result.custom_response.as_ref() {
@@ -544,6 +554,16 @@ pub(crate) async fn handle_http2_connection(
                                 context.as_ref(),
                                 &mut headers,
                                 response.status_code,
+                            );
+                            context.note_ai_route_result(
+                                &request,
+                                AiRouteResultObservation {
+                                    status_code: response.status_code,
+                                    latency_ms: None,
+                                    upstream_error: false,
+                                    local_response: true,
+                                    blocked: response.status_code >= 400,
+                                },
                             );
                             return Ok(Http2Response {
                                 status_code: response.status_code,

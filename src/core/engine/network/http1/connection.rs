@@ -415,7 +415,7 @@ pub(crate) async fn handle_http1_connection(
                 return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
-                let status_code = write_custom_http1_response(
+                write_custom_http1_response(
                     context.as_ref(),
                     &http1_handler,
                     &mut stream,
@@ -453,6 +453,16 @@ pub(crate) async fn handle_http1_connection(
             }
             enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
+                context.note_ai_route_result(
+                    &request,
+                    AiRouteResultObservation {
+                        status_code: 499,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: true,
+                    },
+                );
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
@@ -558,11 +568,21 @@ pub(crate) async fn handle_http1_connection(
             }
             enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
             if result_should_drop_http1(&result, &request) {
+                context.note_ai_route_result(
+                    &request,
+                    AiRouteResultObservation {
+                        status_code: 499,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: true,
+                    },
+                );
                 let _ = stream.shutdown().await;
                 return Ok(());
             }
             if let Some(response) = result.custom_response.as_ref() {
-                write_custom_http1_response(
+                let status_code = write_custom_http1_response(
                     context.as_ref(),
                     &http1_handler,
                     &mut stream,

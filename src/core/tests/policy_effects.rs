@@ -154,7 +154,9 @@ async fn test_ai_temp_policy_local_block_records_outcome_feedback() {
         .expect("local block policy should match");
     assert!(result.blocked);
     assert_eq!(
-        request.get_metadata("ai.policy.matched_count").map(String::as_str),
+        request
+            .get_metadata("ai.policy.matched_count")
+            .map(String::as_str),
         Some("1")
     );
 
@@ -179,9 +181,6 @@ async fn test_ai_temp_policy_local_block_records_outcome_feedback() {
             .unwrap();
     assert_eq!(effect.total_hits, 1);
     assert_eq!(effect.post_policy_observations, 1);
-    assert_eq!(
-        effect.post_policy_status_codes.get("499").copied(),
-        Some(1)
-    );
+    assert_eq!(effect.post_policy_status_codes.get("499").copied(), Some(1));
     assert_eq!(effect.outcome_status.as_deref(), Some("warming"));
 }

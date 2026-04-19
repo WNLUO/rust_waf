@@ -172,6 +172,34 @@ pub(crate) async fn handle_http2_connection(
                         }
                     }
 
+                    if let Some(result) = evaluate_early_defense(&mut request) {
+                        if result.should_persist_event() {
+                            persist_http_inspection_event(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                        }
+                        enforce_and_record_l7_block_feedback(
+                            context.as_ref(),
+                            &packet,
+                            &request,
+                            &result,
+                        );
+                        context.note_ai_route_result(
+                            &request,
+                            AiRouteResultObservation {
+                                status_code: 499,
+                                latency_ms: None,
+                                upstream_error: false,
+                                local_response: true,
+                                blocked: true,
+                            },
+                        );
+                        return Err(drop_http2_result(&result.reason));
+                    }
+
                     if let Some(result) = inspect_blocked_client_ip(context.as_ref(), &request).await
                     {
                         persist_http_inspection_event(

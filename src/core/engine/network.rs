@@ -2,6 +2,7 @@ use super::*;
 
 mod accept;
 mod detect;
+mod early_defense;
 mod helpers;
 mod http1;
 mod http2;
@@ -10,6 +11,7 @@ mod udp;
 
 pub(super) use self::accept::{handle_connection, handle_tls_connection};
 pub(super) use self::detect::{detect_and_handle_protocol, parse_proxy_protocol_stream};
+pub(crate) use self::early_defense::evaluate_early_defense;
 pub(crate) use self::helpers::{
     maybe_delay_policy, maybe_delay_request, next_connection_id, peer_is_configured_trusted_proxy,
     proxy_metric_labels, proxy_traffic_kind, record_l7_behavior_metrics, record_l7_cc_metrics,

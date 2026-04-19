@@ -165,7 +165,7 @@
 
 ### 阶段 2：新增统一早期防御决策层
 
-状态：待开始
+状态：已完成
 
 目标：
 
@@ -205,11 +205,11 @@ struct EarlyDefenseDecision {
 
 | 编号 | 修改 |
 |---:|---|
-| 2.1 | L4 policy 输出更明确的 L7 hint |
-| 2.2 | 在 HTTP 主流程中增加 `evaluate_early_defense()` |
-| 2.3 | 高压下对明显热点路径直接 drop 或轻量 429 |
-| 2.4 | 将早期决策结果写入 metadata，供 L7 CC 和日志使用 |
-| 2.5 | 保证 HTTP/1、HTTP/2、HTTP/3 行为一致 |
+| 2.1 | 已通过早期防御层读取 L4 risk、L4 overload、runtime depth、CPU score，并输出 L7 阈值收紧 hint |
+| 2.2 | 已在 HTTP/1、HTTP/2、HTTP/3 主流程中增加 `evaluate_early_defense()` |
+| 2.3 | 已支持高压下对高风险 L4 bucket、未解析 CDN 身份、伪造转发头等情况提前 drop |
+| 2.4 | 已将早期决策结果写入 metadata，供 L7 CC、日志和事件使用 |
+| 2.5 | 已覆盖 HTTP/1、HTTP/2、HTTP/3 三个入口 |
 
 验证方式：
 
@@ -220,6 +220,23 @@ struct EarlyDefenseDecision {
 | 压测检查 | 常规 CDN CC 下 CPU 峰值应降低或更快进入保护 |
 
 完成后必须更新本文档。
+
+阶段结果：
+
+| 项目 | 内容 |
+|---|---|
+| 完成日期 | 2026-04-19 |
+| 完成状态 | 已完成 |
+| 改动文件 | `src/core/engine/network/early_defense.rs`、`src/core/engine/network.rs`、`src/core/engine/network/http1/connection.rs`、`src/core/engine/network/http2/connection.rs`、`src/core/engine/network/http3/connection.rs`、`L4_L7_CDN_AI_OPTIMIZATION_PLAN.md` |
+| 新增能力 | 在 L4 请求策略之后、黑名单和复杂 L7 逻辑之前，统一执行早期防御决策 |
+| 早期 drop 条件 | 高 CPU 压力下的 L4 高风险 bucket、生存模式下未解析 CDN 身份、生存模式下 L4 请求预算软拒绝、压力下伪造转发头 |
+| 轻量 L7 条件 | L4 suspicious/high 但未达到 drop 条件时，自动收紧 L7 CC 的 route/host 阈值 |
+| 新增 metadata | `early_defense.action`、`early_defense.reason`、`ai.cc.route_threshold_scale_percent`、`ai.cc.host_threshold_scale_percent` |
+| 行为一致性 | HTTP/1 直接关闭连接，HTTP/2 reset 请求路径，HTTP/3 结束请求处理；三者都会记录事件、L7 反馈和 AI route 结果 |
+| 已验证 | `cargo fmt --check`、`cargo test early_defense -- --nocapture`、`cargo test drop_decision -- --nocapture`、`cargo check` |
+| 验证结果 | 通过 |
+| 阶段说明 | 本阶段先建立统一早期决策框架和保守 drop 条件；更细的 CC 轻量计数模式留到阶段 3 |
+| 是否等待确认 | 是，等待用户确认是否进入阶段 3 |
 
 ---
 
@@ -427,8 +444,8 @@ struct EarlyDefenseDecision {
 | 阶段 | 状态 | 说明 |
 |---|---|---|
 | 阶段 0 | 已完成文档初版 | 用户已确认进入阶段 1 |
-| 阶段 1 | 已完成 | CPU 压力感知已接入运行时压力模型，等待用户确认是否进入阶段 2 |
-| 阶段 2 | 未开始 | 统一早期防御决策 |
+| 阶段 1 | 已完成 | CPU 压力感知已接入运行时压力模型 |
+| 阶段 2 | 已完成 | 统一早期防御决策已接入 HTTP/1、HTTP/2、HTTP/3，等待用户确认是否进入阶段 3 |
 | 阶段 3 | 未开始 | L7 CC 轻量快速通道 |
 | 阶段 4 | 未开始 | L4/L7 CDN 双身份联动 |
 | 阶段 5 | 未开始 | 事件日志与持久化降级 |

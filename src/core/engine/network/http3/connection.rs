@@ -178,6 +178,24 @@ async fn handle_http3_request(
         maybe_delay_request(&unified).await;
     }
 
+    if let Some(result) = evaluate_early_defense(&mut unified) {
+        if result.should_persist_event() {
+            persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+        }
+        enforce_and_record_l7_block_feedback(context.as_ref(), &packet, &unified, &result);
+        context.note_ai_route_result(
+            &unified,
+            AiRouteResultObservation {
+                status_code: 499,
+                latency_ms: None,
+                upstream_error: false,
+                local_response: true,
+                blocked: true,
+            },
+        );
+        return Ok(());
+    }
+
     if let Some(result) = inspect_blocked_client_ip(context.as_ref(), &unified).await {
         persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
         record_l7_block_feedback(context.as_ref(), &packet, &unified, &result);

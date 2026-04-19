@@ -24,6 +24,9 @@ const UNDER_ATTACK_NEW_CLUSTER_BUDGET: u64 = 64;
 const SURVIVAL_NEW_CLUSTER_BUDGET: u64 = 16;
 const IP_COOLDOWN_MS: u64 = 30_000;
 const CLUSTER_COOLDOWN_MS: u64 = 10_000;
+const HOT_EVENT_CLUSTER_COUNT: u64 = 32;
+const HOT_EVENT_CLUSTER_SCORE: u64 = 120;
+const HOT_EVENT_SAMPLE_INTERVAL: u64 = 16;
 
 #[derive(Debug)]
 pub(crate) struct ResourceSentinel {
@@ -252,14 +255,43 @@ impl ResourceSentinel {
         false
     }
 
-    pub(crate) fn note_aggregated_event(&self) {
-        self.aggregated_events.fetch_add(1, Ordering::Relaxed);
-        self.note_signal(1);
+    pub(crate) fn should_aggregate_security_event(&self, event: &SecurityEventRecord) -> bool {
+        let global_pressure = self.should_aggregate_event(&event.action);
+        let Some(peer_ip) = parse_event_ip(event) else {
+            return global_pressure;
+        };
+
+        let observed = self.record_event_cluster_observed(peer_ip, event);
+        let keep_sample = observed.count == 1 || observed.count % HOT_EVENT_SAMPLE_INTERVAL == 0;
+        if keep_sample {
+            return false;
+        }
+
+        let low_value_action = is_low_value_persistence_action(&event.action);
+        if global_pressure {
+            return low_value_action || self.current_mode() >= MODE_SURVIVAL;
+        }
+
+        low_value_action
+            && (observed.count >= HOT_EVENT_CLUSTER_COUNT
+                || observed.score >= HOT_EVENT_CLUSTER_SCORE)
     }
 
-    pub(crate) fn note_aggregated_event_for_source(&self, peer_ip: IpAddr, reason: &str) {
+    pub(crate) fn note_security_event_aggregated(&self, event: &SecurityEventRecord) {
         self.aggregated_events.fetch_add(1, Ordering::Relaxed);
-        self.record_cluster_aggregated(peer_ip, "event_aggregation", "storage", reason, 1);
+        if let Some(peer_ip) = parse_event_ip(event) {
+            let parts = event_cluster_parts(event);
+            self.record_cluster_aggregated(
+                peer_ip,
+                parts.attack_type,
+                parts.transport,
+                parts.reason,
+                1,
+            );
+        } else {
+            self.note_signal(1);
+            return;
+        }
         self.note_signal(1);
     }
 
@@ -454,6 +486,20 @@ impl ResourceSentinel {
         bucket.count.fetch_add(1, Ordering::Relaxed);
         bucket.score.fetch_add(score_delta, Ordering::Relaxed);
         bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+    }
+
+    fn record_event_cluster_observed(
+        &self,
+        peer_ip: IpAddr,
+        event: &SecurityEventRecord,
+    ) -> EventClusterObservation {
+        let parts = event_cluster_parts(event);
+        let bucket = self.cluster_bucket(peer_ip, parts.attack_type, parts.transport, parts.reason);
+        let count = bucket.count.fetch_add(1, Ordering::Relaxed) + 1;
+        let score =
+            bucket.score.fetch_add(parts.score_delta, Ordering::Relaxed) + parts.score_delta;
+        bucket.last_seen_ms.store(now_millis(), Ordering::Relaxed);
+        EventClusterObservation { count, score }
     }
 
     fn record_cluster_admitted(
@@ -664,18 +710,31 @@ impl WafContext {
         event: SecurityEventRecord,
         trigger: &'static str,
     ) {
-        if self.resource_sentinel.should_aggregate_event(&event.action) {
-            if let Ok(ip) = event.source_ip.parse::<IpAddr>() {
-                self.resource_sentinel
-                    .note_aggregated_event_for_source(ip, trigger);
-            } else {
-                self.resource_sentinel.note_aggregated_event();
-            }
+        if self
+            .resource_sentinel
+            .should_aggregate_security_event(&event)
+        {
+            self.resource_sentinel
+                .note_security_event_aggregated(&event);
             store.enqueue_security_event_aggregated(event, trigger);
         } else {
             store.enqueue_security_event(event);
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EventClusterObservation {
+    count: u64,
+    score: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EventClusterParts {
+    attack_type: &'static str,
+    transport: &'static str,
+    reason: &'static str,
+    score_delta: u64,
 }
 
 fn debt_keys(peer_ip: IpAddr) -> [String; 2] {
@@ -732,6 +791,68 @@ fn now_millis() -> u64 {
 
 fn window_start(now_ms: u64) -> u64 {
     now_ms / NEW_CLUSTER_BUDGET_WINDOW_MS * NEW_CLUSTER_BUDGET_WINDOW_MS
+}
+
+fn parse_event_ip(event: &SecurityEventRecord) -> Option<IpAddr> {
+    event.source_ip.parse::<IpAddr>().ok()
+}
+
+fn is_low_value_persistence_action(action: &str) -> bool {
+    matches!(action, "log" | "alert" | "respond" | "allow" | "block")
+}
+
+fn event_cluster_parts(event: &SecurityEventRecord) -> EventClusterParts {
+    let reason = event.reason.to_ascii_lowercase();
+    let protocol = event.protocol.to_ascii_lowercase();
+    let transport = if protocol.contains("udp") || protocol.contains("quic") {
+        "udp"
+    } else if protocol.contains("tls") || reason.contains("tls") {
+        "tls"
+    } else if event.layer == "L7" {
+        "http"
+    } else {
+        "tcp"
+    };
+
+    let (attack_type, reason_family, base_score) =
+        if reason.contains("tls") && (reason.contains("timeout") || reason.contains("timed out")) {
+            ("slow_tls_handshake", "timeout", 10)
+        } else if reason.contains("tls") && reason.contains("handshake") {
+            ("tls_handshake_failure", "handshake_error", 4)
+        } else if reason.contains("no request")
+            || reason.contains("no_request")
+            || reason.contains("idle")
+            || reason.contains("slow attack")
+        {
+            ("idle_no_request", "no_request_timeout", 8)
+        } else if reason.contains("rate limit")
+            || reason.contains("admission")
+            || reason.contains("connection budget")
+            || reason.contains("bucket")
+        {
+            ("l4_admission_reject", "connection_budget", 8)
+        } else if event.provider.as_deref() == Some("safeline") {
+            ("provider_intercept", "safeline", 6)
+        } else if event.layer == "L7" {
+            ("l7_security_event", "policy_match", 3)
+        } else {
+            ("l4_security_event", "policy_match", 3)
+        };
+
+    let action_score = match event.action.as_str() {
+        "drop" => 8,
+        "block" => 6,
+        "respond" => 4,
+        "alert" => 2,
+        _ => 1,
+    };
+
+    EventClusterParts {
+        attack_type,
+        transport,
+        reason: reason_family,
+        score_delta: base_score + action_score,
+    }
 }
 
 #[cfg(test)]
@@ -842,5 +963,44 @@ mod tests {
             .unwrap_or_default()
             .contains("cooldown"));
         assert!(sentinel.snapshot().active_cooldowns >= 1);
+    }
+
+    #[test]
+    fn hot_security_event_clusters_are_aggregated_but_keep_samples() {
+        let sentinel = ResourceSentinel::new();
+        let event = SecurityEventRecord::now(
+            "L4",
+            "alert",
+            "tls handshake timed out before first request",
+            "203.0.113.77",
+            "192.0.2.10",
+            44321,
+            443,
+            "TCP",
+        );
+
+        assert!(!sentinel.should_aggregate_security_event(&event));
+        let mut aggregated = 0u64;
+        let mut sampled = 1u64;
+        for _ in 0..48 {
+            if sentinel.should_aggregate_security_event(&event) {
+                sentinel.note_security_event_aggregated(&event);
+                aggregated += 1;
+            } else {
+                sampled += 1;
+            }
+        }
+
+        assert!(aggregated > 0);
+        assert!(sampled > 1);
+        let snapshot = sentinel.snapshot();
+        let cluster = snapshot
+            .top_attack_clusters
+            .iter()
+            .find(|cluster| cluster.attack_type == "slow_tls_handshake")
+            .expect("hot TLS event cluster should be tracked");
+        assert_eq!(cluster.cluster, "203.0.113.0/24");
+        assert!(cluster.count >= HOT_EVENT_CLUSTER_COUNT);
+        assert!(cluster.aggregated > 0);
     }
 }

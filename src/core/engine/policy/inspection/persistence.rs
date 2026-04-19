@@ -77,7 +77,9 @@ pub(crate) fn persist_http_inspection_event(
     event.http_version = Some(request.version.to_string());
 
     if should_aggregate_runtime_event(request, result) {
-        context.resource_sentinel.note_aggregated_event();
+        context
+            .resource_sentinel
+            .note_security_event_aggregated(&event);
         store.enqueue_security_event_aggregated(event, "runtime_budget");
     } else {
         event.details_json = build_request_identity_details(context, request, packet, Some(result));
@@ -186,7 +188,9 @@ pub(crate) fn persist_safeline_intercept_event(
         .unwrap_or(false)
         || context.runtime_pressure_snapshot().trim_event_persistence
     {
-        context.resource_sentinel.note_aggregated_event();
+        context
+            .resource_sentinel
+            .note_security_event_aggregated(&event);
         store.enqueue_security_event_aggregated(event, "runtime_budget_safeline");
     } else {
         event.details_json = build_request_identity_details(context, request, packet, None);

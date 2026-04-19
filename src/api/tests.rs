@@ -203,6 +203,26 @@ fn test_build_metrics_response_with_sources() {
                 phase_since_ms: 0,
                 transitioned: true,
             },
+            attack_session: crate::core::ResourceSentinelAttackSession {
+                session_id: 42,
+                phase: "started".to_string(),
+                started_at_ms: 1,
+                ended_at_ms: None,
+                duration_ms: 1234,
+                peak_severity: "high".to_string(),
+                peak_attack_score: 88,
+                primary_pressure: "tls_handshake_resource".to_string(),
+                top_clusters: vec![],
+                defense_actions: 4,
+                defense_extensions: 2,
+                defense_relaxations: 1,
+                audit_event_count: 1,
+                pre_admission_rejections: 7,
+                aggregated_events: 9,
+                final_outcome: "active".to_string(),
+                summary: "攻击会话 #42 持续 1234ms，峰值等级 high，主压力 tls_handshake_resource。"
+                    .to_string(),
+            },
         },
     );
 
@@ -273,6 +293,11 @@ fn test_build_metrics_response_with_sources() {
         "keep_current_automation_and_watch_decay"
     );
     assert_eq!(response.resource_sentinel_attack_lifecycle.phase, "started");
+    assert_eq!(response.resource_sentinel_attack_session.session_id, 42);
+    assert_eq!(
+        response.resource_sentinel_attack_session.primary_pressure,
+        "tls_handshake_resource"
+    );
     assert_eq!(response.resource_sentinel_tracked_attack_clusters, 1);
     assert_eq!(response.resource_sentinel_active_cooldowns, 1);
     assert_eq!(

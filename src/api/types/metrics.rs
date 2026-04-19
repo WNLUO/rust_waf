@@ -85,6 +85,7 @@ pub struct MetricsResponse {
         Vec<crate::core::ResourceSentinelClusterSnapshot>,
     pub(crate) resource_sentinel_attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis,
     pub(crate) resource_sentinel_attack_lifecycle: crate::core::ResourceSentinelAttackLifecycle,
+    pub(crate) resource_sentinel_attack_session: crate::core::ResourceSentinelAttackSession,
     pub(crate) storage_degraded_reasons: Vec<String>,
     pub(crate) storage_attack_insights: StorageAttackInsightsResponse,
     pub(crate) system: SystemMetricsResponse,

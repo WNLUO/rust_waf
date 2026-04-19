@@ -71,6 +71,16 @@ pub(crate) struct ResourceSentinel {
     last_attack_audit_signature: AtomicU64,
     attack_phase: AtomicU8,
     attack_phase_since_ms: AtomicU64,
+    attack_session_id: AtomicU64,
+    attack_session_started_ms: AtomicU64,
+    attack_session_ended_ms: AtomicU64,
+    attack_session_peak_score: AtomicU64,
+    attack_session_start_rejections: AtomicU64,
+    attack_session_start_aggregated_events: AtomicU64,
+    attack_session_start_defense_actions: AtomicU64,
+    attack_session_start_defense_extensions: AtomicU64,
+    attack_session_start_defense_relaxations: AtomicU64,
+    attack_session_start_audit_events: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -136,6 +146,7 @@ pub struct ResourceSentinelSnapshot {
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
     pub attack_diagnosis: ResourceSentinelAttackDiagnosis,
     pub attack_lifecycle: ResourceSentinelAttackLifecycle,
+    pub attack_session: ResourceSentinelAttackSession,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -173,6 +184,27 @@ pub struct ResourceSentinelAttackLifecycle {
     pub transitioned: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelAttackSession {
+    pub session_id: u64,
+    pub phase: String,
+    pub started_at_ms: u64,
+    pub ended_at_ms: Option<u64>,
+    pub duration_ms: u64,
+    pub peak_severity: String,
+    pub peak_attack_score: u64,
+    pub primary_pressure: String,
+    pub top_clusters: Vec<ResourceSentinelClusterSnapshot>,
+    pub defense_actions: u64,
+    pub defense_extensions: u64,
+    pub defense_relaxations: u64,
+    pub audit_event_count: u64,
+    pub pre_admission_rejections: u64,
+    pub aggregated_events: u64,
+    pub final_outcome: String,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct AdmissionDecision {
     pub allow: bool,
@@ -204,6 +236,16 @@ impl ResourceSentinel {
             last_attack_audit_signature: AtomicU64::new(0),
             attack_phase: AtomicU8::new(ATTACK_PHASE_NORMAL),
             attack_phase_since_ms: AtomicU64::new(now),
+            attack_session_id: AtomicU64::new(0),
+            attack_session_started_ms: AtomicU64::new(0),
+            attack_session_ended_ms: AtomicU64::new(0),
+            attack_session_peak_score: AtomicU64::new(0),
+            attack_session_start_rejections: AtomicU64::new(0),
+            attack_session_start_aggregated_events: AtomicU64::new(0),
+            attack_session_start_defense_actions: AtomicU64::new(0),
+            attack_session_start_defense_extensions: AtomicU64::new(0),
+            attack_session_start_defense_relaxations: AtomicU64::new(0),
+            attack_session_start_audit_events: AtomicU64::new(0),
         }
     }
 
@@ -419,6 +461,18 @@ impl ResourceSentinel {
             &top_attack_clusters,
         );
         let attack_lifecycle = self.update_attack_lifecycle(&attack_diagnosis);
+        let attack_session = self.attack_session_snapshot(
+            attack_score,
+            pre_admission_rejections,
+            aggregated_events,
+            automated_defense_actions,
+            automated_defense_extensions,
+            automated_defense_relaxations,
+            automated_audit_events,
+            &attack_diagnosis,
+            &attack_lifecycle,
+            &top_attack_clusters,
+        );
 
         ResourceSentinelSnapshot {
             mode,
@@ -438,6 +492,7 @@ impl ResourceSentinel {
             top_attack_clusters,
             attack_diagnosis,
             attack_lifecycle,
+            attack_session,
         }
     }
 
@@ -1064,6 +1119,11 @@ impl ResourceSentinel {
         let previous = if transitioned { current } else { next };
         if transitioned {
             self.attack_phase_since_ms.store(now, Ordering::Relaxed);
+            match next {
+                ATTACK_PHASE_STARTED => self.start_attack_session(now),
+                ATTACK_PHASE_ENDED => self.end_attack_session(now),
+                _ => {}
+            }
         }
         let phase_since_ms = now.saturating_sub(self.attack_phase_since_ms.load(Ordering::Relaxed));
         ResourceSentinelAttackLifecycle {
@@ -1071,6 +1131,154 @@ impl ResourceSentinel {
             previous_phase: attack_phase_label(previous).to_string(),
             phase_since_ms,
             transitioned,
+        }
+    }
+
+    fn start_attack_session(&self, now: u64) {
+        let next_id = self
+            .attack_session_id
+            .load(Ordering::Relaxed)
+            .saturating_add(1);
+        self.attack_session_id
+            .store(next_id.max(1), Ordering::Relaxed);
+        self.attack_session_started_ms.store(now, Ordering::Relaxed);
+        self.attack_session_ended_ms.store(0, Ordering::Relaxed);
+        self.attack_session_peak_score
+            .store(self.attack_score.load(Ordering::Relaxed), Ordering::Relaxed);
+        self.attack_session_start_rejections.store(
+            self.pre_admission_rejections.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.attack_session_start_aggregated_events.store(
+            self.aggregated_events.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.attack_session_start_defense_actions.store(
+            self.automated_defense_actions.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.attack_session_start_defense_extensions.store(
+            self.automated_defense_extensions.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.attack_session_start_defense_relaxations.store(
+            self.automated_defense_relaxations.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+        self.attack_session_start_audit_events.store(
+            self.automated_audit_events.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
+    }
+
+    fn end_attack_session(&self, now: u64) {
+        if self.attack_session_started_ms.load(Ordering::Relaxed) > 0 {
+            self.attack_session_ended_ms.store(now, Ordering::Relaxed);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attack_session_snapshot(
+        &self,
+        attack_score: u64,
+        pre_admission_rejections: u64,
+        aggregated_events: u64,
+        automated_defense_actions: u64,
+        automated_defense_extensions: u64,
+        automated_defense_relaxations: u64,
+        automated_audit_events: u64,
+        diagnosis: &ResourceSentinelAttackDiagnosis,
+        lifecycle: &ResourceSentinelAttackLifecycle,
+        top_attack_clusters: &[ResourceSentinelClusterSnapshot],
+    ) -> ResourceSentinelAttackSession {
+        let session_id = self.attack_session_id.load(Ordering::Relaxed);
+        let started_at_ms = self.attack_session_started_ms.load(Ordering::Relaxed);
+        let ended_raw = self.attack_session_ended_ms.load(Ordering::Relaxed);
+        if session_id == 0 || started_at_ms == 0 {
+            return ResourceSentinelAttackSession::default();
+        }
+
+        let mut peak_score = self.attack_session_peak_score.load(Ordering::Relaxed);
+        while attack_score > peak_score {
+            match self.attack_session_peak_score.compare_exchange_weak(
+                peak_score,
+                attack_score,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    peak_score = attack_score;
+                    break;
+                }
+                Err(actual) => peak_score = actual,
+            }
+        }
+
+        let now = now_millis();
+        let ended_at_ms = (ended_raw > 0).then_some(ended_raw);
+        let duration_end = ended_at_ms.unwrap_or(now);
+        let duration_ms = duration_end.saturating_sub(started_at_ms);
+        let defense_actions = automated_defense_actions.saturating_sub(
+            self.attack_session_start_defense_actions
+                .load(Ordering::Relaxed),
+        );
+        let defense_extensions = automated_defense_extensions.saturating_sub(
+            self.attack_session_start_defense_extensions
+                .load(Ordering::Relaxed),
+        );
+        let defense_relaxations = automated_defense_relaxations.saturating_sub(
+            self.attack_session_start_defense_relaxations
+                .load(Ordering::Relaxed),
+        );
+        let audit_event_count = automated_audit_events.saturating_sub(
+            self.attack_session_start_audit_events
+                .load(Ordering::Relaxed),
+        );
+        let session_rejections = pre_admission_rejections
+            .saturating_sub(self.attack_session_start_rejections.load(Ordering::Relaxed));
+        let session_aggregated_events = aggregated_events.saturating_sub(
+            self.attack_session_start_aggregated_events
+                .load(Ordering::Relaxed),
+        );
+        let final_outcome =
+            session_outcome(lifecycle.phase.as_str(), diagnosis.active_defense.as_str());
+        let top_clusters = top_attack_clusters
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>();
+        let primary_pressure = diagnosis.primary_pressure.clone();
+        let peak_severity = severity_for_score(peak_score).to_string();
+        let summary = build_attack_session_summary(
+            session_id,
+            duration_ms,
+            peak_severity.as_str(),
+            primary_pressure.as_str(),
+            top_clusters.first(),
+            defense_actions,
+            defense_extensions,
+            defense_relaxations,
+            final_outcome,
+        );
+
+        ResourceSentinelAttackSession {
+            session_id,
+            phase: lifecycle.phase.clone(),
+            started_at_ms,
+            ended_at_ms,
+            duration_ms,
+            peak_severity,
+            peak_attack_score: peak_score,
+            primary_pressure,
+            top_clusters,
+            defense_actions,
+            defense_extensions,
+            defense_relaxations,
+            audit_event_count,
+            pre_admission_rejections: session_rejections,
+            aggregated_events: session_aggregated_events,
+            final_outcome: final_outcome.to_string(),
+            summary,
         }
     }
 
@@ -1222,6 +1430,30 @@ fn attack_phase_label(phase: u8) -> &'static str {
     }
 }
 
+fn severity_for_score(score: u64) -> &'static str {
+    if score >= SCORE_SURVIVAL {
+        "critical"
+    } else if score >= SCORE_UNDER_ATTACK {
+        "high"
+    } else if score >= SCORE_ELEVATED {
+        "elevated"
+    } else {
+        "normal"
+    }
+}
+
+fn session_outcome(phase: &str, active_defense: &str) -> &'static str {
+    match phase {
+        "ended" => "recovered",
+        "mitigating" => "mitigating",
+        "started" | "sustained" if active_defense == "defense_effective_extending" => {
+            "defense_effective"
+        }
+        "started" | "sustained" => "active",
+        _ => "idle",
+    }
+}
+
 fn next_attack_phase(current: u8, diagnosis: &ResourceSentinelAttackDiagnosis) -> u8 {
     match diagnosis.severity.as_str() {
         "critical" | "high" => {
@@ -1249,6 +1481,30 @@ fn next_attack_phase(current: u8, diagnosis: &ResourceSentinelAttackDiagnosis) -
             }
         }
     }
+}
+
+fn build_attack_session_summary(
+    session_id: u64,
+    duration_ms: u64,
+    peak_severity: &str,
+    primary_pressure: &str,
+    top_cluster: Option<&ResourceSentinelClusterSnapshot>,
+    defense_actions: u64,
+    defense_extensions: u64,
+    defense_relaxations: u64,
+    final_outcome: &str,
+) -> String {
+    let cluster_text = top_cluster
+        .map(|cluster| {
+            format!(
+                "最热簇 {}，类型 {}，样本 IP {}。",
+                cluster.cluster, cluster.attack_type, cluster.sample_ip
+            )
+        })
+        .unwrap_or_else(|| "未形成稳定最热簇。".to_string());
+    format!(
+        "攻击会话 #{session_id} 持续 {duration_ms}ms，峰值等级 {peak_severity}，主压力 {primary_pressure}。{cluster_text}自动防御动作 {defense_actions} 次，延长 {defense_extensions} 次，收缩 {defense_relaxations} 次，当前结果 {final_outcome}。"
+    )
 }
 
 fn now_millis() -> u64 {
@@ -1553,6 +1809,7 @@ fn build_attack_audit_event(snapshot: ResourceSentinelSnapshot) -> SecurityEvent
         "kind": "resource_sentinel_attack_audit",
         "diagnosis": diagnosis,
         "lifecycle": lifecycle,
+        "session": snapshot.attack_session,
         "mode": snapshot.mode,
         "attack_score": snapshot.attack_score,
         "tracked_debt_buckets": snapshot.tracked_debt_buckets,
@@ -1981,6 +2238,7 @@ mod tests {
             .details_json
             .expect("audit event should include details");
         assert!(details.contains("resource_sentinel_attack_audit"));
+        assert!(details.contains("\"session\""));
         assert!(details.contains("CDN"));
         assert!(details.contains("Rust"));
         assert!(sentinel.maybe_attack_audit_event().is_none());
@@ -2019,6 +2277,82 @@ mod tests {
         assert_eq!(ended.phase, "ended");
         assert_eq!(ended.previous_phase, "mitigating");
         assert!(ended.transitioned);
+    }
+
+    #[test]
+    fn attack_session_summarizes_lifecycle_timeline() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        sentinel
+            .attack_score
+            .store(SCORE_UNDER_ATTACK, Ordering::Relaxed);
+
+        let started_snapshot = sentinel.snapshot();
+        assert_eq!(started_snapshot.attack_lifecycle.phase, "started");
+        assert_eq!(started_snapshot.attack_session.session_id, 1);
+
+        sentinel
+            .attack_score
+            .store(SCORE_SURVIVAL, Ordering::Relaxed);
+        sentinel
+            .pre_admission_rejections
+            .fetch_add(9, Ordering::Relaxed);
+        sentinel.aggregated_events.fetch_add(5, Ordering::Relaxed);
+        sentinel
+            .automated_defense_actions
+            .fetch_add(3, Ordering::Relaxed);
+        sentinel
+            .automated_defense_extensions
+            .fetch_add(1, Ordering::Relaxed);
+        sentinel
+            .automated_defense_relaxations
+            .fetch_add(1, Ordering::Relaxed);
+        sentinel
+            .automated_audit_events
+            .fetch_add(2, Ordering::Relaxed);
+
+        let sustained_snapshot = sentinel.snapshot();
+        let session = sustained_snapshot.attack_session;
+        assert_eq!(sustained_snapshot.attack_lifecycle.phase, "sustained");
+        assert_eq!(session.session_id, 1);
+        assert_eq!(session.phase, "sustained");
+        assert_eq!(session.peak_severity, "critical");
+        assert_eq!(session.peak_attack_score, SCORE_SURVIVAL);
+        assert_eq!(session.defense_actions, 3);
+        assert_eq!(session.defense_extensions, 1);
+        assert_eq!(session.defense_relaxations, 1);
+        assert_eq!(session.audit_event_count, 2);
+        assert_eq!(session.pre_admission_rejections, 9);
+        assert_eq!(session.aggregated_events, 5);
+        assert_eq!(session.top_clusters[0].attack_type, "slow_tls_handshake");
+        assert!(session.summary.contains("攻击会话 #1"));
+
+        let ended_diagnosis = ResourceSentinelAttackDiagnosis {
+            severity: "normal".to_string(),
+            active_defense: "monitoring".to_string(),
+            primary_pressure: "stable".to_string(),
+            ..Default::default()
+        };
+        let ended_lifecycle = sentinel.update_attack_lifecycle(&ended_diagnosis);
+        let ended_session = sentinel.attack_session_snapshot(
+            0,
+            sentinel.pre_admission_rejections.load(Ordering::Relaxed),
+            sentinel.aggregated_events.load(Ordering::Relaxed),
+            sentinel.automated_defense_actions.load(Ordering::Relaxed),
+            sentinel
+                .automated_defense_extensions
+                .load(Ordering::Relaxed),
+            sentinel
+                .automated_defense_relaxations
+                .load(Ordering::Relaxed),
+            sentinel.automated_audit_events.load(Ordering::Relaxed),
+            &ended_diagnosis,
+            &ended_lifecycle,
+            &sustained_snapshot.top_attack_clusters,
+        );
+        assert_eq!(ended_lifecycle.phase, "ended");
+        assert_eq!(ended_session.final_outcome, "recovered");
+        assert!(ended_session.ended_at_ms.is_some());
     }
 
     #[test]

@@ -242,7 +242,7 @@ struct EarlyDefenseDecision {
 
 ### 阶段 3：L7 CC 轻量快速通道
 
-状态：待开始
+状态：已完成
 
 目标：
 
@@ -261,11 +261,11 @@ struct EarlyDefenseDecision {
 
 | 编号 | 修改 |
 |---:|---|
-| 3.1 | 根据 `runtime.defense.depth` 切换 CC 模式 |
-| 3.2 | survival 下只维护核心 bucket：`host|route`、`client|host|route` |
-| 3.3 | high/attack 下跳过 page window 和部分 weighted bucket |
-| 3.4 | 对 API 热点路径增加硬阈值快速 drop |
-| 3.5 | 对静态资源保留更宽松策略，避免误伤页面资源 |
+| 3.1 | 已根据 `runtime.defense.depth` 和早期防御 metadata 切换 CC 跟踪模式 |
+| 3.2 | survival 下进入 minimal 模式，保留最核心的 IP/Host/Route/Hot path 计数，不再维护 page window、weighted bucket、distinct client bucket |
+| 3.3 | lean 或早期防御 lightweight 下进入 core 模式，跳过 page window 和 weighted bucket；API 请求仍保留热点路径 distinct client 计数 |
+| 3.4 | API 热点路径继续通过现有 hot path 计数和阶段 2 的阈值收紧触发更快拦截 |
+| 3.5 | 正常 rich 模式下保留静态资源宽松策略，压力模式下降低跟踪成本 |
 
 验证方式：
 
@@ -275,6 +275,23 @@ struct EarlyDefenseDecision {
 | 压测检查 | 高级 CDN CC 下 CPU 峰值、RPS、拦截量对比 |
 
 完成后必须更新本文档。
+
+阶段结果：
+
+| 项目 | 内容 |
+|---|---|
+| 完成日期 | 2026-04-19 |
+| 完成状态 | 已完成 |
+| 改动文件 | `src/l7/cc_guard/types.rs`、`src/l7/cc_guard/runtime.rs`、`src/l7/cc_guard/tests.rs`、`L4_L7_CDN_AI_OPTIMIZATION_PLAN.md` |
+| 新增模式 | `rich`、`core`、`minimal` |
+| rich 模式 | 正常/低压时使用，保留 page window、weighted bucket、distinct hot path client |
+| core 模式 | lean 或早期防御 lightweight 时使用，跳过 page window 和 weighted bucket，API 热点路径保留 distinct client 统计 |
+| minimal 模式 | survival 时使用，跳过 page window、weighted bucket、distinct client，保留核心计数以减少 CPU 消耗 |
+| 新增 metadata | `l7.cc.tracking_mode` |
+| 已验证 | `cargo fmt --check`、`cargo test l7::cc_guard -- --nocapture`、`cargo check` |
+| 验证结果 | 通过 |
+| 阶段说明 | 本阶段主要减少高压下 L7 CC 的 per-request 统计成本；更强的 CDN 双身份联动留到阶段 4 |
+| 是否等待确认 | 是，等待用户确认是否进入阶段 4 |
 
 ---
 
@@ -446,7 +463,7 @@ struct EarlyDefenseDecision {
 | 阶段 0 | 已完成文档初版 | 用户已确认进入阶段 1 |
 | 阶段 1 | 已完成 | CPU 压力感知已接入运行时压力模型 |
 | 阶段 2 | 已完成 | 统一早期防御决策已接入 HTTP/1、HTTP/2、HTTP/3，等待用户确认是否进入阶段 3 |
-| 阶段 3 | 未开始 | L7 CC 轻量快速通道 |
+| 阶段 3 | 已完成 | L7 CC 已支持 rich/core/minimal 跟踪模式，等待用户确认是否进入阶段 4 |
 | 阶段 4 | 未开始 | L4/L7 CDN 双身份联动 |
 | 阶段 5 | 未开始 | 事件日志与持久化降级 |
 | 阶段 6 | 未开始 | AI 临时策略闭环 |
@@ -454,10 +471,10 @@ struct EarlyDefenseDecision {
 
 ## 7. 下一步
 
-等待用户确认后，进入阶段 2：
+等待用户确认后，进入阶段 4：
 
 ```text
-新增统一早期防御决策层
+L4 与 L7 的 CDN 双身份联动增强
 ```
 
-阶段 2 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。
+阶段 4 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。

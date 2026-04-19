@@ -431,6 +431,94 @@ async fn distributed_api_requests_trigger_global_hot_path_pressure() {
 }
 
 #[tokio::test]
+async fn lean_runtime_uses_core_tracking_without_weighted_buckets() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 100,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut request = UnifiedHttpRequest::new(
+        HttpVersion::Http1_1,
+        "POST".to_string(),
+        "/api/search".to_string(),
+    );
+    request.set_client_ip("203.0.113.10".to_string());
+    request.add_header("host".to_string(), "example.com".to_string());
+    request.add_header("accept".to_string(), "application/json".to_string());
+    request.add_metadata("runtime.defense.depth".to_string(), "lean".to_string());
+
+    assert!(guard.inspect_request(&mut request).await.is_none());
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.tracking_mode")
+            .map(String::as_str),
+        Some("core")
+    );
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.rich_tracking")
+            .map(String::as_str),
+        Some("false")
+    );
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.route_count")
+            .map(String::as_str),
+        request
+            .get_metadata("l7.cc.route_weighted")
+            .map(String::as_str)
+    );
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.hot_path_clients")
+            .map(String::as_str),
+        Some("1")
+    );
+}
+
+#[tokio::test]
+async fn survival_runtime_uses_minimal_tracking_for_hot_path_pressure() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 100,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut request = UnifiedHttpRequest::new(
+        HttpVersion::Http1_1,
+        "POST".to_string(),
+        "/api/search".to_string(),
+    );
+    request.set_client_ip("203.0.113.10".to_string());
+    request.add_header("host".to_string(), "example.com".to_string());
+    request.add_header("accept".to_string(), "application/json".to_string());
+    request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut request).await.is_none());
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.tracking_mode")
+            .map(String::as_str),
+        Some("minimal")
+    );
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.hot_path_clients")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        request
+            .get_metadata("l7.cc.hot_path_count")
+            .map(String::as_str),
+        Some("1")
+    );
+}
+
+#[tokio::test]
 async fn hard_multiplier_configuration_can_force_block_for_subresources() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 100,

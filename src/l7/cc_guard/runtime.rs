@@ -68,10 +68,8 @@ impl L7CcGuard {
                 .get_metadata("ai.visitor.reduce_friction")
                 .is_some_and(|value| value == "true");
         let defense_depth = runtime_defense_depth(request);
-        let rich_tracking = matches!(
-            defense_depth,
-            crate::core::DefenseDepth::Full | crate::core::DefenseDepth::Balanced
-        );
+        let tracking_mode = runtime_tracking_mode(request, defense_depth);
+        let rich_tracking = tracking_mode == CcTrackingMode::Rich;
         let bucket_limit = runtime_usize_metadata(
             request,
             "runtime.budget.l7_bucket_limit",
@@ -128,7 +126,7 @@ impl L7CcGuard {
             return Some(InspectionResult::drop(InspectionLayer::L7, reason));
         }
 
-        if rich_tracking && request_kind == RequestKind::Document {
+        if tracking_mode.uses_page_windows() && request_kind == RequestKind::Document {
             self.record_page_load_window(
                 client_ip,
                 &host,
@@ -138,7 +136,7 @@ impl L7CcGuard {
                 page_window_limit,
             );
         }
-        let is_page_subresource = rich_tracking
+        let is_page_subresource = tracking_mode.uses_page_windows()
             && request_kind == RequestKind::StaticAsset
             && self.matches_page_load_window(
                 request,
@@ -189,7 +187,7 @@ impl L7CcGuard {
             window,
             bucket_limit,
         );
-        let hot_path_client_count = if rich_tracking {
+        let hot_path_client_count = if tracking_mode.uses_distinct_hot_path_clients(request_kind) {
             self.observe_distinct(
                 &self.hot_path_client_buckets,
                 format!("{host}|{route_path}"),
@@ -208,7 +206,7 @@ impl L7CcGuard {
             host_weighted_points,
             route_weighted_points,
             hot_path_weighted_points,
-        ) = if rich_tracking {
+        ) = if tracking_mode.uses_weighted_buckets() {
             (
                 self.observe_weighted(
                     &self.ip_weighted_buckets,
@@ -314,6 +312,10 @@ impl L7CcGuard {
             client_identity_unresolved.to_string(),
         );
         request.add_metadata("l7.cc.rich_tracking".to_string(), rich_tracking.to_string());
+        request.add_metadata(
+            "l7.cc.tracking_mode".to_string(),
+            tracking_mode.as_str().to_string(),
+        );
         request.add_metadata(
             "l7.cc.known_bot_threshold_multiplier".to_string(),
             known_bot_threshold_multiplier.to_string(),
@@ -614,6 +616,36 @@ fn runtime_defense_depth(request: &UnifiedHttpRequest) -> crate::core::DefenseDe
         .get_metadata("runtime.defense.depth")
         .map(|value| crate::core::DefenseDepth::from_str(value))
         .unwrap_or(crate::core::DefenseDepth::Balanced)
+}
+
+fn runtime_tracking_mode(
+    request: &UnifiedHttpRequest,
+    defense_depth: crate::core::DefenseDepth,
+) -> CcTrackingMode {
+    if request
+        .get_metadata("early_defense.action")
+        .map(String::as_str)
+        == Some("lightweight_l7")
+    {
+        return CcTrackingMode::Core;
+    }
+
+    let cpu_score = request
+        .get_metadata("runtime.pressure.cpu_score")
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(0);
+
+    match defense_depth {
+        crate::core::DefenseDepth::Full | crate::core::DefenseDepth::Balanced => {
+            if cpu_score >= 3 {
+                CcTrackingMode::Core
+            } else {
+                CcTrackingMode::Rich
+            }
+        }
+        crate::core::DefenseDepth::Lean => CcTrackingMode::Core,
+        crate::core::DefenseDepth::Survival => CcTrackingMode::Minimal,
+    }
 }
 
 fn runtime_usize_metadata(request: &UnifiedHttpRequest, key: &str, default: usize) -> usize {

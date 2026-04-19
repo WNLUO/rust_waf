@@ -62,3 +62,32 @@ impl RequestKind {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CcTrackingMode {
+    Rich,
+    Core,
+    Minimal,
+}
+
+impl CcTrackingMode {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Rich => "rich",
+            Self::Core => "core",
+            Self::Minimal => "minimal",
+        }
+    }
+
+    pub(super) fn uses_page_windows(self) -> bool {
+        matches!(self, Self::Rich)
+    }
+
+    pub(super) fn uses_weighted_buckets(self) -> bool {
+        matches!(self, Self::Rich)
+    }
+
+    pub(super) fn uses_distinct_hot_path_clients(self, kind: RequestKind) -> bool {
+        matches!(self, Self::Rich) || (matches!(self, Self::Core) && kind == RequestKind::ApiLike)
+    }
+}

@@ -125,7 +125,10 @@ pub(super) fn build_metrics_response(
             .automated_defense_relaxations,
         resource_sentinel_automated_defense_memory_hits: resource_sentinel
             .automated_defense_memory_hits,
+        resource_sentinel_automated_audit_events: resource_sentinel.automated_audit_events,
         resource_sentinel_top_attack_clusters: resource_sentinel.top_attack_clusters,
+        resource_sentinel_attack_diagnosis: resource_sentinel.attack_diagnosis,
+        resource_sentinel_attack_lifecycle: resource_sentinel.attack_lifecycle,
         storage_degraded_reasons,
         storage_attack_insights: StorageAttackInsightsResponse {
             active_bucket_count: aggregation_insights.active_bucket_count,

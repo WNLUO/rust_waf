@@ -80,8 +80,11 @@ pub struct MetricsResponse {
     pub(crate) resource_sentinel_automated_defense_extensions: u64,
     pub(crate) resource_sentinel_automated_defense_relaxations: u64,
     pub(crate) resource_sentinel_automated_defense_memory_hits: u64,
+    pub(crate) resource_sentinel_automated_audit_events: u64,
     pub(crate) resource_sentinel_top_attack_clusters:
         Vec<crate::core::ResourceSentinelClusterSnapshot>,
+    pub(crate) resource_sentinel_attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis,
+    pub(crate) resource_sentinel_attack_lifecycle: crate::core::ResourceSentinelAttackLifecycle,
     pub(crate) storage_degraded_reasons: Vec<String>,
     pub(crate) storage_attack_insights: StorageAttackInsightsResponse,
     pub(crate) system: SystemMetricsResponse,

@@ -170,6 +170,7 @@ fn test_build_metrics_response_with_sources() {
             automated_defense_extensions: 2,
             automated_defense_relaxations: 1,
             automated_defense_memory_hits: 3,
+            automated_audit_events: 1,
             top_attack_clusters: vec![crate::core::ResourceSentinelClusterSnapshot {
                 cluster: "203.0.113.0/24".to_string(),
                 attack_type: "slow_tls_handshake".to_string(),
@@ -184,6 +185,24 @@ fn test_build_metrics_response_with_sources() {
                 first_seen_ms: 1,
                 last_seen_ms: 2,
             }],
+            attack_diagnosis: crate::core::ResourceSentinelAttackDiagnosis {
+                severity: "high".to_string(),
+                primary_pressure: "tls_handshake_resource".to_string(),
+                summary: "哨兵级别为 high，主要压力判断为 tls_handshake_resource，自动防御状态为 defense_effective_extending。最热簇为 203.0.113.0/24，类型 slow_tls_handshake，样本 IP 203.0.113.9，累计 20 次、风险分 200。".to_string(),
+                active_defense: "defense_effective_extending".to_string(),
+                recommended_next_action: "keep_current_automation_and_watch_decay".to_string(),
+                evidence: vec![
+                    "mode=under_attack attack_score=88".to_string(),
+                    "top_cluster=203.0.113.0/24 attack_type=slow_tls_handshake transport=tls reason=timeout count=20 score=200 sample_ip=203.0.113.9".to_string(),
+                ],
+                top_cluster: None,
+            },
+            attack_lifecycle: crate::core::ResourceSentinelAttackLifecycle {
+                phase: "started".to_string(),
+                previous_phase: "normal".to_string(),
+                phase_since_ms: 0,
+                transitioned: true,
+            },
         },
     );
 
@@ -242,6 +261,18 @@ fn test_build_metrics_response_with_sources() {
     assert_eq!(response.resource_sentinel_automated_defense_extensions, 2);
     assert_eq!(response.resource_sentinel_automated_defense_relaxations, 1);
     assert_eq!(response.resource_sentinel_automated_defense_memory_hits, 3);
+    assert_eq!(response.resource_sentinel_automated_audit_events, 1);
+    assert_eq!(
+        response.resource_sentinel_attack_diagnosis.primary_pressure,
+        "tls_handshake_resource"
+    );
+    assert_eq!(
+        response
+            .resource_sentinel_attack_diagnosis
+            .recommended_next_action,
+        "keep_current_automation_and_watch_decay"
+    );
+    assert_eq!(response.resource_sentinel_attack_lifecycle.phase, "started");
     assert_eq!(response.resource_sentinel_tracked_attack_clusters, 1);
     assert_eq!(response.resource_sentinel_active_cooldowns, 1);
     assert_eq!(

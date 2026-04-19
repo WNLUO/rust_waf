@@ -2,6 +2,8 @@ use super::{RuntimePressureSnapshot, WafContext};
 use crate::storage::{SecurityEventRecord, SqliteStore};
 use dashmap::DashMap;
 use serde::Serialize;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicU8, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,6 +12,11 @@ const MODE_NORMAL: u8 = 0;
 const MODE_ELEVATED: u8 = 1;
 const MODE_UNDER_ATTACK: u8 = 2;
 const MODE_SURVIVAL: u8 = 3;
+const ATTACK_PHASE_NORMAL: u8 = 0;
+const ATTACK_PHASE_STARTED: u8 = 1;
+const ATTACK_PHASE_SUSTAINED: u8 = 2;
+const ATTACK_PHASE_MITIGATING: u8 = 3;
+const ATTACK_PHASE_ENDED: u8 = 4;
 
 const SCORE_ELEVATED: u64 = 30;
 const SCORE_UNDER_ATTACK: u64 = 80;
@@ -38,6 +45,8 @@ const DEFENSE_EFFECT_SURVIVAL_EXTEND_MS: u64 = 30_000;
 const DEFENSE_EFFECT_MAX_LIFETIME_MS: u64 = 120_000;
 const DEFENSE_EFFECT_RELAX_TO_MS: u64 = 2_000;
 const DEFENSE_EFFECT_REJECTION_DELTA: u64 = 3;
+const ATTACK_AUDIT_MIN_INTERVAL_MS: u64 = 10_000;
+const ATTACK_AUDIT_REPEAT_COOLDOWN_MS: u64 = 60_000;
 
 #[derive(Debug)]
 pub(crate) struct ResourceSentinel {
@@ -57,6 +66,11 @@ pub(crate) struct ResourceSentinel {
     automated_defense_extensions: AtomicU64,
     automated_defense_relaxations: AtomicU64,
     automated_defense_memory_hits: AtomicU64,
+    automated_audit_events: AtomicU64,
+    last_attack_audit_ms: AtomicU64,
+    last_attack_audit_signature: AtomicU64,
+    attack_phase: AtomicU8,
+    attack_phase_since_ms: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -118,7 +132,10 @@ pub struct ResourceSentinelSnapshot {
     pub automated_defense_extensions: u64,
     pub automated_defense_relaxations: u64,
     pub automated_defense_memory_hits: u64,
+    pub automated_audit_events: u64,
     pub top_attack_clusters: Vec<ResourceSentinelClusterSnapshot>,
+    pub attack_diagnosis: ResourceSentinelAttackDiagnosis,
+    pub attack_lifecycle: ResourceSentinelAttackLifecycle,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -135,6 +152,25 @@ pub struct ResourceSentinelClusterSnapshot {
     pub score: u64,
     pub first_seen_ms: u64,
     pub last_seen_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelAttackDiagnosis {
+    pub severity: String,
+    pub primary_pressure: String,
+    pub summary: String,
+    pub active_defense: String,
+    pub recommended_next_action: String,
+    pub evidence: Vec<String>,
+    pub top_cluster: Option<ResourceSentinelClusterSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ResourceSentinelAttackLifecycle {
+    pub phase: String,
+    pub previous_phase: String,
+    pub phase_since_ms: u64,
+    pub transitioned: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -163,6 +199,11 @@ impl ResourceSentinel {
             automated_defense_extensions: AtomicU64::new(0),
             automated_defense_relaxations: AtomicU64::new(0),
             automated_defense_memory_hits: AtomicU64::new(0),
+            automated_audit_events: AtomicU64::new(0),
+            last_attack_audit_ms: AtomicU64::new(0),
+            last_attack_audit_signature: AtomicU64::new(0),
+            attack_phase: AtomicU8::new(ATTACK_PHASE_NORMAL),
+            attack_phase_since_ms: AtomicU64::new(now),
         }
     }
 
@@ -350,25 +391,53 @@ impl ResourceSentinel {
             }
         }
 
+        let mode = mode_label(self.mode.load(Ordering::Relaxed)).to_string();
+        let attack_score = self.attack_score.load(Ordering::Relaxed);
+        let tracked_debt_buckets = self.connection_debt.len() as u64;
+        let active_cooldowns = self.active_cooldown_count();
+        let pre_admission_rejections = self.pre_admission_rejections.load(Ordering::Relaxed);
+        let aggregated_events = self.aggregated_events.load(Ordering::Relaxed);
+        let automated_defense_actions = self.automated_defense_actions.load(Ordering::Relaxed);
+        let automated_defense_extensions =
+            self.automated_defense_extensions.load(Ordering::Relaxed);
+        let automated_defense_relaxations =
+            self.automated_defense_relaxations.load(Ordering::Relaxed);
+        let automated_defense_memory_hits =
+            self.automated_defense_memory_hits.load(Ordering::Relaxed);
+        let automated_audit_events = self.automated_audit_events.load(Ordering::Relaxed);
+        let top_attack_clusters = self.top_attack_clusters(8);
+        let attack_diagnosis = build_attack_diagnosis(
+            &mode,
+            attack_score,
+            active_cooldowns,
+            pre_admission_rejections,
+            aggregated_events,
+            automated_defense_actions,
+            automated_defense_extensions,
+            automated_defense_relaxations,
+            automated_defense_memory_hits,
+            &top_attack_clusters,
+        );
+        let attack_lifecycle = self.update_attack_lifecycle(&attack_diagnosis);
+
         ResourceSentinelSnapshot {
-            mode: mode_label(self.mode.load(Ordering::Relaxed)).to_string(),
-            attack_score: self.attack_score.load(Ordering::Relaxed),
-            tracked_debt_buckets: self.connection_debt.len() as u64,
+            mode,
+            attack_score,
+            tracked_debt_buckets,
             high_debt_buckets,
             extreme_debt_buckets,
             tracked_attack_clusters: self.attack_clusters.len() as u64,
-            active_cooldowns: self.active_cooldown_count(),
-            pre_admission_rejections: self.pre_admission_rejections.load(Ordering::Relaxed),
-            aggregated_events: self.aggregated_events.load(Ordering::Relaxed),
-            automated_defense_actions: self.automated_defense_actions.load(Ordering::Relaxed),
-            automated_defense_extensions: self.automated_defense_extensions.load(Ordering::Relaxed),
-            automated_defense_relaxations: self
-                .automated_defense_relaxations
-                .load(Ordering::Relaxed),
-            automated_defense_memory_hits: self
-                .automated_defense_memory_hits
-                .load(Ordering::Relaxed),
-            top_attack_clusters: self.top_attack_clusters(8),
+            active_cooldowns,
+            pre_admission_rejections,
+            aggregated_events,
+            automated_defense_actions,
+            automated_defense_extensions,
+            automated_defense_relaxations,
+            automated_defense_memory_hits,
+            automated_audit_events,
+            top_attack_clusters,
+            attack_diagnosis,
+            attack_lifecycle,
         }
     }
 
@@ -947,6 +1016,64 @@ impl ResourceSentinel {
         }
     }
 
+    fn maybe_attack_audit_event(&self) -> Option<SecurityEventRecord> {
+        let snapshot = self.snapshot();
+        let diagnosis = snapshot.attack_diagnosis.clone();
+        if !should_emit_attack_audit(&diagnosis, &snapshot.attack_lifecycle) {
+            return None;
+        }
+
+        let now = now_millis();
+        let signature = attack_audit_signature(&diagnosis, &snapshot.attack_lifecycle);
+        let last_signature = self.last_attack_audit_signature.load(Ordering::Relaxed);
+        let required_interval = if signature == last_signature {
+            ATTACK_AUDIT_REPEAT_COOLDOWN_MS
+        } else {
+            ATTACK_AUDIT_MIN_INTERVAL_MS
+        };
+        let last_audit = self.last_attack_audit_ms.load(Ordering::Relaxed);
+        if now.saturating_sub(last_audit) < required_interval {
+            return None;
+        }
+        if self
+            .last_attack_audit_ms
+            .compare_exchange(last_audit, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
+            return None;
+        }
+        self.last_attack_audit_signature
+            .store(signature, Ordering::Relaxed);
+        self.automated_audit_events.fetch_add(1, Ordering::Relaxed);
+
+        Some(build_attack_audit_event(snapshot))
+    }
+
+    fn update_attack_lifecycle(
+        &self,
+        diagnosis: &ResourceSentinelAttackDiagnosis,
+    ) -> ResourceSentinelAttackLifecycle {
+        let now = now_millis();
+        let current = self.attack_phase.load(Ordering::Relaxed);
+        let next = next_attack_phase(current, diagnosis);
+        let transitioned = next != current
+            && self
+                .attack_phase
+                .compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok();
+        let previous = if transitioned { current } else { next };
+        if transitioned {
+            self.attack_phase_since_ms.store(now, Ordering::Relaxed);
+        }
+        let phase_since_ms = now.saturating_sub(self.attack_phase_since_ms.load(Ordering::Relaxed));
+        ResourceSentinelAttackLifecycle {
+            phase: attack_phase_label(next).to_string(),
+            previous_phase: attack_phase_label(previous).to_string(),
+            phase_since_ms,
+            transitioned,
+        }
+    }
+
     fn is_new_cluster(&self, peer_ip: IpAddr) -> bool {
         !self
             .connection_debt
@@ -1008,6 +1135,9 @@ impl WafContext {
             store.enqueue_security_event_aggregated(event, trigger);
         } else {
             store.enqueue_security_event(event);
+        }
+        if let Some(audit_event) = self.resource_sentinel.maybe_attack_audit_event() {
+            store.enqueue_security_event(audit_event);
         }
     }
 }
@@ -1079,6 +1209,45 @@ fn mode_label(mode: u8) -> &'static str {
         MODE_UNDER_ATTACK => "under_attack",
         MODE_ELEVATED => "elevated",
         _ => "normal",
+    }
+}
+
+fn attack_phase_label(phase: u8) -> &'static str {
+    match phase {
+        ATTACK_PHASE_STARTED => "started",
+        ATTACK_PHASE_SUSTAINED => "sustained",
+        ATTACK_PHASE_MITIGATING => "mitigating",
+        ATTACK_PHASE_ENDED => "ended",
+        _ => "normal",
+    }
+}
+
+fn next_attack_phase(current: u8, diagnosis: &ResourceSentinelAttackDiagnosis) -> u8 {
+    match diagnosis.severity.as_str() {
+        "critical" | "high" => {
+            if matches!(current, ATTACK_PHASE_NORMAL | ATTACK_PHASE_ENDED) {
+                ATTACK_PHASE_STARTED
+            } else {
+                ATTACK_PHASE_SUSTAINED
+            }
+        }
+        "elevated" | "watch" => {
+            if matches!(current, ATTACK_PHASE_STARTED | ATTACK_PHASE_SUSTAINED) {
+                ATTACK_PHASE_MITIGATING
+            } else {
+                current
+            }
+        }
+        _ => {
+            if matches!(
+                current,
+                ATTACK_PHASE_STARTED | ATTACK_PHASE_SUSTAINED | ATTACK_PHASE_MITIGATING
+            ) {
+                ATTACK_PHASE_ENDED
+            } else {
+                ATTACK_PHASE_NORMAL
+            }
+        }
     }
 }
 
@@ -1154,6 +1323,254 @@ fn hot_cluster_cooldown_ms(mode: u8) -> u64 {
     } else {
         HOT_CLUSTER_DEFENSE_COOLDOWN_MS
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_attack_diagnosis(
+    mode: &str,
+    attack_score: u64,
+    active_cooldowns: u64,
+    pre_admission_rejections: u64,
+    aggregated_events: u64,
+    automated_defense_actions: u64,
+    automated_defense_extensions: u64,
+    automated_defense_relaxations: u64,
+    automated_defense_memory_hits: u64,
+    top_attack_clusters: &[ResourceSentinelClusterSnapshot],
+) -> ResourceSentinelAttackDiagnosis {
+    let top_cluster = top_attack_clusters.first().cloned();
+    let severity = if matches!(mode, "survival") || attack_score >= SCORE_SURVIVAL {
+        "critical"
+    } else if matches!(mode, "under_attack") || attack_score >= SCORE_UNDER_ATTACK {
+        "high"
+    } else if matches!(mode, "elevated") || attack_score >= SCORE_ELEVATED {
+        "elevated"
+    } else if top_cluster.is_some() {
+        "watch"
+    } else {
+        "normal"
+    };
+    let primary_pressure = top_cluster
+        .as_ref()
+        .map(|cluster| pressure_label_for_attack_type(&cluster.attack_type))
+        .unwrap_or("none")
+        .to_string();
+    let active_defense = if automated_defense_extensions > 0 {
+        "defense_effective_extending"
+    } else if automated_defense_relaxations > 0 && !matches!(severity, "high" | "critical") {
+        "defense_relaxing"
+    } else if active_cooldowns > 0 {
+        "cooldown_active"
+    } else if automated_defense_actions > 0 {
+        "defense_recently_active"
+    } else if aggregated_events > 0 {
+        "event_aggregation_active"
+    } else {
+        "monitoring"
+    }
+    .to_string();
+    let recommended_next_action = recommended_action_for_diagnosis(
+        severity,
+        primary_pressure.as_str(),
+        active_defense.as_str(),
+    )
+    .to_string();
+
+    let mut evidence = Vec::new();
+    evidence.push(format!("mode={mode} attack_score={attack_score}"));
+    if let Some(cluster) = top_cluster.as_ref() {
+        evidence.push(format!(
+            "top_cluster={} attack_type={} transport={} reason={} count={} score={} sample_ip={}",
+            cluster.cluster,
+            cluster.attack_type,
+            cluster.transport,
+            cluster.reason,
+            cluster.count,
+            cluster.score,
+            cluster.sample_ip
+        ));
+    }
+    if pre_admission_rejections > 0 {
+        evidence.push(format!(
+            "pre_admission_rejections={pre_admission_rejections}"
+        ));
+    }
+    if active_cooldowns > 0 || automated_defense_actions > 0 {
+        evidence.push(format!(
+            "active_cooldowns={active_cooldowns} automated_actions={automated_defense_actions} extensions={automated_defense_extensions} relaxations={automated_defense_relaxations} memory_hits={automated_defense_memory_hits}"
+        ));
+    }
+    if aggregated_events > 0 {
+        evidence.push(format!("aggregated_events={aggregated_events}"));
+    }
+
+    let summary = build_attack_summary(
+        severity,
+        primary_pressure.as_str(),
+        active_defense.as_str(),
+        top_cluster.as_ref(),
+    );
+
+    ResourceSentinelAttackDiagnosis {
+        severity: severity.to_string(),
+        primary_pressure,
+        summary,
+        active_defense,
+        recommended_next_action,
+        evidence,
+        top_cluster,
+    }
+}
+
+fn pressure_label_for_attack_type(attack_type: &str) -> &'static str {
+    match attack_type {
+        "slow_tls_handshake" | "tls_handshake_failure" => "tls_handshake_resource",
+        "idle_no_request" => "idle_connection_resource",
+        "l4_admission_reject" | "pre_admission_reject" | "cooldown_reject" => {
+            "connection_admission"
+        }
+        "provider_intercept" => "upstream_provider_intercept",
+        "l7_security_event" => "l7_policy_pressure",
+        "l4_security_event" => "l4_policy_pressure",
+        "event_aggregation" => "event_persistence",
+        _ => "mixed_resource_pressure",
+    }
+}
+
+fn recommended_action_for_diagnosis(
+    severity: &str,
+    primary_pressure: &str,
+    active_defense: &str,
+) -> &'static str {
+    if matches!(active_defense, "defense_effective_extending") {
+        return "keep_current_automation_and_watch_decay";
+    }
+    if matches!(active_defense, "defense_relaxing") {
+        return "observe_for_rebound";
+    }
+    match (severity, primary_pressure) {
+        ("critical", "tls_handshake_resource") | ("high", "tls_handshake_resource") => {
+            "prioritize_tls_pre_admission_and_handshake_budget"
+        }
+        ("critical", "idle_connection_resource") | ("high", "idle_connection_resource") => {
+            "prioritize_idle_connection_shedding"
+        }
+        ("critical", "connection_admission") | ("high", "connection_admission") => {
+            "prioritize_pre_admission_rejection"
+        }
+        (_, "event_persistence") => "keep_event_aggregation_and_preserve_samples",
+        ("normal", _) => "no_action_required",
+        _ => "continue_adaptive_monitoring",
+    }
+}
+
+fn build_attack_summary(
+    severity: &str,
+    primary_pressure: &str,
+    active_defense: &str,
+    top_cluster: Option<&ResourceSentinelClusterSnapshot>,
+) -> String {
+    let cluster_text = top_cluster
+        .map(|cluster| {
+            format!(
+                "最热簇为 {}，类型 {}，样本 IP {}，累计 {} 次、风险分 {}。",
+                cluster.cluster,
+                cluster.attack_type,
+                cluster.sample_ip,
+                cluster.count,
+                cluster.score
+            )
+        })
+        .unwrap_or_else(|| "当前没有明显热点攻击簇。".to_string());
+    format!(
+        "哨兵级别为 {severity}，主要压力判断为 {primary_pressure}，自动防御状态为 {active_defense}。{cluster_text}"
+    )
+}
+
+fn should_emit_attack_audit(
+    diagnosis: &ResourceSentinelAttackDiagnosis,
+    lifecycle: &ResourceSentinelAttackLifecycle,
+) -> bool {
+    if matches!(
+        lifecycle.phase.as_str(),
+        "started" | "sustained" | "mitigating" | "ended"
+    ) {
+        return true;
+    }
+    matches!(diagnosis.severity.as_str(), "high" | "critical")
+        || matches!(
+            diagnosis.active_defense.as_str(),
+            "defense_effective_extending" | "defense_relaxing"
+        )
+}
+
+fn attack_audit_signature(
+    diagnosis: &ResourceSentinelAttackDiagnosis,
+    lifecycle: &ResourceSentinelAttackLifecycle,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    lifecycle.phase.hash(&mut hasher);
+    diagnosis.severity.hash(&mut hasher);
+    diagnosis.primary_pressure.hash(&mut hasher);
+    diagnosis.active_defense.hash(&mut hasher);
+    diagnosis.recommended_next_action.hash(&mut hasher);
+    if let Some(cluster) = diagnosis.top_cluster.as_ref() {
+        cluster.cluster.hash(&mut hasher);
+        cluster.attack_type.hash(&mut hasher);
+        cluster.transport.hash(&mut hasher);
+        cluster.reason.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn build_attack_audit_event(snapshot: ResourceSentinelSnapshot) -> SecurityEventRecord {
+    let diagnosis = snapshot.attack_diagnosis;
+    let lifecycle = snapshot.attack_lifecycle;
+    let sample_ip = diagnosis
+        .top_cluster
+        .as_ref()
+        .map(|cluster| cluster.sample_ip.clone())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    let mut event = SecurityEventRecord::now(
+        "SYSTEM",
+        "alert",
+        format!(
+            "resource sentinel attack diagnosis: phase={} severity={} primary_pressure={} active_defense={} recommended_next_action={}",
+            lifecycle.phase,
+            diagnosis.severity,
+            diagnosis.primary_pressure,
+            diagnosis.active_defense,
+            diagnosis.recommended_next_action
+        ),
+        sample_ip,
+        "0.0.0.0",
+        0,
+        0,
+        "SYSTEM",
+    );
+    event.provider = Some("resource_sentinel".to_string());
+    event.details_json = serde_json::to_string(&serde_json::json!({
+        "kind": "resource_sentinel_attack_audit",
+        "diagnosis": diagnosis,
+        "lifecycle": lifecycle,
+        "mode": snapshot.mode,
+        "attack_score": snapshot.attack_score,
+        "tracked_debt_buckets": snapshot.tracked_debt_buckets,
+        "high_debt_buckets": snapshot.high_debt_buckets,
+        "extreme_debt_buckets": snapshot.extreme_debt_buckets,
+        "tracked_attack_clusters": snapshot.tracked_attack_clusters,
+        "active_cooldowns": snapshot.active_cooldowns,
+        "pre_admission_rejections": snapshot.pre_admission_rejections,
+        "aggregated_events": snapshot.aggregated_events,
+        "automated_defense_actions": snapshot.automated_defense_actions,
+        "automated_defense_extensions": snapshot.automated_defense_extensions,
+        "automated_defense_relaxations": snapshot.automated_defense_relaxations,
+        "automated_defense_memory_hits": snapshot.automated_defense_memory_hits,
+        "top_attack_clusters": snapshot.top_attack_clusters,
+        "cdn_rust_count_note": "CDN 请求数可能远高于 Rust 记录数，因为 CDN/L4/L7 会在不同层提前拦截，Rust 本地审计只代表到达本进程或本进程已聚合的后端视角。"
+    }))
+    .ok();
+    event
 }
 
 fn event_cluster_parts(event: &SecurityEventRecord) -> EventClusterParts {
@@ -1493,6 +1910,115 @@ mod tests {
         );
         let _ = sentinel.should_aggregate_security_event(&event);
         assert!(sentinel.snapshot().automated_defense_memory_hits >= 1);
+    }
+
+    #[test]
+    fn attack_diagnosis_summarizes_primary_tls_pressure_and_defense_effect() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        let key = "transport:tls:cluster:203.0.113.0/24";
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("hot TLS cluster should create scoped cooldown");
+        let eval_at = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_EVAL_INTERVAL_MS + 1);
+        drop(bucket);
+
+        sentinel
+            .attack_score
+            .store(SCORE_UNDER_ATTACK, Ordering::Relaxed);
+        sentinel
+            .pre_admission_rejections
+            .fetch_add(DEFENSE_EFFECT_REJECTION_DELTA, Ordering::Relaxed);
+        sentinel.evaluate_defense_effects(eval_at);
+
+        let diagnosis = sentinel.snapshot().attack_diagnosis;
+        assert_eq!(diagnosis.severity, "high");
+        assert_eq!(diagnosis.primary_pressure, "tls_handshake_resource");
+        assert_eq!(diagnosis.active_defense, "defense_effective_extending");
+        assert_eq!(
+            diagnosis.recommended_next_action,
+            "keep_current_automation_and_watch_decay"
+        );
+        assert!(diagnosis.summary.contains("slow_tls_handshake"));
+        assert!(diagnosis
+            .evidence
+            .iter()
+            .any(|item| item.contains("pre_admission_rejections")));
+    }
+
+    #[test]
+    fn attack_audit_event_captures_diagnosis_and_cdn_rust_gap_note() {
+        let sentinel = ResourceSentinel::new();
+        activate_hot_tls_cluster(&sentinel);
+        let key = "transport:tls:cluster:203.0.113.0/24";
+        let bucket = sentinel
+            .cooldowns
+            .get(key)
+            .expect("hot TLS cluster should create scoped cooldown");
+        let eval_at = bucket
+            .created_ms
+            .saturating_add(DEFENSE_EFFECT_EVAL_INTERVAL_MS + 1);
+        drop(bucket);
+
+        sentinel
+            .attack_score
+            .store(SCORE_UNDER_ATTACK, Ordering::Relaxed);
+        sentinel
+            .pre_admission_rejections
+            .fetch_add(DEFENSE_EFFECT_REJECTION_DELTA, Ordering::Relaxed);
+        sentinel.evaluate_defense_effects(eval_at);
+
+        let event = sentinel
+            .maybe_attack_audit_event()
+            .expect("high diagnosis should emit audit event");
+        assert_eq!(event.layer, "SYSTEM");
+        assert_eq!(event.provider.as_deref(), Some("resource_sentinel"));
+        assert!(event.reason.contains("tls_handshake_resource"));
+        let details = event
+            .details_json
+            .expect("audit event should include details");
+        assert!(details.contains("resource_sentinel_attack_audit"));
+        assert!(details.contains("CDN"));
+        assert!(details.contains("Rust"));
+        assert!(sentinel.maybe_attack_audit_event().is_none());
+        assert_eq!(sentinel.snapshot().automated_audit_events, 1);
+    }
+
+    #[test]
+    fn attack_lifecycle_tracks_start_mitigation_and_end() {
+        let sentinel = ResourceSentinel::new();
+        let started_diagnosis = ResourceSentinelAttackDiagnosis {
+            severity: "high".to_string(),
+            active_defense: "cooldown_active".to_string(),
+            ..Default::default()
+        };
+        let started = sentinel.update_attack_lifecycle(&started_diagnosis);
+        assert_eq!(started.phase, "started");
+        assert_eq!(started.previous_phase, "normal");
+        assert!(started.transitioned);
+
+        let mitigating_diagnosis = ResourceSentinelAttackDiagnosis {
+            severity: "elevated".to_string(),
+            active_defense: "defense_relaxing".to_string(),
+            ..Default::default()
+        };
+        let mitigating = sentinel.update_attack_lifecycle(&mitigating_diagnosis);
+        assert_eq!(mitigating.phase, "mitigating");
+        assert_eq!(mitigating.previous_phase, "started");
+        assert!(mitigating.transitioned);
+
+        let ended_diagnosis = ResourceSentinelAttackDiagnosis {
+            severity: "normal".to_string(),
+            active_defense: "monitoring".to_string(),
+            ..Default::default()
+        };
+        let ended = sentinel.update_attack_lifecycle(&ended_diagnosis);
+        assert_eq!(ended.phase, "ended");
+        assert_eq!(ended.previous_phase, "mitigating");
+        assert!(ended.transitioned);
     }
 
     #[test]

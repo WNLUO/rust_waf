@@ -49,7 +49,10 @@ pub use packet::{
     RandomStatusConfig, TarpitConfig,
 };
 pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
-pub use resource_sentinel::{ResourceSentinelClusterSnapshot, ResourceSentinelSnapshot};
+pub use resource_sentinel::{
+    ResourceSentinelAttackDiagnosis, ResourceSentinelAttackLifecycle,
+    ResourceSentinelClusterSnapshot, ResourceSentinelSnapshot,
+};
 pub use self_protection::ServerPublicIpSnapshot;
 pub use visitor_intelligence::{
     VisitorDecisionSignal, VisitorIntelligenceSnapshot, VisitorProfileSignal, VisitorRouteSummary,

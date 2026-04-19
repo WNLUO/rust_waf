@@ -1,0 +1,446 @@
+# Rust WAF L4/L7 CDN 场景自动化智能化优化方案
+
+## 1. 背景
+
+本方案基于当前代码分析和 2 核 512 MB CDN 场景压测结果制定。
+
+压测链路：
+
+```text
+用户 -> CDN -> Rust WAF -> 雷池 WAF -> nginx
+```
+
+当前测试环境中雷池 WAF 和 nginx 未部署，因此用模拟后端代替后半段。
+
+压测结论：
+
+| 场景 | CPU 最高 | 内存最高 | 是否 CPU 先满 | 是否内存爆掉 |
+|---|---:|---:|---|---|
+| 常规 CDN CC | 约 201.89% | 约 84.2 MB | 是 | 否 |
+| 高级 CDN CC | 约 202.99% | 约 180 MB | 是 | 否 |
+
+核心判断：
+
+| 判断项 | 结论 |
+|---|---|
+| 当前主要瓶颈 | CPU |
+| 当前非主要瓶颈 | 内存 |
+| 高级 CC 的主要风险 | 分散真实用户 IP、路径和请求头，导致更多请求进入 L7 计算路径 |
+| 优化主线 | 更早、更便宜地做防御决策，并让 L4、L7、资源压力、AI 策略形成闭环 |
+
+## 2. 当前关键逻辑分析
+
+| 模块 | 当前位置 | 当前作用 | 主要问题 |
+|---|---|---|---|
+| HTTP/1 入口 | `src/core/engine/network/http1/connection.rs` | 请求头解析、真实 IP 识别、L4/L7/规则/代理主流程 | 攻击时每个请求要经过较长判断链 |
+| CDN 真实 IP 识别 | `src/core/engine/policy/routing.rs`、`src/core/engine/policy/request.rs` | 从可信 CDN 转发头中解析真实用户 IP | 已有基础能力，但还缺少更强的 CDN 可信链校验 |
+| L4 行为引擎 | `src/l4/behavior/engine.rs`、`src/l4/behavior/policy.rs` | 连接桶、请求桶、CDN 双身份、风险评分、降级策略 | L4 策略主要影响延迟和连接关闭，对 L7 收紧信号不够强 |
+| L7 CC | `src/l7/cc_guard/runtime.rs` | 按 IP、Host、Route、热点路径做滑动窗口限流 | 高级 CC 下统计维度多，CPU 成本较高 |
+| L7 行为分析 | `src/l7/behavior_guard/guard.rs` | 行为画像、聚合行为、异常挑战/拦截 | 生存模式会跳过，但进入生存模式依赖压力判断 |
+| 运行时压力 | `src/core/runtime_state/mod.rs` | 根据存储队列、代理延迟、身份压力、L7 摩擦等判断压力 | 缺少直接 CPU 压力输入 |
+| 资源预算 | `src/core/resource_budget.rs` | 根据机器容量和压力切换 full/balanced/lean/survival | 生存模式已有，但对 L7 快速拒绝还不够激进 |
+| AI 临时策略 | `src/core/ai_defense_runtime`、`src/storage/store/ai_temp_policy_repo.rs` | 自动策略、临时策略、效果记录 | 已有基础，但需要和 L4/L7 热点压力更紧密联动 |
+
+## 3. 总体设计目标
+
+| 目标 | 说明 |
+|---|---|
+| CPU 优先保护 | CPU 快满时，优先保证 WAF 自身存活和后端可用 |
+| CDN 不误杀 | 不能简单封 CDN 节点，要继续区分 CDN peer 和真实用户 IP |
+| 高级 CC 早处理 | 分散 IP、随机 UA、多路径攻击要尽量在便宜路径中识别 |
+| L4/L7 联动 | L4 发现高风险后，应直接影响 L7 阈值、挑战、drop 策略 |
+| 自动化闭环 | 观测 -> 自动收紧 -> 效果评估 -> 续期/回滚 |
+| 文档同步 | 每完成一个阶段，必须同步更新本文档的状态和结果 |
+
+## 4. 分阶段实施计划
+
+### 阶段 0：建立基线和文档约束
+
+状态：待用户确认后开始
+
+目标：
+
+| 项目 | 内容 |
+|---|---|
+| 目的 | 明确当前压测基线、测试环境、代码入口和后续阶段约束 |
+| 是否改代码 | 否 |
+| 是否需要复测 | 否 |
+
+任务：
+
+| 编号 | 任务 |
+|---:|---|
+| 0.1 | 保留远端测试环境 `/root/rust_waf_test`，不删除容器、脚本、压测结果 |
+| 0.2 | 在本文档记录每个阶段的开始时间、完成时间、改动文件、验证结果 |
+| 0.3 | 每个阶段完成后暂停，等待用户确认后再进入下一阶段 |
+
+完成标准：
+
+| 标准 | 说明 |
+|---|---|
+| 文档存在 | 根目录有本文档 |
+| 阶段拆分清楚 | 用户可以按阶段批准 |
+| 无代码变更 | 不影响当前运行逻辑 |
+
+阶段结果：
+
+| 项目 | 当前值 |
+|---|---|
+| 完成状态 | 已创建初版文档 |
+| 改动文件 | `L4_L7_CDN_AI_OPTIMIZATION_PLAN.md` |
+| 是否等待确认 | 是 |
+
+---
+
+### 阶段 1：CPU 压力感知进入运行时压力模型
+
+状态：已完成
+
+目标：
+
+让运行时压力判断不再只依赖队列、延迟、L7 摩擦等间接信号，而是直接感知 CPU 压力。
+
+涉及文件：
+
+| 文件 | 作用 |
+|---|---|
+| `src/core/runtime_state/mod.rs` | 运行时压力评分入口 |
+| `src/core/resource_budget.rs` | 根据压力切换资源预算 |
+| `src/core/system_profile.rs` 或相关系统采集模块 | 采集进程/容器 CPU 信息 |
+| `src/api/metrics.rs` | 暴露 CPU 压力指标 |
+
+拟修改点：
+
+| 编号 | 修改 |
+|---:|---|
+| 1.1 | 已增加容器 CPU 使用率采样，优先读取 cgroup v2 的 `cpu.stat` 和 `cpu.max` |
+| 1.2 | 请求 permit 等待压力本阶段未单独新增，现有 `trusted_proxy_permit_drops` 等指标继续参与自动调参；后续可在阶段 2/3 中进一步细化 |
+| 1.3 | 最近请求处理耗时本阶段未单独新增，现有代理平均延迟继续参与压力评分 |
+| 1.4 | 已将 CPU 压力纳入 `runtime_pressure_snapshot()` 的评分 |
+| 1.5 | 已在 `/metrics` 中输出 CPU 压力相关字段 |
+
+设计原则：
+
+| 原则 | 说明 |
+|---|---|
+| 低成本 | CPU 采样不能每个请求读取系统文件 |
+| 平滑 | 用滑动窗口或 EWMA，避免瞬时抖动 |
+| 可解释 | 指标要能说明为什么进入 high/attack |
+
+验证方式：
+
+| 验证 | 命令或方式 |
+|---|---|
+| 单元测试 | `cargo test runtime_pressure` |
+| 指标检查 | 查看 `/metrics` 新增字段 |
+| 压测检查 | CDN CC 下观察是否更早进入 survival |
+
+完成后必须更新：
+
+| 文档项 | 要写入的内容 |
+|---|---|
+| 阶段状态 | 已完成/有阻塞 |
+| 改动文件 | 列出实际修改文件 |
+| 验证结果 | 写明测试命令和结果 |
+| 下一阶段建议 | 是否建议继续阶段 2 |
+
+阶段结果：
+
+| 项目 | 内容 |
+|---|---|
+| 完成日期 | 2026-04-19 |
+| 完成状态 | 已完成 |
+| 改动文件 | `src/core/system_pressure.rs`、`src/core/mod.rs`、`src/core/runtime_state/mod.rs`、`src/api/metrics.rs`、`src/api/types/metrics.rs`、`src/api/tests.rs`、`src/core/resource_sentinel.rs`、`L4_L7_CDN_AI_OPTIMIZATION_PLAN.md` |
+| 新增能力 | 运行时压力模型现在可以读取容器 CPU 使用率，并把 CPU 压力作为进入 elevated/high/attack 的评分输入 |
+| 新增指标 | `runtime_pressure_cpu_percent`、`runtime_pressure_cpu_score`、`runtime_pressure_cpu_sample_available` |
+| 请求 metadata | `runtime.pressure.cpu_percent`、`runtime.pressure.cpu_score`、`runtime.pressure.cpu_sample_available` |
+| 采样方式 | 最多每秒采样一次，避免每个请求频繁读取系统文件 |
+| 压力阈值 | CPU >= 70% 加 1 分，>= 85% 加 2 分，>= 95% 加 3 分 |
+| 已验证 | `cargo fmt --check`、`cargo test cpu_pressure_score -- --nocapture`、`cargo test runtime_state -- --nocapture`、`cargo test test_build_metrics_response_without_sources -- --nocapture`、`cargo check` |
+| 验证结果 | 通过 |
+| 阶段说明 | 本阶段优先完成 CPU 直接感知；permit 等待和请求耗时的更细粒度接入留到统一早期防御决策阶段继续扩展 |
+| 是否等待确认 | 是，等待用户确认是否进入阶段 2 |
+
+---
+
+### 阶段 2：新增统一早期防御决策层
+
+状态：待开始
+
+目标：
+
+在 L4 请求策略之后、昂贵 L7 分析之前，增加统一决策层，尽早决定放行、挑战、丢弃、关闭连接或进入轻量路径。
+
+涉及文件：
+
+| 文件 | 作用 |
+|---|---|
+| `src/core/engine/network/http1/connection.rs` | HTTP/1 主流程接入点 |
+| `src/core/engine/network/http2/connection.rs` | HTTP/2 主流程接入点 |
+| `src/core/engine/network/http3/connection.rs` | HTTP/3 主流程接入点 |
+| `src/core/engine/network/decision.rs` 或新增模块 | 统一决策类型和执行逻辑 |
+| `src/l4/behavior/policy.rs` | L4 策略输出增强 |
+
+拟新增结构：
+
+```rust
+enum EarlyDefenseAction {
+    Allow,
+    LightweightL7,
+    Challenge,
+    Drop,
+    Close,
+}
+
+struct EarlyDefenseDecision {
+    action: EarlyDefenseAction,
+    reason: String,
+    force_close: bool,
+    route_threshold_scale_percent: Option<u32>,
+    host_threshold_scale_percent: Option<u32>,
+}
+```
+
+拟修改点：
+
+| 编号 | 修改 |
+|---:|---|
+| 2.1 | L4 policy 输出更明确的 L7 hint |
+| 2.2 | 在 HTTP 主流程中增加 `evaluate_early_defense()` |
+| 2.3 | 高压下对明显热点路径直接 drop 或轻量 429 |
+| 2.4 | 将早期决策结果写入 metadata，供 L7 CC 和日志使用 |
+| 2.5 | 保证 HTTP/1、HTTP/2、HTTP/3 行为一致 |
+
+验证方式：
+
+| 验证 | 命令或方式 |
+|---|---|
+| 单元测试 | 新增 early defense decision 测试 |
+| 集成测试 | HTTP/1/2/3 分别验证 drop/challenge/allow |
+| 压测检查 | 常规 CDN CC 下 CPU 峰值应降低或更快进入保护 |
+
+完成后必须更新本文档。
+
+---
+
+### 阶段 3：L7 CC 轻量快速通道
+
+状态：待开始
+
+目标：
+
+在 high/attack/survival 下减少 L7 CC 每个请求的统计成本，让热点路径先进入快速判断，避免高级 CC 把 CPU 耗在多维 bucket 维护上。
+
+涉及文件：
+
+| 文件 | 作用 |
+|---|---|
+| `src/l7/cc_guard/runtime.rs` | CC 主判断逻辑 |
+| `src/l7/cc_guard/counters.rs` | 滑动窗口计数器 |
+| `src/l7/cc_guard/types.rs` | 类型和阈值 |
+| `src/l7/cc_guard/tests.rs` | 测试 |
+
+拟修改点：
+
+| 编号 | 修改 |
+|---:|---|
+| 3.1 | 根据 `runtime.defense.depth` 切换 CC 模式 |
+| 3.2 | survival 下只维护核心 bucket：`host|route`、`client|host|route` |
+| 3.3 | high/attack 下跳过 page window 和部分 weighted bucket |
+| 3.4 | 对 API 热点路径增加硬阈值快速 drop |
+| 3.5 | 对静态资源保留更宽松策略，避免误伤页面资源 |
+
+验证方式：
+
+| 验证 | 命令或方式 |
+|---|---|
+| 单元测试 | CC 阈值、轻量模式、静态资源例外 |
+| 压测检查 | 高级 CDN CC 下 CPU 峰值、RPS、拦截量对比 |
+
+完成后必须更新本文档。
+
+---
+
+### 阶段 4：L4 与 L7 的 CDN 双身份联动增强
+
+状态：待开始
+
+目标：
+
+保留“CDN 节点不误封”的前提下，让 L4 同时从真实用户和 CDN 节点压力中给 L7 输出更强、更清晰的防御信号。
+
+涉及文件：
+
+| 文件 | 作用 |
+|---|---|
+| `src/l4/behavior/engine.rs` | 双身份 bucket 和 policy 合并 |
+| `src/l4/behavior/policy.rs` | 风险评分和策略输出 |
+| `src/core/engine/policy/routing.rs` | CDN 身份解析 |
+| `src/l7/cc_guard/runtime.rs` | 接收 L4 输出的阈值缩放 |
+
+拟修改点：
+
+| 编号 | 修改 |
+|---:|---|
+| 4.1 | L4 policy 增加 `l7_route_threshold_scale_percent` |
+| 4.2 | L4 policy 增加 `l7_host_threshold_scale_percent` |
+| 4.3 | CDN peer 高压时不封 CDN，但对其承载的热点 route 收紧 |
+| 4.4 | 真实用户 bucket 高风险时，优先对用户维度收紧 |
+| 4.5 | unresolved CDN 身份在高压时更快进入 close/drop |
+
+验证方式：
+
+| 验证 | 命令或方式 |
+|---|---|
+| 单元测试 | trusted CDN forwarded、unresolved、spoofed header |
+| 压测检查 | CDN 高级 CC 下拦截更早，后端成功请求更可控 |
+
+完成后必须更新本文档。
+
+---
+
+### 阶段 5：事件日志与持久化降级
+
+状态：待开始
+
+目标：
+
+攻击时大量重复事件不能拖垮主请求链路。高压下应该聚合、采样、瘦身，而不是完整记录每个细节。
+
+涉及文件：
+
+| 文件 | 作用 |
+|---|---|
+| `src/core/engine/policy/inspection/persistence.rs` | 安全事件持久化 |
+| `src/storage/support/writer.rs` | SQLite 写入队列 |
+| `src/storage/support/behavior.rs` | 行为事件压缩相关逻辑 |
+| `src/api/metrics.rs` | 暴露降级计数 |
+
+拟修改点：
+
+| 编号 | 修改 |
+|---:|---|
+| 5.1 | survival 下默认聚合同类 CC 事件 |
+| 5.2 | 高频重复事件只保留计数和样本 |
+| 5.3 | 日志详情按压力等级瘦身 |
+| 5.4 | 暴露被聚合/丢弃/瘦身事件数量 |
+
+验证方式：
+
+| 验证 | 命令或方式 |
+|---|---|
+| 单元测试 | queue pressure、event aggregation |
+| 压测检查 | SQLite 队列不持续堆积 |
+
+完成后必须更新本文档。
+
+---
+
+### 阶段 6：AI 临时策略闭环增强
+
+状态：待开始
+
+目标：
+
+把已有 AI 临时策略变成真正闭环：自动生成、自动应用、自动评估、自动续期或撤销。
+
+涉及文件：
+
+| 文件 | 作用 |
+|---|---|
+| `src/core/ai_defense_runtime` | AI 防御运行时 |
+| `src/storage/store/ai_temp_policy_repo.rs` | 临时策略存储和效果统计 |
+| `src/core/adaptive_protection.rs` | 自适应保护 |
+| `src/core/auto_tuning` | 自动调参 |
+
+拟修改点：
+
+| 编号 | 修改 |
+|---:|---|
+| 6.1 | 热点路径自动生成短期策略 |
+| 6.2 | 策略命中后记录后端延迟、错误率、挑战通过率 |
+| 6.3 | 策略有效则自动续期 |
+| 6.4 | 疑似误伤则自动回滚 |
+| 6.5 | 策略效果进入 `/metrics` 和审计报告 |
+
+验证方式：
+
+| 验证 | 命令或方式 |
+|---|---|
+| 单元测试 | temp policy outcome、续期、撤销 |
+| 压测检查 | 高级 CC 后生成的策略是否降低后续压力 |
+
+完成后必须更新本文档。
+
+---
+
+### 阶段 7：复测与报告
+
+状态：待开始
+
+目标：
+
+在保留的远端测试环境中，对修改前后的常规 CDN CC、高级 CDN CC 做对比。
+
+测试环境：
+
+| 项目 | 值 |
+|---|---|
+| 远端目录 | `/root/rust_waf_test` |
+| 结果目录 | `/root/rust_waf_test/cdn-report-artifacts` |
+| 是否删除环境 | 否 |
+
+复测项目：
+
+| 场景 | 并发 | 持续时间 | 关注指标 |
+|---|---:|---:|---|
+| 常规 CDN CC | 512 | 90 秒 | CPU、内存、拦截、后端成功 |
+| 高级 CDN CC | 512 | 120 秒 | CPU、内存、拦截、后端成功 |
+| 长时间高级 CDN CC | 待定 | 10-30 分钟 | 稳定性、误伤、队列 |
+
+报告必须包含：
+
+| 项目 | 内容 |
+|---|---|
+| 修改前后 CPU 对比 | 峰值、平均值、进入 survival 时间 |
+| 修改前后内存对比 | 峰值、是否 OOM |
+| L4/L7 拦截对比 | L4、L7、早期 drop、挑战 |
+| 后端保护效果 | 后端成功/失败、平均代理延迟 |
+| 智能化效果 | 自动策略数量、命中、续期/撤销 |
+| 结论 | 是否达到优化目标 |
+
+完成后必须更新本文档。
+
+## 5. 阶段推进规则
+
+| 规则 | 内容 |
+|---|---|
+| 逐阶段执行 | 未经用户确认，不进入下一阶段 |
+| 每阶段更新文档 | 每次代码修改完成后，同步更新本文档 |
+| 保留测试环境 | 不删除远端 `/root/rust_waf_test` |
+| 小步提交 | 每阶段控制改动范围，避免一次性大重构 |
+| 先测再报 | 每阶段完成后尽量运行相关测试 |
+| 中文汇报 | 阶段完成报告使用中文 |
+
+## 6. 当前状态
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| 阶段 0 | 已完成文档初版 | 用户已确认进入阶段 1 |
+| 阶段 1 | 已完成 | CPU 压力感知已接入运行时压力模型，等待用户确认是否进入阶段 2 |
+| 阶段 2 | 未开始 | 统一早期防御决策 |
+| 阶段 3 | 未开始 | L7 CC 轻量快速通道 |
+| 阶段 4 | 未开始 | L4/L7 CDN 双身份联动 |
+| 阶段 5 | 未开始 | 事件日志与持久化降级 |
+| 阶段 6 | 未开始 | AI 临时策略闭环 |
+| 阶段 7 | 未开始 | 复测与报告 |
+
+## 7. 下一步
+
+等待用户确认后，进入阶段 2：
+
+```text
+新增统一早期防御决策层
+```
+
+阶段 2 完成后，我会更新本文档中的阶段状态、改动文件和验证结果，然后暂停等待确认。

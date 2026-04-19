@@ -22,6 +22,7 @@ const MAX_ROUTE_DEFENSE_BUCKETS: usize = 8_192;
 impl WafContext {
     pub fn runtime_pressure_snapshot(&self) -> RuntimePressureSnapshot {
         let auto = self.auto_tuning_snapshot();
+        let cpu_pressure = self.cpu_pressure_snapshot();
         let storage_queue_usage_percent = self
             .sqlite_store
             .as_ref()
@@ -55,6 +56,7 @@ impl WafContext {
         } else if auto.last_observed_slow_attack_pressure_percent >= 0.5 {
             score += 1;
         }
+        score = score.saturating_add(cpu_pressure.score);
 
         let level = match score {
             0..=1 => "normal",
@@ -71,6 +73,9 @@ impl WafContext {
             capacity_class: budget.capacity_class.as_str(),
             defense_depth: budget.defense_depth.as_str(),
             storage_queue_usage_percent,
+            cpu_usage_percent: cpu_pressure.usage_percent,
+            cpu_pressure_score: cpu_pressure.score,
+            cpu_sample_available: cpu_pressure.sample_available,
             drop_delay: matches!(level, "high" | "attack") || budget.prefer_drop,
             trim_event_persistence: storage_queue_usage_percent >= 75
                 || matches!(level, "high" | "attack")
@@ -94,6 +99,18 @@ impl WafContext {
         request.add_metadata(
             "runtime.pressure.storage_queue_percent".to_string(),
             pressure.storage_queue_usage_percent.to_string(),
+        );
+        request.add_metadata(
+            "runtime.pressure.cpu_percent".to_string(),
+            format!("{:.2}", pressure.cpu_usage_percent),
+        );
+        request.add_metadata(
+            "runtime.pressure.cpu_score".to_string(),
+            pressure.cpu_pressure_score.to_string(),
+        );
+        request.add_metadata(
+            "runtime.pressure.cpu_sample_available".to_string(),
+            pressure.cpu_sample_available.to_string(),
         );
         request.add_metadata(
             "runtime.capacity.class".to_string(),
@@ -135,6 +152,13 @@ impl WafContext {
             );
             request.add_metadata("runtime.aggregate_events".to_string(), "true".to_string());
         }
+    }
+
+    fn cpu_pressure_snapshot(&self) -> super::system_pressure::CpuPressureSnapshot {
+        self.cpu_pressure_monitor
+            .lock()
+            .map(|mut monitor| monitor.snapshot())
+            .unwrap_or_default()
     }
 
     pub fn annotate_site_runtime_budget(&self, request: &mut UnifiedHttpRequest) {

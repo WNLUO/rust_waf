@@ -16,6 +16,7 @@ mod rule_engine;
 mod runtime_state;
 mod self_protection;
 mod storage_runtime;
+mod system_pressure;
 mod system_profile;
 pub mod traffic_map;
 mod visitor_intelligence;
@@ -34,7 +35,7 @@ use anyhow::Result;
 use dashmap::DashMap;
 use rule_engine::load_rule_engine_state;
 use std::sync::atomic::{AtomicI64, AtomicU64};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use storage_runtime::restore_runtime_blocked_ips;
 use tokio::sync::Mutex;
@@ -111,6 +112,7 @@ pub struct WafContext {
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     resource_sentinel: resource_sentinel::ResourceSentinel,
+    cpu_pressure_monitor: StdMutex<system_pressure::CpuPressureMonitor>,
     server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
     bot_ip_verifier: Arc<bot_verifier::BotIpVerifier>,
     bot_provider_config: Arc<RwLock<Vec<crate::config::BotProviderConfig>>>,
@@ -126,6 +128,9 @@ pub struct RuntimePressureSnapshot {
     pub capacity_class: &'static str,
     pub defense_depth: &'static str,
     pub storage_queue_usage_percent: u64,
+    pub cpu_usage_percent: f64,
+    pub cpu_pressure_score: u8,
+    pub cpu_sample_available: bool,
     pub drop_delay: bool,
     pub trim_event_persistence: bool,
     pub l7_bucket_limit: usize,
@@ -501,6 +506,7 @@ impl WafContext {
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
             resource_sentinel: resource_sentinel::ResourceSentinel::new(),
+            cpu_pressure_monitor: StdMutex::new(system_pressure::CpuPressureMonitor::new()),
             server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),
             bot_ip_verifier: Arc::new(bot_verifier::BotIpVerifier::new()),
             bot_provider_config: Arc::new(RwLock::new(config.bot_detection.providers.clone())),

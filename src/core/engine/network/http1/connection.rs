@@ -168,6 +168,62 @@ pub(crate) async fn handle_http1_connection(
             apply_gateway_site_metadata(&mut request, site);
         }
         context.annotate_site_runtime_budget(&mut request);
+        if request
+            .get_metadata("runtime.defense.depth")
+            .map(String::as_str)
+            == Some("survival")
+        {
+            let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
+            request.add_metadata("l7.cc.prechecked".to_string(), "true".to_string());
+            if let Some(metrics) = context.metrics.as_ref() {
+                record_l7_cc_metrics(metrics, &request);
+            }
+            if let Some(result) = cc_result {
+                if result.should_persist_event() {
+                    persist_http_inspection_event(context.as_ref(), packet, &request, &result);
+                }
+                enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
+                if result_should_drop_http1(&result, &request) {
+                    context.note_ai_route_result(
+                        &request,
+                        AiRouteResultObservation {
+                            status_code: 499,
+                            latency_ms: None,
+                            upstream_error: false,
+                            local_response: true,
+                            blocked: true,
+                        },
+                    );
+                    let _ = stream.shutdown().await;
+                    return Ok(());
+                }
+                if let Some(response) = result.custom_response.as_ref() {
+                    write_custom_http1_response(
+                        context.as_ref(),
+                        &http1_handler,
+                        &mut stream,
+                        &request,
+                        response,
+                        true,
+                        false,
+                    )
+                    .await?;
+                } else {
+                    http1_handler
+                        .write_response(
+                            &mut stream,
+                            429,
+                            "Too Many Requests",
+                            result.reason.as_bytes(),
+                        )
+                        .await?;
+                }
+                if !should_keep_client_connection_open(&request) {
+                    return Ok(());
+                }
+                continue;
+            }
+        }
         if let Some(inspector) = context.l4_inspector() {
             let policy = inspector.apply_request_policy(packet, &mut request);
             if skip_l4_connection_budget

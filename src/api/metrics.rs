@@ -51,6 +51,14 @@ pub(super) fn build_metrics_response(
         l7_cc_delays: snapshot.l7_cc_delays,
         l7_cc_unresolved_identity_delays: snapshot.l7_cc_unresolved_identity_delays,
         l7_cc_verified_passes: snapshot.l7_cc_verified_passes,
+        l7_cc_fast_path_requests: snapshot.l7_cc_fast_path_requests,
+        l7_cc_fast_path_blocks: snapshot.l7_cc_fast_path_blocks,
+        l7_cc_hot_cache_hits: snapshot.l7_cc_hot_cache_hits,
+        l7_cc_fast_path_ratio_percent: if snapshot.total_packets == 0 {
+            0.0
+        } else {
+            (snapshot.l7_cc_fast_path_requests as f64 / snapshot.total_packets as f64) * 100.0
+        },
         l7_behavior_challenges: snapshot.l7_behavior_challenges,
         l7_behavior_blocks: snapshot.l7_behavior_blocks,
         l7_behavior_delays: snapshot.l7_behavior_delays,

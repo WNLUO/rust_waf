@@ -5,8 +5,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use super::types::{
-    DistinctSlidingWindowCounter, PageLoadWindowState, SlidingWindowCounter,
-    WeightedSlidingWindowCounter,
+    DistinctSlidingWindowCounter, FastWindowCounter, FastWindowObservation, FastWindowSlot,
+    FastWindowState, HotBlockEntry, PageLoadWindowState, SlidingWindowCounter,
+    WeightedSlidingWindowCounter, FAST_WINDOW_BUCKETS,
 };
 use super::unix_timestamp;
 
@@ -137,6 +138,71 @@ impl DistinctSlidingWindowCounter {
     }
 }
 
+impl FastWindowState {
+    fn new(unix_now: i64) -> Self {
+        Self {
+            slots: [FastWindowSlot {
+                tick: unix_now,
+                count: 0,
+            }; FAST_WINDOW_BUCKETS],
+        }
+    }
+}
+
+impl FastWindowCounter {
+    pub(super) fn new(unix_now: i64) -> Self {
+        Self {
+            state: Mutex::new(FastWindowState::new(unix_now)),
+            last_seen_unix: AtomicI64::new(unix_now),
+        }
+    }
+
+    pub(super) fn observe(
+        &self,
+        unix_now: i64,
+        window_secs: u64,
+        increment: u32,
+    ) -> FastWindowObservation {
+        let mut state = self.state.lock().expect("cc fast bucket lock poisoned");
+        let index = unix_now.rem_euclid(FAST_WINDOW_BUCKETS as i64) as usize;
+        let slot = &mut state.slots[index];
+        if slot.tick != unix_now {
+            slot.tick = unix_now;
+            slot.count = 0;
+        }
+        slot.count = slot.count.saturating_add(increment.max(1));
+
+        let oldest_tick = unix_now.saturating_sub(window_secs.max(1) as i64 - 1);
+        let count = state
+            .slots
+            .iter()
+            .filter(|slot| slot.tick >= oldest_tick && slot.tick <= unix_now)
+            .fold(0u32, |acc, slot| acc.saturating_add(slot.count));
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        FastWindowObservation { count }
+    }
+}
+
+impl HotBlockEntry {
+    pub(super) fn new(expires_at_unix: i64, unix_now: i64) -> Self {
+        Self {
+            expires_at_unix: AtomicI64::new(expires_at_unix),
+            last_seen_unix: AtomicI64::new(unix_now),
+        }
+    }
+
+    pub(super) fn is_active(&self, unix_now: i64) -> bool {
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        self.expires_at_unix.load(Ordering::Relaxed) >= unix_now
+    }
+
+    pub(super) fn refresh(&self, expires_at_unix: i64, unix_now: i64) {
+        self.expires_at_unix
+            .store(expires_at_unix, Ordering::Relaxed);
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+    }
+}
+
 pub(super) fn weighted_points_to_requests(points: u32) -> u32 {
     if points == 0 {
         return 0;
@@ -223,6 +289,44 @@ pub(super) fn cleanup_page_window_map(
             let value = entry.value();
             value.expires_at_unix.load(Ordering::Relaxed) < unix_now
                 && value.last_seen_unix.load(Ordering::Relaxed) < stale_before
+        })
+        .take(limit)
+        .map(|entry| entry.key().clone())
+        .collect::<Vec<_>>();
+
+    for key in keys {
+        map.remove(&key);
+    }
+}
+
+pub(super) fn cleanup_fast_window_map(
+    map: &DashMap<String, FastWindowCounter>,
+    stale_before: i64,
+    limit: usize,
+) {
+    let keys = map
+        .iter()
+        .filter(|entry| entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before)
+        .take(limit)
+        .map(|entry| entry.key().clone())
+        .collect::<Vec<_>>();
+
+    for key in keys {
+        map.remove(&key);
+    }
+}
+
+pub(super) fn cleanup_hot_block_map(
+    map: &DashMap<String, HotBlockEntry>,
+    unix_now: i64,
+    stale_before: i64,
+    limit: usize,
+) {
+    let keys = map
+        .iter()
+        .filter(|entry| {
+            entry.value().expires_at_unix.load(Ordering::Relaxed) < unix_now
+                && entry.value().last_seen_unix.load(Ordering::Relaxed) < stale_before
         })
         .take(limit)
         .map(|entry| entry.key().clone())

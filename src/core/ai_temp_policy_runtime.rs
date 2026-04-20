@@ -35,10 +35,17 @@ impl WafContext {
         &self,
         request: &mut UnifiedHttpRequest,
     ) -> Option<InspectionResult> {
-        let policies = self.active_ai_temp_policies();
+        let policies = self
+            .ai_temp_policies
+            .read()
+            .expect("ai_temp_policies lock poisoned");
         if policies.is_empty() {
             return None;
         }
+        let survival_path = request
+            .get_metadata("runtime.defense.depth")
+            .map(String::as_str)
+            == Some("survival");
 
         let host = request
             .get_header("host")
@@ -78,9 +85,12 @@ impl WafContext {
         let mut reduce_friction = false;
         let mut block_reason = None::<String>;
 
-        for policy in policies {
+        for policy in policies.iter() {
+            if survival_path && !survival_ai_action_is_hot_path_safe(policy.action.as_str()) {
+                continue;
+            }
             let matched =
-                match_ai_temp_policy(&policy, &host, &route, &client_ip, identity.as_deref());
+                match_ai_temp_policy(policy, &host, &route, &client_ip, identity.as_deref());
             let Some(matched) = matched else {
                 continue;
             };
@@ -216,4 +226,11 @@ impl WafContext {
             }
         });
     }
+}
+
+fn survival_ai_action_is_hot_path_safe(action: &str) -> bool {
+    matches!(
+        action,
+        "add_temp_block" | "tighten_route_cc" | "tighten_host_cc" | "increase_challenge"
+    )
 }

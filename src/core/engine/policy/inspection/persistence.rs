@@ -48,10 +48,10 @@ pub(crate) fn persist_http_inspection_event(
     request: &UnifiedHttpRequest,
     result: &InspectionResult,
 ) {
-    context.note_site_defense_signal(request, result);
     if should_skip_persisting_result_event(context, result, Some(request)) {
         return;
     }
+    context.note_site_defense_signal(request, result);
     let Some(store) = context.sqlite_store.as_ref() else {
         return;
     };
@@ -249,12 +249,17 @@ fn should_skip_persisting_result_event(
     result: &InspectionResult,
     request: Option<&UnifiedHttpRequest>,
 ) -> bool {
-    if result.persist_blocked_ip
-        || matches!(
-            result.action,
-            InspectionAction::Block | InspectionAction::Drop
-        )
+    if result.persist_blocked_ip || matches!(result.action, InspectionAction::Block) {
+        return false;
+    }
+
+    if matches!(result.action, InspectionAction::Drop)
+        && should_sample_survival_drop_event(request).is_some_and(|sample| !sample)
     {
+        return true;
+    }
+
+    if matches!(result.action, InspectionAction::Drop) {
         return false;
     }
 
@@ -282,6 +287,21 @@ fn should_skip_persisting_result_event(
     }
 
     false
+}
+
+fn should_sample_survival_drop_event(request: Option<&UnifiedHttpRequest>) -> Option<bool> {
+    let request = request?;
+    if request
+        .get_metadata("runtime.defense.depth")
+        .map(String::as_str)
+        != Some("survival")
+    {
+        return None;
+    }
+    static SURVIVAL_DROP_EVENT_SEQUENCE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+    let sequence = SURVIVAL_DROP_EVENT_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Some(sequence.is_multiple_of(1024))
 }
 
 fn should_trim_event_persistence(

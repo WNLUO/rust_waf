@@ -11,6 +11,7 @@ pub(super) const MAX_BUCKET_KEY_LEN: usize = 192;
 pub(super) const MAX_ROUTE_PATH_LEN: usize = 160;
 pub(super) const MAX_HOST_LEN: usize = 96;
 pub(super) const OVERFLOW_SHARDS: u64 = 64;
+pub(super) const FAST_WINDOW_BUCKETS: usize = 8;
 
 #[derive(Debug)]
 pub(super) struct SlidingWindowCounter {
@@ -35,6 +36,34 @@ pub(super) struct PageLoadWindowState {
 pub(super) struct DistinctSlidingWindowCounter {
     pub(super) events: Mutex<VecDeque<(Instant, String)>>,
     pub(super) counts: Mutex<HashMap<String, u32>>,
+    pub(super) last_seen_unix: AtomicI64,
+}
+
+#[derive(Debug)]
+pub(super) struct FastWindowCounter {
+    pub(super) state: Mutex<FastWindowState>,
+    pub(super) last_seen_unix: AtomicI64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct FastWindowState {
+    pub(super) slots: [FastWindowSlot; FAST_WINDOW_BUCKETS],
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct FastWindowSlot {
+    pub(super) tick: i64,
+    pub(super) count: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FastWindowObservation {
+    pub(super) count: u32,
+}
+
+#[derive(Debug)]
+pub(super) struct HotBlockEntry {
+    pub(super) expires_at_unix: AtomicI64,
     pub(super) last_seen_unix: AtomicI64,
 }
 

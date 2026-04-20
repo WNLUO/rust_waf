@@ -57,6 +57,40 @@ impl L7CcGuard {
         entry.observe(value, now, unix_now, window)
     }
 
+    pub(super) fn observe_fast(
+        &self,
+        map: &DashMap<String, FastWindowCounter>,
+        key: String,
+        unix_now: i64,
+        window_secs: u64,
+        limit: usize,
+    ) -> FastWindowObservation {
+        let key = bounded_dashmap_key(map, key, limit, "cc_fast", OVERFLOW_SHARDS);
+        let entry = map
+            .entry(key)
+            .or_insert_with(|| FastWindowCounter::new(unix_now));
+        entry.observe(unix_now, window_secs, 1)
+    }
+
+    pub(super) fn hot_block_cache_hit(&self, key: &str, unix_now: i64) -> bool {
+        if let Some(entry) = self.hot_block_cache.get(key) {
+            if entry.is_active(unix_now) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(super) fn insert_hot_block_cache(&self, key: String, unix_now: i64, ttl_secs: u64) {
+        let expires_at = unix_now.saturating_add(ttl_secs.max(1) as i64);
+        if let Some(entry) = self.hot_block_cache.get(&key) {
+            entry.refresh(expires_at, unix_now);
+            return;
+        }
+        self.hot_block_cache
+            .insert(key, HotBlockEntry::new(expires_at, unix_now));
+    }
+
     pub(super) fn request_weight_percent(
         &self,
         kind: RequestKind,
@@ -183,6 +217,10 @@ impl L7CcGuard {
             self.host_weighted_buckets.len(),
             self.route_weighted_buckets.len(),
             self.hot_path_weighted_buckets.len(),
+            self.fast_ip_buckets.len(),
+            self.fast_route_buckets.len(),
+            self.fast_hot_path_buckets.len(),
+            self.hot_block_cache.len(),
             self.page_load_windows.len(),
             self.page_load_host_windows.len(),
         ]
@@ -205,6 +243,10 @@ impl L7CcGuard {
         cleanup_weighted_map(&self.host_weighted_buckets, stale_before, cleanup_batch);
         cleanup_weighted_map(&self.route_weighted_buckets, stale_before, cleanup_batch);
         cleanup_weighted_map(&self.hot_path_weighted_buckets, stale_before, cleanup_batch);
+        cleanup_fast_window_map(&self.fast_ip_buckets, stale_before, cleanup_batch);
+        cleanup_fast_window_map(&self.fast_route_buckets, stale_before, cleanup_batch);
+        cleanup_fast_window_map(&self.fast_hot_path_buckets, stale_before, cleanup_batch);
+        cleanup_hot_block_map(&self.hot_block_cache, unix_now, stale_before, cleanup_batch);
         cleanup_page_window_map(
             &self.page_load_windows,
             unix_now,

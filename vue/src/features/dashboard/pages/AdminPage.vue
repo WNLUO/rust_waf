@@ -573,22 +573,29 @@ const defenseMatrix = computed(() => {
           class: (metrics?.l7_cc_delays || 0) > 0 ? 'text-amber-700' : '',
         },
         {
-          label: '放行',
-          value: formatNumber(metrics?.l7_cc_verified_passes || 0),
-          class: 'text-emerald-700',
+          label: '快路径',
+          value: formatNumber(metrics?.l7_cc_fast_path_requests || 0),
+          class:
+            (metrics?.l7_cc_fast_path_requests || 0) > 0
+              ? 'text-sky-700'
+              : '',
         },
         {
-          label: '行为拦截',
-          value: formatNumber(metrics?.l7_behavior_blocks || 0),
-          class: (metrics?.l7_behavior_blocks || 0) > 0 ? 'text-red-700' : '',
+          label: '热缓存',
+          value: formatNumber(metrics?.l7_cc_hot_cache_hits || 0),
+          class:
+            (metrics?.l7_cc_hot_cache_hits || 0) > 0 ? 'text-red-700' : '',
         },
         {
-          label: '行为延迟',
-          value: formatNumber(metrics?.l7_behavior_delays || 0),
-          class: (metrics?.l7_behavior_delays || 0) > 0 ? 'text-amber-700' : '',
+          label: '快路径占比',
+          value: `${(metrics?.l7_cc_fast_path_ratio_percent || 0).toFixed(1)}%`,
+          class:
+            (metrics?.l7_cc_fast_path_ratio_percent || 0) > 0
+              ? 'text-sky-700'
+              : '',
         },
       ],
-      summary: 'CC 挑战链路',
+      summary: 'CC 自动战时快路径',
     },
     {
       label: '存储',

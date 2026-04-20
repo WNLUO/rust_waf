@@ -84,10 +84,33 @@ pub(crate) fn record_l7_cc_metrics(
     {
         metrics.record_l7_cc_verified_pass();
     }
+    if request
+        .get_metadata("l7.cc.fast_path")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        metrics.record_l7_cc_fast_path_request();
+    }
+    if request
+        .get_metadata("l7.cc.hot_cache_hit")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        metrics.record_l7_cc_hot_cache_hit();
+    }
 
     match request.get_metadata("l7.cc.action").map(String::as_str) {
         Some("challenge") => metrics.record_l7_cc_challenge(),
-        Some("block") => metrics.record_l7_cc_block(),
+        Some("block") => {
+            metrics.record_l7_cc_block();
+            if request
+                .get_metadata("l7.cc.fast_path")
+                .map(|value| value == "true")
+                .unwrap_or(false)
+            {
+                metrics.record_l7_cc_fast_path_block();
+            }
+        }
         Some(action) if action.starts_with("delay:") => {
             metrics.record_l7_cc_delay();
             if unresolved_identity {

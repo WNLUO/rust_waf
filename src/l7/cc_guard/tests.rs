@@ -502,19 +502,62 @@ async fn survival_runtime_uses_minimal_tracking_for_hot_path_pressure() {
         request
             .get_metadata("l7.cc.tracking_mode")
             .map(String::as_str),
-        Some("minimal")
+        Some("survival_fast")
+    );
+    assert_eq!(
+        request.get_metadata("l7.cc.fast_path").map(String::as_str),
+        Some("true")
     );
     assert_eq!(
         request
-            .get_metadata("l7.cc.hot_path_clients")
-            .map(String::as_str),
-        Some("0")
-    );
-    assert_eq!(
-        request
-            .get_metadata("l7.cc.hot_path_count")
+            .get_metadata("l7.cc.route_count")
             .map(String::as_str),
         Some("1")
+    );
+}
+
+#[tokio::test]
+async fn survival_fast_path_blocks_and_uses_hot_cache() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 2,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/api/search");
+    first.method = "POST".to_string();
+    first.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    assert!(guard.inspect_request(&mut first).await.is_none());
+
+    let mut second = request("/api/search");
+    second.method = "POST".to_string();
+    second.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    let result = guard
+        .inspect_request(&mut second)
+        .await
+        .expect("fast block");
+    assert!(result.blocked);
+    assert_eq!(
+        second.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("cc_fast_block")
+    );
+
+    let mut third = request("/api/search");
+    third.method = "POST".to_string();
+    third.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    let result = guard
+        .inspect_request(&mut third)
+        .await
+        .expect("hot cache block");
+    assert!(result.blocked);
+    assert_eq!(
+        third
+            .get_metadata("l7.cc.hot_cache_hit")
+            .map(String::as_str),
+        Some("true")
     );
 }
 

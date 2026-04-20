@@ -24,6 +24,9 @@ pub struct MetricsCollector {
     l7_cc_delays: AtomicU64,
     l7_cc_unresolved_identity_delays: AtomicU64,
     l7_cc_verified_passes: AtomicU64,
+    l7_cc_fast_path_requests: AtomicU64,
+    l7_cc_fast_path_blocks: AtomicU64,
+    l7_cc_hot_cache_hits: AtomicU64,
     l7_behavior_challenges: AtomicU64,
     l7_behavior_blocks: AtomicU64,
     l7_behavior_delays: AtomicU64,
@@ -100,6 +103,9 @@ impl MetricsCollector {
             l7_cc_delays: AtomicU64::new(0),
             l7_cc_unresolved_identity_delays: AtomicU64::new(0),
             l7_cc_verified_passes: AtomicU64::new(0),
+            l7_cc_fast_path_requests: AtomicU64::new(0),
+            l7_cc_fast_path_blocks: AtomicU64::new(0),
+            l7_cc_hot_cache_hits: AtomicU64::new(0),
             l7_behavior_challenges: AtomicU64::new(0),
             l7_behavior_blocks: AtomicU64::new(0),
             l7_behavior_delays: AtomicU64::new(0),
@@ -331,6 +337,19 @@ impl MetricsCollector {
         self.l7_cc_verified_passes.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_l7_cc_fast_path_request(&self) {
+        self.l7_cc_fast_path_requests
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_fast_path_block(&self) {
+        self.l7_cc_fast_path_blocks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_hot_cache_hit(&self) {
+        self.l7_cc_hot_cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_l7_behavior_challenge(&self) {
         self.l7_behavior_challenges.fetch_add(1, Ordering::Relaxed);
     }
@@ -425,6 +444,9 @@ impl MetricsCollector {
                 .l7_cc_unresolved_identity_delays
                 .load(Ordering::Relaxed),
             l7_cc_verified_passes: self.l7_cc_verified_passes.load(Ordering::Relaxed),
+            l7_cc_fast_path_requests: self.l7_cc_fast_path_requests.load(Ordering::Relaxed),
+            l7_cc_fast_path_blocks: self.l7_cc_fast_path_blocks.load(Ordering::Relaxed),
+            l7_cc_hot_cache_hits: self.l7_cc_hot_cache_hits.load(Ordering::Relaxed),
             l7_behavior_challenges: self.l7_behavior_challenges.load(Ordering::Relaxed),
             l7_behavior_blocks: self.l7_behavior_blocks.load(Ordering::Relaxed),
             l7_behavior_delays: self.l7_behavior_delays.load(Ordering::Relaxed),
@@ -549,6 +571,9 @@ mod tests {
         metrics.record_l7_cc_delay();
         metrics.record_l7_cc_unresolved_identity_delay();
         metrics.record_l7_cc_verified_pass();
+        metrics.record_l7_cc_fast_path_request();
+        metrics.record_l7_cc_fast_path_block();
+        metrics.record_l7_cc_hot_cache_hit();
         metrics.record_l7_ip_access_allow();
         metrics.record_l7_ip_access_alert();
         metrics.record_l7_ip_access_challenge();
@@ -566,6 +591,9 @@ mod tests {
         assert_eq!(snapshot.l7_cc_delays, 1);
         assert_eq!(snapshot.l7_cc_unresolved_identity_delays, 1);
         assert_eq!(snapshot.l7_cc_verified_passes, 1);
+        assert_eq!(snapshot.l7_cc_fast_path_requests, 1);
+        assert_eq!(snapshot.l7_cc_fast_path_blocks, 1);
+        assert_eq!(snapshot.l7_cc_hot_cache_hits, 1);
         assert_eq!(snapshot.l7_ip_access_allows, 1);
         assert_eq!(snapshot.l7_ip_access_alerts, 1);
         assert_eq!(snapshot.l7_ip_access_challenges, 1);

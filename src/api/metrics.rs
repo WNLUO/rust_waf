@@ -53,7 +53,11 @@ pub(super) fn build_metrics_response(
         l7_cc_verified_passes: snapshot.l7_cc_verified_passes,
         l7_cc_fast_path_requests: snapshot.l7_cc_fast_path_requests,
         l7_cc_fast_path_blocks: snapshot.l7_cc_fast_path_blocks,
+        l7_cc_fast_path_challenges: snapshot.l7_cc_fast_path_challenges,
+        l7_cc_fast_path_no_decisions: snapshot.l7_cc_fast_path_no_decisions,
         l7_cc_hot_cache_hits: snapshot.l7_cc_hot_cache_hits,
+        l7_cc_hot_cache_misses: snapshot.l7_cc_hot_cache_misses,
+        l7_cc_hot_cache_expired: snapshot.l7_cc_hot_cache_expired,
         l7_cc_fast_path_ratio_percent: if snapshot.total_packets == 0 {
             0.0
         } else {

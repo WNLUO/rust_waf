@@ -72,13 +72,19 @@ impl L7CcGuard {
         entry.observe(unix_now, window_secs, 1)
     }
 
-    pub(super) fn hot_block_cache_hit(&self, key: &str, unix_now: i64) -> bool {
-        if let Some(entry) = self.hot_block_cache.get(key) {
-            if entry.is_active(unix_now) {
-                return true;
-            }
+    pub(super) fn hot_block_cache_hit_and_extend(
+        &self,
+        key: &str,
+        unix_now: i64,
+        base_ttl_secs: u64,
+    ) -> Option<bool> {
+        let entry = self.hot_block_cache.get(key)?;
+        if entry.record_hit_and_extend(unix_now, base_ttl_secs) {
+            return Some(true);
         }
-        false
+        drop(entry);
+        self.hot_block_cache.remove(key);
+        Some(false)
     }
 
     pub(super) fn insert_hot_block_cache(&self, key: String, unix_now: i64, ttl_secs: u64) {

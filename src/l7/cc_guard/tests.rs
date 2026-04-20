@@ -562,6 +562,76 @@ async fn survival_fast_path_blocks_and_uses_hot_cache() {
 }
 
 #[tokio::test]
+async fn survival_fast_path_no_decision_never_allows_or_proxies() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 50,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut req = request("/api/search");
+    req.method = "POST".to_string();
+    req.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut req).await.is_none());
+    assert_eq!(
+        req.get_metadata("l7.cc.fast_path_no_decision")
+            .map(String::as_str),
+        Some("below_threshold")
+    );
+    assert!(req.get_metadata("l7.cc.action").is_none());
+}
+
+#[tokio::test]
+async fn survival_fast_path_uses_route_hot_cache_for_hot_paths() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 2,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        hot_path_challenge_threshold: 50,
+        hot_path_block_threshold: 2,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/api/search");
+    first.method = "POST".to_string();
+    first.set_client_ip("203.0.113.10".to_string());
+    first.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    assert!(guard.inspect_request(&mut first).await.is_none());
+
+    let mut second = request("/api/search");
+    second.method = "POST".to_string();
+    second.set_client_ip("203.0.113.11".to_string());
+    second.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    let result = guard
+        .inspect_request(&mut second)
+        .await
+        .expect("hot path route block");
+    assert!(result.blocked);
+
+    let mut third = request("/api/search");
+    third.method = "POST".to_string();
+    third.set_client_ip("203.0.113.12".to_string());
+    third.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    let result = guard
+        .inspect_request(&mut third)
+        .await
+        .expect("route hot cache block");
+    assert!(result.blocked);
+    assert_eq!(
+        third
+            .get_metadata("l7.cc.hot_cache_hit")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[tokio::test]
 async fn hard_multiplier_configuration_can_force_block_for_subresources() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 100,

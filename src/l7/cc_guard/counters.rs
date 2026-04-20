@@ -188,6 +188,7 @@ impl HotBlockEntry {
         Self {
             expires_at_unix: AtomicI64::new(expires_at_unix),
             last_seen_unix: AtomicI64::new(unix_now),
+            hits: AtomicU64::new(0),
         }
     }
 
@@ -196,11 +197,41 @@ impl HotBlockEntry {
         self.expires_at_unix.load(Ordering::Relaxed) >= unix_now
     }
 
+    pub(super) fn record_hit_and_extend(&self, unix_now: i64, base_ttl_secs: u64) -> bool {
+        if !self.is_active(unix_now) {
+            return false;
+        }
+        let hits = self.hits.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+        if hits % 64 != 0 {
+            return true;
+        }
+        let ttl = adaptive_hot_cache_ttl(base_ttl_secs, hits);
+        let expires_at = unix_now.saturating_add(ttl as i64);
+        let current = self.expires_at_unix.load(Ordering::Relaxed);
+        if expires_at > current {
+            self.expires_at_unix.store(expires_at, Ordering::Relaxed);
+        }
+        true
+    }
+
     pub(super) fn refresh(&self, expires_at_unix: i64, unix_now: i64) {
         self.expires_at_unix
             .store(expires_at_unix, Ordering::Relaxed);
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        self.hits.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+pub(super) fn adaptive_hot_cache_ttl(base_ttl_secs: u64, hits: u64) -> u64 {
+    let base = base_ttl_secs.max(3);
+    let multiplier = match hits {
+        0..=1 => 1,
+        2..=4 => 2,
+        5..=15 => 4,
+        16..=63 => 8,
+        _ => 12,
+    };
+    base.saturating_mul(multiplier).clamp(3, 900)
 }
 
 pub(super) fn weighted_points_to_requests(points: u32) -> u32 {

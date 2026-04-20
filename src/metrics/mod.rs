@@ -26,7 +26,11 @@ pub struct MetricsCollector {
     l7_cc_verified_passes: AtomicU64,
     l7_cc_fast_path_requests: AtomicU64,
     l7_cc_fast_path_blocks: AtomicU64,
+    l7_cc_fast_path_challenges: AtomicU64,
+    l7_cc_fast_path_no_decisions: AtomicU64,
     l7_cc_hot_cache_hits: AtomicU64,
+    l7_cc_hot_cache_misses: AtomicU64,
+    l7_cc_hot_cache_expired: AtomicU64,
     l7_behavior_challenges: AtomicU64,
     l7_behavior_blocks: AtomicU64,
     l7_behavior_delays: AtomicU64,
@@ -105,7 +109,11 @@ impl MetricsCollector {
             l7_cc_verified_passes: AtomicU64::new(0),
             l7_cc_fast_path_requests: AtomicU64::new(0),
             l7_cc_fast_path_blocks: AtomicU64::new(0),
+            l7_cc_fast_path_challenges: AtomicU64::new(0),
+            l7_cc_fast_path_no_decisions: AtomicU64::new(0),
             l7_cc_hot_cache_hits: AtomicU64::new(0),
+            l7_cc_hot_cache_misses: AtomicU64::new(0),
+            l7_cc_hot_cache_expired: AtomicU64::new(0),
             l7_behavior_challenges: AtomicU64::new(0),
             l7_behavior_blocks: AtomicU64::new(0),
             l7_behavior_delays: AtomicU64::new(0),
@@ -346,8 +354,26 @@ impl MetricsCollector {
         self.l7_cc_fast_path_blocks.fetch_add(1, Ordering::Relaxed);
     }
 
+    pub fn record_l7_cc_fast_path_challenge(&self) {
+        self.l7_cc_fast_path_challenges
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_fast_path_no_decision(&self) {
+        self.l7_cc_fast_path_no_decisions
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn record_l7_cc_hot_cache_hit(&self) {
         self.l7_cc_hot_cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_hot_cache_miss(&self) {
+        self.l7_cc_hot_cache_misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_l7_cc_hot_cache_expired(&self) {
+        self.l7_cc_hot_cache_expired.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn record_l7_behavior_challenge(&self) {
@@ -446,7 +472,11 @@ impl MetricsCollector {
             l7_cc_verified_passes: self.l7_cc_verified_passes.load(Ordering::Relaxed),
             l7_cc_fast_path_requests: self.l7_cc_fast_path_requests.load(Ordering::Relaxed),
             l7_cc_fast_path_blocks: self.l7_cc_fast_path_blocks.load(Ordering::Relaxed),
+            l7_cc_fast_path_challenges: self.l7_cc_fast_path_challenges.load(Ordering::Relaxed),
+            l7_cc_fast_path_no_decisions: self.l7_cc_fast_path_no_decisions.load(Ordering::Relaxed),
             l7_cc_hot_cache_hits: self.l7_cc_hot_cache_hits.load(Ordering::Relaxed),
+            l7_cc_hot_cache_misses: self.l7_cc_hot_cache_misses.load(Ordering::Relaxed),
+            l7_cc_hot_cache_expired: self.l7_cc_hot_cache_expired.load(Ordering::Relaxed),
             l7_behavior_challenges: self.l7_behavior_challenges.load(Ordering::Relaxed),
             l7_behavior_blocks: self.l7_behavior_blocks.load(Ordering::Relaxed),
             l7_behavior_delays: self.l7_behavior_delays.load(Ordering::Relaxed),
@@ -573,7 +603,11 @@ mod tests {
         metrics.record_l7_cc_verified_pass();
         metrics.record_l7_cc_fast_path_request();
         metrics.record_l7_cc_fast_path_block();
+        metrics.record_l7_cc_fast_path_challenge();
+        metrics.record_l7_cc_fast_path_no_decision();
         metrics.record_l7_cc_hot_cache_hit();
+        metrics.record_l7_cc_hot_cache_miss();
+        metrics.record_l7_cc_hot_cache_expired();
         metrics.record_l7_ip_access_allow();
         metrics.record_l7_ip_access_alert();
         metrics.record_l7_ip_access_challenge();
@@ -593,7 +627,11 @@ mod tests {
         assert_eq!(snapshot.l7_cc_verified_passes, 1);
         assert_eq!(snapshot.l7_cc_fast_path_requests, 1);
         assert_eq!(snapshot.l7_cc_fast_path_blocks, 1);
+        assert_eq!(snapshot.l7_cc_fast_path_challenges, 1);
+        assert_eq!(snapshot.l7_cc_fast_path_no_decisions, 1);
         assert_eq!(snapshot.l7_cc_hot_cache_hits, 1);
+        assert_eq!(snapshot.l7_cc_hot_cache_misses, 1);
+        assert_eq!(snapshot.l7_cc_hot_cache_expired, 1);
         assert_eq!(snapshot.l7_ip_access_allows, 1);
         assert_eq!(snapshot.l7_ip_access_alerts, 1);
         assert_eq!(snapshot.l7_ip_access_challenges, 1);

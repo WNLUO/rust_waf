@@ -17,7 +17,11 @@ export interface MetricsResponse {
   l7_cc_verified_passes: number
   l7_cc_fast_path_requests: number
   l7_cc_fast_path_blocks: number
+  l7_cc_fast_path_challenges: number
+  l7_cc_fast_path_no_decisions: number
   l7_cc_hot_cache_hits: number
+  l7_cc_hot_cache_misses: number
+  l7_cc_hot_cache_expired: number
   l7_cc_fast_path_ratio_percent: number
   l7_behavior_challenges: number
   l7_behavior_blocks: number

@@ -587,6 +587,18 @@ const defenseMatrix = computed(() => {
             (metrics?.l7_cc_hot_cache_hits || 0) > 0 ? 'text-red-700' : '',
         },
         {
+          label: '未决',
+          value: formatNumber(metrics?.l7_cc_fast_path_no_decisions || 0),
+          class:
+            (metrics?.l7_cc_fast_path_no_decisions || 0) > 0
+              ? 'text-amber-700'
+              : '',
+        },
+        {
+          label: '缓存未命中',
+          value: formatNumber(metrics?.l7_cc_hot_cache_misses || 0),
+        },
+        {
           label: '快路径占比',
           value: `${(metrics?.l7_cc_fast_path_ratio_percent || 0).toFixed(1)}%`,
           class:

@@ -164,15 +164,21 @@ pub(crate) fn validate_response_template(template: &RuleResponseTemplate) -> Res
         RuleResponseBodySource::InlineText => {}
         RuleResponseBodySource::File => {
             let path = resolve_response_file_path(template.body_file_path.trim())?;
-            let metadata = fs::metadata(&path).map_err(|err| {
-                anyhow::anyhow!(
-                    "Failed to access response file '{}': {}",
-                    path.display(),
-                    err
-                )
-            })?;
-            if !metadata.is_file() {
-                anyhow::bail!("Response file '{}' is not a regular file", path.display());
+            match fs::metadata(&path) {
+                Ok(metadata) if metadata.is_file() => {}
+                Ok(_) => {
+                    log::warn!(
+                        "Custom response file '{}' is not a regular file, fallback body will be used",
+                        path.display()
+                    );
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Custom response file '{}' could not be accessed, fallback body will be used: {}",
+                        path.display(),
+                        err
+                    );
+                }
             }
         }
     }
@@ -191,9 +197,17 @@ pub(crate) fn build_custom_response(template: &RuleResponseTemplate) -> Result<C
         RuleResponseBodySource::InlineText => template.body_text.as_bytes().to_vec(),
         RuleResponseBodySource::File => {
             let path = resolve_response_file_path(template.body_file_path.trim())?;
-            fs::read(&path).map_err(|err| {
-                anyhow::anyhow!("Failed to read response file '{}': {}", path.display(), err)
-            })?
+            match fs::read(&path) {
+                Ok(body) => body,
+                Err(err) => {
+                    log::warn!(
+                        "Custom response file '{}' could not be read, using fallback body: {}",
+                        path.display(),
+                        err
+                    );
+                    template.body_text.as_bytes().to_vec()
+                }
+            }
         }
     };
 

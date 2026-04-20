@@ -98,9 +98,30 @@ pub(crate) fn record_l7_cc_metrics(
     {
         metrics.record_l7_cc_hot_cache_hit();
     }
+    if request.get_metadata("l7.cc.hot_cache_miss").is_some() {
+        metrics.record_l7_cc_hot_cache_miss();
+    }
+    if request.get_metadata("l7.cc.hot_cache_expired").is_some() {
+        metrics.record_l7_cc_hot_cache_expired();
+    }
+    if request
+        .get_metadata("l7.cc.fast_path_no_decision")
+        .is_some()
+    {
+        metrics.record_l7_cc_fast_path_no_decision();
+    }
 
     match request.get_metadata("l7.cc.action").map(String::as_str) {
-        Some("challenge") => metrics.record_l7_cc_challenge(),
+        Some("challenge") => {
+            metrics.record_l7_cc_challenge();
+            if request
+                .get_metadata("l7.cc.fast_path")
+                .map(|value| value == "true")
+                .unwrap_or(false)
+            {
+                metrics.record_l7_cc_fast_path_challenge();
+            }
+        }
         Some("block") => {
             metrics.record_l7_cc_block();
             if request

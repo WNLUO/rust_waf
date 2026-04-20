@@ -69,7 +69,11 @@ impl L7CcGuard {
                 .is_some_and(|value| value == "true");
         let defense_depth = runtime_defense_depth(request);
         if defense_depth == crate::core::DefenseDepth::Survival {
-            return self.inspect_survival_fast(request, &config).await;
+            return match self.inspect_survival_fast(request, &config).await {
+                SurvivalFastPathResult::Block(result)
+                | SurvivalFastPathResult::Challenge(result) => Some(result),
+                SurvivalFastPathResult::NoDecision => None,
+            };
         }
         let tracking_mode = runtime_tracking_mode(request, defense_depth);
         let rich_tracking = tracking_mode == CcTrackingMode::Rich;
@@ -626,26 +630,67 @@ impl L7CcGuard {
         &self,
         request: &mut UnifiedHttpRequest,
         config: &crate::config::l7::CcDefenseConfig,
-    ) -> Option<InspectionResult> {
-        let client_ip = request_client_ip(request)?;
+    ) -> SurvivalFastPathResult {
+        let Some(client_ip) = request_client_ip(request) else {
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "identity".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
+        };
         let raw_path = request_path(&request.uri).to_string();
         if BYPASS_PATHS.contains(&raw_path.as_str()) {
-            return None;
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "bypass_path".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
         }
 
         let unix_now = unix_timestamp();
         let host = normalized_host(request);
         let route_path = normalized_route_path(&raw_path);
         let client_ip_key = client_ip.to_string();
-        let route_key = format!("{}|{}|{}", client_ip_key, host, route_path);
-        let hot_path_key = format!("{}|{}", host, route_path);
-        let hot_key = format!("{}|{}", client_ip_key, route_path);
+        let ip_hot_key = format!("ip:{}", client_ip_key);
+        let ip_route_hot_key = format!("iproute:{}|{}|{}", client_ip_key, host, route_path);
+        let route_hot_key = format!("route:{}|{}", host, route_path);
+        let site_hot_key = format!("site:{}", host);
+        let hot_cache_base_ttl = survival_hot_cache_base_ttl(config);
 
         request.add_metadata("l7.cc.fast_path".to_string(), "true".to_string());
         request.add_metadata(
             "l7.cc.tracking_mode".to_string(),
             "survival_fast".to_string(),
         );
+
+        let hot_cache_hit = [
+            (&ip_route_hot_key, "ip_route"),
+            (&ip_hot_key, "ip"),
+            (&route_hot_key, "route"),
+            (&site_hot_key, "site"),
+        ]
+        .into_iter()
+        .find_map(|(key, scope)| {
+            self.hot_block_cache_hit_and_extend(key, unix_now, hot_cache_base_ttl)
+                .map(|active| (scope, active))
+        });
+        if let Some((_scope, true)) = hot_cache_hit {
+            request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
+            request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+            request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
+            return SurvivalFastPathResult::Block(InspectionResult::drop(
+                InspectionLayer::L7,
+                "l7 cc fast path hot block".to_string(),
+            ));
+        }
+        if matches!(hot_cache_hit, Some((_, false))) {
+            request.add_metadata("l7.cc.hot_cache_expired".to_string(), "true".to_string());
+        } else {
+            request.add_metadata("l7.cc.hot_cache_miss".to_string(), "true".to_string());
+        }
+
         request.add_metadata("l7.cc.client_ip".to_string(), client_ip_key.clone());
         request.add_metadata("l7.cc.host".to_string(), host.clone());
         request.add_metadata("l7.cc.route".to_string(), route_path.clone());
@@ -654,20 +699,6 @@ impl L7CcGuard {
             fast_request_kind(request, &route_path).as_str().to_string(),
         );
 
-        if self.hot_block_cache_hit(&hot_key, unix_now)
-            || self.hot_block_cache_hit(&client_ip_key, unix_now)
-        {
-            request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-            request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-            request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
-            request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            return Some(InspectionResult::drop(
-                InspectionLayer::L7,
-                "l7 cc fast path hot block".to_string(),
-            ));
-        }
-
         let bucket_limit = runtime_usize_metadata(
             request,
             "runtime.budget.l7_bucket_limit",
@@ -675,6 +706,8 @@ impl L7CcGuard {
         )
         .clamp(512, MAX_COUNTER_BUCKETS);
         let window_secs = config.request_window_secs.max(1);
+        let route_key = format!("{}|{}|{}", client_ip_key, host, route_path);
+        let hot_path_key = format!("{}|{}", host, route_path);
         let ip_count = self
             .observe_fast(
                 &self.fast_ip_buckets,
@@ -739,8 +772,11 @@ impl L7CcGuard {
         let hot_path_challenge_threshold = config
             .hot_path_challenge_threshold
             .max(route_challenge_threshold);
+        let survival_hot_path_threshold = hot_path_challenge_threshold
+            .min(route_challenge_threshold.saturating_mul(2).max(24))
+            .max(1);
         let hot_path_block_threshold = if prefer_drop {
-            hot_path_challenge_threshold
+            survival_hot_path_threshold
         } else {
             config.hot_path_block_threshold.max(route_block_threshold)
         };
@@ -754,17 +790,20 @@ impl L7CcGuard {
             || route_count >= route_block_threshold
             || hot_path_count >= hot_path_block_threshold
         {
-            let ttl = config
-                .challenge_ttl_secs
-                .max(config.request_window_secs.saturating_mul(4))
-                .min(900);
-            self.insert_hot_block_cache(hot_key, unix_now, ttl);
-            self.insert_hot_block_cache(client_ip_key, unix_now, ttl.min(120));
+            let ttl = hot_cache_base_ttl;
+            self.insert_hot_block_cache(ip_route_hot_key, unix_now, ttl);
+            self.insert_hot_block_cache(ip_hot_key, unix_now, ttl.min(180));
+            if hot_path_count >= hot_path_block_threshold {
+                self.insert_hot_block_cache(route_hot_key, unix_now, ttl.min(90));
+            }
+            if hot_path_count >= hard_hot_path_threshold {
+                self.insert_hot_block_cache(site_hot_key, unix_now, ttl.min(30));
+            }
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
             request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
             request.add_metadata("l7.drop_reason".to_string(), "cc_fast_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            return Some(InspectionResult::drop_and_persist_ip(
+            return SurvivalFastPathResult::Block(InspectionResult::drop_and_persist_ip(
                 InspectionLayer::L7,
                 format!(
                     "l7 cc fast path blocked request: ip={} route={} ip_count={} route_count={} hot_path_count={}",
@@ -773,9 +812,8 @@ impl L7CcGuard {
             ));
         }
 
-        let hot_path_challenge_threshold = config
-            .hot_path_challenge_threshold
-            .max(route_challenge_threshold);
+        let hot_path_challenge_threshold =
+            hot_path_challenge_threshold.min(survival_hot_path_threshold);
         let challenge_needed = route_count >= route_challenge_threshold
             || hot_path_count >= hot_path_challenge_threshold
             || ip_count >= config.ip_challenge_threshold;
@@ -795,7 +833,7 @@ impl L7CcGuard {
                     hot_path_count
                 );
                 request.add_metadata("l7.cc.action".to_string(), action.to_string());
-                return Some(InspectionResult::respond(
+                return SurvivalFastPathResult::Challenge(InspectionResult::respond(
                     InspectionLayer::L7,
                     reason.clone(),
                     self.build_challenge_response(
@@ -805,8 +843,19 @@ impl L7CcGuard {
             }
         }
 
-        None
+        request.add_metadata(
+            "l7.cc.fast_path_no_decision".to_string(),
+            "below_threshold".to_string(),
+        );
+        SurvivalFastPathResult::NoDecision
     }
+}
+
+fn survival_hot_cache_base_ttl(config: &crate::config::l7::CcDefenseConfig) -> u64 {
+    config
+        .challenge_ttl_secs
+        .max(config.request_window_secs.saturating_mul(4))
+        .clamp(3, 900)
 }
 
 fn fast_request_kind(request: &UnifiedHttpRequest, route_path: &str) -> RequestKind {

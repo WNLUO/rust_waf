@@ -65,6 +65,14 @@ pub(super) struct FastWindowObservation {
 pub(super) struct HotBlockEntry {
     pub(super) expires_at_unix: AtomicI64,
     pub(super) last_seen_unix: AtomicI64,
+    pub(super) hits: AtomicU64,
+}
+
+#[derive(Debug)]
+pub(super) enum SurvivalFastPathResult {
+    Block(crate::core::InspectionResult),
+    Challenge(crate::core::InspectionResult),
+    NoDecision,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

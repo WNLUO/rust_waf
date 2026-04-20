@@ -156,6 +156,65 @@ async fn handle_http3_request(
         apply_gateway_site_metadata(&mut unified, site);
     }
     context.annotate_site_runtime_budget(&mut unified);
+    if unified
+        .get_metadata("runtime.defense.depth")
+        .map(String::as_str)
+        == Some("survival")
+    {
+        let cc_result = context.l7_cc_guard().inspect_request(&mut unified).await;
+        unified.add_metadata("l7.cc.prechecked".to_string(), "true".to_string());
+        if let Some(metrics) = context.metrics.as_ref() {
+            record_l7_cc_metrics(metrics, &unified);
+        }
+        if let Some(result) = cc_result {
+            if result.should_persist_event() {
+                persist_http_inspection_event(context.as_ref(), &packet, &unified, &result);
+            }
+            enforce_and_record_l7_block_feedback(context.as_ref(), &packet, &unified, &result);
+            if result_should_drop_http3(&result, &unified) {
+                context.note_ai_route_result(
+                    &unified,
+                    AiRouteResultObservation {
+                        status_code: 499,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: true,
+                    },
+                );
+                return Ok(());
+            }
+            if let Some(response) = result.custom_response.as_ref() {
+                let response =
+                    crate::core::engine::network::helpers::soften_explicit_response_for_runtime(
+                        context.as_ref(),
+                        &resolve_runtime_custom_response(response),
+                    );
+                let status_code = response.status_code;
+                send_http3_response(
+                    &mut stream,
+                    status_code,
+                    &response.headers,
+                    response.body,
+                    response.tarpit.as_ref(),
+                )
+                .await?;
+                context.note_ai_route_result(
+                    &unified,
+                    AiRouteResultObservation {
+                        status_code,
+                        latency_ms: None,
+                        upstream_error: false,
+                        local_response: true,
+                        blocked: status_code >= 400,
+                    },
+                );
+                return Ok(());
+            }
+            send_http3_response(&mut stream, 429, &[], result.reason.into_bytes(), None).await?;
+            return Ok(());
+        }
+    }
     if let Some(inspector) = context.l4_inspector() {
         let policy = inspector.apply_request_policy(&packet, &mut unified);
         if skip_l4_connection_budget && (policy.suggested_delay_ms > 0 || policy.disable_keepalive)

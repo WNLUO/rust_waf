@@ -137,30 +137,6 @@ pub(crate) async fn handle_http1_connection(
                 }
             }
         }
-        let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
-            context.as_ref(),
-            Arc::clone(&request_semaphore),
-            peer_addr,
-            "HTTP/1.1 request",
-        )
-        .await
-        else {
-            http1_handler
-                .write_response_with_headers(
-                    &mut stream,
-                    503,
-                    "Service Unavailable",
-                    &[("Retry-After".to_string(), "5".to_string())],
-                    b"gateway overloaded, retry later",
-                )
-                .await?;
-            if let Some(bucket_key) = bucket_key.as_ref() {
-                if let Some(inspector) = context.l4_inspector() {
-                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
-                }
-            }
-            return Ok(());
-        };
         prepare_request_for_routing(context.as_ref(), &mut request);
         context.annotate_runtime_pressure(&mut request);
         let matched_site = resolve_gateway_site(context.as_ref(), &request);
@@ -184,16 +160,18 @@ pub(crate) async fn handle_http1_connection(
                 }
                 enforce_and_record_l7_block_feedback(context.as_ref(), packet, &request, &result);
                 if result_should_drop_http1(&result, &request) {
-                    context.note_ai_route_result(
-                        &request,
-                        AiRouteResultObservation {
-                            status_code: 499,
-                            latency_ms: None,
-                            upstream_error: false,
-                            local_response: true,
-                            blocked: true,
-                        },
-                    );
+                    if should_record_survival_fast_ai_route_result(&request) {
+                        context.note_ai_route_result(
+                            &request,
+                            AiRouteResultObservation {
+                                status_code: 499,
+                                latency_ms: None,
+                                upstream_error: false,
+                                local_response: true,
+                                blocked: true,
+                            },
+                        );
+                    }
                     let _ = stream.shutdown().await;
                     return Ok(());
                 }
@@ -224,6 +202,30 @@ pub(crate) async fn handle_http1_connection(
                 continue;
             }
         }
+        let Some(_request_permit) = crate::core::engine::runtime::acquire_permit_auto(
+            context.as_ref(),
+            Arc::clone(&request_semaphore),
+            peer_addr,
+            "HTTP/1.1 request",
+        )
+        .await
+        else {
+            http1_handler
+                .write_response_with_headers(
+                    &mut stream,
+                    503,
+                    "Service Unavailable",
+                    &[("Retry-After".to_string(), "5".to_string())],
+                    b"gateway overloaded, retry later",
+                )
+                .await?;
+            if let Some(bucket_key) = bucket_key.as_ref() {
+                if let Some(inspector) = context.l4_inspector() {
+                    inspector.observe_connection_close(bucket_key, &connection_id, opened_at);
+                }
+            }
+            return Ok(());
+        };
         if let Some(inspector) = context.l4_inspector() {
             let policy = inspector.apply_request_policy(packet, &mut request);
             if skip_l4_connection_budget
@@ -896,4 +898,26 @@ pub(crate) async fn handle_http1_connection(
             return Ok(());
         }
     }
+}
+
+fn should_record_survival_fast_ai_route_result(request: &UnifiedHttpRequest) -> bool {
+    if request
+        .get_metadata("runtime.defense.depth")
+        .map(String::as_str)
+        != Some("survival")
+    {
+        return true;
+    }
+    if request.get_metadata("l7.cc.fast_path").map(String::as_str) != Some("true") {
+        return true;
+    }
+    if request.get_metadata("l7.cc.action").map(String::as_str) != Some("block") {
+        return true;
+    }
+
+    static SURVIVAL_FAST_AI_ROUTE_SEQUENCE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
+    let sequence =
+        SURVIVAL_FAST_AI_ROUTE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    sequence.is_multiple_of(64)
 }

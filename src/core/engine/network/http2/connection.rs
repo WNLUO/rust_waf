@@ -135,6 +135,76 @@ pub(crate) async fn handle_http2_connection(
                         apply_gateway_site_metadata(&mut request, site);
                     }
                     context.annotate_site_runtime_budget(&mut request);
+                    if request
+                        .get_metadata("runtime.defense.depth")
+                        .map(String::as_str)
+                        == Some("survival")
+                    {
+                        let cc_result = context.l7_cc_guard().inspect_request(&mut request).await;
+                        request.add_metadata("l7.cc.prechecked".to_string(), "true".to_string());
+                        if let Some(metrics) = context.metrics.as_ref() {
+                            record_l7_cc_metrics(metrics, &request);
+                        }
+                        if let Some(result) = cc_result {
+                            if result.should_persist_event() {
+                                persist_http_inspection_event(
+                                    context.as_ref(),
+                                    &packet,
+                                    &request,
+                                    &result,
+                                );
+                            }
+                            enforce_and_record_l7_block_feedback(
+                                context.as_ref(),
+                                &packet,
+                                &request,
+                                &result,
+                            );
+                            if result_should_drop_http2(&result, &request) {
+                                context.note_ai_route_result(
+                                    &request,
+                                    AiRouteResultObservation {
+                                        status_code: 499,
+                                        latency_ms: None,
+                                        upstream_error: false,
+                                        local_response: true,
+                                        blocked: true,
+                                    },
+                                );
+                                return Err(drop_http2_result(&result.reason));
+                            }
+                            if let Some(response) = result.custom_response.as_ref() {
+                                let response = resolve_runtime_custom_response(response);
+                                let body = body_for_request(&request, &response.body);
+                                let mut headers = response.headers.clone();
+                                apply_response_policies(
+                                    context.as_ref(),
+                                    &mut headers,
+                                    response.status_code,
+                                );
+                                context.note_ai_route_result(
+                                    &request,
+                                    AiRouteResultObservation {
+                                        status_code: response.status_code,
+                                        latency_ms: None,
+                                        upstream_error: false,
+                                        local_response: true,
+                                        blocked: response.status_code >= 400,
+                                    },
+                                );
+                                return Ok(Http2Response {
+                                    status_code: response.status_code,
+                                    headers,
+                                    body,
+                                });
+                            }
+                            return Ok(Http2Response {
+                                status_code: 429,
+                                headers: vec![],
+                                body: body_for_request(&request, result.reason.as_bytes()),
+                            });
+                        }
+                    }
                     if let Some(inspector) = context.l4_inspector() {
                         let policy = inspector.apply_request_policy(&packet, &mut request);
                         if skip_l4_connection_budget

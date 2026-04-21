@@ -896,7 +896,7 @@ impl L7CcGuard {
             request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
             request.add_metadata("l7.drop_reason".to_string(), "cc_fast_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            return SurvivalFastPathResult::Block(InspectionResult::drop_and_persist_ip(
+            return SurvivalFastPathResult::Block(InspectionResult::drop(
                 InspectionLayer::L7,
                 format!(
                     "l7 cc fast path blocked request: ip={} route={} ip_count={} route_count={} hot_path_count={}",

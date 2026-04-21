@@ -11,6 +11,22 @@ export interface MetricsResponse {
   blocked_packets: number
   blocked_l4: number
   blocked_l7: number
+  early_defense_drops_total: number
+  early_defense_spoofed_forward_header_drops: number
+  early_defense_trusted_cdn_unresolved_drops: number
+  early_defense_l4_request_budget_drops: number
+  early_defense_l4_high_risk_drops: number
+  early_defense_l4_suspicious_drops: number
+  early_defense_other_drops: number
+  l7_drop_reason_cc_hot_block: number
+  l7_drop_reason_cc_fast_block: number
+  l7_drop_reason_cc_hard_block: number
+  l7_drop_reason_spoofed_forward_header: number
+  l7_drop_reason_behavior_aggregate: number
+  l7_drop_reason_behavior_route_burst: number
+  l7_drop_reason_l7_bloom_filter: number
+  l7_drop_reason_blocked_client_ip: number
+  l7_drop_reason_other: number
   l7_cc_challenges: number
   l7_cc_blocks: number
   l7_cc_delays: number

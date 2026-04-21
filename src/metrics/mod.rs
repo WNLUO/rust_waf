@@ -19,6 +19,22 @@ pub struct MetricsCollector {
     blocked_packets: AtomicU64,
     blocked_l4: AtomicU64,
     blocked_l7: AtomicU64,
+    early_defense_drops_total: AtomicU64,
+    early_defense_spoofed_forward_header_drops: AtomicU64,
+    early_defense_trusted_cdn_unresolved_drops: AtomicU64,
+    early_defense_l4_request_budget_drops: AtomicU64,
+    early_defense_l4_high_risk_drops: AtomicU64,
+    early_defense_l4_suspicious_drops: AtomicU64,
+    early_defense_other_drops: AtomicU64,
+    l7_drop_reason_cc_hot_block: AtomicU64,
+    l7_drop_reason_cc_fast_block: AtomicU64,
+    l7_drop_reason_cc_hard_block: AtomicU64,
+    l7_drop_reason_spoofed_forward_header: AtomicU64,
+    l7_drop_reason_behavior_aggregate: AtomicU64,
+    l7_drop_reason_behavior_route_burst: AtomicU64,
+    l7_drop_reason_l7_bloom_filter: AtomicU64,
+    l7_drop_reason_blocked_client_ip: AtomicU64,
+    l7_drop_reason_other: AtomicU64,
     l7_cc_challenges: AtomicU64,
     l7_cc_blocks: AtomicU64,
     l7_cc_delays: AtomicU64,
@@ -102,6 +118,22 @@ impl MetricsCollector {
             blocked_packets: AtomicU64::new(0),
             blocked_l4: AtomicU64::new(0),
             blocked_l7: AtomicU64::new(0),
+            early_defense_drops_total: AtomicU64::new(0),
+            early_defense_spoofed_forward_header_drops: AtomicU64::new(0),
+            early_defense_trusted_cdn_unresolved_drops: AtomicU64::new(0),
+            early_defense_l4_request_budget_drops: AtomicU64::new(0),
+            early_defense_l4_high_risk_drops: AtomicU64::new(0),
+            early_defense_l4_suspicious_drops: AtomicU64::new(0),
+            early_defense_other_drops: AtomicU64::new(0),
+            l7_drop_reason_cc_hot_block: AtomicU64::new(0),
+            l7_drop_reason_cc_fast_block: AtomicU64::new(0),
+            l7_drop_reason_cc_hard_block: AtomicU64::new(0),
+            l7_drop_reason_spoofed_forward_header: AtomicU64::new(0),
+            l7_drop_reason_behavior_aggregate: AtomicU64::new(0),
+            l7_drop_reason_behavior_route_burst: AtomicU64::new(0),
+            l7_drop_reason_l7_bloom_filter: AtomicU64::new(0),
+            l7_drop_reason_blocked_client_ip: AtomicU64::new(0),
+            l7_drop_reason_other: AtomicU64::new(0),
             l7_cc_challenges: AtomicU64::new(0),
             l7_cc_blocks: AtomicU64::new(0),
             l7_cc_delays: AtomicU64::new(0),
@@ -177,6 +209,77 @@ impl MetricsCollector {
             }
             InspectionLayer::L7 => {
                 self.blocked_l7.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn record_early_defense_drop(&self, reason: Option<&str>) {
+        self.early_defense_drops_total
+            .fetch_add(1, Ordering::Relaxed);
+        match reason.unwrap_or("unknown") {
+            "spoofed_forward_header_under_pressure" => {
+                self.early_defense_spoofed_forward_header_drops
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "trusted_cdn_unresolved_survival" => {
+                self.early_defense_trusted_cdn_unresolved_drops
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "l4_request_budget_softened_survival" => {
+                self.early_defense_l4_request_budget_drops
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "l4_high_risk_runtime_pressure" => {
+                self.early_defense_l4_high_risk_drops
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "l4_suspicious_survival_pressure" => {
+                self.early_defense_l4_suspicious_drops
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                self.early_defense_other_drops
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn record_l7_drop_reason(&self, reason: Option<&str>, result_reason: &str) {
+        match reason.unwrap_or("unknown") {
+            "cc_hot_block" => {
+                self.l7_drop_reason_cc_hot_block
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "cc_fast_block" => {
+                self.l7_drop_reason_cc_fast_block
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "cc_hard_block" => {
+                self.l7_drop_reason_cc_hard_block
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "spoofed_forward_header" => {
+                self.l7_drop_reason_spoofed_forward_header
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "behavior_aggregate_enforcement" => {
+                self.l7_drop_reason_behavior_aggregate
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "behavior_route_burst" => {
+                self.l7_drop_reason_behavior_route_burst
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "l7_bloom_filter" => {
+                self.l7_drop_reason_l7_bloom_filter
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ if result_reason.starts_with("Request blocked by local blocked IP list") => {
+                self.l7_drop_reason_blocked_client_ip
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                self.l7_drop_reason_other.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -463,6 +566,42 @@ impl MetricsCollector {
             blocked_packets: self.blocked_packets.load(Ordering::Relaxed),
             blocked_l4: self.blocked_l4.load(Ordering::Relaxed),
             blocked_l7: self.blocked_l7.load(Ordering::Relaxed),
+            early_defense_drops_total: self.early_defense_drops_total.load(Ordering::Relaxed),
+            early_defense_spoofed_forward_header_drops: self
+                .early_defense_spoofed_forward_header_drops
+                .load(Ordering::Relaxed),
+            early_defense_trusted_cdn_unresolved_drops: self
+                .early_defense_trusted_cdn_unresolved_drops
+                .load(Ordering::Relaxed),
+            early_defense_l4_request_budget_drops: self
+                .early_defense_l4_request_budget_drops
+                .load(Ordering::Relaxed),
+            early_defense_l4_high_risk_drops: self
+                .early_defense_l4_high_risk_drops
+                .load(Ordering::Relaxed),
+            early_defense_l4_suspicious_drops: self
+                .early_defense_l4_suspicious_drops
+                .load(Ordering::Relaxed),
+            early_defense_other_drops: self.early_defense_other_drops.load(Ordering::Relaxed),
+            l7_drop_reason_cc_hot_block: self.l7_drop_reason_cc_hot_block.load(Ordering::Relaxed),
+            l7_drop_reason_cc_fast_block: self.l7_drop_reason_cc_fast_block.load(Ordering::Relaxed),
+            l7_drop_reason_cc_hard_block: self.l7_drop_reason_cc_hard_block.load(Ordering::Relaxed),
+            l7_drop_reason_spoofed_forward_header: self
+                .l7_drop_reason_spoofed_forward_header
+                .load(Ordering::Relaxed),
+            l7_drop_reason_behavior_aggregate: self
+                .l7_drop_reason_behavior_aggregate
+                .load(Ordering::Relaxed),
+            l7_drop_reason_behavior_route_burst: self
+                .l7_drop_reason_behavior_route_burst
+                .load(Ordering::Relaxed),
+            l7_drop_reason_l7_bloom_filter: self
+                .l7_drop_reason_l7_bloom_filter
+                .load(Ordering::Relaxed),
+            l7_drop_reason_blocked_client_ip: self
+                .l7_drop_reason_blocked_client_ip
+                .load(Ordering::Relaxed),
+            l7_drop_reason_other: self.l7_drop_reason_other.load(Ordering::Relaxed),
             l7_cc_challenges: self.l7_cc_challenges.load(Ordering::Relaxed),
             l7_cc_blocks: self.l7_cc_blocks.load(Ordering::Relaxed),
             l7_cc_delays: self.l7_cc_delays.load(Ordering::Relaxed),
@@ -596,6 +735,21 @@ mod tests {
         metrics.record_tls_pre_handshake_rejection();
         metrics.record_tls_handshake_timeout();
         metrics.record_tls_handshake_failure();
+        metrics.record_early_defense_drop(Some("spoofed_forward_header_under_pressure"));
+        metrics.record_early_defense_drop(Some("trusted_cdn_unresolved_survival"));
+        metrics.record_early_defense_drop(Some("l4_request_budget_softened_survival"));
+        metrics.record_early_defense_drop(Some("l4_high_risk_runtime_pressure"));
+        metrics.record_early_defense_drop(Some("l4_suspicious_survival_pressure"));
+        metrics.record_early_defense_drop(Some("unknown"));
+        metrics.record_l7_drop_reason(Some("cc_hot_block"), "");
+        metrics.record_l7_drop_reason(Some("cc_fast_block"), "");
+        metrics.record_l7_drop_reason(Some("cc_hard_block"), "");
+        metrics.record_l7_drop_reason(Some("spoofed_forward_header"), "");
+        metrics.record_l7_drop_reason(Some("behavior_aggregate_enforcement"), "");
+        metrics.record_l7_drop_reason(Some("behavior_route_burst"), "");
+        metrics.record_l7_drop_reason(Some("l7_bloom_filter"), "");
+        metrics.record_l7_drop_reason(None, "Request blocked by local blocked IP list: test");
+        metrics.record_l7_drop_reason(Some("unknown"), "");
         metrics.record_l7_cc_challenge();
         metrics.record_l7_cc_block();
         metrics.record_l7_cc_delay();
@@ -620,6 +774,22 @@ mod tests {
 
         let snapshot = metrics.get_stats();
         assert_eq!(snapshot.total_packets, 1);
+        assert_eq!(snapshot.early_defense_drops_total, 6);
+        assert_eq!(snapshot.early_defense_spoofed_forward_header_drops, 1);
+        assert_eq!(snapshot.early_defense_trusted_cdn_unresolved_drops, 1);
+        assert_eq!(snapshot.early_defense_l4_request_budget_drops, 1);
+        assert_eq!(snapshot.early_defense_l4_high_risk_drops, 1);
+        assert_eq!(snapshot.early_defense_l4_suspicious_drops, 1);
+        assert_eq!(snapshot.early_defense_other_drops, 1);
+        assert_eq!(snapshot.l7_drop_reason_cc_hot_block, 1);
+        assert_eq!(snapshot.l7_drop_reason_cc_fast_block, 1);
+        assert_eq!(snapshot.l7_drop_reason_cc_hard_block, 1);
+        assert_eq!(snapshot.l7_drop_reason_spoofed_forward_header, 1);
+        assert_eq!(snapshot.l7_drop_reason_behavior_aggregate, 1);
+        assert_eq!(snapshot.l7_drop_reason_behavior_route_burst, 1);
+        assert_eq!(snapshot.l7_drop_reason_l7_bloom_filter, 1);
+        assert_eq!(snapshot.l7_drop_reason_blocked_client_ip, 1);
+        assert_eq!(snapshot.l7_drop_reason_other, 1);
         assert_eq!(snapshot.l7_cc_challenges, 1);
         assert_eq!(snapshot.l7_cc_blocks, 1);
         assert_eq!(snapshot.l7_cc_delays, 1);

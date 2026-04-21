@@ -540,6 +540,7 @@ async fn survival_fast_path_blocks_and_uses_hot_cache() {
         .await
         .expect("fast block");
     assert!(result.blocked);
+    assert!(!result.persist_blocked_ip);
     assert_eq!(
         second.get_metadata("l7.drop_reason").map(String::as_str),
         Some("cc_fast_block")

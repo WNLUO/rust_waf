@@ -8,6 +8,23 @@ pub(super) fn record_l7_block_feedback(
 ) {
     if let Some(metrics) = context.metrics.as_ref() {
         metrics.record_block(result.layer.clone());
+        if matches!(result.layer, crate::core::InspectionLayer::L7) {
+            metrics.record_l7_drop_reason(
+                request.get_metadata("l7.drop_reason").map(String::as_str),
+                &result.reason,
+            );
+        }
+        if request
+            .get_metadata("early_defense.action")
+            .map(String::as_str)
+            == Some("drop")
+        {
+            metrics.record_early_defense_drop(
+                request
+                    .get_metadata("early_defense.reason")
+                    .map(String::as_str),
+            );
+        }
     }
     if should_sample_runtime_l7_feedback(request, result).is_some_and(|sample| !sample) {
         return;

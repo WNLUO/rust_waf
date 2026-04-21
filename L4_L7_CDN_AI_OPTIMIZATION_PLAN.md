@@ -539,19 +539,32 @@ struct EarlyDefenseDecision {
 |---|---|---|
 | 阶段 0 | 已完成文档初版 | 用户已确认进入阶段 1 |
 | 阶段 1 | 已完成 | CPU 压力感知已接入运行时压力模型 |
-| 阶段 2 | 已完成 | 统一早期防御决策已接入 HTTP/1、HTTP/2、HTTP/3，等待用户确认是否进入阶段 3 |
-| 阶段 3 | 已完成 | L7 CC 已支持 rich/core/minimal 跟踪模式，等待用户确认是否进入阶段 4 |
-| 阶段 4 | 已完成 | L4 policy 已能向 L7 输出 route/host 阈值缩放和 survival hint，等待用户确认是否进入阶段 5 |
+| 阶段 2 | 已完成 | 统一早期防御决策已接入 HTTP/1、HTTP/2、HTTP/3 |
+| 阶段 3 | 已完成 | L7 CC 已支持 rich/core/minimal 跟踪模式 |
+| 阶段 4 | 已完成 | L4 policy 已能向 L7 输出 route/host 阈值缩放和 survival hint |
 | 阶段 5 | 已完成 | 高压下 HTTP 防御事件和 SQLite 队列压力事件已支持聚合、瘦身和关键 block/drop 摘要保留 |
 | 阶段 6 | 已完成 | AI 临时策略已补齐 hit/outcome 反馈、自动续期/撤销治理和 `/metrics` 闭环指标 |
-| 阶段 7 | 已完成（长时间高级 CDN CC 待确认） | 已完成常规 CDN CC / 高级 CDN CC 复测并产出中文报告 |
+| 阶段 7 | 已完成 | 已完成常规 CDN CC / 高级 CDN CC 复测并产出中文报告，高级场景约 `1654` TPS |
+| 阶段 8 | 已完成 | 新增 `survival_fast` 与 hot block cache，高级 120 秒达到 `2049.57` TPS，10 分钟约 `1919.03` TPS |
+| 阶段 9 | 已完成 | fast path 三态化、hot cache 自适应续期、四层 cache，高级 120 秒最佳 `2151.73` TPS |
+| 阶段 10 | 已完成 | HTTP/1 hot-cache drop 前移到 request permit 前，高级 120 秒 `2372.50` TPS，600 秒 `2342.41` TPS |
+
+当前以 `CURRENT_OPTIMIZATION_STATUS.md` 作为后续承接的权威状态文档。
 
 ## 7. 下一步
 
-下一步如果继续推进，建议只补一件事：
+下一步建议进入 Stage 11：生产可用性验证和更严谨的压测口径，而不是继续只追求 closed-loop 跑分。
+
+| 优先级 | 任务 | 目的 |
+|---|---|---|
+| P0 | 补 95/5、90/10、80/20 攻击 / 正常混合流量测试 | 验证攻击期间正常用户成功率、误杀率、p95/p99 |
+| P0 | 补 1k/10k IP 高基数低频高级 CC | 验证四层 hot cache 对分布式低频攻击的覆盖率 |
+| P1 | 使用 Tokio async、vegeta 或 wrk2 做严格 open-loop 固定到达率测试 | 证明 2000/2200/2500 RPS 边界，减少 closed-loop 供给干扰 |
+| P1 | 统一报告口径 | 同时记录 client actual send RPS、WAF observed incoming RPS、WAF verdict RPS、proxy RPS |
+
+当前准确结论：
 
 ```text
-经用户确认后，执行长时间高级 CDN CC（10-30 分钟）稳定性复测
+高级 CDN CC 的 2000+ TPS 已在 2 核 / 512MB 的 multi closed-loop 口径下达成。
+严格 open-loop、混合正常流量、高基数低频代理池场景还没有严谨证明。
 ```
-
-当前阶段 7 已在保留的远端测试环境 `/root/rust_waf_test` 中完成常规 CDN CC 和高级 CDN CC 复测，并已输出中文对比报告。

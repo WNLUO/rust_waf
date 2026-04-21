@@ -75,6 +75,7 @@ impl L7StatsResponse {
         let upstream = context.upstream_health_snapshot();
         let http3 = context.http3_runtime_snapshot();
         let auto = context.auto_tuning_snapshot();
+        let runtime_pressure = context.runtime_pressure_snapshot();
 
         Self {
             enabled: true,
@@ -99,6 +100,44 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.l7_cc_verified_passes)
                 .unwrap_or(0),
+            cc_fast_path_requests: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_fast_path_requests)
+                .unwrap_or(0),
+            cc_fast_path_blocks: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_fast_path_blocks)
+                .unwrap_or(0),
+            cc_fast_path_challenges: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_fast_path_challenges)
+                .unwrap_or(0),
+            cc_fast_path_no_decisions: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_fast_path_no_decisions)
+                .unwrap_or(0),
+            cc_hot_cache_hits: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_hot_cache_hits)
+                .unwrap_or(0),
+            cc_hot_cache_misses: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_hot_cache_misses)
+                .unwrap_or(0),
+            cc_hot_cache_expired: metrics
+                .as_ref()
+                .map(|value| value.l7_cc_hot_cache_expired)
+                .unwrap_or(0),
+            cc_fast_path_ratio_percent: metrics
+                .as_ref()
+                .map(|value| {
+                    if value.total_packets == 0 {
+                        0.0
+                    } else {
+                        (value.l7_cc_fast_path_requests as f64 / value.total_packets as f64) * 100.0
+                    }
+                })
+                .unwrap_or(0.0),
             behavior_challenge_requests: metrics
                 .as_ref()
                 .map(|value| value.l7_behavior_challenges)
@@ -195,6 +234,12 @@ impl L7StatsResponse {
                 .as_ref()
                 .map(|value| value.average_proxy_latency_micros)
                 .unwrap_or(0),
+            runtime_pressure_level: runtime_pressure.level.to_string(),
+            runtime_defense_depth: runtime_pressure.defense_depth.to_string(),
+            runtime_pressure_cpu_percent: runtime_pressure.cpu_usage_percent,
+            runtime_pressure_cpu_score: runtime_pressure.cpu_pressure_score,
+            runtime_pressure_cpu_sample_available: runtime_pressure.cpu_sample_available,
+            runtime_pressure_storage_queue_percent: runtime_pressure.storage_queue_usage_percent,
             upstream_healthy: upstream.healthy,
             upstream_last_check_at: upstream.last_check_at,
             upstream_last_error: upstream.last_error,

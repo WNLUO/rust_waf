@@ -527,6 +527,24 @@ const defenseMatrix = computed(() => {
           value: controllerStateLabel(l7Tuning?.controller_state),
         },
         {
+          label: '压力',
+          value: pressureLabel(metrics?.runtime_pressure_level),
+          class:
+            metrics?.runtime_pressure_level === 'attack'
+              ? 'text-red-700'
+              : metrics?.runtime_pressure_level === 'high'
+                ? 'text-amber-700'
+                : '',
+        },
+        {
+          label: '深度',
+          value: metrics?.runtime_defense_depth || 'unknown',
+          class:
+            metrics?.runtime_defense_depth === 'survival'
+              ? 'text-amber-700'
+              : '',
+        },
+        {
           label: 'TLS超时',
           value: `${(
             l7Tuning?.last_observed_tls_handshake_timeout_rate_percent || 0
@@ -549,6 +567,14 @@ const defenseMatrix = computed(() => {
           label: '慢攻命中',
           value: formatNumber(slowAttackHits),
           class: slowAttackHits > 0 ? 'text-red-700' : '',
+        },
+        {
+          label: 'CPU分',
+          value: formatNumber(metrics?.runtime_pressure_cpu_score || 0),
+          class:
+            (metrics?.runtime_pressure_cpu_score || 0) >= 2
+              ? 'text-amber-700'
+              : '',
         },
       ],
       summary: l7Tuning?.last_adjust_reason || '最近无自动动作',

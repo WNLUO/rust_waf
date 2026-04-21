@@ -70,9 +70,18 @@ export interface MetricsResponse {
   l4_behavior_dropped_events: number
   l4_overload_level: string
   runtime_pressure_level: string
+  runtime_capacity_class: string
+  runtime_defense_depth: string
   runtime_pressure_drop_delay: boolean
   runtime_pressure_trim_event_persistence: boolean
   runtime_pressure_storage_queue_percent: number
+  runtime_pressure_cpu_percent: number
+  runtime_pressure_cpu_score: number
+  runtime_pressure_cpu_sample_available: boolean
+  runtime_l7_bucket_limit: number
+  runtime_l7_page_window_limit: number
+  runtime_behavior_bucket_limit: number
+  runtime_behavior_sample_stride: number
   storage_degraded_reasons: string[]
   storage_attack_insights: StorageAttackInsights
   system: SystemMetrics

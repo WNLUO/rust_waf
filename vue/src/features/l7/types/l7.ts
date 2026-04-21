@@ -215,6 +215,14 @@ export interface L7StatsPayload {
   cc_delayed_requests: number
   cc_unresolved_identity_delayed_requests: number
   cc_verified_pass_requests: number
+  cc_fast_path_requests: number
+  cc_fast_path_blocks: number
+  cc_fast_path_challenges: number
+  cc_fast_path_no_decisions: number
+  cc_hot_cache_hits: number
+  cc_hot_cache_misses: number
+  cc_hot_cache_expired: number
+  cc_fast_path_ratio_percent: number
   behavior_challenge_requests: number
   behavior_block_requests: number
   behavior_delayed_requests: number
@@ -239,6 +247,12 @@ export interface L7StatsPayload {
   slow_attack_tls_handshake_hits: number
   slow_attack_blocks: number
   average_proxy_latency_micros: number
+  runtime_pressure_level: string
+  runtime_defense_depth: string
+  runtime_pressure_cpu_percent: number
+  runtime_pressure_cpu_score: number
+  runtime_pressure_cpu_sample_available: boolean
+  runtime_pressure_storage_queue_percent: number
   upstream_healthy: boolean
   upstream_last_check_at: number | null
   upstream_last_error: string | null

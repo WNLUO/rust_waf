@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, ArrowUpRight, Shield, TimerReset } from 'lucide-vue-next'
+import { Activity, ArrowUpRight, Cpu, Gauge, Shield, TimerReset, Zap } from 'lucide-vue-next'
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
@@ -251,6 +251,66 @@ function hotspotViewButtonClass(view: 'host' | 'route') {
     ? 'border-blue-500 bg-blue-50 text-blue-700'
     : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
 }
+
+const hotCacheHitRatio = computed(() => {
+  const hits = props.stats?.cc_hot_cache_hits ?? 0
+  const misses = props.stats?.cc_hot_cache_misses ?? 0
+  const expired = props.stats?.cc_hot_cache_expired ?? 0
+  const total = hits + misses + expired
+  if (!total) return 0
+  return (hits / total) * 100
+})
+
+const fastNoDecisionRatio = computed(() => {
+  const total = props.stats?.cc_fast_path_requests ?? 0
+  if (!total) return 0
+  return ((props.stats?.cc_fast_path_no_decisions ?? 0) / total) * 100
+})
+
+function pressureLabel(value?: string) {
+  switch (value) {
+    case 'attack':
+      return '攻击态'
+    case 'high':
+      return '高压'
+    case 'elevated':
+      return '升压'
+    case 'normal':
+      return '正常'
+    default:
+      return value || '未知'
+  }
+}
+
+function pressureBadgeType(value?: string) {
+  switch (value) {
+    case 'attack':
+      return 'error' as const
+    case 'high':
+      return 'warning' as const
+    case 'elevated':
+      return 'info' as const
+    case 'normal':
+      return 'success' as const
+    default:
+      return 'muted' as const
+  }
+}
+
+function defenseDepthLabel(value?: string) {
+  switch (value) {
+    case 'survival':
+      return 'survival'
+    case 'lean':
+      return 'lean'
+    case 'balanced':
+      return 'balanced'
+    case 'full':
+      return 'full'
+    default:
+      return value || 'unknown'
+  }
+}
 </script>
 
 <template>
@@ -345,6 +405,87 @@ function hotspotViewButtonClass(view: 'host' | 'route') {
       :hint="`Cookie 标记 ${configForm.cc_defense.challenge_cookie_name} 验证通过后继续放行`"
       :icon="ArrowUpRight"
     />
+  </section>
+
+  <section class="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+    <CyberCard title="战时状态" sub-title="运行时压力、资源深度与快路径触发状态">
+      <template #header-action>
+        <div class="self-end flex flex-wrap justify-end gap-2">
+          <StatusBadge
+            :text="pressureLabel(stats?.runtime_pressure_level)"
+            :type="pressureBadgeType(stats?.runtime_pressure_level)"
+          />
+          <StatusBadge
+            :text="defenseDepthLabel(stats?.runtime_defense_depth)"
+            :type="stats?.runtime_defense_depth === 'survival' ? 'warning' : 'info'"
+          />
+        </div>
+      </template>
+      <div class="grid gap-3 md:grid-cols-2">
+        <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
+          <p class="text-xs tracking-wide text-slate-500">CPU 压力</p>
+          <p class="mt-3 text-2xl font-semibold text-stone-900">
+            {{
+              stats?.runtime_pressure_cpu_sample_available
+                ? `${(stats.runtime_pressure_cpu_percent || 0).toFixed(1)}%`
+                : '无采样'
+            }}
+          </p>
+          <p class="mt-1 text-xs text-slate-500">
+            score {{ formatNumber(stats?.runtime_pressure_cpu_score || 0) }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
+          <p class="text-xs tracking-wide text-slate-500">存储队列压力</p>
+          <p class="mt-3 text-2xl font-semibold text-stone-900">
+            {{ formatNumber(stats?.runtime_pressure_storage_queue_percent || 0) }}%
+          </p>
+          <p class="mt-1 text-xs text-slate-500">事件持久化压力输入</p>
+        </div>
+      </div>
+    </CyberCard>
+
+    <CyberCard title="CC 快路径" sub-title="survival fast path 与 hot cache 命中情况">
+      <template #header-action>
+        <div class="self-end flex flex-wrap justify-end gap-2">
+          <StatusBadge
+            :text="`${(stats?.cc_fast_path_ratio_percent || 0).toFixed(1)}% 快路径`"
+            :type="(stats?.cc_fast_path_ratio_percent || 0) > 0 ? 'info' : 'muted'"
+          />
+          <StatusBadge
+            :text="`${hotCacheHitRatio.toFixed(1)}% 热缓存`"
+            :type="hotCacheHitRatio > 0 ? 'success' : 'muted'"
+          />
+        </div>
+      </template>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricWidget
+          label="快路径请求"
+          :value="formatNumber(stats?.cc_fast_path_requests || 0)"
+          hint="进入 survival fast path 的累计请求"
+          :icon="Zap"
+        />
+        <MetricWidget
+          label="快路径拦截"
+          :value="formatNumber(stats?.cc_fast_path_blocks || 0)"
+          :hint="`挑战 ${formatNumber(stats?.cc_fast_path_challenges || 0)}`"
+          :icon="Shield"
+          trend="up"
+        />
+        <MetricWidget
+          label="热缓存命中"
+          :value="formatNumber(stats?.cc_hot_cache_hits || 0)"
+          :hint="`命中率 ${hotCacheHitRatio.toFixed(1)}%，过期 ${formatNumber(stats?.cc_hot_cache_expired || 0)}`"
+          :icon="Gauge"
+        />
+        <MetricWidget
+          label="快路径未决"
+          :value="formatNumber(stats?.cc_fast_path_no_decisions || 0)"
+          :hint="`未决率 ${fastNoDecisionRatio.toFixed(2)}%，未命中 ${formatNumber(stats?.cc_hot_cache_misses || 0)}`"
+          :icon="Cpu"
+        />
+      </div>
+    </CyberCard>
   </section>
 
   <section class="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">

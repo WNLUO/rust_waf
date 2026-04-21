@@ -549,7 +549,7 @@ struct EarlyDefenseDecision {
 | 阶段 9 | 已完成 | fast path 三态化、hot cache 自适应续期、四层 cache，高级 120 秒最佳 `2151.73` TPS |
 | 阶段 10 | 已完成 | HTTP/1 hot-cache drop 前移到 request permit 前，高级 120 秒 `2372.50` TPS，600 秒 `2342.41` TPS |
 | 阶段 11 | 已完成 | 严谨验证：open-loop 2200 / 120s 与 2100 / 600s 纯攻击通过；10k IP 高基数基本稳定；混合正常流量未通过 |
-| 阶段 12 | 进行中 | 正常用户保活第一目标达成；修复 survival fast / hard block 持久化 IP 误伤后，600s 95/5、90/10、80/20 均达到 `100.00%` |
+| 阶段 12 | 进行中 | 正常用户保活第一目标达成；修复 survival fast / hard block 持久化 IP 误伤后，2200 RPS 混合 600s 三组均达到 `100.00%`；纯攻击 2600 target / 600s 达到 `2594.69` TPS；95/5 混合 2600 target / 180s 正常成功率 `100.00%` |
 
 当前以 `CURRENT_OPTIMIZATION_STATUS.md` 作为后续承接的权威状态文档。
 
@@ -568,7 +568,9 @@ struct EarlyDefenseDecision {
 | P0 | 修复 hard block 持久化误伤 | 已完成：分布式 API / hot path hard block 不再持久化共享真实 IP，单 IP 高压和静态资源确定性误用仍可持久化 |
 | P1 | 重跑 95/5、90/10、80/20 混合流量 | 短测分别达到 `95.76%`、`95.10%`、`94.78%`；180s 达到 `95.86%`、`97.55%`、`98.84%`；600s 三组均达到 `100.00%` |
 | P1 | 600s 混合长测 | 已完成：95/5、90/10、80/20 均无正常侧 `0/403/429`，`blocked_client_ip=0`，`proxy_failures=0` |
-| P2 | 用专业 open-loop 工具复核 2500+ 边界 | 减少 Python 调度和连接模型对上限判断的影响 |
+| P1 | 用 open-loop 复核 2500+ 纯攻击边界 | 已完成：2600 target 下 120s 达到 `2571.06` TPS，600s 达到 `2594.69` TPS，无 OOM、无队列积压 |
+| P1 | 用 open-loop 探测 2500+ 混合边界 | 已完成 95/5 / 2600 target / 180s：实际发送 `2575.28` RPS，正常成功率 `100.00%`，`blocked_client_ip=0`，`proxy_failures=0` |
+| P2 | 补混合 2500+ 600s 与更多比例 | 下一步补 95/5 / 2600 target / 600s，再扩展 90/10、80/20 |
 
 当前准确结论：
 
@@ -579,5 +581,6 @@ struct EarlyDefenseDecision {
 新增 reason 指标后确认 early defense 不是剩余主要误伤来源，真正问题是 survival fast block 把共享真实 IP 持久化进 local blocked IP。
 修复 survival fast 后 180s 长测达到 95.86%、97.55%、98.84%。
 600s 首轮 95/5 暴露 full L7 CC hard block 仍会持久化分布式热点 API 的共享真实 IP；修复后，600s 95/5、90/10、80/20 均达到 100.00%，blocked_client_ip=0，proxy_failures=0。
-下一步进入 2500+ open-loop 边界复核和更复杂混合矩阵验证。
+2500+ 边界复核已推进：纯攻击 2600 target / 600s 达到 2594.69 effective TPS；95/5 混合 2600 target / 180s 实际发送 2575.28 RPS，正常成功率 100.00%。
+下一步补混合 2500+ 的 600s 验证，并扩展到 90/10、80/20 和更复杂混合矩阵。
 ```

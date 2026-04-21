@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, onMounted, onBeforeUnmount } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  ref,
+  onMounted,
+  onBeforeUnmount,
+} from 'vue'
 import AppLayout from '@/app/layout/AppLayout.vue'
 import AdminDashboardAiAutomationPanel from '@/features/dashboard/components/AdminDashboardAiAutomationPanel.vue'
+import AdminDashboardAttackTimeline from '@/features/dashboard/components/AdminDashboardAttackTimeline.vue'
 import AdminDashboardDefenseMatrix from '@/features/dashboard/components/AdminDashboardDefenseMatrix.vue'
 import AdminDashboardPerformanceGrid from '@/features/dashboard/components/AdminDashboardPerformanceGrid.vue'
 import { RefreshCw } from 'lucide-vue-next'
@@ -40,6 +47,7 @@ const {
   refreshing,
   metricsHistory,
   networkHistory,
+  attackTimeline,
   metricTrends,
   formatBytes,
   formatNumber,
@@ -368,13 +376,16 @@ onMounted(() => {
 
     // IO 条形平滑插值
     smoothIoReadPercent.value += (targetRead - smoothIoReadPercent.value) * 0.08
-    smoothIoWritePercent.value += (targetWrite - smoothIoWritePercent.value) * 0.08
+    smoothIoWritePercent.value +=
+      (targetWrite - smoothIoWritePercent.value) * 0.08
 
     // 报文和延迟的数字平滑滚动
     const targetPackets = metrics?.total_packets || 0
     const targetLatency = metrics?.average_proxy_latency_micros || 0
-    smoothTotalPackets.value += (targetPackets - smoothTotalPackets.value) * 0.08
-    smoothLatencyMicros.value += (targetLatency - smoothLatencyMicros.value) * 0.08
+    smoothTotalPackets.value +=
+      (targetPackets - smoothTotalPackets.value) * 0.08
+    smoothLatencyMicros.value +=
+      (targetLatency - smoothLatencyMicros.value) * 0.08
 
     ioRafId = requestAnimationFrame(animateIo)
   }
@@ -602,15 +613,12 @@ const defenseMatrix = computed(() => {
           label: '快路径',
           value: formatNumber(metrics?.l7_cc_fast_path_requests || 0),
           class:
-            (metrics?.l7_cc_fast_path_requests || 0) > 0
-              ? 'text-sky-700'
-              : '',
+            (metrics?.l7_cc_fast_path_requests || 0) > 0 ? 'text-sky-700' : '',
         },
         {
           label: '热缓存',
           value: formatNumber(metrics?.l7_cc_hot_cache_hits || 0),
-          class:
-            (metrics?.l7_cc_hot_cache_hits || 0) > 0 ? 'text-red-700' : '',
+          class: (metrics?.l7_cc_hot_cache_hits || 0) > 0 ? 'text-red-700' : '',
         },
         {
           label: '未决',
@@ -740,7 +748,10 @@ const defenseMatrix = computed(() => {
         :format-latency="formatLatencyEnglish"
       />
 
-      <section class="grid gap-3 xl:grid transition-[grid-template-columns] duration-500 ease-in-out" :class="trafficOverviewGridClass">
+      <section
+        class="grid gap-3 xl:grid transition-[grid-template-columns] duration-500 ease-in-out"
+        :class="trafficOverviewGridClass"
+      >
         <AdminEventMapSection
           :traffic-map="trafficMap"
           :traffic-events="trafficEvents"
@@ -786,11 +797,19 @@ const defenseMatrix = computed(() => {
           :ai-policy-title="aiPolicyTitle"
           :ai-policy-detail-line="aiPolicyDetailLine"
           :ai-policy-status-label="aiPolicyStatusLabel"
-          @update:policy-feedback-expanded="
-            aiPolicyFeedbackExpanded = $event
-          "
+          @update:policy-feedback-expanded="aiPolicyFeedbackExpanded = $event"
         />
       </section>
+
+      <AdminDashboardAttackTimeline
+        :timeline="attackTimeline"
+        :current-pressure="
+          dashboard?.metrics.runtime_pressure_level || 'normal'
+        "
+        :current-depth="dashboard?.metrics.runtime_defense_depth || 'unknown'"
+        :cpu-score="dashboard?.metrics.runtime_pressure_cpu_score || 0"
+        :format-number="formatNumber"
+      />
     </div>
   </AppLayout>
 </template>

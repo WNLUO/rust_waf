@@ -81,6 +81,13 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
         return EarlyDefenseDecision::drop("trusted_cdn_unresolved_survival");
     }
 
+    if metadata_bool(request, "l7.cc.survival_verified_normal")
+        || (matches!(runtime_depth, Some("survival"))
+            && is_low_risk_stable_identity_candidate(request))
+    {
+        return EarlyDefenseDecision::allow();
+    }
+
     if request_budget_softened && matches!(runtime_depth, Some("survival")) {
         return EarlyDefenseDecision::drop("l4_request_budget_softened_survival");
     }
@@ -174,6 +181,90 @@ fn metadata_u8(request: &UnifiedHttpRequest, key: &str) -> u8 {
         .unwrap_or(0)
 }
 
+fn is_low_risk_stable_identity_candidate(request: &UnifiedHttpRequest) -> bool {
+    let method = request.method.to_ascii_uppercase();
+    if method != "GET" && method != "HEAD" {
+        return false;
+    }
+    let path = request.uri.split('?').next().unwrap_or("/");
+    if path.starts_with("/api/") {
+        return false;
+    }
+    let Some(identity) = stable_browser_identity(request) else {
+        return false;
+    };
+    if identity.len() < 6 || identity.len() > 128 {
+        return false;
+    }
+    let sec_fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(sec_fetch_site.as_str(), "same-origin" | "same-site") {
+        return false;
+    }
+    if looks_like_static_asset(path)
+        || path == "/"
+        || path.ends_with(".html")
+        || path.ends_with(".htm")
+    {
+        return true;
+    }
+    if request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.eq_ignore_ascii_case("document"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    request
+        .get_header("accept")
+        .map(|value| {
+            let accept = value.to_ascii_lowercase();
+            accept.contains("text/html") || accept.contains("application/xhtml+xml")
+        })
+        .unwrap_or(false)
+}
+
+fn stable_browser_identity(request: &UnifiedHttpRequest) -> Option<&str> {
+    let cookie_fp = cookie_value(request, "rwaf_fp").filter(|value| !value.trim().is_empty());
+    let header_fp = request
+        .get_header("x-browser-fingerprint-id")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty());
+
+    match (cookie_fp, header_fp) {
+        (Some(cookie), Some(header)) if cookie == header => Some(cookie),
+        (Some(cookie), None) => Some(cookie),
+        (None, Some(header)) => Some(header),
+        _ => None,
+    }
+}
+
+fn cookie_value<'a>(request: &'a UnifiedHttpRequest, name: &str) -> Option<&'a str> {
+    request.get_header("cookie").and_then(|header| {
+        header.split(';').find_map(|part| {
+            let trimmed = part.trim();
+            let (key, value) = trimmed.split_once('=')?;
+            if key.trim() == name {
+                Some(value.trim())
+            } else {
+                None
+            }
+        })
+    })
+}
+
+fn looks_like_static_asset(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    [
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".woff", ".woff2",
+        ".ttf", ".map",
+    ]
+    .iter()
+    .any(|suffix| path.ends_with(suffix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,6 +328,77 @@ mod tests {
         assert_eq!(
             request.get_metadata("early_defense.reason").unwrap(),
             "trusted_cdn_unresolved_survival"
+        );
+    }
+
+    #[test]
+    fn survival_verified_normal_survives_broad_l4_pressure() {
+        let mut request = request();
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_forwarded".to_string(),
+        );
+        request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("l4.overload_level".to_string(), "critical".to_string());
+        request.add_metadata("l4.request_budget_softened".to_string(), "true".to_string());
+        request.add_metadata(
+            "l7.cc.survival_verified_normal".to_string(),
+            "true".to_string(),
+        );
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert!(request.get_metadata("early_defense.action").is_none());
+        assert!(request.get_metadata("l7.enforcement").is_none());
+    }
+
+    #[test]
+    fn stable_document_identity_survives_before_l7_verified_marker() {
+        let mut request = request();
+        request.uri = "/health?n=1".to_string();
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_forwarded".to_string(),
+        );
+        request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("l4.overload_level".to_string(), "critical".to_string());
+        request.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+        request.add_header(
+            "x-browser-fingerprint-id".to_string(),
+            "stable-normal".to_string(),
+        );
+        request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        request.add_header("sec-fetch-dest".to_string(), "document".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert!(request.get_metadata("early_defense.action").is_none());
+    }
+
+    #[test]
+    fn api_identity_candidate_still_drops_under_l4_pressure() {
+        let mut request = request();
+        request.uri = "/api/search".to_string();
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_forwarded".to_string(),
+        );
+        request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("l4.overload_level".to_string(), "critical".to_string());
+        request.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+        request.add_header(
+            "x-browser-fingerprint-id".to_string(),
+            "stable-normal".to_string(),
+        );
+        request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        request.add_header("sec-fetch-dest".to_string(), "document".to_string());
+
+        let result = evaluate_early_defense(&mut request).expect("api should still drop");
+        assert!(result.blocked);
+        assert_eq!(
+            request.get_metadata("early_defense.reason").unwrap(),
+            "l4_high_risk_runtime_pressure"
         );
     }
 }

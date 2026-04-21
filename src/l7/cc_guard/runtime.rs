@@ -707,21 +707,23 @@ impl L7CcGuard {
             hot_cache_expired = true;
         }
         let ip_hot_key = format!("ip:{}", client_ip_key);
-        if let Some(active) =
-            self.hot_block_cache_hit_and_extend(&ip_hot_key, unix_now, hot_cache_base_ttl)
-        {
-            if active {
-                request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
-                request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                return SurvivalFastPathResult::Block(InspectionResult::drop(
-                    InspectionLayer::L7,
-                    "l7 cc fast path hot block".to_string(),
-                ));
+        if !survival_low_risk_identity {
+            if let Some(active) =
+                self.hot_block_cache_hit_and_extend(&ip_hot_key, unix_now, hot_cache_base_ttl)
+            {
+                if active {
+                    request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
+                    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+                    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+                    request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                    request.add_metadata("l4.force_close".to_string(), "true".to_string());
+                    return SurvivalFastPathResult::Block(InspectionResult::drop(
+                        InspectionLayer::L7,
+                        "l7 cc fast path hot block".to_string(),
+                    ));
+                }
+                hot_cache_expired = true;
             }
-            hot_cache_expired = true;
         }
         let route_hot_key = format!("route:{}|{}", host, route_path);
         let site_hot_key = format!("site:{}", host);

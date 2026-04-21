@@ -696,6 +696,49 @@ async fn survival_fast_path_spares_low_risk_identity_from_site_hot_cache() {
 }
 
 #[tokio::test]
+async fn survival_fast_path_spares_low_risk_identity_from_ip_hot_cache() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 50,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 2,
+        hot_path_challenge_threshold: 50,
+        hot_path_block_threshold: 50,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for _ in 0..2 {
+        let mut attack = request("/api/search");
+        attack.method = "POST".to_string();
+        attack.set_client_ip("203.0.113.10".to_string());
+        attack.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        let _ = guard.inspect_request(&mut attack).await;
+    }
+
+    let mut trusted = request("/dashboard");
+    trusted.set_client_ip("203.0.113.10".to_string());
+    trusted.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+    trusted.add_header(
+        "x-browser-fingerprint-id".to_string(),
+        "stable-normal".to_string(),
+    );
+    trusted.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+    trusted.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+    trusted.add_header("sec-fetch-dest".to_string(), "document".to_string());
+    trusted.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut trusted).await.is_none());
+    assert_eq!(
+        trusted
+            .get_metadata("l7.cc.survival_bypass")
+            .map(String::as_str),
+        Some("low_risk_identity")
+    );
+    assert_eq!(trusted.get_metadata("l7.cc.hot_cache_hit"), None);
+}
+
+#[tokio::test]
 async fn survival_fast_path_does_not_bypass_api_with_spoofed_identity() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 50,

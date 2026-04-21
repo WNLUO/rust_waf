@@ -30,6 +30,16 @@ import {
   useAdminRealtimeTopic,
 } from '@/shared/realtime/adminRealtime'
 
+type AttackTimelineCounterKey =
+  | 'proxy_successes'
+  | 'proxy_failures'
+  | 'l7_cc_fast_path_blocks'
+  | 'l7_cc_hot_cache_hits'
+  | 'l7_cc_fast_path_no_decisions'
+  | 'l7_cc_verified_passes'
+  | 'trusted_proxy_l4_degrade_actions'
+  | 'blocked_l7'
+
 export function useAdminDashboardPage() {
   const dashboard = ref<DashboardPayload | null>(null)
   const trafficMap = ref<TrafficMapResponse | null>(null)
@@ -71,6 +81,23 @@ export function useAdminDashboardPage() {
     rx: [] as number[],
     tx: [] as number[],
   })
+  const attackTimeline = reactive({
+    timestamps: [] as number[],
+    proxySuccesses: [] as number[],
+    proxyFailures: [] as number[],
+    fastPathBlocks: [] as number[],
+    hotCacheHits: [] as number[],
+    noDecisions: [] as number[],
+    verifiedPasses: [] as number[],
+    l4DegradeActions: [] as number[],
+    blockedL7: [] as number[],
+    pressureLevels: [] as string[],
+    defenseDepths: [] as string[],
+  })
+  const lastAttackCounters = ref<Record<
+    AttackTimelineCounterKey,
+    number
+  > | null>(null)
 
   const pushHistory = (key: keyof typeof metricsHistory, value: number) => {
     const series = metricsHistory[key]
@@ -89,6 +116,56 @@ export function useAdminDashboardPage() {
       networkHistory.rx.shift()
       networkHistory.tx.shift()
     }
+  }
+  const pushAttackTimeline = (metrics: MetricsResponse) => {
+    const counters: Record<AttackTimelineCounterKey, number> = {
+      proxy_successes: metrics.proxy_successes || 0,
+      proxy_failures: metrics.proxy_failures || 0,
+      l7_cc_fast_path_blocks: metrics.l7_cc_fast_path_blocks || 0,
+      l7_cc_hot_cache_hits: metrics.l7_cc_hot_cache_hits || 0,
+      l7_cc_fast_path_no_decisions: metrics.l7_cc_fast_path_no_decisions || 0,
+      l7_cc_verified_passes: metrics.l7_cc_verified_passes || 0,
+      trusted_proxy_l4_degrade_actions:
+        metrics.trusted_proxy_l4_degrade_actions || 0,
+      blocked_l7: metrics.blocked_l7 || 0,
+    }
+    const previous = lastAttackCounters.value
+    const delta = (key: AttackTimelineCounterKey) =>
+      previous === null ? 0 : Math.max(0, counters[key] - previous[key])
+
+    attackTimeline.timestamps.push(Date.now())
+    attackTimeline.proxySuccesses.push(delta('proxy_successes'))
+    attackTimeline.proxyFailures.push(delta('proxy_failures'))
+    attackTimeline.fastPathBlocks.push(delta('l7_cc_fast_path_blocks'))
+    attackTimeline.hotCacheHits.push(delta('l7_cc_hot_cache_hits'))
+    attackTimeline.noDecisions.push(delta('l7_cc_fast_path_no_decisions'))
+    attackTimeline.verifiedPasses.push(delta('l7_cc_verified_passes'))
+    attackTimeline.l4DegradeActions.push(
+      delta('trusted_proxy_l4_degrade_actions'),
+    )
+    attackTimeline.blockedL7.push(delta('blocked_l7'))
+    attackTimeline.pressureLevels.push(
+      metrics.runtime_pressure_level || 'normal',
+    )
+    attackTimeline.defenseDepths.push(
+      metrics.runtime_defense_depth || 'unknown',
+    )
+
+    if (attackTimeline.timestamps.length > 90) {
+      attackTimeline.timestamps.shift()
+      attackTimeline.proxySuccesses.shift()
+      attackTimeline.proxyFailures.shift()
+      attackTimeline.fastPathBlocks.shift()
+      attackTimeline.hotCacheHits.shift()
+      attackTimeline.noDecisions.shift()
+      attackTimeline.verifiedPasses.shift()
+      attackTimeline.l4DegradeActions.shift()
+      attackTimeline.blockedL7.shift()
+      attackTimeline.pressureLevels.shift()
+      attackTimeline.defenseDepths.shift()
+    }
+
+    lastAttackCounters.value = counters
   }
 
   const trendFromDiff = (diff: number, threshold = 0) => {
@@ -304,6 +381,7 @@ export function useAdminDashboardPage() {
     lastProxySuccessRate.value = proxySuccessRate
     pushHistory('latency', metrics.average_proxy_latency_micros)
     pushNetworkHistory(metrics)
+    pushAttackTimeline(metrics)
     lastUpdated.value = Date.now()
   }
 
@@ -478,6 +556,7 @@ export function useAdminDashboardPage() {
     realtimeState,
     metricsHistory,
     networkHistory,
+    attackTimeline,
     metricTrends,
     blockedPeriodDelta,
     pushHistory,

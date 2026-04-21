@@ -549,13 +549,13 @@ struct EarlyDefenseDecision {
 | 阶段 9 | 已完成 | fast path 三态化、hot cache 自适应续期、四层 cache，高级 120 秒最佳 `2151.73` TPS |
 | 阶段 10 | 已完成 | HTTP/1 hot-cache drop 前移到 request permit 前，高级 120 秒 `2372.50` TPS，600 秒 `2342.41` TPS |
 | 阶段 11 | 已完成 | 严谨验证：open-loop 2200 / 120s 与 2100 / 600s 纯攻击通过；10k IP 高基数基本稳定；混合正常流量未通过 |
-| 阶段 12 | 进行中 | 正常用户保活短测第一目标达成；修复 survival fast block 持久化 IP 误伤后，180s 长测达到 `95.86%` / `97.55%` / `98.84%`，600s 待验证 |
+| 阶段 12 | 进行中 | 正常用户保活第一目标达成；修复 survival fast / hard block 持久化 IP 误伤后，600s 95/5、90/10、80/20 均达到 `100.00%` |
 
 当前以 `CURRENT_OPTIMIZATION_STATUS.md` 作为后续承接的权威状态文档。
 
 ## 7. 下一步
 
-下一步继续 Stage 12：高压正常用户保活和 hot cache / blocked IP 误伤控制，而不是继续只追求纯攻击 TPS。
+下一步继续 Stage 12：在正常用户保活已过第一目标后，推进更高边界和更复杂混合口径。
 
 | 优先级 | 任务 | 目的 |
 |---|---|---|
@@ -565,8 +565,9 @@ struct EarlyDefenseDecision {
 | P0 | 排查 normal-only 无响应 | 已确认主要不是 L4/permit/proxy；正常保活先围绕混合长测继续推进 |
 | P0 | 拆 `blocked_l7` 来源 | 已完成：新增 early defense / L7 drop reason 指标，定位到 survival fast block 持久化 IP 导致共享真实 IP 被 local blocked IP 误伤 |
 | P0 | 修复 blocked IP 误伤 | 已完成：survival fast `cc_fast_block` 只 drop 当前请求，不再持久化真实 IP |
-| P1 | 重跑 95/5、90/10、80/20 混合流量 | 短测分别达到 `95.76%`、`95.10%`、`94.78%`；修复后 180s 长测达到 `95.86%`、`97.55%`、`98.84%` |
-| P1 | 600s 混合长测 | 待执行：先清空或过期历史 local blocked IP，再跑 95/5、90/10、80/20 |
+| P0 | 修复 hard block 持久化误伤 | 已完成：分布式 API / hot path hard block 不再持久化共享真实 IP，单 IP 高压和静态资源确定性误用仍可持久化 |
+| P1 | 重跑 95/5、90/10、80/20 混合流量 | 短测分别达到 `95.76%`、`95.10%`、`94.78%`；180s 达到 `95.86%`、`97.55%`、`98.84%`；600s 三组均达到 `100.00%` |
+| P1 | 600s 混合长测 | 已完成：95/5、90/10、80/20 均无正常侧 `0/403/429`，`blocked_client_ip=0`，`proxy_failures=0` |
 | P2 | 用专业 open-loop 工具复核 2500+ 边界 | 减少 Python 调度和连接模型对上限判断的影响 |
 
 当前准确结论：
@@ -576,5 +577,7 @@ struct EarlyDefenseDecision {
 10k IP 高基数低频场景基本稳定。
 混合正常业务流量短测已达到第一目标；Stage 12 把 normal-only 100 RPS 从 4.13% 提升到 96.47%，normal-only 200 RPS 达到 95.75%，95/5、90/10、80/20 混合短测分别达到 95.76%、95.10%、94.78%。
 新增 reason 指标后确认 early defense 不是剩余主要误伤来源，真正问题是 survival fast block 把共享真实 IP 持久化进 local blocked IP。
-修复后 180s 长测达到 95.86%、97.55%、98.84%；下一步清理/过期历史 blocked IP 后做 600s 95/5、90/10、80/20 复核。
+修复 survival fast 后 180s 长测达到 95.86%、97.55%、98.84%。
+600s 首轮 95/5 暴露 full L7 CC hard block 仍会持久化分布式热点 API 的共享真实 IP；修复后，600s 95/5、90/10、80/20 均达到 100.00%，blocked_client_ip=0，proxy_failures=0。
+下一步进入 2500+ open-loop 边界复核和更复杂混合矩阵验证。
 ```

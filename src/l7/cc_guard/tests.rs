@@ -431,6 +431,47 @@ async fn distributed_api_requests_trigger_global_hot_path_pressure() {
 }
 
 #[tokio::test]
+async fn distributed_api_hard_block_does_not_persist_shared_ip() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 100,
+        route_block_threshold: 1_000,
+        host_challenge_threshold: 1_000,
+        host_block_threshold: 1_000,
+        ip_challenge_threshold: 1_000,
+        ip_block_threshold: 1_000,
+        hot_path_challenge_threshold: 100,
+        hot_path_block_threshold: 4,
+        hard_hot_path_block_multiplier: 1,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut result = None;
+    let mut last = None;
+    for idx in 0..4 {
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "POST".to_string(),
+            "/api/checkout".to_string(),
+        );
+        request.set_client_ip(format!("203.0.113.{}", idx + 10));
+        request.add_header("host".to_string(), "example.com".to_string());
+        request.add_header("accept".to_string(), "application/json".to_string());
+        result = guard.inspect_request(&mut request).await;
+        last = Some(request);
+    }
+
+    let result = result.expect("distributed hot path should hard block");
+    let last = last.expect("last request");
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert!(!result.persist_blocked_ip);
+    assert_eq!(
+        last.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("cc_hard_block")
+    );
+}
+
+#[tokio::test]
 async fn lean_runtime_uses_core_tracking_without_weighted_buckets() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 50,

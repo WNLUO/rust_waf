@@ -475,10 +475,14 @@ impl L7CcGuard {
             request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
             request.add_metadata("l7.drop_reason".to_string(), "cc_hard_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            return Some(InspectionResult::drop_and_persist_ip(
-                InspectionLayer::L7,
-                reason,
-            ));
+            let should_persist_ip = static_asset_persist_block
+                || ip_count >= hard_ip_block_threshold
+                || ip_effective >= ip_block_threshold;
+            return Some(if should_persist_ip {
+                InspectionResult::drop_and_persist_ip(InspectionLayer::L7, reason)
+            } else {
+                InspectionResult::drop(InspectionLayer::L7, reason)
+            });
         }
 
         let route_challenge_threshold = bot_scaled(

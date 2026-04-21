@@ -224,21 +224,22 @@ Stage 9 的 fast path 方向正确，但 HTTP/1 fast path 还没有完全避开 
 |---|---|
 | multi closed-loop 高级 CDN CC 120 秒是否超过 2000 TPS | 是，Stage 10 测得 `2372.50` TPS |
 | multi closed-loop 高级 CDN CC 600 秒是否超过 2000 TPS | 是，Stage 10 测得 `2342.41` TPS |
-| 严格 open-loop 固定到达率是否已证明 2000+ | 还没有 |
-| 攻击 + 正常业务混合流量是否已证明 2000+ | 还没有 |
-| 高基数低频代理池高级 CC 是否已证明 2000+ | 还没有 |
+| open-loop 固定到达率是否已证明 2000+ | Stage 11 已补证：2200 / 120s 约 `2198.07` TPS，2100 / 600s 约 `2098.13` TPS |
+| 攻击 + 正常业务混合流量是否已证明 2000+ | Stage 11 未通过：正常成功率低于 1% |
+| 高基数低频代理池高级 CC 是否已证明 2000+ | Stage 11 基本通过：10k IP / 2200 / 180s 约 `2190.86` TPS |
 
 因此后续应表述为：
 
 ```text
-高级 CDN CC 的 2000+ TPS 已在 multi closed-loop 压测口径下达成，但严格 open-loop、混合正常流量和高基数低频攻击还需要继续验证。
+高级 CDN CC 的 2000+ TPS 已在纯攻击 multi closed-loop 和 open-loop 压测口径下达成，但混合正常流量没有通过，下一阶段需要优先解决正常用户保活。
 ```
 
 ## 8. 建议下一步
 
 下一阶段建议进入生产可用性验证，而不是继续盲目压热路径：
 
-1. 补 95/5、90/10、80/20 攻击/正常混合流量。
-2. 补合法 Cookie/Token 用户的成功率、误杀率、p95/p99。
-3. 补 1k/10k IP 高基数低频攻击，拆分观察 `ip_route/ip/route/site` 各层 cache 命中。
-4. 若继续追求 open-loop 固定 RPS，应改用 Tokio async 压测器或 vegeta/wrk2，并区分连接模型与 WAF verdict 模型。
+1. 先建立 normal-only 10、50、100、200 RPS 基线。
+2. 补合法 Cookie/Token/指纹用户的 survival allow 或 challenge bypass。
+3. 收敛 hot cache scope，减少 site / route 级误伤扩大。
+4. 再重跑 95/5、90/10、80/20 攻击/正常混合流量。
+5. 若继续追求 2500+ open-loop 固定 RPS，应改用 Tokio async 压测器或 vegeta/wrk2，并区分连接模型与 WAF verdict 模型。

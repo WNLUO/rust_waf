@@ -133,6 +133,33 @@ impl L7CcGuard {
             return Some(InspectionResult::drop(InspectionLayer::L7, reason));
         }
 
+        if is_survival_low_risk_identity_request(request, &route_path) {
+            let verified_normal_kind = if looks_like_static_asset(&route_path) {
+                RequestKind::StaticAsset
+            } else {
+                RequestKind::Document
+            };
+            request.add_metadata(
+                "l7.cc.survival_verified_normal".to_string(),
+                "true".to_string(),
+            );
+            if interactive_session {
+                request.add_metadata("l7.cc.interactive_session".to_string(), "true".to_string());
+            }
+            request.add_metadata("l7.cc.client_ip".to_string(), client_ip.to_string());
+            request.add_metadata("l7.cc.host".to_string(), host);
+            request.add_metadata("l7.cc.route".to_string(), route_path);
+            request.add_metadata(
+                "l7.cc.request_kind".to_string(),
+                verified_normal_kind.as_str().to_string(),
+            );
+            request.add_metadata(
+                "l7.cc.action".to_string(),
+                "verified_normal_pass".to_string(),
+            );
+            return None;
+        }
+
         if tracking_mode.uses_page_windows() && request_kind == RequestKind::Document {
             self.record_page_load_window(
                 client_ip,
@@ -653,6 +680,8 @@ impl L7CcGuard {
         let client_ip_key = client_ip.to_string();
         let ip_route_hot_key = format!("iproute:{}|{}|{}", client_ip_key, host, route_path);
         let hot_cache_base_ttl = survival_hot_cache_base_ttl(config);
+        let survival_low_risk_identity =
+            is_survival_low_risk_identity_request(request, &route_path);
 
         request.add_metadata("l7.cc.fast_path".to_string(), "true".to_string());
         request.add_metadata(
@@ -695,38 +724,49 @@ impl L7CcGuard {
             hot_cache_expired = true;
         }
         let route_hot_key = format!("route:{}|{}", host, route_path);
-        if let Some(active) =
-            self.hot_block_cache_hit_and_extend(&route_hot_key, unix_now, hot_cache_base_ttl)
-        {
-            if active {
-                request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
-                request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                return SurvivalFastPathResult::Block(InspectionResult::drop(
-                    InspectionLayer::L7,
-                    "l7 cc fast path hot block".to_string(),
-                ));
-            }
-            hot_cache_expired = true;
-        }
         let site_hot_key = format!("site:{}", host);
-        if let Some(active) =
-            self.hot_block_cache_hit_and_extend(&site_hot_key, unix_now, hot_cache_base_ttl)
-        {
-            if active {
-                request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
-                request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                return SurvivalFastPathResult::Block(InspectionResult::drop(
-                    InspectionLayer::L7,
-                    "l7 cc fast path hot block".to_string(),
-                ));
+        if survival_low_risk_identity {
+            request.add_metadata(
+                "l7.cc.survival_bypass".to_string(),
+                "low_risk_identity".to_string(),
+            );
+            request.add_metadata(
+                "l7.cc.survival_verified_normal".to_string(),
+                "true".to_string(),
+            );
+        } else {
+            if let Some(active) =
+                self.hot_block_cache_hit_and_extend(&route_hot_key, unix_now, hot_cache_base_ttl)
+            {
+                if active {
+                    request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
+                    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+                    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+                    request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                    request.add_metadata("l4.force_close".to_string(), "true".to_string());
+                    return SurvivalFastPathResult::Block(InspectionResult::drop(
+                        InspectionLayer::L7,
+                        "l7 cc fast path hot block".to_string(),
+                    ));
+                }
+                hot_cache_expired = true;
             }
-            hot_cache_expired = true;
+            if let Some(active) =
+                self.hot_block_cache_hit_and_extend(&site_hot_key, unix_now, hot_cache_base_ttl)
+            {
+                if active {
+                    request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
+                    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+                    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+                    request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                    request.add_metadata("l4.force_close".to_string(), "true".to_string());
+                    return SurvivalFastPathResult::Block(InspectionResult::drop(
+                        InspectionLayer::L7,
+                        "l7 cc fast path hot block".to_string(),
+                    ));
+                }
+                hot_cache_expired = true;
+            }
         }
         if hot_cache_expired {
             request.add_metadata("l7.cc.hot_cache_expired".to_string(), "true".to_string());
@@ -785,6 +825,14 @@ impl L7CcGuard {
             "l7.cc.hot_path_count".to_string(),
             hot_path_count.to_string(),
         );
+
+        if survival_low_risk_identity {
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "low_risk_identity".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
+        }
 
         self.maybe_cleanup(unix_now, config);
 

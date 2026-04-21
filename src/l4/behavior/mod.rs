@@ -495,6 +495,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn survival_verified_normal_clears_l4_request_friction() {
+        let engine = L4BehaviorEngine::new(&L4Config {
+            behavior_normal_connection_budget_per_minute: 64,
+            ..L4Config::default()
+        });
+        let mut request = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            "/dashboard".to_string(),
+        );
+        request.set_client_ip("198.51.100.10".to_string());
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.survival_verified_normal".to_string(),
+            "true".to_string(),
+        );
+
+        let policy = engine.apply_request_policy(&packet(44), &mut request);
+
+        assert!(!policy.disable_keepalive);
+        assert!(!policy.prefer_early_close);
+        assert!(!policy.reject_new_connections);
+        assert_eq!(policy.suggested_delay_ms, 0);
+        assert!(policy.connection_budget_per_minute >= 128);
+        assert_eq!(policy.l7_route_threshold_scale_percent, None);
+        assert_eq!(policy.l7_host_threshold_scale_percent, None);
+        assert!(!policy.route_survival_hint);
+        assert!(request.get_metadata("l4.force_close").is_none());
+    }
+
+    #[tokio::test]
     async fn trusted_forwarded_requests_merge_peer_budget_pressure() {
         let engine = L4BehaviorEngine::new(&L4Config::default());
         engine.start();

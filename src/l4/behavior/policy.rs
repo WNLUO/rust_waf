@@ -287,6 +287,24 @@ pub(super) fn apply_identity_state_policy(
         }
     }
 
+    if request
+        .get_metadata("l7.cc.survival_verified_normal")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        policy.reject_new_connections = false;
+        policy.disable_keepalive = false;
+        policy.prefer_early_close = false;
+        policy.suggested_delay_ms = 0;
+        policy.connection_budget_per_minute = policy
+            .connection_budget_per_minute
+            .max(tuning.normal_connection_budget_per_minute.saturating_mul(2));
+        policy.l7_route_threshold_scale_percent = None;
+        policy.l7_host_threshold_scale_percent = None;
+        policy.route_survival_hint = false;
+        return policy;
+    }
+
     match request
         .get_metadata("network.identity_state")
         .map(String::as_str)

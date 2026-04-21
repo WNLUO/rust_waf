@@ -70,6 +70,85 @@ pub(super) fn is_interactive_session(
         && (verified || broad_navigation || behavior_score_low)
 }
 
+pub(super) fn is_survival_low_risk_identity_request(
+    request: &UnifiedHttpRequest,
+    route_path: &str,
+) -> bool {
+    let method = request.method.to_ascii_uppercase();
+    if method != "GET" && method != "HEAD" {
+        return false;
+    }
+    if route_path.starts_with("/api/") {
+        return false;
+    }
+
+    let Some(identity) = stable_browser_identity(request) else {
+        return false;
+    };
+    if identity.len() < 6 || identity.len() > 128 {
+        return false;
+    }
+
+    let sec_fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(sec_fetch_site.as_str(), "same-origin" | "same-site") {
+        return false;
+    }
+
+    if !is_low_risk_document_or_asset_request(request, route_path) {
+        return false;
+    }
+
+    request
+        .get_metadata("l7.behavior.score")
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|score| score <= 20)
+        .unwrap_or(true)
+}
+
+pub(super) fn is_low_risk_document_or_asset_request(
+    request: &UnifiedHttpRequest,
+    route_path: &str,
+) -> bool {
+    if looks_like_static_asset(route_path) {
+        return true;
+    }
+    if route_path == "/" || route_path.ends_with(".html") || route_path.ends_with(".htm") {
+        return true;
+    }
+    if request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.eq_ignore_ascii_case("document"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    request
+        .get_header("accept")
+        .map(|value| {
+            let accept = value.to_ascii_lowercase();
+            accept.contains("text/html") || accept.contains("application/xhtml+xml")
+        })
+        .unwrap_or(false)
+}
+
+fn stable_browser_identity(request: &UnifiedHttpRequest) -> Option<&str> {
+    let cookie_fp = cookie_value(request, "rwaf_fp").filter(|value| !value.trim().is_empty());
+    let header_fp = request
+        .get_header("x-browser-fingerprint-id")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty());
+
+    match (cookie_fp, header_fp) {
+        (Some(cookie), Some(header)) if cookie == header => Some(cookie),
+        (Some(cookie), None) => Some(cookie),
+        (None, Some(header)) => Some(header),
+        _ => None,
+    }
+}
+
 pub(super) fn challenge_reason_verb(mode: HtmlResponseMode) -> &'static str {
     match mode {
         HtmlResponseMode::HtmlChallenge => "issued challenge",

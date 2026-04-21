@@ -548,23 +548,29 @@ struct EarlyDefenseDecision {
 | 阶段 8 | 已完成 | 新增 `survival_fast` 与 hot block cache，高级 120 秒达到 `2049.57` TPS，10 分钟约 `1919.03` TPS |
 | 阶段 9 | 已完成 | fast path 三态化、hot cache 自适应续期、四层 cache，高级 120 秒最佳 `2151.73` TPS |
 | 阶段 10 | 已完成 | HTTP/1 hot-cache drop 前移到 request permit 前，高级 120 秒 `2372.50` TPS，600 秒 `2342.41` TPS |
+| 阶段 11 | 已完成 | 严谨验证：open-loop 2200 / 120s 与 2100 / 600s 纯攻击通过；10k IP 高基数基本稳定；混合正常流量未通过 |
+| 阶段 12 | 进行中 | 正常用户保活第一目标达成：normal-only 100 RPS `96.47%`，95/5 混合短测 `95.76%` |
 
 当前以 `CURRENT_OPTIMIZATION_STATUS.md` 作为后续承接的权威状态文档。
 
 ## 7. 下一步
 
-下一步建议进入 Stage 11：生产可用性验证和更严谨的压测口径，而不是继续只追求 closed-loop 跑分。
+下一步建议进入 Stage 12：高压正常用户保活和 hot cache 误伤控制，而不是继续只追求纯攻击 TPS。
 
 | 优先级 | 任务 | 目的 |
 |---|---|---|
-| P0 | 补 95/5、90/10、80/20 攻击 / 正常混合流量测试 | 验证攻击期间正常用户成功率、误杀率、p95/p99 |
-| P0 | 补 1k/10k IP 高基数低频高级 CC | 验证四层 hot cache 对分布式低频攻击的覆盖率 |
-| P1 | 使用 Tokio async、vegeta 或 wrk2 做严格 open-loop 固定到达率测试 | 证明 2000/2200/2500 RPS 边界，减少 closed-loop 供给干扰 |
-| P1 | 统一报告口径 | 同时记录 client actual send RPS、WAF observed incoming RPS、WAF verdict RPS、proxy RPS |
+| P0 | 建立 normal-only 基线 | 100 RPS 已达 `96.47%`，下一步补 10/50/200 RPS 阶梯 |
+| P0 | 增强合法身份 survival allow / challenge bypass | 已完成：低风险稳定身份支持 verified normal lane |
+| P0 | 收敛 hot cache scope | 已完成：site / route 级热缓存不再直接吞掉低风险稳定身份请求 |
+| P0 | 排查 normal-only 无响应 | 已确认主要不是 L4/permit/proxy；下一步继续看行为层和连接关闭 |
+| P1 | 重跑 95/5、90/10、80/20 混合流量 | 95/5 短测已达 `95.76%`，下一步补 90/10、80/20 和长测 |
+| P1 | 用专业 open-loop 工具复核 2500+ 边界 | 减少 Python 调度和连接模型对上限判断的影响 |
 
 当前准确结论：
 
 ```text
-高级 CDN CC 的 2000+ TPS 已在 2 核 / 512MB 的 multi closed-loop 口径下达成。
-严格 open-loop、混合正常流量、高基数低频代理池场景还没有严谨证明。
+高级 CDN CC 的 2000+ TPS 已在 2 核 / 512MB 的纯攻击 multi closed-loop 和 open-loop 口径下达成。
+10k IP 高基数低频场景基本稳定。
+混合正常业务流量已在 95/5 短测达到第一目标；Stage 12 把 normal-only 100 RPS 从 4.13% 提升到 96.47%，把 95/5 短测从 0.47% 提升到 95.76%。
+下一步还要补 normal-only 200 RPS、90/10、80/20 和长时间混合验证。
 ```

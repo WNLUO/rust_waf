@@ -632,6 +632,153 @@ async fn survival_fast_path_uses_route_hot_cache_for_hot_paths() {
 }
 
 #[tokio::test]
+async fn survival_fast_path_spares_low_risk_identity_from_site_hot_cache() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 2,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        hot_path_challenge_threshold: 50,
+        hot_path_block_threshold: 2,
+        hard_hot_path_block_multiplier: 1,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for ip in ["203.0.113.10", "203.0.113.11"] {
+        let mut attack = request("/api/search");
+        attack.method = "POST".to_string();
+        attack.set_client_ip(ip.to_string());
+        attack.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        let _ = guard.inspect_request(&mut attack).await;
+    }
+
+    let mut untrusted = request("/dashboard");
+    untrusted.set_client_ip("203.0.113.12".to_string());
+    untrusted.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    let result = guard
+        .inspect_request(&mut untrusted)
+        .await
+        .expect("site hot cache should block untrusted request");
+    assert!(result.blocked);
+    assert_eq!(
+        untrusted
+            .get_metadata("l7.cc.hot_cache_hit")
+            .map(String::as_str),
+        Some("true")
+    );
+
+    let mut trusted = request("/dashboard");
+    trusted.set_client_ip("203.0.113.13".to_string());
+    trusted.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+    trusted.add_header(
+        "x-browser-fingerprint-id".to_string(),
+        "stable-normal".to_string(),
+    );
+    trusted.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+    trusted.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+    trusted.add_header("sec-fetch-dest".to_string(), "document".to_string());
+    trusted.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut trusted).await.is_none());
+    assert_eq!(
+        trusted
+            .get_metadata("l7.cc.survival_bypass")
+            .map(String::as_str),
+        Some("low_risk_identity")
+    );
+    assert_eq!(
+        trusted
+            .get_metadata("l7.cc.fast_path_no_decision")
+            .map(String::as_str),
+        Some("low_risk_identity")
+    );
+}
+
+#[tokio::test]
+async fn survival_fast_path_does_not_bypass_api_with_spoofed_identity() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 2,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        hot_path_challenge_threshold: 50,
+        hot_path_block_threshold: 2,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/api/search");
+    first.method = "POST".to_string();
+    first.set_client_ip("203.0.113.10".to_string());
+    first.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    assert!(guard.inspect_request(&mut first).await.is_none());
+
+    let mut spoofed = request("/api/search");
+    spoofed.method = "POST".to_string();
+    spoofed.set_client_ip("203.0.113.11".to_string());
+    spoofed.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+    spoofed.add_header(
+        "x-browser-fingerprint-id".to_string(),
+        "stable-normal".to_string(),
+    );
+    spoofed.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+    spoofed.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    let result = guard
+        .inspect_request(&mut spoofed)
+        .await
+        .expect("API pressure should still block");
+    assert!(result.blocked);
+    assert!(spoofed.get_metadata("l7.cc.survival_bypass").is_none());
+}
+
+#[tokio::test]
+async fn low_risk_identity_skips_full_l7_cc_pressure_before_survival() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 2,
+        route_block_threshold: 3,
+        host_challenge_threshold: 2,
+        host_block_threshold: 3,
+        ip_challenge_threshold: 2,
+        ip_block_threshold: 3,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..12 {
+        let mut normal = request("/dashboard");
+        normal.add_header(
+            "accept".to_string(),
+            "text/html,application/xhtml+xml,application/json,*/*;q=0.8".to_string(),
+        );
+        normal.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+        normal.add_header(
+            "x-browser-fingerprint-id".to_string(),
+            "stable-normal".to_string(),
+        );
+        normal.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        normal.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+        normal.add_header("sec-fetch-dest".to_string(), "document".to_string());
+
+        assert!(
+            guard.inspect_request(&mut normal).await.is_none(),
+            "verified normal document should not trip full L7 CC at request {index}"
+        );
+        assert_eq!(
+            normal
+                .get_metadata("l7.cc.survival_verified_normal")
+                .map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            normal.get_metadata("l7.cc.action").map(String::as_str),
+            Some("verified_normal_pass")
+        );
+    }
+}
+
+#[tokio::test]
 async fn hard_multiplier_configuration_can_force_block_for_subresources() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 100,

@@ -1,4 +1,4 @@
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import {
   fetchAiAutomationOverview,
   fetchTrafficMap,
@@ -40,6 +40,9 @@ type AttackTimelineCounterKey =
   | 'trusted_proxy_l4_degrade_actions'
   | 'blocked_l7'
 
+const DASHBOARD_REFRESH_INTERVAL_MS = 5_000
+const TRAFFIC_MAP_REFRESH_INTERVAL_MS = 10_000
+
 export function useAdminDashboardPage() {
   const dashboard = ref<DashboardPayload | null>(null)
   const trafficMap = ref<TrafficMapResponse | null>(null)
@@ -60,6 +63,8 @@ export function useAdminDashboardPage() {
   const lastLatencyMicros = ref<number | null>(null)
   const lastProxySuccessRate = ref<number | null>(null)
   const realtimeState = useAdminRealtimeState()
+  let dashboardRefreshTimer: number | null = null
+  let trafficMapRefreshTimer: number | null = null
 
   useFlashMessages({
     error,
@@ -538,6 +543,24 @@ export function useAdminDashboardPage() {
   onMounted(() => {
     void fetchData(true)
     void fetchTrafficMapData()
+
+    dashboardRefreshTimer = window.setInterval(() => {
+      if (!refreshing.value) {
+        void fetchData(false)
+      }
+    }, DASHBOARD_REFRESH_INTERVAL_MS)
+    trafficMapRefreshTimer = window.setInterval(() => {
+      void fetchTrafficMapData()
+    }, TRAFFIC_MAP_REFRESH_INTERVAL_MS)
+  })
+
+  onBeforeUnmount(() => {
+    if (dashboardRefreshTimer !== null) {
+      window.clearInterval(dashboardRefreshTimer)
+    }
+    if (trafficMapRefreshTimer !== null) {
+      window.clearInterval(trafficMapRefreshTimer)
+    }
   })
 
   return {

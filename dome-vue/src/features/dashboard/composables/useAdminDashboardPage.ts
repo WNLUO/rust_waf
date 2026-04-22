@@ -545,9 +545,7 @@ export function useAdminDashboardPage() {
     void fetchTrafficMapData()
 
     dashboardRefreshTimer = window.setInterval(() => {
-      if (!refreshing.value) {
-        void fetchData(false)
-      }
+      void fetchData(false)
     }, DASHBOARD_REFRESH_INTERVAL_MS)
     trafficMapRefreshTimer = window.setInterval(() => {
       void fetchTrafficMapData()

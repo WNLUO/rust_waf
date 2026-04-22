@@ -12,13 +12,5 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5174,
-    proxy: {
-      '/api': {
-        target: 'http://160.30.230.57:3740',
-        changeOrigin: true,
-        ws: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-    },
   },
 })

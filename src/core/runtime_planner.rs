@@ -76,7 +76,6 @@ pub fn apply_dynamic_runtime_plan(
         plan_ai_audit_config(config.integrations.ai_audit, &environment, signals.as_ref());
 
     if environment.memory_limit_mb <= 640 {
-        config.api_enabled = false;
         config.http3_config.enabled = false;
         config.integrations.ai_audit.auto_audit_enabled = false;
     }

@@ -2,7 +2,6 @@ use super::super::*;
 
 pub(super) fn normalize_profile_settings(config: &mut Config) {
     if config.runtime_profile.is_minimal() {
-        config.api_enabled = false;
         config.bloom_enabled = false;
         config.l4_bloom_false_positive_verification = false;
         config.l7_bloom_false_positive_verification = false;

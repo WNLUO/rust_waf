@@ -139,6 +139,10 @@ async fn site_survival_budget_enables_runtime_event_aggregation_metadata() {
     );
     request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
     request.add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+    request.add_metadata(
+        "runtime.pressure.storage_queue_percent".to_string(),
+        "95".to_string(),
+    );
     context.annotate_site_runtime_budget(&mut request);
 
     assert_eq!(

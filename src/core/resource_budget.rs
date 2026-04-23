@@ -115,7 +115,7 @@ impl RuntimeResourceBudget {
                 behavior_sample_stride: 2,
                 trusted_cdn_auto_learn_limit: 64,
                 aggregate_events: true,
-                prefer_drop: true,
+                prefer_drop: false,
             },
             RuntimeCapacityClass::Small => Self {
                 capacity_class,
@@ -175,8 +175,7 @@ impl RuntimeResourceBudget {
         };
         budget.aggregate_events = budget.aggregate_events
             || matches!(server_mode, ServerMode::Conservative | ServerMode::Survival);
-        budget.prefer_drop = budget.prefer_drop
-            || matches!(server_mode, ServerMode::Conservative | ServerMode::Survival);
+        budget.prefer_drop = budget.prefer_drop || matches!(server_mode, ServerMode::Survival);
 
         match defense_depth {
             DefenseDepth::Full => {}
@@ -190,7 +189,6 @@ impl RuntimeResourceBudget {
                 budget.behavior_bucket_limit = budget.behavior_bucket_limit.min(4_096);
                 budget.behavior_sample_stride = budget.behavior_sample_stride.max(2);
                 budget.aggregate_events = true;
-                budget.prefer_drop = true;
             }
             DefenseDepth::Survival => {
                 budget.l7_bucket_limit = budget.l7_bucket_limit.min(2_048);
@@ -357,6 +355,7 @@ mod tests {
         assert_eq!(normal.defense_depth, DefenseDepth::Balanced);
         assert_eq!(normal.server_mode, ServerMode::Conservative);
         assert_eq!(normal.server_mode_scale_percent, 85);
+        assert!(!normal.prefer_drop);
         assert_eq!(elevated.defense_depth, DefenseDepth::Survival);
         assert_eq!(elevated.server_mode, ServerMode::Survival);
         assert!(elevated.prefer_drop);
@@ -376,6 +375,7 @@ mod tests {
         assert_eq!(high.defense_depth, DefenseDepth::Lean);
         assert_eq!(high.server_mode, ServerMode::Conservative);
         assert!(high.l7_bucket_limit < normal.l7_bucket_limit);
+        assert!(!high.prefer_drop);
     }
 
     #[test]
@@ -387,7 +387,7 @@ mod tests {
 
         assert_eq!(lean.defense_depth, DefenseDepth::Lean);
         assert!(lean.aggregate_events);
-        assert!(lean.prefer_drop);
+        assert!(!lean.prefer_drop);
         assert_eq!(survival.defense_depth, DefenseDepth::Survival);
         assert!(survival.aggregate_events);
         assert!(survival.prefer_drop);
@@ -404,6 +404,8 @@ mod tests {
         assert_eq!(budget.defense_depth, DefenseDepth::Lean);
         assert_eq!(budget.server_mode, ServerMode::Conservative);
         assert_eq!(budget.server_mode_scale_percent, 85);
+        assert!(budget.aggregate_events);
+        assert!(!budget.prefer_drop);
     }
 
     #[test]

@@ -188,6 +188,41 @@ fn protocol_stream_budgets_scale_with_server_mode() {
 }
 
 #[tokio::test]
+async fn annotate_runtime_pressure_exposes_adaptive_pressure_metadata() {
+    let config = crate::config::Config {
+        sqlite_enabled: false,
+        ..crate::config::Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+    let mut request = UnifiedHttpRequest::new(
+        HttpVersion::Http1_1,
+        "GET".to_string(),
+        "/".to_string(),
+    );
+
+    context.annotate_runtime_pressure(&mut request);
+
+    assert_eq!(
+        request
+            .get_metadata("runtime.adaptive.system_pressure")
+            .map(String::as_str),
+        Some("normal")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.adaptive.identity_pressure_percent")
+            .map(String::as_str),
+        Some("0.00")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.adaptive.l7_friction_pressure_percent")
+            .map(String::as_str),
+        Some("0.00")
+    );
+}
+
+#[tokio::test]
 async fn local_defense_recommendations_preview_hot_routes() {
     let config = crate::config::Config {
         sqlite_enabled: false,

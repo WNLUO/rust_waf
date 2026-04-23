@@ -66,7 +66,14 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     let runtime_level = metadata(request, "runtime.pressure.level");
     let l4_risk = metadata(request, "l4.bucket_risk");
     let l4_overload = metadata(request, "l4.overload_level");
+    let storage_queue_percent = metadata_u64(request, "runtime.pressure.storage_queue_percent");
     let cpu_score = metadata_u8(request, "runtime.pressure.cpu_score");
+    let adaptive_pressure = metadata(request, "runtime.adaptive.system_pressure");
+    let identity_pressure = metadata_f64(request, "runtime.adaptive.identity_pressure_percent");
+    let l7_friction_pressure =
+        metadata_f64(request, "runtime.adaptive.l7_friction_pressure_percent");
+    let slow_attack_pressure =
+        metadata_f64(request, "runtime.adaptive.slow_attack_pressure_percent");
     let prefer_drop = metadata_bool(request, "runtime.prefer_drop");
     let request_budget_softened = metadata_bool(request, "l4.request_budget_softened");
     let site_action = metadata(request, "runtime.site.action");
@@ -97,7 +104,19 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     }
 
     if identity_state == Some("spoofed_forward_header")
-        && (prefer_drop || cpu_score >= 2 || matches!(runtime_level, Some("high" | "attack")))
+        && (matches!(runtime_level, Some("high" | "attack"))
+            || should_hard_drop_under_pressure(
+                prefer_drop,
+                runtime_depth,
+                runtime_level,
+                l4_overload,
+                storage_queue_percent,
+                cpu_score,
+                adaptive_pressure,
+                identity_pressure,
+                l7_friction_pressure,
+                slow_attack_pressure,
+            ))
     {
         return EarlyDefenseDecision::drop("spoofed_forward_header_under_pressure");
     }
@@ -119,18 +138,38 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     }
 
     if matches!(l4_risk, Some("high")) {
-        if prefer_drop
-            || cpu_score >= 2
-            || matches!(runtime_depth, Some("survival"))
-            || matches!(l4_overload, Some("critical"))
-        {
+        if should_hard_drop_under_pressure(
+            prefer_drop,
+            runtime_depth,
+            runtime_level,
+            l4_overload,
+            storage_queue_percent,
+            cpu_score,
+            adaptive_pressure,
+            identity_pressure,
+            l7_friction_pressure,
+            slow_attack_pressure,
+        ) {
             return EarlyDefenseDecision::drop("l4_high_risk_runtime_pressure");
         }
         return EarlyDefenseDecision::lightweight("l4_high_risk_tighten_l7", 45, 60);
     }
 
     if matches!(l4_risk, Some("suspicious")) {
-        if matches!(runtime_depth, Some("survival")) && (prefer_drop || cpu_score >= 2) {
+        if matches!(runtime_depth, Some("survival"))
+            && should_hard_drop_under_pressure(
+                prefer_drop,
+                runtime_depth,
+                runtime_level,
+                l4_overload,
+                storage_queue_percent,
+                cpu_score,
+                adaptive_pressure,
+                identity_pressure,
+                l7_friction_pressure,
+                slow_attack_pressure,
+            )
+        {
             return EarlyDefenseDecision::drop("l4_suspicious_survival_pressure");
         }
         return EarlyDefenseDecision::lightweight("l4_suspicious_tighten_l7", 70, 80);
@@ -205,6 +244,70 @@ fn metadata_u8(request: &UnifiedHttpRequest, key: &str) -> u8 {
     metadata(request, key)
         .and_then(|value| value.parse::<u8>().ok())
         .unwrap_or(0)
+}
+
+fn metadata_u64(request: &UnifiedHttpRequest, key: &str) -> u64 {
+    metadata(request, key)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn metadata_f64(request: &UnifiedHttpRequest, key: &str) -> f64 {
+    metadata(request, key)
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
+fn should_hard_drop_under_pressure(
+    prefer_drop: bool,
+    runtime_depth: Option<&str>,
+    runtime_level: Option<&str>,
+    l4_overload: Option<&str>,
+    storage_queue_percent: u64,
+    cpu_score: u8,
+    adaptive_pressure: Option<&str>,
+    identity_pressure: f64,
+    l7_friction_pressure: f64,
+    slow_attack_pressure: f64,
+) -> bool {
+    if prefer_drop {
+        return true;
+    }
+
+    let survival = matches!(runtime_depth, Some("survival"));
+    let runtime_high = matches!(runtime_level, Some("high" | "attack"));
+    let runtime_attack = matches!(runtime_level, Some("attack"));
+    let adaptive_high = matches!(adaptive_pressure, Some("high" | "attack"));
+    let adaptive_attack = matches!(adaptive_pressure, Some("attack"));
+    let overload_high = matches!(l4_overload, Some("high" | "critical"));
+    let overload_critical = matches!(l4_overload, Some("critical"));
+    let queue_hot = storage_queue_percent >= 90;
+    let queue_warm = storage_queue_percent >= 75;
+    let identity_hot = identity_pressure >= 5.0;
+    let friction_hot = l7_friction_pressure >= 25.0;
+    let slow_attack_hot = slow_attack_pressure >= 2.0;
+    let defense_heat = [identity_hot, friction_hot, slow_attack_hot]
+        .into_iter()
+        .filter(|hot| *hot)
+        .count();
+
+    if overload_critical && (survival || runtime_high || queue_warm || cpu_score >= 2) {
+        return true;
+    }
+    if survival && (runtime_attack || adaptive_attack || queue_hot || defense_heat >= 2) {
+        return true;
+    }
+    if cpu_score >= 3 && (queue_warm || runtime_high || adaptive_high || overload_high) {
+        return true;
+    }
+    if queue_hot && (runtime_high || adaptive_high || overload_high || defense_heat >= 1) {
+        return true;
+    }
+    if defense_heat >= 2 && (runtime_high || adaptive_high || overload_high) {
+        return true;
+    }
+
+    false
 }
 
 fn is_low_risk_stable_identity_candidate(request: &UnifiedHttpRequest) -> bool {
@@ -300,10 +403,52 @@ mod tests {
     }
 
     #[test]
-    fn high_l4_risk_drops_under_cpu_pressure() {
+    fn high_l4_risk_tightens_l7_under_medium_cpu_pressure() {
         let mut request = request();
         request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
         request.add_metadata("runtime.pressure.cpu_score".to_string(), "2".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "lightweight_l7"
+        );
+        assert_eq!(
+            request
+                .get_metadata("ai.cc.route_threshold_scale_percent")
+                .unwrap(),
+            "45"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_extreme_cpu_alone_only_tightens_l7() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.pressure.cpu_score".to_string(), "3".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "lightweight_l7"
+        );
+        assert_eq!(
+            request
+                .get_metadata("ai.cc.route_threshold_scale_percent")
+                .unwrap(),
+            "45"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_drops_under_extreme_cpu_with_queue_pressure() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.pressure.cpu_score".to_string(), "3".to_string());
+        request.add_metadata(
+            "runtime.pressure.storage_queue_percent".to_string(),
+            "80".to_string(),
+        );
 
         let result = evaluate_early_defense(&mut request).expect("drop decision");
 
@@ -336,6 +481,55 @@ mod tests {
                 .get_metadata("ai.cc.route_threshold_scale_percent")
                 .unwrap(),
             "70"
+        );
+    }
+
+    #[test]
+    fn suspicious_l4_risk_in_survival_needs_compound_pressure_to_drop() {
+        let mut relaxed = request();
+        relaxed.add_metadata("l4.bucket_risk".to_string(), "suspicious".to_string());
+        relaxed.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        relaxed.add_metadata("runtime.pressure.cpu_score".to_string(), "3".to_string());
+
+        assert!(evaluate_early_defense(&mut relaxed).is_none());
+        assert_eq!(
+            relaxed.get_metadata("early_defense.action").unwrap(),
+            "lightweight_l7"
+        );
+
+        let mut pressured = request();
+        pressured.add_metadata("l4.bucket_risk".to_string(), "suspicious".to_string());
+        pressured.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        pressured.add_metadata("runtime.pressure.cpu_score".to_string(), "3".to_string());
+        pressured.add_metadata("l4.overload_level".to_string(), "high".to_string());
+
+        let result = evaluate_early_defense(&mut pressured).expect("drop decision");
+        assert!(result.blocked);
+        assert_eq!(
+            pressured.get_metadata("early_defense.reason").unwrap(),
+            "l4_suspicious_survival_pressure"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_drops_under_compound_adaptive_pressure() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.adaptive.system_pressure".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.adaptive.identity_pressure_percent".to_string(),
+            "6.20".to_string(),
+        );
+        request.add_metadata(
+            "runtime.adaptive.l7_friction_pressure_percent".to_string(),
+            "28.00".to_string(),
+        );
+
+        let result = evaluate_early_defense(&mut request).expect("drop decision");
+        assert!(result.blocked);
+        assert_eq!(
+            request.get_metadata("early_defense.reason").unwrap(),
+            "l4_high_risk_runtime_pressure"
         );
     }
 

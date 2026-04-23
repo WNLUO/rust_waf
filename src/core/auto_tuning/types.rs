@@ -31,6 +31,11 @@ pub struct AutoTuningRuntimeSnapshot {
     pub last_observed_l7_friction_pressure_percent: f64,
     pub last_observed_slow_attack_pressure_percent: f64,
     pub last_observed_direct_idle_no_request_connections: u64,
+    pub consecutive_handshake_high: u8,
+    pub consecutive_identity_high: u8,
+    pub consecutive_slow_attack_high: u8,
+    pub consecutive_budget_high: u8,
+    pub consecutive_latency_high: u8,
     pub recommendation: AutoTuningRecommendationSnapshot,
 }
 

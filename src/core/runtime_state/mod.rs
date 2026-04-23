@@ -110,6 +110,7 @@ impl WafContext {
     pub fn annotate_runtime_pressure(&self, request: &mut UnifiedHttpRequest) {
         let pressure = self.runtime_pressure_snapshot();
         let adaptive = self.adaptive_protection_snapshot();
+        let auto = self.auto_tuning_snapshot();
         request.add_metadata(
             "runtime.pressure.level".to_string(),
             pressure.level.to_string(),
@@ -165,6 +166,26 @@ impl WafContext {
         request.add_metadata(
             "runtime.adaptive.slow_attack_pressure_percent".to_string(),
             format!("{:.2}", adaptive.slow_attack_pressure_percent),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.controller_state".to_string(),
+            auto.controller_state,
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.identity_windows".to_string(),
+            auto.consecutive_identity_high.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.slow_attack_windows".to_string(),
+            auto.consecutive_slow_attack_high.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.budget_windows".to_string(),
+            auto.consecutive_budget_high.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.latency_windows".to_string(),
+            auto.consecutive_latency_high.to_string(),
         );
         request.add_metadata(
             "runtime.budget.l7_bucket_limit".to_string(),

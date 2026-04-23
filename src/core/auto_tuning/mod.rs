@@ -52,6 +52,11 @@ pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
         last_observed_l7_friction_pressure_percent: 0.0,
         last_observed_slow_attack_pressure_percent: 0.0,
         last_observed_direct_idle_no_request_connections: 0,
+        consecutive_handshake_high: 0,
+        consecutive_identity_high: 0,
+        consecutive_slow_attack_high: 0,
+        consecutive_budget_high: 0,
+        consecutive_latency_high: 0,
         recommendation,
     }
 }
@@ -68,6 +73,17 @@ pub fn refresh_runtime_snapshot(runtime: &mut AutoTuningRuntimeSnapshot, config:
     if runtime.controller_state.is_empty() {
         runtime.controller_state = controller_state_label(config.auto_tuning.mode).to_string();
     }
+}
+
+fn sync_runtime_signal_windows(
+    runtime: &mut AutoTuningRuntimeSnapshot,
+    state: &AutoTuningControllerState,
+) {
+    runtime.consecutive_handshake_high = state.consecutive_handshake_high;
+    runtime.consecutive_identity_high = state.consecutive_identity_high;
+    runtime.consecutive_slow_attack_high = state.consecutive_slow_attack_high;
+    runtime.consecutive_budget_high = state.consecutive_budget_high;
+    runtime.consecutive_latency_high = state.consecutive_latency_high;
 }
 
 pub fn run_control_step(
@@ -94,6 +110,7 @@ pub fn run_control_step(
         None => {
             state.last_metrics = Some(metrics.clone());
             runtime.controller_state = "warming_up".to_string();
+            sync_runtime_signal_windows(runtime, state);
             return None;
         }
     };
@@ -115,10 +132,12 @@ pub fn run_control_step(
         runtime.controller_state = "disabled".to_string();
         state.consecutive_handshake_high = 0;
         state.consecutive_identity_high = 0;
+        state.consecutive_slow_attack_high = 0;
         state.consecutive_budget_high = 0;
         state.consecutive_latency_high = 0;
         state.baseline_before_adjust = None;
         state.bootstrap_applied = false;
+        sync_runtime_signal_windows(runtime, state);
         return None;
     }
 
@@ -164,8 +183,10 @@ pub fn run_control_step(
 
                 state.consecutive_handshake_high = 0;
                 state.consecutive_identity_high = 0;
+                state.consecutive_slow_attack_high = 0;
                 state.consecutive_budget_high = 0;
                 state.consecutive_latency_high = 0;
+                sync_runtime_signal_windows(runtime, state);
 
                 return Some(AutoTuningDecision {
                     next_config: rollback_config,
@@ -219,6 +240,7 @@ pub fn run_control_step(
         state.consecutive_slow_attack_high = 0;
         state.consecutive_budget_high = 0;
         state.consecutive_latency_high = 0;
+        sync_runtime_signal_windows(runtime, state);
 
         return Some(AutoTuningDecision {
             next_config: rollback_config,
@@ -234,6 +256,7 @@ pub fn run_control_step(
     }
 
     update_consecutive_counters(config, state, &deltas);
+    sync_runtime_signal_windows(runtime, state);
 
     let action = if state.consecutive_handshake_high >= 3 {
         Some("handshake")
@@ -348,6 +371,7 @@ pub fn run_control_step(
     state.consecutive_slow_attack_high = 0;
     state.consecutive_budget_high = 0;
     state.consecutive_latency_high = 0;
+    sync_runtime_signal_windows(runtime, state);
     let cooldown_until = Some(now + config.auto_tuning.cooldown_secs as i64);
     state.cooldown_until = cooldown_until;
 
@@ -448,6 +472,7 @@ fn apply_bootstrap_recommendation(
 
     if diff.is_empty() {
         state.bootstrap_applied = true;
+        sync_runtime_signal_windows(runtime, state);
         return None;
     }
 

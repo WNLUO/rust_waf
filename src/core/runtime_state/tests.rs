@@ -220,6 +220,15 @@ async fn annotate_runtime_pressure_exposes_adaptive_pressure_metadata() {
             .map(String::as_str),
         Some("0.00")
     );
+    assert_eq!(
+        request
+            .get_metadata("runtime.auto_tuning.identity_windows")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert!(request
+        .get_metadata("runtime.auto_tuning.controller_state")
+        .is_some());
 }
 
 #[tokio::test]

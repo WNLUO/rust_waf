@@ -77,12 +77,23 @@ export interface AiAuditCurrentState {
   adaptive_system_pressure: string
   adaptive_reasons: string[]
   l4_overload_level: string
+  runtime_defense_depth: string
+  runtime_defense_base_stage: string
+  runtime_defense_stage: string
+  runtime_defense_stage_score: number
+  runtime_defense_stage_reason: string
   auto_tuning_controller_state: string
   auto_tuning_last_adjust_reason: string | null
   auto_tuning_last_adjust_diff: string[]
+  auto_tuning_recovery_windows: number
+  auto_tuning_pressure_memory_windows: number
   identity_pressure_percent: number
   l7_friction_pressure_percent: number
   slow_attack_pressure_percent: number
+  challenge_issued: number
+  challenge_verified: number
+  challenge_verify_rate_percent: number
+  challenge_block_rate_percent: number
 }
 
 export interface AiAuditCounters {

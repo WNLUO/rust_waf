@@ -21,6 +21,9 @@ import {
   aiTriggerReasonLabel,
   confidenceLabel,
   controllerStateLabel,
+  defenseStageBadgeType,
+  defenseStageLabel,
+  defenseStageReasonLabel,
   l4OverloadLabel,
   l7ModeLabel,
   pressureLabel,
@@ -102,6 +105,14 @@ const stateTextClass = {
 } as const
 
 const formatPercent = (value?: number) => `${(value || 0).toFixed(0)}%`
+
+const formatPressurePercent = (value?: number) => {
+  const current = value || 0
+  if (current >= 1000) return `${formatNumber(Math.round(current))}%`
+  if (current >= 100) return `${current.toFixed(0)}%`
+  if (current >= 10) return `${current.toFixed(1)}%`
+  return `${current.toFixed(2)}%`
+}
 
 const formatCompactDuration = (seconds?: number) => {
   const value = seconds || 0
@@ -247,6 +258,16 @@ const aiAutomationStats = computed(() => {
   const overview = aiAutomation.value
   return [
     {
+      label: '防护档位',
+      value: defenseStageLabel(overview?.current.runtime_defense_stage),
+      class:
+        overview?.current.runtime_defense_stage === 'drop'
+          ? 'text-red-700'
+          : overview?.current.runtime_defense_stage === 'challenge'
+            ? 'text-amber-700'
+            : 'text-blue-700',
+    },
+    {
       label: '活跃策略',
       value: `${formatNumber(overview?.active_policy_count || 0)}/${formatNumber(
         overview?.max_active_policy_count || 0,
@@ -257,6 +278,16 @@ const aiAutomationStats = computed(() => {
       value: `${formatNumber(overview?.sampled_events || 0)}/${formatNumber(
         overview?.total_events || 0,
       )}`,
+    },
+    {
+      label: '档位评分',
+      value: formatNumber(overview?.current.runtime_defense_stage_score || 0),
+      class:
+        (overview?.current.runtime_defense_stage_score || 0) >= 6
+          ? 'text-red-700'
+          : (overview?.current.runtime_defense_stage_score || 0) >= 3
+            ? 'text-amber-700'
+            : 'text-blue-700',
     },
     {
       label: '可信度',
@@ -271,12 +302,26 @@ const aiAutomationStats = computed(() => {
       value: formatPercent(overview?.data_quality.persistence_coverage_ratio),
     },
     {
-      label: '触发原因',
-      value: aiTriggerReasonValue.value,
+      label: 'Challenge通过',
+      value: formatPressurePercent(
+        overview?.current.challenge_verify_rate_percent,
+      ),
+      class:
+        (overview?.current.challenge_verify_rate_percent || 0) >= 50
+          ? 'text-emerald-700'
+          : (overview?.current.challenge_issued || 0) >= 3
+            ? 'text-amber-700'
+            : 'text-slate-700',
     },
     {
-      label: '运行周期',
-      value: aiRunCycleValue.value,
+      label: 'Challenge阻断',
+      value: formatPressurePercent(
+        overview?.current.challenge_block_rate_percent,
+      ),
+      class:
+        (overview?.current.challenge_block_rate_percent || 0) >= 50
+          ? 'text-red-700'
+          : 'text-slate-700',
     },
   ]
 })
@@ -298,6 +343,72 @@ const aiAutomationPressureRows = computed(() => [
     color: 'bg-red-500',
   },
 ])
+
+const aiDefenseStageReasonTags = computed(() =>
+  defenseStageReasonLabel(aiAutomation.value?.current.runtime_defense_stage_reason),
+)
+
+const aiAutomationMetaBadges = computed(() => {
+  const overview = aiAutomation.value
+  if (!overview) return []
+
+  return [
+    {
+      text: `${defenseStageLabel(overview.current.runtime_defense_stage)}档`,
+      type: defenseStageBadgeType(overview.current.runtime_defense_stage),
+    },
+    {
+      text: `${controllerStateLabel(overview.current.auto_tuning_controller_state)}`,
+      type: 'info' as const,
+    },
+    {
+      text: `${l4OverloadLabel(overview.current.l4_overload_level)}过载`,
+      type:
+        overview.current.l4_overload_level === 'high'
+          ? ('warning' as const)
+          : overview.current.l4_overload_level === 'critical'
+            ? ('error' as const)
+            : ('muted' as const),
+    },
+    {
+      text: `${overview.current.runtime_defense_depth || 'unknown'} depth`,
+      type: 'muted' as const,
+    },
+  ]
+})
+
+const aiAutomationSecondaryStats = computed(() => {
+  const overview = aiAutomation.value
+  if (!overview) return []
+  return [
+    {
+      label: '触发原因',
+      value: aiTriggerReasonValue.value,
+    },
+    {
+      label: '运行周期',
+      value: aiRunCycleValue.value,
+    },
+    {
+      label: '恢复窗口',
+      value: formatNumber(overview.current.auto_tuning_recovery_windows || 0),
+    },
+    {
+      label: '高压记忆',
+      value: formatNumber(
+        overview.current.auto_tuning_pressure_memory_windows || 0,
+      ),
+    },
+    {
+      label: 'Challenge下发',
+      value: formatNumber(overview.current.challenge_issued || 0),
+    },
+    {
+      label: 'Challenge验证',
+      value: formatNumber(overview.current.challenge_verified || 0),
+    },
+  ]
+})
 
 const aiTrendMax = computed(() =>
   Math.max(
@@ -808,7 +919,10 @@ const defenseMatrix = computed(() => {
           :status-type="aiAutomationStatusType"
           :last-run-label="aiLastRunLabel"
           :stats="aiAutomationStats"
+          :secondary-stats="aiAutomationSecondaryStats"
+          :meta-badges="aiAutomationMetaBadges"
           :pressure-rows="aiAutomationPressureRows"
+          :defense-stage-reason-tags="aiDefenseStageReasonTags"
           :trend-windows="aiTrendWindows"
           :trend-max="aiTrendMax"
           :visible-policy-feedback="visibleAiPolicyFeedback"

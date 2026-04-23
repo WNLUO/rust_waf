@@ -97,6 +97,56 @@ export const pressureLabel = (value?: string) => {
   return labels[value || ''] || '未知'
 }
 
+export const defenseStageLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    observe: '观察',
+    tighten: '收紧',
+    challenge: '挑战',
+    drop: '丢弃',
+  }
+  return labels[value || ''] || value || '未知'
+}
+
+export const defenseStageBadgeType = (value?: string) => {
+  switch (value) {
+    case 'observe':
+      return 'muted' as const
+    case 'tighten':
+      return 'info' as const
+    case 'challenge':
+      return 'warning' as const
+    case 'drop':
+      return 'error' as const
+    default:
+      return 'muted' as const
+  }
+}
+
+export const defenseStageReasonLabel = (value?: string) => {
+  const labels: Record<string, string> = {
+    runtime_attack: '运行时已判定攻击态',
+    runtime_high: '运行时压力偏高',
+    runtime_elevated: '运行时压力升高',
+    adaptive_attack: '自适应策略处于攻击态',
+    adaptive_high: '自适应策略处于高压态',
+    storage_queue_hot: '存储队列过热',
+    storage_queue_warm: '存储队列偏热',
+    cpu_extreme: 'CPU 局部高压',
+    persistent_multi_window_pressure: '多窗口持续高压',
+    persistent_single_window_pressure: '单窗口持续高压',
+    pressure_memory_active: '高压记忆仍在生效',
+    challenge_effect_poor: 'Challenge 最近效果较差',
+    challenge_effect_good: 'Challenge 最近效果较好',
+    steady_state: '当前整体平稳',
+  }
+
+  return (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => labels[item] || item.replace(/_/g, ' '))
+}
+
 export const trendWindowLabel = (value?: string) => {
   const labels: Record<string, string> = {
     last_5m: '近5分钟',

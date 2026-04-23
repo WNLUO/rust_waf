@@ -13,6 +13,11 @@ type SummaryStat = {
   class?: string
 }
 
+type MetaBadge = {
+  text: string
+  type: BadgeType
+}
+
 type PressureRow = {
   label: string
   value: number
@@ -41,7 +46,10 @@ defineProps<{
   statusType: BadgeType
   lastRunLabel: string
   stats: SummaryStat[]
+  secondaryStats: SummaryStat[]
+  metaBadges: MetaBadge[]
   pressureRows: PressureRow[]
+  defenseStageReasonTags: string[]
   trendWindows: TrendWindow[]
   trendMax: number
   visiblePolicyFeedback: AiAuditPolicyFeedback[]
@@ -92,6 +100,16 @@ defineEmits<{
       <StatusBadge :text="statusLabel" :type="statusType" compact />
     </div>
 
+    <div class="relative mt-2 flex flex-wrap gap-1.5">
+      <StatusBadge
+        v-for="badge in metaBadges"
+        :key="badge.text"
+        :text="badge.text"
+        :type="badge.type"
+        compact
+      />
+    </div>
+
     <div
       class="relative mx-auto mt-3 grid w-full max-w-[42rem] grid-cols-3 gap-2 text-center md:grid-cols-6"
     >
@@ -104,6 +122,40 @@ defineEmits<{
         >
           {{ item.value }}
         </p>
+      </div>
+    </div>
+
+    <div
+      class="relative mx-auto mt-2 grid w-full max-w-[42rem] grid-cols-3 gap-2 text-center md:grid-cols-6"
+    >
+      <div v-for="item in secondaryStats" :key="item.label" class="min-w-0">
+        <p class="truncate text-[10px] text-slate-500">{{ item.label }}</p>
+        <p
+          class="mt-0.5 truncate text-sm font-semibold text-slate-900"
+          :class="item.class"
+          :title="item.value"
+        >
+          {{ item.value }}
+        </p>
+      </div>
+    </div>
+
+    <div v-if="defenseStageReasonTags.length" class="relative mt-3">
+      <div class="mb-1 flex items-center justify-between text-[11px]">
+        <span class="font-medium text-slate-700">档位原因</span>
+        <span class="text-slate-400">{{
+          formatNumber(defenseStageReasonTags.length)
+        }} 条</span>
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <span
+          v-for="tag in defenseStageReasonTags"
+          :key="tag"
+          class="max-w-full truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600"
+          :title="tag"
+        >
+          {{ tag }}
+        </span>
       </div>
     </div>
 

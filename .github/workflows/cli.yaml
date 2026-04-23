@@ -1,0 +1,125 @@
+name: CLI Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional release tag to publish, for example v0.1.0
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: waf
+
+jobs:
+  verify-frontend:
+    name: Verify Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: vue/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  build-release:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    needs: verify-frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            binary_name: waf
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            binary_name: waf.exe
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: waf
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            binary_name: waf
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin ${{ env.BIN_NAME }}
+
+      - name: Prepare archive directory
+        shell: bash
+        run: |
+          mkdir -p release/${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} release/${{ matrix.name }}/
+          cp .env.example release/${{ matrix.name }}/
+
+      - name: Package tar.gz
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          archive="waf-${{ matrix.name }}.tar.gz"
+          tar -C release/${{ matrix.name }} -czf "$archive" .
+          echo "ASSET_NAME=$archive" >> "$GITHUB_ENV"
+
+      - name: Package zip
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $archive = "waf-${{ matrix.name }}.zip"
+          Compress-Archive -Path "release/${{ matrix.name }}/*" -DestinationPath $archive -Force
+          "ASSET_NAME=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ env.ASSET_NAME }}
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.ref_name }}
+          name: ${{ github.event.inputs.release_tag != '' && github.event.inputs.release_tag || github.ref_name }}
+          generate_release_notes: true
+          files: ${{ env.ASSET_NAME }}

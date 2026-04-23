@@ -52,11 +52,17 @@ pub fn build_runtime_snapshot(config: &Config) -> AutoTuningRuntimeSnapshot {
         last_observed_l7_friction_pressure_percent: 0.0,
         last_observed_slow_attack_pressure_percent: 0.0,
         last_observed_direct_idle_no_request_connections: 0,
+        last_observed_challenge_issued: 0,
+        last_observed_challenge_verified: 0,
+        last_observed_challenge_verify_rate_percent: 0.0,
+        last_observed_challenge_block_rate_percent: 0.0,
         consecutive_handshake_high: 0,
         consecutive_identity_high: 0,
         consecutive_slow_attack_high: 0,
         consecutive_budget_high: 0,
         consecutive_latency_high: 0,
+        consecutive_recovery_windows: 0,
+        recent_pressure_memory_windows: 0,
         recommendation,
     }
 }
@@ -84,6 +90,8 @@ fn sync_runtime_signal_windows(
     runtime.consecutive_slow_attack_high = state.consecutive_slow_attack_high;
     runtime.consecutive_budget_high = state.consecutive_budget_high;
     runtime.consecutive_latency_high = state.consecutive_latency_high;
+    runtime.consecutive_recovery_windows = state.consecutive_recovery_windows;
+    runtime.recent_pressure_memory_windows = state.recent_pressure_memory_windows;
 }
 
 pub fn run_control_step(
@@ -126,6 +134,10 @@ pub fn run_control_step(
     runtime.last_observed_slow_attack_pressure_percent = deltas.slow_attack_pressure_percent;
     runtime.last_observed_direct_idle_no_request_connections =
         deltas.direct_idle_no_request_connections;
+    runtime.last_observed_challenge_issued = deltas.challenge_issued;
+    runtime.last_observed_challenge_verified = deltas.challenge_verified;
+    runtime.last_observed_challenge_verify_rate_percent = deltas.challenge_verify_rate_percent;
+    runtime.last_observed_challenge_block_rate_percent = deltas.challenge_block_rate_percent;
     maybe_finalize_effect_evaluation(config, runtime, state, &deltas, now);
 
     if matches!(config.auto_tuning.mode, AutoTuningMode::Off) {
@@ -135,6 +147,8 @@ pub fn run_control_step(
         state.consecutive_slow_attack_high = 0;
         state.consecutive_budget_high = 0;
         state.consecutive_latency_high = 0;
+        state.consecutive_recovery_windows = 0;
+        state.recent_pressure_memory_windows = 0;
         state.baseline_before_adjust = None;
         state.bootstrap_applied = false;
         sync_runtime_signal_windows(runtime, state);
@@ -186,6 +200,8 @@ pub fn run_control_step(
                 state.consecutive_slow_attack_high = 0;
                 state.consecutive_budget_high = 0;
                 state.consecutive_latency_high = 0;
+                state.consecutive_recovery_windows = 0;
+                state.recent_pressure_memory_windows = 0;
                 sync_runtime_signal_windows(runtime, state);
 
                 return Some(AutoTuningDecision {
@@ -240,6 +256,8 @@ pub fn run_control_step(
         state.consecutive_slow_attack_high = 0;
         state.consecutive_budget_high = 0;
         state.consecutive_latency_high = 0;
+        state.consecutive_recovery_windows = 0;
+        state.recent_pressure_memory_windows = 0;
         sync_runtime_signal_windows(runtime, state);
 
         return Some(AutoTuningDecision {
@@ -371,6 +389,8 @@ pub fn run_control_step(
     state.consecutive_slow_attack_high = 0;
     state.consecutive_budget_high = 0;
     state.consecutive_latency_high = 0;
+    state.consecutive_recovery_windows = 0;
+    state.recent_pressure_memory_windows = 0;
     sync_runtime_signal_windows(runtime, state);
     let cooldown_until = Some(now + config.auto_tuning.cooldown_secs as i64);
     state.cooldown_until = cooldown_until;
@@ -472,6 +492,8 @@ fn apply_bootstrap_recommendation(
 
     if diff.is_empty() {
         state.bootstrap_applied = true;
+        state.consecutive_recovery_windows = 0;
+        state.recent_pressure_memory_windows = 0;
         sync_runtime_signal_windows(runtime, state);
         return None;
     }
@@ -554,47 +576,62 @@ fn update_consecutive_counters(
     let hotspot_budget_pressure = has_hotspot_budget_pressure(config, deltas);
     let hotspot_latency_pressure = has_hotspot_latency_pressure(config, deltas);
     let identity_resolution_pressure = has_identity_resolution_pressure(config, deltas);
-
-    if has_volume
+    let handshake_high = has_volume
         && deltas.handshake_timeout_rate_percent
-            > config.auto_tuning.slo.tls_handshake_timeout_rate_percent
-    {
+            > config.auto_tuning.slo.tls_handshake_timeout_rate_percent;
+    let identity_high = has_volume && identity_resolution_pressure;
+    let slow_attack_high = has_volume
+        && (deltas.slow_attack_pressure_percent >= 0.5
+            || deltas.direct_idle_no_request_connections >= 2);
+    let budget_high = has_volume
+        && (deltas.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent
+            || hotspot_budget_pressure);
+    let latency_high = deltas.proxy_successes_delta >= 10
+        && (deltas.avg_proxy_latency_ms > config.auto_tuning.slo.p95_proxy_latency_ms
+            || hotspot_latency_pressure);
+
+    if handshake_high {
         state.consecutive_handshake_high = state.consecutive_handshake_high.saturating_add(1);
     } else {
         state.consecutive_handshake_high = 0;
     }
 
-    if has_volume && identity_resolution_pressure {
+    if identity_high {
         state.consecutive_identity_high = state.consecutive_identity_high.saturating_add(1);
     } else {
         state.consecutive_identity_high = 0;
     }
 
-    if has_volume
-        && (deltas.slow_attack_pressure_percent >= 0.5
-            || deltas.direct_idle_no_request_connections >= 2)
-    {
+    if slow_attack_high {
         state.consecutive_slow_attack_high = state.consecutive_slow_attack_high.saturating_add(1);
     } else {
         state.consecutive_slow_attack_high = 0;
     }
 
-    if has_volume
-        && (deltas.bucket_reject_rate_percent > config.auto_tuning.slo.bucket_reject_rate_percent
-            || hotspot_budget_pressure)
-    {
+    if budget_high {
         state.consecutive_budget_high = state.consecutive_budget_high.saturating_add(1);
     } else {
         state.consecutive_budget_high = 0;
     }
 
-    if deltas.proxy_successes_delta >= 10
-        && (deltas.avg_proxy_latency_ms > config.auto_tuning.slo.p95_proxy_latency_ms
-            || hotspot_latency_pressure)
-    {
+    if latency_high {
         state.consecutive_latency_high = state.consecutive_latency_high.saturating_add(1);
     } else {
         state.consecutive_latency_high = 0;
+    }
+
+    let any_pressure_high =
+        handshake_high || identity_high || slow_attack_high || budget_high || latency_high;
+    if has_volume && !any_pressure_high {
+        state.consecutive_recovery_windows = state.consecutive_recovery_windows.saturating_add(1);
+    } else {
+        state.consecutive_recovery_windows = 0;
+    }
+    if any_pressure_high {
+        state.recent_pressure_memory_windows = 3;
+    } else {
+        state.recent_pressure_memory_windows =
+            state.recent_pressure_memory_windows.saturating_sub(1);
     }
 }
 

@@ -31,10 +31,17 @@ pub(in crate::core::auto_tuning) fn compute_deltas(
     let l7_cc_unresolved_identity_delays_delta = current
         .l7_cc_unresolved_identity_delays
         .saturating_sub(previous.l7_cc_unresolved_identity_delays);
+    let l7_cc_challenges_delta = current
+        .l7_cc_challenges
+        .saturating_sub(previous.l7_cc_challenges);
+    let l7_cc_blocks_delta = current.l7_cc_blocks.saturating_sub(previous.l7_cc_blocks);
+    let l7_cc_verified_passes_delta = current
+        .l7_cc_verified_passes
+        .saturating_sub(previous.l7_cc_verified_passes);
     let l7_friction_events_delta = current
         .l7_cc_challenges
         .saturating_sub(previous.l7_cc_challenges)
-        .saturating_add(current.l7_cc_blocks.saturating_sub(previous.l7_cc_blocks))
+        .saturating_add(l7_cc_blocks_delta)
         .saturating_add(current.l7_cc_delays.saturating_sub(previous.l7_cc_delays))
         .saturating_add(
             current
@@ -93,6 +100,16 @@ pub(in crate::core::auto_tuning) fn compute_deltas(
         / denominator;
     let l7_friction_pressure_percent = (l7_friction_events_delta as f64 * 100.0) / denominator;
     let slow_attack_pressure_percent = (slow_attack_events_delta as f64 * 100.0) / denominator;
+    let challenge_verify_rate_percent = if l7_cc_challenges_delta > 0 {
+        l7_cc_verified_passes_delta as f64 * 100.0 / l7_cc_challenges_delta as f64
+    } else {
+        0.0
+    };
+    let challenge_block_rate_percent = if l7_cc_challenges_delta > 0 {
+        l7_cc_blocks_delta as f64 * 100.0 / l7_cc_challenges_delta as f64
+    } else {
+        0.0
+    };
 
     MetricDeltas {
         proxied_requests_delta,
@@ -104,6 +121,10 @@ pub(in crate::core::auto_tuning) fn compute_deltas(
         l7_friction_pressure_percent,
         slow_attack_pressure_percent,
         direct_idle_no_request_connections: current.l4_direct_idle_no_request_connections,
+        challenge_issued: l7_cc_challenges_delta,
+        challenge_verified: l7_cc_verified_passes_delta,
+        challenge_verify_rate_percent,
+        challenge_block_rate_percent,
         segments: collect_segment_deltas(previous, current),
     }
 }
@@ -150,6 +171,10 @@ pub(in crate::core::auto_tuning) fn deltas_from_runtime(
         slow_attack_pressure_percent: runtime.last_observed_slow_attack_pressure_percent,
         direct_idle_no_request_connections: runtime
             .last_observed_direct_idle_no_request_connections,
+        challenge_issued: runtime.last_observed_challenge_issued,
+        challenge_verified: runtime.last_observed_challenge_verified,
+        challenge_verify_rate_percent: runtime.last_observed_challenge_verify_rate_percent,
+        challenge_block_rate_percent: runtime.last_observed_challenge_block_rate_percent,
         segments: Vec::new(),
     }
 }

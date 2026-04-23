@@ -188,6 +188,30 @@ impl WafContext {
             auto.consecutive_latency_high.to_string(),
         );
         request.add_metadata(
+            "runtime.auto_tuning.recovery_windows".to_string(),
+            auto.consecutive_recovery_windows.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.pressure_memory_windows".to_string(),
+            auto.recent_pressure_memory_windows.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_issued".to_string(),
+            auto.last_observed_challenge_issued.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_verified".to_string(),
+            auto.last_observed_challenge_verified.to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_verify_rate_percent".to_string(),
+            format!("{:.2}", auto.last_observed_challenge_verify_rate_percent),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_block_rate_percent".to_string(),
+            format!("{:.2}", auto.last_observed_challenge_block_rate_percent),
+        );
+        request.add_metadata(
             "runtime.budget.l7_bucket_limit".to_string(),
             pressure.l7_bucket_limit.to_string(),
         );

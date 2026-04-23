@@ -226,6 +226,24 @@ async fn annotate_runtime_pressure_exposes_adaptive_pressure_metadata() {
             .map(String::as_str),
         Some("0")
     );
+    assert_eq!(
+        request
+            .get_metadata("runtime.auto_tuning.recovery_windows")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.auto_tuning.pressure_memory_windows")
+            .map(String::as_str),
+        Some("0")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.auto_tuning.challenge_verify_rate_percent")
+            .map(String::as_str),
+        Some("0.00")
+    );
     assert!(request
         .get_metadata("runtime.auto_tuning.controller_state")
         .is_some());

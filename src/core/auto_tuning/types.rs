@@ -31,11 +31,17 @@ pub struct AutoTuningRuntimeSnapshot {
     pub last_observed_l7_friction_pressure_percent: f64,
     pub last_observed_slow_attack_pressure_percent: f64,
     pub last_observed_direct_idle_no_request_connections: u64,
+    pub last_observed_challenge_issued: u64,
+    pub last_observed_challenge_verified: u64,
+    pub last_observed_challenge_verify_rate_percent: f64,
+    pub last_observed_challenge_block_rate_percent: f64,
     pub consecutive_handshake_high: u8,
     pub consecutive_identity_high: u8,
     pub consecutive_slow_attack_high: u8,
     pub consecutive_budget_high: u8,
     pub consecutive_latency_high: u8,
+    pub consecutive_recovery_windows: u8,
+    pub recent_pressure_memory_windows: u8,
     pub recommendation: AutoTuningRecommendationSnapshot,
 }
 
@@ -74,6 +80,8 @@ pub struct AutoTuningControllerState {
     pub consecutive_slow_attack_high: u8,
     pub consecutive_budget_high: u8,
     pub consecutive_latency_high: u8,
+    pub consecutive_recovery_windows: u8,
+    pub recent_pressure_memory_windows: u8,
     pub baseline_before_adjust: Option<Config>,
     pub rollback_timestamps: Vec<i64>,
     pub bootstrap_applied: bool,
@@ -97,6 +105,10 @@ pub(super) struct MetricDeltas {
     pub(super) l7_friction_pressure_percent: f64,
     pub(super) slow_attack_pressure_percent: f64,
     pub(super) direct_idle_no_request_connections: u64,
+    pub(super) challenge_issued: u64,
+    pub(super) challenge_verified: u64,
+    pub(super) challenge_verify_rate_percent: f64,
+    pub(super) challenge_block_rate_percent: f64,
     pub(super) segments: Vec<TrafficSegmentDelta>,
 }
 

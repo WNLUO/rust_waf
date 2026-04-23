@@ -89,6 +89,14 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     let slow_attack_windows = metadata_u8(request, "runtime.auto_tuning.slow_attack_windows");
     let budget_windows = metadata_u8(request, "runtime.auto_tuning.budget_windows");
     let latency_windows = metadata_u8(request, "runtime.auto_tuning.latency_windows");
+    let recovery_windows = metadata_u8(request, "runtime.auto_tuning.recovery_windows");
+    let pressure_memory_windows =
+        metadata_u8(request, "runtime.auto_tuning.pressure_memory_windows");
+    let challenge_issued = metadata_u64(request, "runtime.auto_tuning.challenge_issued");
+    let challenge_verify_rate =
+        metadata_f64(request, "runtime.auto_tuning.challenge_verify_rate_percent");
+    let challenge_block_rate =
+        metadata_f64(request, "runtime.auto_tuning.challenge_block_rate_percent");
     let prefer_drop = metadata_bool(request, "runtime.prefer_drop");
     let request_budget_softened = metadata_bool(request, "l4.request_budget_softened");
     let site_action = metadata(request, "runtime.site.action");
@@ -135,6 +143,10 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
                 slow_attack_windows,
                 budget_windows,
                 latency_windows,
+                recovery_windows,
+                challenge_issued,
+                challenge_verify_rate,
+                challenge_block_rate,
             ))
     {
         return EarlyDefenseDecision::drop("spoofed_forward_header_under_pressure");
@@ -172,6 +184,10 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
             slow_attack_windows,
             budget_windows,
             latency_windows,
+            recovery_windows,
+            challenge_issued,
+            challenge_verify_rate,
+            challenge_block_rate,
         ) {
             return EarlyDefenseDecision::drop("l4_high_risk_runtime_pressure");
         }
@@ -189,6 +205,11 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
             slow_attack_windows,
             budget_windows,
             latency_windows,
+            recovery_windows,
+            pressure_memory_windows,
+            challenge_issued,
+            challenge_verify_rate,
+            challenge_block_rate,
         ) {
             return EarlyDefenseDecision::challenge("l4_high_risk_force_challenge", 35, 50);
         }
@@ -212,6 +233,10 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
                 slow_attack_windows,
                 budget_windows,
                 latency_windows,
+                recovery_windows,
+                challenge_issued,
+                challenge_verify_rate,
+                challenge_block_rate,
             )
         {
             return EarlyDefenseDecision::drop("l4_suspicious_survival_pressure");
@@ -230,6 +255,11 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
             slow_attack_windows,
             budget_windows,
             latency_windows,
+            recovery_windows,
+            pressure_memory_windows,
+            challenge_issued,
+            challenge_verify_rate,
+            challenge_block_rate,
         ) {
             return EarlyDefenseDecision::challenge("l4_suspicious_force_challenge", 55, 70);
         }
@@ -339,6 +369,10 @@ fn should_hard_drop_under_pressure(
     slow_attack_windows: u8,
     budget_windows: u8,
     latency_windows: u8,
+    recovery_windows: u8,
+    _challenge_issued: u64,
+    _challenge_verify_rate: f64,
+    _challenge_block_rate: f64,
 ) -> bool {
     if prefer_drop {
         return true;
@@ -388,7 +422,10 @@ fn should_hard_drop_under_pressure(
     {
         return true;
     }
-    if persistent_heat >= 2 && (runtime_high || adaptive_high || queue_warm || overload_high) {
+    if persistent_heat >= 2
+        && (runtime_high || adaptive_high || queue_warm || overload_high)
+        && recovery_windows < 2
+    {
         return true;
     }
 
@@ -409,6 +446,11 @@ fn should_force_challenge_under_pressure(
     slow_attack_windows: u8,
     budget_windows: u8,
     latency_windows: u8,
+    recovery_windows: u8,
+    pressure_memory_windows: u8,
+    challenge_issued: u64,
+    challenge_verify_rate: f64,
+    challenge_block_rate: f64,
 ) -> bool {
     let survival = matches!(runtime_depth, Some("survival"));
     let runtime_high = matches!(runtime_level, Some("high" | "attack"));
@@ -432,6 +474,7 @@ fn should_force_challenge_under_pressure(
     .into_iter()
     .filter(|hot| *hot)
     .count();
+    let downgrade_hold = pressure_memory_windows >= 2 && recovery_windows < 2;
 
     if survival && (defense_heat >= 1 || persistent_heat >= 1 || queue_warm) {
         return true;
@@ -445,7 +488,17 @@ fn should_force_challenge_under_pressure(
     if defense_heat >= 1 && (runtime_high || adaptive_high || queue_warm || persistent_heat >= 1) {
         return true;
     }
+    if challenge_issued >= 3 && challenge_verify_rate >= 50.0 && recovery_windows >= 1 {
+        return false;
+    }
     if persistent_heat >= 2 {
+        return true;
+    }
+    if downgrade_hold && (runtime_high || adaptive_high || defense_heat >= 1 || persistent_heat >= 1)
+    {
+        return true;
+    }
+    if challenge_issued >= 3 && challenge_verify_rate < 20.0 && challenge_block_rate >= 30.0 {
         return true;
     }
 
@@ -606,6 +659,91 @@ mod tests {
                 .get_metadata("ai.cc.route_threshold_scale_percent")
                 .unwrap(),
             "35"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_recovery_hysteresis_holds_challenge_briefly() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.pressure.level".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.pressure_memory_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "1".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "challenge"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_recovery_windows_allow_downgrade_to_lightweight() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.pressure.level".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.pressure_memory_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "2".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "lightweight_l7"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_successful_challenges_speed_up_downgrade() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.pressure_memory_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "1".to_string());
+        request.add_metadata("runtime.auto_tuning.challenge_issued".to_string(), "4".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_verify_rate_percent".to_string(),
+            "75.00".to_string(),
+        );
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "lightweight_l7"
+        );
+    }
+
+    #[test]
+    fn high_l4_risk_failed_challenges_hold_challenge_mode() {
+        let mut request = request();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.pressure_memory_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "1".to_string());
+        request.add_metadata("runtime.auto_tuning.challenge_issued".to_string(), "5".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_verify_rate_percent".to_string(),
+            "0.00".to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_block_rate_percent".to_string(),
+            "40.00".to_string(),
+        );
+        request.add_metadata("runtime.pressure.level".to_string(), "high".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "challenge"
         );
     }
 

@@ -69,6 +69,32 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     let cpu_score = metadata_u8(request, "runtime.pressure.cpu_score");
     let prefer_drop = metadata_bool(request, "runtime.prefer_drop");
     let request_budget_softened = metadata_bool(request, "l4.request_budget_softened");
+    let site_action = metadata(request, "runtime.site.action");
+    let site_proxy_mode = metadata(request, "runtime.site.proxy_mode");
+    let site_priority = metadata(request, "runtime.site.priority");
+    let site_over_rps_budget = metadata_bool(request, "runtime.site.over_rps_budget");
+
+    if site_proxy_mode == Some("shed") && (prefer_drop || matches!(runtime_depth, Some("survival")))
+    {
+        return EarlyDefenseDecision::drop("site_shed_under_runtime_pressure");
+    }
+
+    if site_action == Some("block") && site_over_rps_budget {
+        return EarlyDefenseDecision::drop("site_block_first_budget_exceeded");
+    }
+
+    if site_action == Some("challenge") && site_over_rps_budget {
+        let (route_scale, host_scale) = if site_priority == Some("critical") {
+            (70, 80)
+        } else {
+            (55, 70)
+        };
+        return EarlyDefenseDecision::lightweight(
+            "site_challenge_first_budget_exceeded",
+            route_scale,
+            host_scale,
+        );
+    }
 
     if identity_state == Some("spoofed_forward_header")
         && (prefer_drop || cpu_score >= 2 || matches!(runtime_level, Some("high" | "attack")))

@@ -24,6 +24,18 @@ where
     S: AsyncWrite + Unpin,
 {
     let traffic_source_ip = traffic_source_ip.to_string();
+    if let Some(reason) = site_proxy_shed_reason(request) {
+        context
+            .traffic_map
+            .record_ingress(traffic_source_ip.clone(), request_dump_len, true);
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_fail_close_rejection();
+        }
+        http1_handler
+            .write_response(stream, 503, "Service Unavailable", reason.as_bytes())
+            .await?;
+        return Ok(Http1RequestFlow::Close);
+    }
     let upstream_addr = select_upstream_target(matched_site);
     if let Some(upstream_addr) = upstream_addr.as_deref() {
         let safeline_intercept = resolve_safeline_intercept_config(config, matched_site);

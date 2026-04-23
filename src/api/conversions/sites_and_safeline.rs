@@ -176,6 +176,13 @@ impl TryFrom<crate::storage::LocalSiteEntry> for LocalSiteResponse {
                 .map(serde_json::from_str::<crate::config::l7::SafeLineInterceptConfig>)
                 .transpose()?
                 .map(|config| SafeLineInterceptConfigResponse::from_config(&config)),
+            priority: crate::core::gateway::normalize_site_priority(&value.priority).to_string(),
+            overload_policy: crate::core::gateway::normalize_site_overload_policy(
+                &value.overload_policy,
+            )
+            .to_string(),
+            reserved_concurrency: value.reserved_concurrency.max(0) as u32,
+            reserved_rps: value.reserved_rps.max(0) as u32,
             enabled: value.enabled,
             tls_enabled: value.tls_enabled,
             local_certificate_id: value.local_certificate_id,
@@ -206,6 +213,10 @@ impl LocalSiteUpsertRequest {
             .safeline_intercept
             .map(SafeLineInterceptConfigRequest::into_config)
             .transpose()?;
+        let priority = crate::core::gateway::normalize_site_priority(&self.priority).to_string();
+        let overload_policy =
+            crate::core::gateway::normalize_site_overload_policy(&self.overload_policy)
+                .to_string();
         let source = non_empty_string(self.source).unwrap_or_else(|| "manual".to_string());
         let sync_mode = non_empty_string(self.sync_mode).unwrap_or_else(|| "manual".to_string());
         let notes = self.notes.trim().to_string();
@@ -226,6 +237,10 @@ impl LocalSiteUpsertRequest {
             listen_ports,
             upstreams,
             safeline_intercept,
+            priority,
+            overload_policy,
+            reserved_concurrency: self.reserved_concurrency,
+            reserved_rps: self.reserved_rps,
             enabled: self.enabled,
             tls_enabled: self.tls_enabled,
             local_certificate_id: self.local_certificate_id,

@@ -265,6 +265,14 @@ fn default_auto_defense_fallback_interval_secs() -> u64 {
     5 * 60
 }
 
+fn default_local_site_priority() -> String {
+    "normal".to_string()
+}
+
+fn default_local_site_overload_policy() -> String {
+    "inherit".to_string()
+}
+
 #[derive(Debug, Serialize)]
 pub struct LocalSiteResponse {
     pub(crate) id: i64,
@@ -274,6 +282,10 @@ pub struct LocalSiteResponse {
     pub(crate) listen_ports: Vec<String>,
     pub(crate) upstreams: Vec<String>,
     pub(crate) safeline_intercept: Option<SafeLineInterceptConfigResponse>,
+    pub(crate) priority: String,
+    pub(crate) overload_policy: String,
+    pub(crate) reserved_concurrency: u32,
+    pub(crate) reserved_rps: u32,
     pub(crate) enabled: bool,
     pub(crate) tls_enabled: bool,
     pub(crate) local_certificate_id: Option<i64>,
@@ -295,6 +307,14 @@ pub struct LocalSiteUpsertRequest {
     pub(crate) upstreams: Vec<String>,
     #[serde(default)]
     pub(crate) safeline_intercept: Option<SafeLineInterceptConfigRequest>,
+    #[serde(default = "default_local_site_priority")]
+    pub(crate) priority: String,
+    #[serde(default = "default_local_site_overload_policy")]
+    pub(crate) overload_policy: String,
+    #[serde(default)]
+    pub(crate) reserved_concurrency: u32,
+    #[serde(default)]
+    pub(crate) reserved_rps: u32,
     pub(crate) enabled: bool,
     pub(crate) tls_enabled: bool,
     pub(crate) local_certificate_id: Option<i64>,

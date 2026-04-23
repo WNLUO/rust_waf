@@ -11,6 +11,15 @@ pub(super) async fn handle_http2_proxy_or_local_response(
     request_dump_len: usize,
 ) -> Result<Http2Response, crate::protocol::ProtocolError> {
     let traffic_source_ip = traffic_source_ip.to_string();
+    if let Some(reason) = site_proxy_shed_reason(request) {
+        context
+            .traffic_map
+            .record_ingress(traffic_source_ip.clone(), request_dump_len, true);
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_fail_close_rejection();
+        }
+        return Ok(build_plain_http2_response(503, reason.as_bytes().to_vec()));
+    }
     let upstream_addr = select_upstream_target(matched_site);
     if let Some(upstream_addr) = upstream_addr.as_deref() {
         if let Err(reason) = enforce_upstream_policy(context) {

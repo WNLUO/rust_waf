@@ -23,6 +23,77 @@ pub struct GatewaySiteRuntime {
     pub certificate_id: Option<i64>,
     pub upstream_endpoint: Option<String>,
     pub safeline_intercept: Option<SafeLineInterceptConfig>,
+    pub priority: GatewaySitePriority,
+    pub overload_policy: GatewaySiteOverloadPolicy,
+    pub reserved_concurrency: u32,
+    pub reserved_rps: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewaySitePriority {
+    Critical,
+    Important,
+    Normal,
+    BestEffort,
+}
+
+impl GatewaySitePriority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Critical => "critical",
+            Self::Important => "important",
+            Self::Normal => "normal",
+            Self::BestEffort => "best_effort",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "critical" => Self::Critical,
+            "important" => Self::Important,
+            "best_effort" | "besteffort" | "best-effort" => Self::BestEffort,
+            _ => Self::Normal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewaySiteOverloadPolicy {
+    Inherit,
+    ChallengeFirst,
+    BlockFirst,
+    FailClose,
+    Sacrificial,
+}
+
+impl GatewaySiteOverloadPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Inherit => "inherit",
+            Self::ChallengeFirst => "challenge_first",
+            Self::BlockFirst => "block_first",
+            Self::FailClose => "fail_close",
+            Self::Sacrificial => "sacrificial",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "challenge_first" | "challenge-first" => Self::ChallengeFirst,
+            "block_first" | "block-first" => Self::BlockFirst,
+            "fail_close" | "fail-close" => Self::FailClose,
+            "sacrificial" => Self::Sacrificial,
+            _ => Self::Inherit,
+        }
+    }
+}
+
+pub fn normalize_site_priority(value: &str) -> &'static str {
+    GatewaySitePriority::from_str(value).as_str()
+}
+
+pub fn normalize_site_overload_policy(value: &str) -> &'static str {
+    GatewaySiteOverloadPolicy::from_str(value).as_str()
 }
 
 #[derive(Debug, Clone)]
@@ -282,6 +353,10 @@ fn runtime_site_from_entry(site: &LocalSiteEntry) -> GatewaySiteRuntime {
         certificate_id: site.local_certificate_id,
         upstream_endpoint,
         safeline_intercept,
+        priority: GatewaySitePriority::from_str(&site.priority),
+        overload_policy: GatewaySiteOverloadPolicy::from_str(&site.overload_policy),
+        reserved_concurrency: site.reserved_concurrency.max(0) as u32,
+        reserved_rps: site.reserved_rps.max(0) as u32,
     }
 }
 

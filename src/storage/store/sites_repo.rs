@@ -3,7 +3,8 @@ impl SqliteStore {
         let rows = sqlx::query_as::<_, LocalSiteEntry>(
             r#"
             SELECT id, name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
-                   safeline_intercept_json,
+                   safeline_intercept_json, priority, overload_policy,
+                   reserved_concurrency, reserved_rps,
                    enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
                    last_synced_at, created_at, updated_at
             FROM local_sites
@@ -21,7 +22,8 @@ impl SqliteStore {
         let row = sqlx::query_as::<_, LocalSiteEntry>(
             r#"
             SELECT id, name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
-                   safeline_intercept_json,
+                   safeline_intercept_json, priority, overload_policy,
+                   reserved_concurrency, reserved_rps,
                    enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
                    last_synced_at, created_at, updated_at
             FROM local_sites
@@ -42,11 +44,12 @@ impl SqliteStore {
             r#"
             INSERT INTO local_sites (
                 name, primary_hostname, hostnames_json, listen_ports_json, upstreams_json,
-                safeline_intercept_json,
+                safeline_intercept_json, priority, overload_policy,
+                reserved_concurrency, reserved_rps,
                 enabled, tls_enabled, local_certificate_id, source, sync_mode, notes,
                 last_synced_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&site.name)
@@ -60,6 +63,10 @@ impl SqliteStore {
                 .map(serde_json::to_string)
                 .transpose()?,
         )
+        .bind(&site.priority)
+        .bind(&site.overload_policy)
+        .bind(site.reserved_concurrency as i64)
+        .bind(site.reserved_rps as i64)
         .bind(site.enabled)
         .bind(site.tls_enabled)
         .bind(site.local_certificate_id)
@@ -86,6 +93,10 @@ impl SqliteStore {
                 listen_ports_json = ?,
                 upstreams_json = ?,
                 safeline_intercept_json = ?,
+                priority = ?,
+                overload_policy = ?,
+                reserved_concurrency = ?,
+                reserved_rps = ?,
                 enabled = ?,
                 tls_enabled = ?,
                 local_certificate_id = ?,
@@ -108,6 +119,10 @@ impl SqliteStore {
                 .map(serde_json::to_string)
                 .transpose()?,
         )
+        .bind(&site.priority)
+        .bind(&site.overload_policy)
+        .bind(site.reserved_concurrency as i64)
+        .bind(site.reserved_rps as i64)
         .bind(site.enabled)
         .bind(site.tls_enabled)
         .bind(site.local_certificate_id)

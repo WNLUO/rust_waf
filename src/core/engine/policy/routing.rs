@@ -98,6 +98,22 @@ pub(crate) fn apply_gateway_site_metadata(
     request.add_metadata("gateway.site_id".to_string(), site.id.to_string());
     request.add_metadata("gateway.site_name".to_string(), site.name.clone());
     request.add_metadata(
+        "gateway.site_priority".to_string(),
+        site.priority.as_str().to_string(),
+    );
+    request.add_metadata(
+        "gateway.site_overload_policy".to_string(),
+        site.overload_policy.as_str().to_string(),
+    );
+    request.add_metadata(
+        "gateway.site_reserved_concurrency".to_string(),
+        site.reserved_concurrency.to_string(),
+    );
+    request.add_metadata(
+        "gateway.site_reserved_rps".to_string(),
+        site.reserved_rps.to_string(),
+    );
+    request.add_metadata(
         "gateway.primary_hostname".to_string(),
         site.primary_hostname.clone(),
     );
@@ -137,6 +153,11 @@ fn normalize_request_host(value: &str) -> Option<String> {
 
 pub(crate) fn select_upstream_target(site: Option<&GatewaySiteRuntime>) -> Option<String> {
     site.and_then(|site| site.upstream_endpoint.clone())
+}
+
+pub(crate) fn site_proxy_shed_reason(request: &UnifiedHttpRequest) -> Option<&'static str> {
+    (request.get_metadata("runtime.site.proxy_mode").map(String::as_str) == Some("shed"))
+        .then_some("site temporarily shed under runtime pressure")
 }
 
 pub(crate) fn resolve_safeline_intercept_config<'a>(

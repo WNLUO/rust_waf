@@ -15,6 +15,13 @@ pub(super) async fn handle_http3_proxy_or_local_response(
     context
         .traffic_map
         .record_ingress(traffic_source_ip.clone(), request_dump_len, false);
+    if let Some(reason) = site_proxy_shed_reason(request) {
+        if let Some(metrics) = context.metrics.as_ref() {
+            metrics.record_fail_close_rejection();
+        }
+        send_http3_response(stream, 503, &[], reason.as_bytes().to_vec(), None).await?;
+        return Ok(());
+    }
     if let Some(upstream_addr) = upstream_addr.as_deref() {
         let safeline_intercept = resolve_safeline_intercept_config(config, matched_site);
         if let Err(reason) = enforce_upstream_policy(context) {

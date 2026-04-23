@@ -236,3 +236,81 @@ async fn ai_defense_trigger_waits_for_enough_route_signals() {
         .as_deref()
         .is_some_and(|reason| reason.starts_with("route_pressure:site-a:/api/login")));
 }
+
+#[tokio::test]
+async fn site_runtime_budget_marks_best_effort_site_for_shedding_in_survival() {
+    let config = crate::config::Config {
+        sqlite_enabled: false,
+        ..crate::config::Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+
+    let mut request = UnifiedHttpRequest::new(
+        HttpVersion::Http1_1,
+        "GET".to_string(),
+        "/".to_string(),
+    );
+    request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+    request.add_metadata("gateway.site_priority".to_string(), "best_effort".to_string());
+    request.add_metadata(
+        "gateway.site_overload_policy".to_string(),
+        "sacrificial".to_string(),
+    );
+    request.add_metadata("gateway.site_reserved_rps".to_string(), "1".to_string());
+    request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    request.add_metadata("runtime.capacity.class".to_string(), "small".to_string());
+    request.add_metadata("runtime.pressure.storage_queue_percent".to_string(), "90".to_string());
+
+    context.annotate_site_runtime_budget(&mut request);
+
+    assert_eq!(
+        request.get_metadata("runtime.site.action").map(String::as_str),
+        Some("shed")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.site.proxy_mode")
+            .map(String::as_str),
+        Some("shed")
+    );
+}
+
+#[tokio::test]
+async fn site_runtime_budget_challenges_critical_site_when_rps_exceeded() {
+    let config = crate::config::Config {
+        sqlite_enabled: false,
+        ..crate::config::Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+
+    let mut request = UnifiedHttpRequest::new(
+        HttpVersion::Http1_1,
+        "GET".to_string(),
+        "/".to_string(),
+    );
+    request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+    request.add_metadata("gateway.site_priority".to_string(), "critical".to_string());
+    request.add_metadata(
+        "gateway.site_overload_policy".to_string(),
+        "challenge_first".to_string(),
+    );
+    request.add_metadata("gateway.site_reserved_rps".to_string(), "1".to_string());
+    request.add_metadata("runtime.defense.depth".to_string(), "lean".to_string());
+    request.add_metadata("runtime.capacity.class".to_string(), "tiny".to_string());
+    request.add_metadata("runtime.pressure.storage_queue_percent".to_string(), "80".to_string());
+
+    for _ in 0..800 {
+        context.annotate_site_runtime_budget(&mut request);
+    }
+
+    assert_eq!(
+        request.get_metadata("runtime.site.action").map(String::as_str),
+        Some("challenge")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.site.over_rps_budget")
+            .map(String::as_str),
+        Some("true")
+    );
+}

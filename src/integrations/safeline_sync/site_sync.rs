@@ -279,6 +279,10 @@ pub(super) async fn update_local_site_sync_metadata(
             .as_deref()
             .map(serde_json::from_str)
             .transpose()?,
+        priority: local_site.priority.clone(),
+        overload_policy: local_site.overload_policy.clone(),
+        reserved_concurrency: local_site.reserved_concurrency.max(0) as u32,
+        reserved_rps: local_site.reserved_rps.max(0) as u32,
         enabled: local_site.enabled,
         tls_enabled: local_site.tls_enabled,
         local_certificate_id: local_site.local_certificate_id,
@@ -342,6 +346,12 @@ fn hash_local_site_upsert(site: &LocalSiteUpsert, remote_cert_id: Option<&str>) 
         );
     }
     hasher.update([0]);
+    hasher.update(site.priority.as_bytes());
+    hasher.update([0]);
+    hasher.update(site.overload_policy.as_bytes());
+    hasher.update([0]);
+    hasher.update(site.reserved_concurrency.to_le_bytes());
+    hasher.update(site.reserved_rps.to_le_bytes());
     hasher.update([site.enabled as u8]);
     hasher.update([site.tls_enabled as u8]);
     hasher.update(remote_cert_id.unwrap_or_default().as_bytes());
@@ -364,6 +374,10 @@ pub(super) fn hash_local_site_entry(
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()?,
+            priority: site.priority.clone(),
+            overload_policy: site.overload_policy.clone(),
+            reserved_concurrency: site.reserved_concurrency.max(0) as u32,
+            reserved_rps: site.reserved_rps.max(0) as u32,
             enabled: site.enabled,
             tls_enabled: site.tls_enabled,
             local_certificate_id: site.local_certificate_id,

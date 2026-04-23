@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::gateway::{GatewaySiteOverloadPolicy, GatewaySitePriority};
 
 pub(super) fn protocol_stream_budget(configured: usize, defense_depth: &str) -> usize {
     let configured = configured.max(1);
@@ -7,6 +8,101 @@ pub(super) fn protocol_stream_budget(configured: usize, defense_depth: &str) -> 
         "lean" => configured.min(24),
         "balanced" => configured.min(64),
         _ => configured,
+    }
+}
+
+pub(super) fn site_priority_from_metadata(request: &UnifiedHttpRequest) -> GatewaySitePriority {
+    request
+        .get_metadata("gateway.site_priority")
+        .map(|value| GatewaySitePriority::from_str(value))
+        .unwrap_or(GatewaySitePriority::Normal)
+}
+
+pub(super) fn site_overload_policy_from_metadata(
+    request: &UnifiedHttpRequest,
+) -> GatewaySiteOverloadPolicy {
+    request
+        .get_metadata("gateway.site_overload_policy")
+        .map(|value| GatewaySiteOverloadPolicy::from_str(value))
+        .unwrap_or(GatewaySiteOverloadPolicy::Inherit)
+}
+
+pub(super) fn metadata_u32(request: &UnifiedHttpRequest, key: &str) -> u32 {
+    request
+        .get_metadata(key)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+pub(super) fn capacity_rps_floor(
+    capacity_class: &str,
+    priority: GatewaySitePriority,
+) -> u32 {
+    match capacity_class {
+        "tiny" => match priority {
+            GatewaySitePriority::Critical => 120,
+            GatewaySitePriority::Important => 80,
+            GatewaySitePriority::Normal => 40,
+            GatewaySitePriority::BestEffort => 20,
+        },
+        "small" => match priority {
+            GatewaySitePriority::Critical => 240,
+            GatewaySitePriority::Important => 160,
+            GatewaySitePriority::Normal => 80,
+            GatewaySitePriority::BestEffort => 40,
+        },
+        "large" => match priority {
+            GatewaySitePriority::Critical => 1200,
+            GatewaySitePriority::Important => 600,
+            GatewaySitePriority::Normal => 240,
+            GatewaySitePriority::BestEffort => 120,
+        },
+        _ => match priority {
+            GatewaySitePriority::Critical => 600,
+            GatewaySitePriority::Important => 300,
+            GatewaySitePriority::Normal => 150,
+            GatewaySitePriority::BestEffort => 60,
+        },
+    }
+}
+
+pub(super) fn depth_rps_scale_percent(depth: DefenseDepth) -> u32 {
+    match depth {
+        DefenseDepth::Full => 100,
+        DefenseDepth::Balanced => 90,
+        DefenseDepth::Lean => 60,
+        DefenseDepth::Survival => 35,
+    }
+}
+
+pub(super) fn resolve_site_overload_policy(
+    configured: GatewaySiteOverloadPolicy,
+    priority: GatewaySitePriority,
+    depth: DefenseDepth,
+) -> GatewaySiteOverloadPolicy {
+    if configured != GatewaySiteOverloadPolicy::Inherit {
+        return configured;
+    }
+
+    match (priority, depth) {
+        (GatewaySitePriority::Critical, _) => GatewaySiteOverloadPolicy::ChallengeFirst,
+        (GatewaySitePriority::Important, DefenseDepth::Survival) => {
+            GatewaySiteOverloadPolicy::ChallengeFirst
+        }
+        (GatewaySitePriority::Important, _) => GatewaySiteOverloadPolicy::Inherit,
+        (GatewaySitePriority::Normal, DefenseDepth::Survival) => {
+            GatewaySiteOverloadPolicy::FailClose
+        }
+        (GatewaySitePriority::Normal, DefenseDepth::Lean) => {
+            GatewaySiteOverloadPolicy::ChallengeFirst
+        }
+        (GatewaySitePriority::BestEffort, DefenseDepth::Survival) => {
+            GatewaySiteOverloadPolicy::Sacrificial
+        }
+        (GatewaySitePriority::BestEffort, DefenseDepth::Lean) => {
+            GatewaySiteOverloadPolicy::BlockFirst
+        }
+        _ => GatewaySiteOverloadPolicy::Inherit,
     }
 }
 
@@ -80,6 +176,22 @@ impl WafContext {
         }
 
         self.route_defense_buckets.len() < MAX_ROUTE_DEFENSE_BUCKETS
+    }
+
+    pub(super) fn observe_site_request_rate(&self, site_id: &str, now: i64) -> u64 {
+        let entry = self
+            .site_request_budget_buckets
+            .entry(site_id.to_string())
+            .or_default();
+        let mut bucket = entry
+            .lock()
+            .expect("site request budget bucket lock poisoned");
+        if bucket.window_start != now {
+            bucket.window_start = now;
+            bucket.request_count = 0;
+        }
+        bucket.request_count = bucket.request_count.saturating_add(1);
+        bucket.request_count
     }
 }
 

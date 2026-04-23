@@ -111,6 +111,7 @@ pub struct WafContext {
     ai_route_result_buckets: DashMap<String, std::sync::Mutex<AiRouteResultBucket>>,
     site_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
     route_defense_buckets: DashMap<String, std::sync::Mutex<SiteDefenseBucket>>,
+    site_request_budget_buckets: DashMap<String, std::sync::Mutex<SiteRequestBudgetBucket>>,
     resource_sentinel: resource_sentinel::ResourceSentinel,
     cpu_pressure_monitor: StdMutex<system_pressure::CpuPressureMonitor>,
     server_public_ips: RwLock<self_protection::ServerPublicIpRuntime>,
@@ -208,6 +209,12 @@ struct SiteDefenseBucket {
     window_start: i64,
     soft_events: u64,
     hard_events: u64,
+}
+
+#[derive(Debug, Default)]
+struct SiteRequestBudgetBucket {
+    window_start: i64,
+    request_count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -505,6 +512,7 @@ impl WafContext {
             ai_route_result_buckets: DashMap::new(),
             site_defense_buckets: DashMap::new(),
             route_defense_buckets: DashMap::new(),
+            site_request_budget_buckets: DashMap::new(),
             resource_sentinel: resource_sentinel::ResourceSentinel::new(),
             cpu_pressure_monitor: StdMutex::new(system_pressure::CpuPressureMonitor::new()),
             server_public_ips: RwLock::new(self_protection::ServerPublicIpRuntime::default()),

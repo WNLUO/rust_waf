@@ -165,21 +165,20 @@ impl WafContext {
         let Some(site_id) = request.get_metadata("gateway.site_id").cloned() else {
             return;
         };
+        let site_priority = site_priority_from_metadata(request);
+        let configured_policy = site_overload_policy_from_metadata(request);
         let site_depth = self.site_defense_depth(&site_id);
         let route = runtime_route_path(&request.uri);
         let route_depth = self.route_defense_depth(&site_id, &route);
-        let Some(site_depth) = select_strictest_depth(site_depth, route_depth) else {
-            return;
-        };
         let current_depth = request
             .get_metadata("runtime.defense.depth")
             .map(|value| DefenseDepth::from_str(value))
             .unwrap_or(DefenseDepth::Balanced);
-        if !defense_depth_is_stricter(site_depth, current_depth) {
-            return;
-        }
-
-        let pseudo_pressure = match site_depth {
+        let local_strictest_depth = select_strictest_depth(site_depth, route_depth);
+        let effective_depth = local_strictest_depth
+            .filter(|depth| defense_depth_is_stricter(*depth, current_depth))
+            .unwrap_or(current_depth);
+        let pseudo_pressure = match effective_depth {
             DefenseDepth::Survival => "attack",
             DefenseDepth::Lean => "high",
             _ => "elevated",
@@ -190,14 +189,16 @@ impl WafContext {
             .unwrap_or(0);
         let budget =
             resource_budget::current_runtime_resource_budget(pseudo_pressure, current_queue);
-        request.add_metadata(
-            "runtime.defense.depth".to_string(),
-            site_depth.as_str().to_string(),
-        );
-        request.add_metadata(
-            "runtime.site.defense_depth".to_string(),
-            site_depth.as_str().to_string(),
-        );
+        if defense_depth_is_stricter(effective_depth, current_depth) {
+            request.add_metadata(
+                "runtime.defense.depth".to_string(),
+                effective_depth.as_str().to_string(),
+            );
+            request.add_metadata(
+                "runtime.site.defense_depth".to_string(),
+                effective_depth.as_str().to_string(),
+            );
+        }
         if let Some(route_depth) = route_depth {
             request.add_metadata(
                 "runtime.route.defense_depth".to_string(),
@@ -208,7 +209,12 @@ impl WafContext {
         }
         request.add_metadata(
             "runtime.site.defense_reason".to_string(),
-            "site_local_attack_pressure".to_string(),
+            if local_strictest_depth.is_some() {
+                "site_local_attack_pressure"
+            } else {
+                "runtime_adaptive_budget"
+            }
+            .to_string(),
         );
         request.add_metadata(
             "runtime.budget.l7_bucket_limit".to_string(),
@@ -231,6 +237,92 @@ impl WafContext {
         }
         if budget.aggregate_events {
             request.add_metadata("runtime.aggregate_events".to_string(), "true".to_string());
+        }
+
+        let reserved_rps = metadata_u32(request, "gateway.site_reserved_rps");
+        let reserved_concurrency = metadata_u32(request, "gateway.site_reserved_concurrency");
+        let base_rps_limit = if reserved_rps > 0 {
+            reserved_rps
+        } else {
+            capacity_rps_floor(budget.capacity_class.as_str(), site_priority)
+        };
+        let effective_rps_limit = base_rps_limit
+            .saturating_mul(depth_rps_scale_percent(effective_depth))
+            .saturating_div(100)
+            .max(1);
+        let current_rps = self.observe_site_request_rate(&site_id, unix_timestamp());
+        let resolved_policy =
+            resolve_site_overload_policy(configured_policy, site_priority, effective_depth);
+        let proactive_shed = matches!(
+            resolved_policy,
+            crate::core::gateway::GatewaySiteOverloadPolicy::Sacrificial
+        ) && matches!(effective_depth, DefenseDepth::Survival);
+        let over_rps_budget = current_rps > effective_rps_limit as u64;
+        let site_action = if proactive_shed {
+            "shed"
+        } else if over_rps_budget {
+            match resolved_policy {
+                crate::core::gateway::GatewaySiteOverloadPolicy::ChallengeFirst => "challenge",
+                crate::core::gateway::GatewaySiteOverloadPolicy::BlockFirst => "block",
+                crate::core::gateway::GatewaySiteOverloadPolicy::FailClose => "fail_close",
+                crate::core::gateway::GatewaySiteOverloadPolicy::Sacrificial => "shed",
+                crate::core::gateway::GatewaySiteOverloadPolicy::Inherit => "allow",
+            }
+        } else {
+            "allow"
+        };
+        request.add_metadata(
+            "runtime.site.priority".to_string(),
+            site_priority.as_str().to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.overload_policy".to_string(),
+            resolved_policy.as_str().to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.reserved_concurrency".to_string(),
+            reserved_concurrency.to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.reserved_rps".to_string(),
+            reserved_rps.to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.effective_rps_limit".to_string(),
+            effective_rps_limit.to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.current_rps".to_string(),
+            current_rps.to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.action".to_string(),
+            site_action.to_string(),
+        );
+        request.add_metadata(
+            "runtime.site.proxy_mode".to_string(),
+            if matches!(site_action, "fail_close" | "shed") {
+                "shed"
+            } else if site_action == "challenge" {
+                "degraded"
+            } else {
+                "normal"
+            }
+            .to_string(),
+        );
+        if over_rps_budget {
+            request.add_metadata("runtime.site.over_rps_budget".to_string(), "true".to_string());
+            request.add_metadata(
+                "runtime.site.defense_reason".to_string(),
+                "site_reserved_rps_budget_exceeded".to_string(),
+            );
+        }
+        if proactive_shed {
+            request.add_metadata(
+                "runtime.site.defense_reason".to_string(),
+                "site_sacrificed_for_server_survival".to_string(),
+            );
+            request.add_metadata("runtime.prefer_drop".to_string(), "true".to_string());
         }
     }
 

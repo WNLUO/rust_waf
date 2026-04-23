@@ -144,6 +144,18 @@ fn build_local_site_upsert_from_remote(
             .and_then(|item| item.safeline_intercept_json.as_deref())
             .map(serde_json::from_str)
             .transpose()?,
+        priority: existing_local
+            .map(|item| item.priority.clone())
+            .unwrap_or_else(|| "normal".to_string()),
+        overload_policy: existing_local
+            .map(|item| item.overload_policy.clone())
+            .unwrap_or_else(|| "inherit".to_string()),
+        reserved_concurrency: existing_local
+            .map(|item| item.reserved_concurrency.max(0) as u32)
+            .unwrap_or(0),
+        reserved_rps: existing_local
+            .map(|item| item.reserved_rps.max(0) as u32)
+            .unwrap_or(0),
         enabled: if options.enabled || existing_local.is_none() {
             remote_site.enabled.unwrap_or(true)
         } else {

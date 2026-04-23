@@ -11,6 +11,7 @@ use super::types::{
     FAST_WINDOW_BUCKETS, MAX_TRACKED_DISTINCT_VALUES,
 };
 use super::unix_timestamp;
+use crate::locks::mutex_lock;
 
 impl SlidingWindowCounter {
     pub(super) fn new() -> Self {
@@ -21,7 +22,7 @@ impl SlidingWindowCounter {
     }
 
     pub(super) fn observe(&mut self, unix_now: i64, window: Duration) -> u32 {
-        let mut state = self.state.lock().expect("cc bucket lock poisoned");
+        let mut state = mutex_lock(&self.state, "cc bucket");
         state.observe(unix_now, window, 1);
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
         state.sum(unix_now, window)
@@ -37,7 +38,7 @@ impl WeightedSlidingWindowCounter {
     }
 
     pub(super) fn observe(&mut self, unix_now: i64, window: Duration, weight_percent: u8) -> u32 {
-        let mut state = self.state.lock().expect("cc weighted bucket lock poisoned");
+        let mut state = mutex_lock(&self.state, "cc weighted bucket");
         let weight = u16::from(weight_percent.max(1));
         state.observe(unix_now, window, u32::from(weight));
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
@@ -73,7 +74,7 @@ impl DistinctSlidingWindowCounter {
     }
 
     pub(super) fn observe(&mut self, value: String, unix_now: i64, window: Duration) -> u32 {
-        let mut state = self.state.lock().expect("cc distinct bucket lock poisoned");
+        let mut state = mutex_lock(&self.state, "cc distinct bucket");
         state.observe(hash_distinct_value(&value), unix_now, window);
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
         state.len()
@@ -211,7 +212,7 @@ impl FastWindowCounter {
         window_secs: u64,
         increment: u32,
     ) -> FastWindowObservation {
-        let mut state = self.state.lock().expect("cc fast bucket lock poisoned");
+        let mut state = mutex_lock(&self.state, "cc fast bucket");
         let index = unix_now.rem_euclid(FAST_WINDOW_BUCKETS as i64) as usize;
         let slot = &mut state.slots[index];
         if slot.tick != unix_now {

@@ -12,6 +12,7 @@ mod runtime;
 mod tracking;
 mod types;
 
+use crate::locks::{read_lock, write_lock};
 use helpers::*;
 use types::*;
 
@@ -63,14 +64,11 @@ impl L7CcGuard {
     }
 
     pub fn config(&self) -> CcDefenseConfig {
-        self.config
-            .read()
-            .expect("l7 cc config lock poisoned")
-            .clone()
+        read_lock(&self.config, "l7 cc config").clone()
     }
 
     pub fn update_config(&self, config: &CcDefenseConfig) {
-        let mut guard = self.config.write().expect("l7 cc config lock poisoned");
+        let mut guard = write_lock(&self.config, "l7 cc config");
         *guard = config.clone();
     }
 

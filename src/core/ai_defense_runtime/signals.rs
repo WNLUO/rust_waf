@@ -1,4 +1,5 @@
 use super::*;
+use crate::locks::mutex_lock;
 
 impl WafContext {
     pub(super) fn ai_defense_l4_signal(&self) -> Option<AiDefenseL4Signal> {
@@ -42,10 +43,7 @@ impl WafContext {
             .iter()
             .filter_map(|entry| {
                 let (site_id, route) = split_ai_defense_identity_key(entry.key())?;
-                let bucket = entry
-                    .value()
-                    .lock()
-                    .expect("ai defense identity bucket lock poisoned");
+                let bucket = mutex_lock(entry.value(), "ai defense identity bucket");
                 if now.saturating_sub(bucket.window_start) > 75 {
                     return None;
                 }
@@ -104,10 +102,7 @@ impl WafContext {
             .iter()
             .filter_map(|entry| {
                 let (site_id, route) = split_ai_defense_identity_key(entry.key())?;
-                let bucket = entry
-                    .value()
-                    .lock()
-                    .expect("ai route result bucket lock poisoned");
+                let bucket = mutex_lock(entry.value(), "ai route result bucket");
                 if now.saturating_sub(bucket.window_start) > 75 {
                     return None;
                 }

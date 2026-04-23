@@ -6,6 +6,7 @@ use super::{
     AiDefenseUserAgentSignal, AiRouteResultObservation, LocalDefenseRecommendation,
     VisitorDecisionSignal, WafContext,
 };
+use crate::locks::mutex_lock;
 use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{
     AiRouteProfileEntry, AiRouteProfileUpsert, AiTempPolicyEffectStats, AiTempPolicyEntry,
@@ -31,8 +32,11 @@ impl WafContext {
     pub fn active_ai_route_profiles(&self) -> Vec<AiRouteProfileEntry> {
         self.ai_route_profiles
             .read()
-            .expect("ai_route_profiles lock poisoned")
-            .clone()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|poisoned| {
+                log::warn!("ai_route_profiles lock poisoned; recovering with current value");
+                poisoned.into_inner().clone()
+            })
     }
 
     pub async fn refresh_ai_route_profiles(&self) -> Result<()> {
@@ -50,7 +54,11 @@ impl WafContext {
         let mut guard = self
             .ai_route_profiles
             .write()
-            .expect("ai_route_profiles lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("ai_route_profiles lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         *guard = profiles;
         Ok(())
     }
@@ -71,7 +79,13 @@ impl WafContext {
         let mut guard = self
             .ai_defense_trigger_runtime
             .lock()
-            .expect("ai_defense_trigger_runtime lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!(
+                    "ai_defense_trigger_runtime lock poisoned; recovering with current value"
+                );
+                poisoned.into_inner()
+            });
         if guard.last_trigger_at.is_some_and(|last| {
             now.saturating_sub(last) < config.auto_defense_trigger_cooldown_secs as i64
         }) {
@@ -113,9 +127,7 @@ impl WafContext {
             .ai_defense_identity_buckets
             .entry(key)
             .or_insert_with(|| std::sync::Mutex::new(super::AiDefenseIdentityBucket::default()));
-        let mut bucket = entry
-            .lock()
-            .expect("ai defense identity bucket lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "ai defense identity bucket");
         if bucket.window_start != window_start {
             *bucket = super::AiDefenseIdentityBucket {
                 window_start,
@@ -200,7 +212,7 @@ impl WafContext {
             .ai_route_result_buckets
             .entry(key)
             .or_insert_with(|| std::sync::Mutex::new(super::AiRouteResultBucket::default()));
-        let mut bucket = entry.lock().expect("ai route result bucket lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "ai route result bucket");
         if bucket.window_start != window_start {
             *bucket = super::AiRouteResultBucket {
                 window_start,
@@ -322,7 +334,13 @@ impl WafContext {
         let mut guard = self
             .ai_defense_trigger_runtime
             .lock()
-            .expect("ai_defense_trigger_runtime lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!(
+                    "ai_defense_trigger_runtime lock poisoned; recovering with current value"
+                );
+                poisoned.into_inner()
+            });
         if guard.pending {
             guard.pending = false;
             guard.last_run_at = Some(now);
@@ -377,7 +395,13 @@ impl WafContext {
         let trigger_pending_secs = self
             .ai_defense_trigger_runtime
             .lock()
-            .expect("ai_defense_trigger_runtime lock poisoned")
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!(
+                    "ai_defense_trigger_runtime lock poisoned; recovering with current value"
+                );
+                poisoned.into_inner()
+            })
             .pending_since
             .map(|pending_since| now.saturating_sub(pending_since).max(0) as u64)
             .unwrap_or(0);
@@ -441,7 +465,13 @@ impl WafContext {
                 let bucket = entry
                     .value()
                     .lock()
-                    .expect("ai defense identity bucket lock poisoned");
+                    .map(|guard| guard)
+                    .unwrap_or_else(|poisoned| {
+                        log::warn!(
+                            "ai defense identity bucket lock poisoned; recovering with current value"
+                        );
+                        poisoned.into_inner()
+                    });
                 (bucket.window_start < stale_before).then(|| entry.key().clone())
             })
             .take(256)
@@ -466,7 +496,13 @@ impl WafContext {
                 let bucket = entry
                     .value()
                     .lock()
-                    .expect("ai route result bucket lock poisoned");
+                    .map(|guard| guard)
+                    .unwrap_or_else(|poisoned| {
+                        log::warn!(
+                            "ai route result bucket lock poisoned; recovering with current value"
+                        );
+                        poisoned.into_inner()
+                    });
                 (bucket.window_start < stale_before).then(|| entry.key().clone())
             })
             .take(256)

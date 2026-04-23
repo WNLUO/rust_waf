@@ -1,3 +1,5 @@
+#![warn(clippy::unwrap_used, clippy::expect_used)]
+
 // WAF库文件
 // 导出公共API用于测试
 
@@ -14,6 +16,7 @@ pub mod core;
 pub mod integrations;
 pub mod l4;
 pub mod l7;
+mod locks;
 pub mod metrics;
 pub mod protocol;
 pub mod rules;
@@ -76,7 +79,10 @@ pub async fn load_runtime_config() -> Result<Config> {
         match value.trim().parse::<usize>() {
             Ok(capacity) if capacity > 0 => {
                 config.sqlite_queue_capacity = capacity;
-                info!("Overrode SQLite queue capacity via environment: {}", capacity);
+                info!(
+                    "Overrode SQLite queue capacity via environment: {}",
+                    capacity
+                );
             }
             _ => warn!(
                 "Unsupported WAF_SQLITE_QUEUE_CAPACITY '{}', keeping normalized value",

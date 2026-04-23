@@ -5,6 +5,7 @@ use super::policy::{
 };
 use super::runtime::{extend_queue, unix_timestamp, worker_loop};
 use super::*;
+use crate::locks::{mutex_lock, read_lock, write_lock};
 use std::sync::RwLock;
 
 impl L4BehaviorTuning {
@@ -58,16 +59,13 @@ impl L4BehaviorEngine {
     }
 
     pub fn update_tuning(&self, config: &L4Config) {
-        let mut guard = self.tuning.write().expect("behavior tuning lock poisoned");
+        let mut guard = write_lock(&self.tuning, "behavior tuning");
         *guard = L4BehaviorTuning::from_config(config);
     }
 
     pub fn start(&self) {
         let receiver = {
-            let mut guard = self
-                .worker_receiver
-                .lock()
-                .expect("behavior worker receiver lock poisoned");
+            let mut guard = mutex_lock(&self.worker_receiver, "behavior worker receiver");
             guard.take()
         };
 
@@ -92,11 +90,7 @@ impl L4BehaviorEngine {
         peer_kind: BucketPeerKind,
     ) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
-        let tuning = self
-            .tuning
-            .read()
-            .expect("behavior tuning lock poisoned")
-            .clone();
+        let tuning = read_lock(&self.tuning, "behavior tuning").clone();
         self.aggregate_for_peer_transport(peer_ip, canonicalize_transport(transport), peer_kind)
             .map(|bucket| policy_from_runtime(&bucket, overload_level.clone(), &tuning))
             .unwrap_or_else(|| default_policy(overload_level, &tuning))
@@ -152,8 +146,11 @@ impl L4BehaviorEngine {
         let tuning = self
             .tuning
             .read()
-            .expect("behavior tuning lock poisoned")
-            .clone();
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|poisoned| {
+                log::warn!("behavior tuning lock poisoned; recovering with current value");
+                poisoned.into_inner().clone()
+            });
         let mut policy = self
             .policy_for_key(&key, overload_level.clone())
             .unwrap_or_else(|| default_policy(overload_level.clone(), &tuning));
@@ -298,17 +295,9 @@ impl L4BehaviorEngine {
             active_connections,
             self.fallback_threshold,
             self.dropped_events.load(Ordering::Relaxed),
-            &self
-                .tuning
-                .read()
-                .expect("behavior tuning lock poisoned")
-                .clone(),
+            &read_lock(&self.tuning, "behavior tuning").clone(),
         );
-        let tuning = self
-            .tuning
-            .read()
-            .expect("behavior tuning lock poisoned")
-            .clone();
+        let tuning = read_lock(&self.tuning, "behavior tuning").clone();
 
         let mut normal_buckets = 0u64;
         let mut fine_grained_buckets = 0u64;
@@ -424,11 +413,7 @@ impl L4BehaviorEngine {
 
     pub fn connection_admission_for_key(&self, key: &BucketKey) -> L4AdaptivePolicy {
         let overload_level = self.current_overload_level();
-        let tuning = self
-            .tuning
-            .read()
-            .expect("behavior tuning lock poisoned")
-            .clone();
+        let tuning = read_lock(&self.tuning, "behavior tuning").clone();
         self.policy_for_key(key, overload_level.clone())
             .unwrap_or_else(|| default_policy(overload_level, &tuning))
     }
@@ -444,11 +429,7 @@ impl L4BehaviorEngine {
         key: &BucketKey,
         overload_level: L4OverloadLevel,
     ) -> Option<L4AdaptivePolicy> {
-        let tuning = self
-            .tuning
-            .read()
-            .expect("behavior tuning lock poisoned")
-            .clone();
+        let tuning = read_lock(&self.tuning, "behavior tuning").clone();
         self.lookup_bucket(key)
             .map(|bucket| policy_from_runtime(&bucket, overload_level, &tuning))
     }
@@ -469,11 +450,7 @@ impl L4BehaviorEngine {
             0,
             self.fallback_threshold,
             self.dropped_events.load(Ordering::Relaxed),
-            &self
-                .tuning
-                .read()
-                .expect("behavior tuning lock poisoned")
-                .clone(),
+            &read_lock(&self.tuning, "behavior tuning").clone(),
         )
     }
 

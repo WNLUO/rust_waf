@@ -5,6 +5,7 @@ use super::{
 };
 use crate::core::InspectionResult;
 use crate::l4::L4Inspector;
+use crate::locks::{mutex_lock, read_lock, write_lock};
 use crate::protocol::UnifiedHttpRequest;
 use anyhow::Result;
 use std::sync::Arc;
@@ -407,7 +408,7 @@ impl WafContext {
             .site_defense_buckets
             .entry(site_id.to_string())
             .or_insert_with(|| std::sync::Mutex::new(SiteDefenseBucket::default()));
-        let mut bucket = entry.lock().expect("site defense bucket lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "site defense bucket");
         if bucket.window_start != window_start {
             bucket.window_start = window_start;
             bucket.soft_events = 0;
@@ -434,7 +435,7 @@ impl WafContext {
             .route_defense_buckets
             .entry(route_key)
             .or_insert_with(|| std::sync::Mutex::new(SiteDefenseBucket::default()));
-        let mut bucket = entry.lock().expect("route defense bucket lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "route defense bucket");
         if bucket.window_start != window_start {
             bucket.window_start = window_start;
             bucket.soft_events = 0;
@@ -504,7 +505,7 @@ impl WafContext {
             .iter()
             .filter_map(|entry| {
                 let (site_id, route) = split_route_defense_key(entry.key())?;
-                let bucket = entry.value().lock().expect("route defense bucket lock poisoned");
+                let bucket = mutex_lock(entry.value(), "route defense bucket");
                 if now.saturating_sub(bucket.window_start) > 75 {
                     return None;
                 }
@@ -566,43 +567,32 @@ impl WafContext {
     }
 
     pub fn upstream_health_snapshot(&self) -> UpstreamHealthSnapshot {
-        self.upstream_health
-            .read()
-            .expect("upstream_health lock poisoned")
-            .clone()
+        read_lock(&self.upstream_health, "upstream_health").clone()
     }
 
     pub fn set_upstream_health(&self, healthy: bool, last_error: Option<String>) {
-        let mut guard = self
-            .upstream_health
-            .write()
-            .expect("upstream_health lock poisoned");
+        let mut guard = write_lock(&self.upstream_health, "upstream_health");
         guard.healthy = healthy;
         guard.last_error = last_error;
         guard.last_check_at = Some(unix_timestamp());
     }
 
     pub fn http3_runtime_snapshot(&self) -> Http3RuntimeSnapshot {
-        self.http3_runtime
-            .read()
-            .expect("http3_runtime lock poisoned")
-            .clone()
+        read_lock(&self.http3_runtime, "http3_runtime").clone()
     }
 
     pub fn auto_tuning_snapshot(&self) -> auto_tuning::AutoTuningRuntimeSnapshot {
-        self.auto_tuning_runtime
-            .read()
-            .expect("auto_tuning_runtime lock poisoned")
-            .clone()
+        read_lock(&self.auto_tuning_runtime, "auto_tuning_runtime").clone()
     }
 
     pub fn adaptive_protection_snapshot(
         &self,
     ) -> adaptive_protection::AdaptiveProtectionRuntimeSnapshot {
-        self.adaptive_protection_runtime
-            .read()
-            .expect("adaptive_protection_runtime lock poisoned")
-            .clone()
+        read_lock(
+            &self.adaptive_protection_runtime,
+            "adaptive_protection_runtime",
+        )
+        .clone()
     }
 
     pub async fn ai_auto_audit_runtime_snapshot(&self) -> AiAutoAuditRuntimeSnapshot {
@@ -655,10 +645,7 @@ impl WafContext {
 
         let decision = {
             let mut controller = self.auto_tuning_controller.lock().await;
-            let mut runtime = self
-                .auto_tuning_runtime
-                .write()
-                .expect("auto_tuning_runtime lock poisoned");
+            let mut runtime = write_lock(&self.auto_tuning_runtime, "auto_tuning_runtime");
             auto_tuning::run_control_step(&config, &mut runtime, &mut controller, &metrics, now)
         };
 
@@ -687,7 +674,11 @@ impl WafContext {
         let mut guard = self
             .http3_runtime
             .write()
-            .expect("http3_runtime lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("http3_runtime lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         let config = self.config_snapshot();
         guard.feature_available = cfg!(feature = "http3");
         guard.configured_enabled = config.http3_config.enabled;
@@ -705,7 +696,11 @@ impl WafContext {
         let mut guard = self
             .http3_runtime
             .write()
-            .expect("http3_runtime lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("http3_runtime lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         guard.feature_available = cfg!(feature = "http3");
         guard.configured_enabled = config.http3_config.enabled;
         guard.tls13_enabled = config.http3_config.enable_tls13;
@@ -744,7 +739,11 @@ impl WafContext {
         let mut guard = self
             .l4_inspector
             .write()
-            .expect("l4_inspector lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("l4_inspector lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         *guard = next;
         Ok(())
     }
@@ -773,7 +772,11 @@ impl WafContext {
         let mut guard = self
             .l7_bloom_filter
             .write()
-            .expect("l7_bloom_filter lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("l7_bloom_filter lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         *guard = next;
     }
 
@@ -795,7 +798,13 @@ impl WafContext {
         let mut guard = self
             .adaptive_protection_runtime
             .write()
-            .expect("adaptive_protection_runtime lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!(
+                    "adaptive_protection_runtime lock poisoned; recovering with current value"
+                );
+                poisoned.into_inner()
+            });
         *guard = snapshot;
     }
 }

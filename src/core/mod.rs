@@ -28,6 +28,7 @@ use crate::l7::{
     HttpTrafficProcessor, IpAccessGuard, L7BehaviorGuard, L7BloomFilterManager, L7CcGuard,
     SlowAttackGuard,
 };
+use crate::locks::{read_lock, write_lock};
 use crate::metrics::MetricsCollector;
 use crate::rules::RuleEngine;
 use crate::storage::{AiRouteProfileEntry, AiTempPolicyEntry, SqliteStore};
@@ -573,32 +574,18 @@ impl WafContext {
     }
 
     pub fn config_snapshot(&self) -> Config {
-        self.runtime_config
-            .read()
-            .expect("runtime_config lock poisoned")
-            .clone()
+        read_lock(&self.runtime_config, "runtime_config").clone()
     }
 
     pub fn apply_runtime_config(&self, config: Config) {
         {
-            let mut guard = self
-                .runtime_config
-                .write()
-                .expect("runtime_config lock poisoned");
+            let mut guard = write_lock(&self.runtime_config, "runtime_config");
             *guard = config;
         }
         {
-            let mut guard = self
-                .auto_tuning_runtime
-                .write()
-                .expect("auto_tuning_runtime lock poisoned");
-            auto_tuning::refresh_runtime_snapshot(
-                &mut guard,
-                &self
-                    .runtime_config
-                    .read()
-                    .expect("runtime_config lock poisoned"),
-            );
+            let mut guard = write_lock(&self.auto_tuning_runtime, "auto_tuning_runtime");
+            let runtime_config = read_lock(&self.runtime_config, "runtime_config");
+            auto_tuning::refresh_runtime_snapshot(&mut guard, &runtime_config);
         }
         self.refresh_adaptive_protection_runtime(None);
         let effective_cc_defense = self.effective_l7_cc_defense();
@@ -610,10 +597,7 @@ impl WafContext {
         self.refresh_l7_bloom_filter_from_config();
         self.refresh_l4_behavior_tuning_from_config();
         self.refresh_http3_runtime_metadata();
-        *self
-            .bot_provider_config
-            .write()
-            .expect("bot_provider_config lock poisoned") =
+        *write_lock(&self.bot_provider_config, "bot_provider_config") =
             self.config_snapshot().bot_detection.providers.clone();
     }
 
@@ -682,9 +666,7 @@ impl WafContext {
     }
 
     pub fn l4_inspector(&self) -> Option<Arc<L4Inspector>> {
-        self.l4_inspector
-            .read()
-            .expect("l4_inspector lock poisoned")
+        read_lock(&self.l4_inspector, "l4_inspector")
             .as_ref()
             .cloned()
     }
@@ -694,39 +676,25 @@ impl WafContext {
     }
 
     pub fn l7_bloom_filter(&self) -> Option<Arc<L7BloomFilterManager>> {
-        self.l7_bloom_filter
-            .read()
-            .expect("l7_bloom_filter lock poisoned")
+        read_lock(&self.l7_bloom_filter, "l7_bloom_filter")
             .as_ref()
             .cloned()
     }
 
     pub fn l7_cc_guard(&self) -> Arc<L7CcGuard> {
-        self.l7_cc_guard
-            .read()
-            .expect("l7_cc_guard lock poisoned")
-            .clone()
+        read_lock(&self.l7_cc_guard, "l7_cc_guard").clone()
     }
 
     pub fn ip_access_guard(&self) -> Arc<IpAccessGuard> {
-        self.ip_access_guard
-            .read()
-            .expect("ip_access_guard lock poisoned")
-            .clone()
+        read_lock(&self.ip_access_guard, "ip_access_guard").clone()
     }
 
     pub fn slow_attack_guard(&self) -> Arc<SlowAttackGuard> {
-        self.slow_attack_guard
-            .read()
-            .expect("slow_attack_guard lock poisoned")
-            .clone()
+        read_lock(&self.slow_attack_guard, "slow_attack_guard").clone()
     }
 
     pub fn l7_behavior_guard(&self) -> Arc<L7BehaviorGuard> {
-        self.l7_behavior_guard
-            .read()
-            .expect("l7_behavior_guard lock poisoned")
-            .clone()
+        read_lock(&self.l7_behavior_guard, "l7_behavior_guard").clone()
     }
 
     pub(crate) fn bot_ip_verifier(&self) -> Arc<bot_verifier::BotIpVerifier> {
@@ -734,11 +702,7 @@ impl WafContext {
     }
 
     pub(crate) fn bot_verifier_snapshot(&self) -> bot_verifier::BotVerifierSnapshot {
-        let providers = self
-            .bot_provider_config
-            .read()
-            .expect("bot_provider_config lock poisoned")
-            .clone();
+        let providers = read_lock(&self.bot_provider_config, "bot_provider_config").clone();
         self.bot_ip_verifier.snapshot(&providers)
     }
 

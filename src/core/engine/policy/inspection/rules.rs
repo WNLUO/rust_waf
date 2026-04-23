@@ -102,7 +102,11 @@ fn inspect_l4_rules(context: &WafContext, packet: &PacketInfo) -> InspectionResu
     let rule_engine_guard = context
         .rule_engine
         .read()
-        .expect("rule_engine lock poisoned");
+        .map(|guard| guard)
+        .unwrap_or_else(|poisoned| {
+            log::warn!("rule_engine lock poisoned; recovering with current value");
+            poisoned.into_inner()
+        });
     let Some(rule_engine) = rule_engine_guard.as_ref() else {
         return InspectionResult::allow(InspectionLayer::L4);
     };
@@ -147,7 +151,11 @@ fn inspect_l7_rules(
     let rule_engine_guard = context
         .rule_engine
         .read()
-        .expect("rule_engine lock poisoned");
+        .map(|guard| guard)
+        .unwrap_or_else(|poisoned| {
+            log::warn!("rule_engine lock poisoned; recovering with current value");
+            poisoned.into_inner()
+        });
     let Some(rule_engine) = rule_engine_guard.as_ref() else {
         return InspectionResult::allow(InspectionLayer::L7);
     };

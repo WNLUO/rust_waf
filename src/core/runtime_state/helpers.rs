@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::gateway::{GatewaySiteOverloadPolicy, GatewaySitePriority};
+use crate::locks::mutex_lock;
 
 pub(super) fn protocol_stream_budget(
     configured: usize,
@@ -134,7 +135,7 @@ fn defense_depth_rank(depth: DefenseDepth) -> u8 {
 impl WafContext {
     pub(super) fn site_defense_depth(&self, site_id: &str) -> Option<DefenseDepth> {
         let entry = self.site_defense_buckets.get(site_id)?;
-        let bucket = entry.lock().expect("site defense bucket lock poisoned");
+        let bucket = mutex_lock(entry.value(), "site defense bucket");
         let now = unix_timestamp();
         if now.saturating_sub(bucket.window_start) > 75 {
             return None;
@@ -155,7 +156,7 @@ impl WafContext {
         let entry = self
             .route_defense_buckets
             .get(&route_defense_key(site_id, route))?;
-        let bucket = entry.lock().expect("route defense bucket lock poisoned");
+        let bucket = mutex_lock(entry.value(), "route defense bucket");
         let now = unix_timestamp();
         if now.saturating_sub(bucket.window_start) > 75 {
             return None;
@@ -175,10 +176,7 @@ impl WafContext {
             .route_defense_buckets
             .iter()
             .filter_map(|entry| {
-                let bucket = entry
-                    .value()
-                    .lock()
-                    .expect("route defense bucket lock poisoned");
+                let bucket = entry.value().lock().ok()?;
                 (bucket.window_start < stale_before).then(|| entry.key().clone())
             })
             .take(256)
@@ -195,9 +193,7 @@ impl WafContext {
             .site_request_budget_buckets
             .entry(site_id.to_string())
             .or_default();
-        let mut bucket = entry
-            .lock()
-            .expect("site request budget bucket lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "site request budget bucket");
         if bucket.window_start != now {
             bucket.window_start = now;
             bucket.request_count = 0;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::locks::mutex_lock;
 
 #[derive(Debug)]
 pub(super) struct RouteBurstWindow {
@@ -68,7 +69,7 @@ impl RouteBurstWindow {
         unix_now: i64,
     ) -> RouteBurstAssessment {
         let now = sample.at;
-        let mut samples = self.samples.lock().expect("route burst lock poisoned");
+        let mut samples = mutex_lock(&self.samples, "route burst");
         while let Some(front) = samples.front() {
             if now.duration_since(front.at) > Duration::from_secs(ROUTE_BURST_WINDOW_SECS)
                 || samples.len() > MAX_BURST_SAMPLES_PER_ROUTE

@@ -165,7 +165,13 @@ impl WafContext {
             let mut guard = self
                 .ai_defense_trigger_runtime
                 .lock()
-                .expect("ai_defense_trigger_runtime lock poisoned");
+                .map(|guard| guard)
+                .unwrap_or_else(|poisoned| {
+                    log::warn!(
+                        "ai_defense_trigger_runtime lock poisoned; recovering with current value"
+                    );
+                    poisoned.into_inner()
+                });
             guard.pending_since = None;
         }
         if let Err(err) = self

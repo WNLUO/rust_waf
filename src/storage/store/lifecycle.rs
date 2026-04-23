@@ -1,3 +1,5 @@
+use crate::locks::mutex_lock;
+
 impl SqliteStore {
     pub fn queue_depth(&self) -> u64 {
         self.pending_writes.load(Ordering::Relaxed)
@@ -304,16 +306,15 @@ impl SqliteStore {
 
     pub async fn flush_aggregated_security_events(&self) -> Result<u64> {
         let drained = {
-            let mut guard = self
-                .aggregated_security_events
-                .lock()
-                .expect("aggregated_security_events lock poisoned");
+            let mut guard =
+                mutex_lock(&self.aggregated_security_events, "aggregated_security_events");
             guard.drain().map(|(_, bucket)| bucket).collect::<Vec<_>>()
         };
-        self.aggregated_security_event_candidates
-            .lock()
-            .expect("aggregated_security_event_candidates lock poisoned")
-            .clear();
+        mutex_lock(
+            &self.aggregated_security_event_candidates,
+            "aggregated_security_event_candidates",
+        )
+        .clear();
         let flushed = drained.len() as u64;
         for bucket in drained {
             let event = aggregated_bucket_to_event(bucket);
@@ -323,10 +324,7 @@ impl SqliteStore {
     }
 
     pub fn aggregation_insight_summary(&self) -> StorageAggregationInsightSummary {
-        let guard = self
-            .aggregated_security_events
-            .lock()
-            .expect("aggregated_security_events lock poisoned");
+        let guard = mutex_lock(&self.aggregated_security_events, "aggregated_security_events");
         let active_bucket_count = guard.len() as u64;
         let active_event_count = guard.values().map(|bucket| bucket.count).sum::<u64>();
         let mut hotspot_sources = guard
@@ -387,18 +385,15 @@ impl SqliteStore {
         let max_bucket_count = aggregated_security_bucket_limit(self.queue_capacity);
         let direct_key = aggregated_security_event_key(&event);
         let candidate_hits = {
-            let mut guard = self
-                .aggregated_security_event_candidates
-                .lock()
-                .expect("aggregated_security_event_candidates lock poisoned");
+            let mut guard = mutex_lock(
+                &self.aggregated_security_event_candidates,
+                "aggregated_security_event_candidates",
+            );
             let hits = guard.entry(direct_key.clone()).or_insert(0);
             *hits = hits.saturating_add(1);
             *hits
         };
-        let mut guard = self
-            .aggregated_security_events
-            .lock()
-            .expect("aggregated_security_events lock poisoned");
+        let mut guard = mutex_lock(&self.aggregated_security_events, "aggregated_security_events");
         let bucket_key = resolve_aggregated_security_event_key(
             &event,
             &direct_key,

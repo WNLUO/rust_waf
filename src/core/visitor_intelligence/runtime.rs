@@ -10,6 +10,7 @@ use super::types::{
 };
 use super::utils::{compact_text, visitor_priority_rank};
 use crate::core::{unix_timestamp, AiRouteResultObservation, WafContext};
+use crate::locks::mutex_lock;
 use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{AiVisitorDecisionUpsert, AiVisitorProfileUpsert};
 use std::sync::Mutex;
@@ -51,7 +52,7 @@ impl WafContext {
             .visitor_intelligence_buckets
             .entry(key)
             .or_insert_with(|| Mutex::new(VisitorIntelligenceBucket::default()));
-        let mut bucket = entry.lock().expect("visitor intelligence lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "visitor intelligence");
         if bucket.window_start != window_start {
             *bucket = VisitorIntelligenceBucket {
                 window_start,
@@ -200,7 +201,7 @@ impl WafContext {
             .visitor_intelligence_buckets
             .entry(key)
             .or_insert_with(|| Mutex::new(VisitorIntelligenceBucket::default()));
-        let mut bucket = entry.lock().expect("visitor intelligence lock poisoned");
+        let mut bucket = mutex_lock(entry.value(), "visitor intelligence");
         if bucket.first_seen_at == 0 {
             bucket.first_seen_at = now;
         }

@@ -1,4 +1,5 @@
 use crate::config::L4Config;
+use crate::locks::mutex_lock;
 use log::info;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -50,7 +51,7 @@ impl ConnectionTracker {
 
     pub fn track(&self, packet: &crate::core::PacketInfo) {
         let now = Instant::now();
-        let mut peers = self.peers.lock().expect("peers mutex poisoned");
+        let mut peers = mutex_lock(&self.peers, "peers");
         self.ensure_capacity(&mut peers, packet.source_ip);
 
         let peer = peers
@@ -66,12 +67,12 @@ impl ConnectionTracker {
     }
 
     pub fn get_active_connections(&self) -> u64 {
-        self.peers.lock().expect("peers mutex poisoned").len() as u64
+        mutex_lock(&self.peers, "peers").len() as u64
     }
 
     pub fn recent_connection_count(&self, ip: &IpAddr, window: Duration) -> usize {
         let now = Instant::now();
-        let mut peers = self.peers.lock().expect("peers mutex poisoned");
+        let mut peers = mutex_lock(&self.peers, "peers");
         let Some(peer) = peers.get_mut(ip) else {
             return 0;
         };
@@ -83,7 +84,7 @@ impl ConnectionTracker {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn unique_destination_ports(&self, ip: &IpAddr, window: Duration) -> usize {
         let now = Instant::now();
-        let mut peers = self.peers.lock().expect("peers mutex poisoned");
+        let mut peers = mutex_lock(&self.peers, "peers");
         let Some(peer) = peers.get_mut(ip) else {
             return 0;
         };
@@ -94,7 +95,7 @@ impl ConnectionTracker {
 
     pub fn cleanup_inactive(&self, timeout: Duration) {
         let now = Instant::now();
-        let mut peers = self.peers.lock().expect("peers mutex poisoned");
+        let mut peers = mutex_lock(&self.peers, "peers");
         let old_active = peers.len();
         peers.retain(|_, peer| {
             peer.prune(now, timeout);

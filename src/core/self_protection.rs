@@ -1,4 +1,5 @@
 use super::{unix_timestamp, WafContext};
+use crate::locks::{read_lock, write_lock};
 use anyhow::{anyhow, Result};
 use log::{debug, info, warn};
 use reqwest::Client;
@@ -66,10 +67,7 @@ impl WafContext {
     }
 
     pub fn server_public_ip_snapshot(&self) -> ServerPublicIpSnapshot {
-        let guard = self
-            .server_public_ips
-            .read()
-            .expect("server_public_ips lock poisoned");
+        let guard = read_lock(&self.server_public_ips, "server_public_ips");
         let mut ips = guard
             .ips
             .iter()
@@ -85,9 +83,7 @@ impl WafContext {
     }
 
     pub fn is_server_public_ip(&self, ip: IpAddr) -> bool {
-        self.server_public_ips
-            .read()
-            .expect("server_public_ips lock poisoned")
+        read_lock(&self.server_public_ips, "server_public_ips")
             .ips
             .contains(&ip)
     }
@@ -104,10 +100,7 @@ impl WafContext {
         if !is_public_routable_ip(ip) {
             return false;
         }
-        let mut guard = self
-            .server_public_ips
-            .write()
-            .expect("server_public_ips lock poisoned");
+        let mut guard = write_lock(&self.server_public_ips, "server_public_ips");
         if !guard.ips.insert(ip) {
             return true;
         }
@@ -134,10 +127,7 @@ impl WafContext {
     }
 
     fn server_public_ip_refresh_due(&self, now: i64) -> bool {
-        let guard = self
-            .server_public_ips
-            .read()
-            .expect("server_public_ips lock poisoned");
+        let guard = read_lock(&self.server_public_ips, "server_public_ips");
         guard
             .last_refresh_at
             .map(|last| now.saturating_sub(last) >= SERVER_PUBLIC_IP_REFRESH_SECS)
@@ -145,10 +135,7 @@ impl WafContext {
     }
 
     fn set_server_public_ip_refresh_started(&self, now: i64) {
-        let mut guard = self
-            .server_public_ips
-            .write()
-            .expect("server_public_ips lock poisoned");
+        let mut guard = write_lock(&self.server_public_ips, "server_public_ips");
         guard.last_refresh_at = Some(now);
     }
 
@@ -158,10 +145,7 @@ impl WafContext {
         now: i64,
         last_error: Option<String>,
     ) {
-        let mut guard = self
-            .server_public_ips
-            .write()
-            .expect("server_public_ips lock poisoned");
+        let mut guard = write_lock(&self.server_public_ips, "server_public_ips");
         guard.ips = ips;
         guard.last_refresh_at = Some(now);
         guard.last_success_at = Some(now);
@@ -169,10 +153,7 @@ impl WafContext {
     }
 
     fn set_server_public_ip_error(&self, now: i64, error: String) {
-        let mut guard = self
-            .server_public_ips
-            .write()
-            .expect("server_public_ips lock poisoned");
+        let mut guard = write_lock(&self.server_public_ips, "server_public_ips");
         guard.last_refresh_at = Some(now);
         guard.last_error = Some(error);
     }

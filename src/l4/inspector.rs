@@ -4,6 +4,7 @@ use crate::l4::behavior::{FeedbackSource, L4BehaviorEngine, L4BehaviorSnapshot};
 use crate::l4::bloom_filter::L4BloomFilterManager;
 use crate::l4::connection::limiter::RATE_LIMIT_BLOCK_DURATION_SECS;
 use crate::l4::connection::{ConnectionManager, RateLimitDecision};
+use crate::locks::mutex_lock;
 use crate::protocol::UnifiedHttpRequest;
 use log::{debug, info};
 use std::collections::HashMap;
@@ -302,7 +303,7 @@ impl L4Inspector {
     }
 
     pub fn get_statistics(&self) -> L4Statistics {
-        let per_port_stats = self.port_stats.lock().unwrap().clone();
+        let per_port_stats = mutex_lock(&self.port_stats, "port_stats").clone();
         let connection_stats = self.connection_manager.get_stats();
         L4Statistics {
             behavior: self.behavior_engine.snapshot(
@@ -327,7 +328,7 @@ impl L4Inspector {
     where
         F: FnOnce(&mut PortStats),
     {
-        let mut stats = self.port_stats.lock().unwrap();
+        let mut stats = mutex_lock(&self.port_stats, "port_stats");
         let port_stats = stats
             .entry(port.to_string())
             .or_insert_with(|| PortStats::new(port.to_string()));

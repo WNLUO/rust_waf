@@ -6,6 +6,7 @@ use super::types::{
     TrafficMapResponse,
 };
 use crate::core::WafContext;
+use crate::locks::mutex_lock;
 use crate::storage::StorageRealtimeEvent;
 use crate::storage::{
     BlockedIpQuery, BlockedIpSortField, EventSortField, SecurityEventQuery, SortDirection,
@@ -63,7 +64,7 @@ impl WsTicketStore {
     pub(super) fn issue(&self) -> AdminWsTicketResponse {
         let mut ticket = random_ticket();
         let expires_at = unix_timestamp() + Self::TTL_SECS;
-        let mut guard = self.tickets.lock().expect("ws_tickets mutex poisoned");
+        let mut guard = mutex_lock(&self.tickets, "ws_tickets");
 
         while guard.contains_key(&ticket) {
             ticket = random_ticket();
@@ -76,7 +77,7 @@ impl WsTicketStore {
 
     pub(super) fn consume(&self, ticket: &str) -> bool {
         let now = unix_timestamp();
-        let mut guard = self.tickets.lock().expect("ws_tickets mutex poisoned");
+        let mut guard = mutex_lock(&self.tickets, "ws_tickets");
         guard.retain(|_, expires| *expires > now);
         guard.remove(ticket).is_some_and(|expires| expires > now)
     }

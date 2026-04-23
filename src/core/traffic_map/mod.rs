@@ -10,6 +10,7 @@ mod geo;
 mod snapshot;
 mod types;
 
+use crate::locks::mutex_lock;
 use geo::{
     fallback_node, internal_node, is_internal_ip, map_remote_region_to_node,
     origin_node_from_geo_payload, origin_node_from_ip_sb_payload, origin_node_from_ipip_payload,
@@ -167,10 +168,7 @@ impl TrafficMapCollector {
     }
 
     fn record(&self, observation: TrafficObservation) {
-        let mut guard = self
-            .observations
-            .lock()
-            .expect("traffic map observation lock poisoned");
+        let mut guard = mutex_lock(&self.observations, "traffic map observation");
         guard.push_back(observation);
         let stale_before =
             unix_timestamp_ms() - i64::from(self.max_window_seconds).saturating_mul(1_000);
@@ -192,10 +190,7 @@ impl TrafficMapCollector {
         let stale_before = now_ms - i64::from(window_seconds) * 1_000;
 
         let observations = {
-            let mut guard = self
-                .observations
-                .lock()
-                .expect("traffic map observation lock poisoned");
+            let mut guard = mutex_lock(&self.observations, "traffic map observation");
             while guard
                 .front()
                 .map(|item| item.timestamp_ms < now_ms - i64::from(self.max_window_seconds) * 1_000)
@@ -256,7 +251,11 @@ impl TrafficMapCollector {
         if let Some(cached) = self
             .origin_cache
             .lock()
-            .expect("origin_cache lock poisoned")
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("origin_cache lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            })
             .clone()
             .filter(|cached| {
                 let ttl_ms = if cached.resolved {
@@ -273,7 +272,11 @@ impl TrafficMapCollector {
         let cached_success = self
             .origin_cache
             .lock()
-            .expect("origin_cache lock poisoned")
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("origin_cache lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            })
             .clone()
             .filter(|cached| cached.resolved);
 
@@ -290,7 +293,11 @@ impl TrafficMapCollector {
         let mut guard = self
             .origin_cache
             .lock()
-            .expect("origin_cache lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("origin_cache lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         *guard = Some(CachedOriginNode {
             node: node.clone(),
             refreshed_at_ms: now_ms,
@@ -449,7 +456,11 @@ mod tests {
         let guard = collector
             .observations
             .lock()
-            .expect("traffic map observation lock poisoned");
+            .map(|guard| guard)
+            .unwrap_or_else(|poisoned| {
+                log::warn!("traffic map observation lock poisoned; recovering with current value");
+                poisoned.into_inner()
+            });
         assert!(guard.len() <= TRAFFIC_MAP_MAX_OBSERVATIONS);
     }
 

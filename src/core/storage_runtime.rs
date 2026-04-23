@@ -1,5 +1,6 @@
 use super::{rule_engine::compile_rule_engine, unix_timestamp, WafContext};
 use crate::l4::L4Inspector;
+use crate::locks::write_lock;
 use crate::storage::SqliteStore;
 use anyhow::Result;
 use log::{info, warn};
@@ -29,7 +30,7 @@ impl WafContext {
         let new_engine = compile_rule_engine(rules)?;
 
         {
-            let mut guard = self.rule_engine.write().expect("rule_engine lock poisoned");
+            let mut guard = write_lock(&self.rule_engine, "rule_engine");
             *guard = new_engine;
         }
 

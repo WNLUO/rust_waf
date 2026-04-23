@@ -1,5 +1,6 @@
 use crate::config::l7::{IpAccessAction, IpAccessConfig, IpAccessMode};
 use crate::core::{InspectionLayer, InspectionResult, WafContext};
+use crate::locks::{read_lock, write_lock};
 use crate::protocol::UnifiedHttpRequest;
 use ipnet::IpNet;
 use std::net::IpAddr;
@@ -33,7 +34,7 @@ impl IpAccessGuard {
     }
 
     pub fn update_config(&self, config: &IpAccessConfig) {
-        *self.state.write().expect("ip_access lock poisoned") = IpAccessState::new(config);
+        *write_lock(&self.state, "ip_access") = IpAccessState::new(config);
     }
 
     pub fn inspect_request(
@@ -41,7 +42,7 @@ impl IpAccessGuard {
         context: &WafContext,
         request: &mut UnifiedHttpRequest,
     ) -> Option<InspectionResult> {
-        let state = self.state.read().expect("ip_access lock poisoned").clone();
+        let state = read_lock(&self.state, "ip_access").clone();
         let config = &state.config;
         if !config.enabled {
             return None;

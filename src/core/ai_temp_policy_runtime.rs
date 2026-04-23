@@ -4,16 +4,14 @@ use super::{
     },
     unix_timestamp, InspectionLayer, InspectionResult, WafContext,
 };
+use crate::locks::{read_lock, write_lock};
 use crate::protocol::UnifiedHttpRequest;
 use crate::storage::{AiTempPolicyEntry, AiTempPolicyHitRecord};
 use anyhow::Result;
 
 impl WafContext {
     pub fn active_ai_temp_policies(&self) -> Vec<AiTempPolicyEntry> {
-        self.ai_temp_policies
-            .read()
-            .expect("ai_temp_policies lock poisoned")
-            .clone()
+        read_lock(&self.ai_temp_policies, "ai_temp_policies").clone()
     }
 
     pub async fn refresh_ai_temp_policies(&self) -> Result<()> {
@@ -23,10 +21,7 @@ impl WafContext {
         let now = unix_timestamp();
         let _ = store.expire_ai_temp_policies(now).await?;
         let items = store.list_active_ai_temp_policies(now).await?;
-        let mut guard = self
-            .ai_temp_policies
-            .write()
-            .expect("ai_temp_policies lock poisoned");
+        let mut guard = write_lock(&self.ai_temp_policies, "ai_temp_policies");
         *guard = items;
         Ok(())
     }
@@ -35,10 +30,7 @@ impl WafContext {
         &self,
         request: &mut UnifiedHttpRequest,
     ) -> Option<InspectionResult> {
-        let policies = self
-            .ai_temp_policies
-            .read()
-            .expect("ai_temp_policies lock poisoned");
+        let policies = read_lock(&self.ai_temp_policies, "ai_temp_policies");
         if policies.is_empty() {
             return None;
         }

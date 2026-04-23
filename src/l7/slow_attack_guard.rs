@@ -1,5 +1,6 @@
 use crate::config::l7::SlowAttackDefenseConfig;
 use crate::core::CustomHttpResponse;
+use crate::locks::{mutex_lock, read_lock, write_lock};
 use dashmap::DashMap;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -64,18 +65,12 @@ impl SlowAttackGuard {
     }
 
     pub fn update_config(&self, config: &SlowAttackDefenseConfig) {
-        let mut guard = self
-            .config
-            .write()
-            .expect("slow attack config lock poisoned");
+        let mut guard = write_lock(&self.config, "slow attack config");
         *guard = config.clone();
     }
 
     pub fn config(&self) -> SlowAttackDefenseConfig {
-        self.config
-            .read()
-            .expect("slow attack config lock poisoned")
-            .clone()
+        read_lock(&self.config, "slow attack config").clone()
     }
 
     pub fn assess(&self, observation: SlowAttackObservation) -> SlowAttackAssessment {
@@ -239,10 +234,7 @@ impl SlidingWindowCounter {
 
     fn observe(&mut self, window: Duration, unix_now: i64) -> u32 {
         let now = Instant::now();
-        let mut events = self
-            .events
-            .lock()
-            .expect("slow attack bucket lock poisoned");
+        let mut events = mutex_lock(&self.events, "slow attack bucket");
         while let Some(front) = events.front() {
             if now.duration_since(*front) > window {
                 events.pop_front();

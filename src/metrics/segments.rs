@@ -1,4 +1,5 @@
 use super::ProxyMetricLabels;
+use crate::locks::mutex_lock;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -47,7 +48,7 @@ pub(super) fn update_segment_map(
     key: String,
     update: ProxySegmentUpdate,
 ) {
-    let mut guard = segments.lock().expect("segment metrics lock poisoned");
+    let mut guard = mutex_lock(segments, "segment metrics");
     let key = bounded_segment_key(&key, guard.len());
     let entry = guard
         .entry(key)
@@ -79,7 +80,7 @@ pub(super) fn segment_snapshots(
     scope: ProxySegmentScope,
     limit: usize,
 ) -> Vec<ProxyTrafficSegmentSnapshot> {
-    let guard = segments.lock().expect("segment metrics lock poisoned");
+    let guard = mutex_lock(segments, "segment metrics");
     let mut snapshots = guard
         .iter()
         .map(|(key, value)| build_segment_snapshot(scope, key, value))

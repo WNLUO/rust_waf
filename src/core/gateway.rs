@@ -1,5 +1,6 @@
 use crate::config::l7::SafeLineInterceptConfig;
 use crate::config::Config;
+use crate::locks::{read_lock, write_lock};
 use crate::storage::{LocalCertificateSecretEntry, LocalSiteEntry, SqliteStore};
 use anyhow::Result;
 use log::warn;
@@ -138,7 +139,7 @@ struct GatewayCertResolver {
 
 impl ResolvesServerCert for GatewayCertResolver {
     fn resolve(&self, client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
-        let state = self.inner.read().expect("gateway_runtime lock poisoned");
+        let state = read_lock(&self.inner, "gateway_runtime");
         client_hello
             .server_name()
             .and_then(normalize_sni_hostname)
@@ -168,13 +169,13 @@ impl GatewayRuntime {
 
     pub async fn reload(&self, config: &Config, store: Option<&SqliteStore>) -> Result<()> {
         let next = build_runtime_state(config, store).await?;
-        let mut guard = self.inner.write().expect("gateway_runtime lock poisoned");
+        let mut guard = write_lock(&self.inner, "gateway_runtime");
         *guard = next;
         Ok(())
     }
 
     pub fn tls_resolver(&self) -> Option<Arc<dyn ResolvesServerCert>> {
-        let state = self.inner.read().expect("gateway_runtime lock poisoned");
+        let state = read_lock(&self.inner, "gateway_runtime");
         if state.by_name.is_empty() && state.default_cert.is_none() {
             None
         } else {
@@ -183,12 +184,7 @@ impl GatewayRuntime {
     }
 
     pub fn has_sites(&self) -> bool {
-        !self
-            .inner
-            .read()
-            .expect("gateway_runtime lock poisoned")
-            .sites
-            .is_empty()
+        !read_lock(&self.inner, "gateway_runtime").sites.is_empty()
     }
 
     pub fn resolve_site(
@@ -197,7 +193,7 @@ impl GatewayRuntime {
         listener_port: u16,
     ) -> Option<GatewaySiteRuntime> {
         let hostname = hostname.and_then(normalize_hostname)?;
-        let state = self.inner.read().expect("gateway_runtime lock poisoned");
+        let state = read_lock(&self.inner, "gateway_runtime");
         let site_indexes = state.host_index.get(&hostname)?;
 
         site_indexes

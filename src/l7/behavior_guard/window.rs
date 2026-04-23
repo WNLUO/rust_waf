@@ -1,4 +1,5 @@
 use super::*;
+use crate::locks::mutex_lock;
 
 impl BehaviorWindow {
     pub(super) fn new() -> Self {
@@ -21,7 +22,7 @@ impl BehaviorWindow {
         unix_now: i64,
         window: Duration,
     ) -> BehaviorAssessment {
-        let mut samples = self.samples.lock().expect("behavior window lock poisoned");
+        let mut samples = mutex_lock(&self.samples, "behavior window");
         while let Some(front) = samples.front() {
             if now.duration_since(front.at) > window || samples.len() > MAX_SAMPLES_PER_IDENTITY {
                 samples.pop_front();
@@ -47,10 +48,7 @@ impl BehaviorWindow {
     }
 
     pub(super) fn recent_challenges(&self, now: Instant, window: Duration) -> usize {
-        let mut challenge_hits = self
-            .challenge_hits
-            .lock()
-            .expect("behavior challenge lock poisoned");
+        let mut challenge_hits = mutex_lock(&self.challenge_hits, "behavior challenge");
         while let Some(front) = challenge_hits.front() {
             if now.duration_since(*front) > window {
                 challenge_hits.pop_front();
@@ -62,10 +60,7 @@ impl BehaviorWindow {
     }
 
     pub(super) fn record_challenge(&mut self, now: Instant, window: Duration) {
-        let mut challenge_hits = self
-            .challenge_hits
-            .lock()
-            .expect("behavior challenge lock poisoned");
+        let mut challenge_hits = mutex_lock(&self.challenge_hits, "behavior challenge");
         while let Some(front) = challenge_hits.front() {
             if now.duration_since(*front) > window {
                 challenge_hits.pop_front();
@@ -77,10 +72,7 @@ impl BehaviorWindow {
     }
 
     pub(super) fn record_block(&mut self, now: Instant, window: Duration) {
-        let mut challenge_hits = self
-            .challenge_hits
-            .lock()
-            .expect("behavior challenge lock poisoned");
+        let mut challenge_hits = mutex_lock(&self.challenge_hits, "behavior challenge");
         while let Some(front) = challenge_hits.front() {
             if now.duration_since(*front) > window {
                 challenge_hits.pop_front();
@@ -97,7 +89,7 @@ impl BehaviorWindow {
         now: Instant,
         window: Duration,
     ) -> Option<BehaviorProfileSnapshot> {
-        let mut samples = self.samples.lock().expect("behavior window lock poisoned");
+        let mut samples = mutex_lock(&self.samples, "behavior window");
         while let Some(front) = samples.front() {
             if now.duration_since(front.at) > window || samples.len() > MAX_SAMPLES_PER_IDENTITY {
                 samples.pop_front();

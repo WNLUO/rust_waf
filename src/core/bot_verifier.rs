@@ -7,6 +7,7 @@ use std::sync::RwLock;
 use std::time::Duration;
 
 use crate::config::BotProviderConfig;
+use crate::locks::{read_lock, write_lock};
 use crate::storage::{BotIpCacheEntry, SqliteStore};
 
 const REFRESH_INTERVAL_SECS: u64 = 6 * 60 * 60;
@@ -76,7 +77,7 @@ impl BotIpVerifier {
 
     pub(crate) fn verify(&self, provider: &str, ip: IpAddr) -> BotVerificationStatus {
         let now = unix_timestamp();
-        let guard = self.cache.read().expect("bot verifier cache lock poisoned");
+        let guard = read_lock(&self.cache, "bot verifier cache");
         let ip_cache = guard.providers.get(provider);
         if ip_cache
             .filter(|cache| cache.last_success_at.is_some())
@@ -108,10 +109,7 @@ impl BotIpVerifier {
         let now = unix_timestamp();
         let key = dns_key(provider, ip);
         {
-            let mut guard = self
-                .cache
-                .write()
-                .expect("bot verifier cache lock poisoned");
+            let mut guard = write_lock(&self.cache, "bot verifier cache");
             if guard
                 .dns_verifications
                 .get(&key)
@@ -153,10 +151,7 @@ impl BotIpVerifier {
                 false
             }
         };
-        let mut guard = self
-            .cache
-            .write()
-            .expect("bot verifier cache lock poisoned");
+        let mut guard = write_lock(&self.cache, "bot verifier cache");
         guard.dns_pending.remove(&key);
         guard.dns_verifications.insert(
             key,
@@ -168,10 +163,7 @@ impl BotIpVerifier {
     }
 
     pub(crate) fn hydrate_from_entries(&self, entries: Vec<BotIpCacheEntry>) {
-        let mut guard = self
-            .cache
-            .write()
-            .expect("bot verifier cache lock poisoned");
+        let mut guard = write_lock(&self.cache, "bot verifier cache");
         for entry in entries {
             let ranges = serde_json::from_str::<Vec<String>>(&entry.ranges_json)
                 .unwrap_or_default()
@@ -194,7 +186,7 @@ impl BotIpVerifier {
         &self,
         configured_providers: &[BotProviderConfig],
     ) -> BotVerifierSnapshot {
-        let guard = self.cache.read().expect("bot verifier cache lock poisoned");
+        let guard = read_lock(&self.cache, "bot verifier cache");
         let mut providers = bot_ip_providers(configured_providers)
             .into_iter()
             .map(|provider| {
@@ -248,10 +240,7 @@ impl BotIpVerifier {
         for provider in bot_ip_providers(configured_providers) {
             let result = fetch_provider_ranges(&client, &provider).await;
             let refresh_result = {
-                let mut guard = self
-                    .cache
-                    .write()
-                    .expect("bot verifier cache lock poisoned");
+                let mut guard = write_lock(&self.cache, "bot verifier cache");
                 let cache = guard.providers.entry(provider.id.clone()).or_default();
                 cache.last_refresh_at = Some(unix_timestamp());
                 match result {
@@ -346,16 +335,22 @@ pub(crate) async fn run_bot_ip_refresh_loop(
 ) {
     let providers = configured_providers
         .read()
-        .expect("bot provider config lock poisoned")
-        .clone();
+        .map(|guard| guard.clone())
+        .unwrap_or_else(|poisoned| {
+            log::warn!("bot provider config lock poisoned; recovering with current value");
+            poisoned.into_inner().clone()
+        });
     verifier.refresh_once(&providers, store.as_deref()).await;
     let mut interval = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECS));
     loop {
         interval.tick().await;
         let providers = configured_providers
             .read()
-            .expect("bot provider config lock poisoned")
-            .clone();
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|poisoned| {
+                log::warn!("bot provider config lock poisoned; recovering with current value");
+                poisoned.into_inner().clone()
+            });
         verifier.refresh_once(&providers, store.as_deref()).await;
         if !has_any_success(&verifier) {
             tokio::time::sleep(Duration::from_secs(INITIAL_REFRESH_RETRY_SECS)).await;
@@ -411,7 +406,11 @@ fn has_any_success(verifier: &BotIpVerifier) -> bool {
     verifier
         .cache
         .read()
-        .expect("bot verifier cache lock poisoned")
+        .map(|guard| guard)
+        .unwrap_or_else(|poisoned| {
+            log::warn!("bot verifier cache lock poisoned; recovering with current value");
+            poisoned.into_inner()
+        })
         .providers
         .values()
         .any(|cache| cache.last_success_at.is_some())

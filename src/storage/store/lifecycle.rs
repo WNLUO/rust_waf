@@ -19,10 +19,11 @@ impl SqliteStore {
     }
 
     pub async fn new(path: String, auto_migrate: bool) -> Result<Self> {
-        Self::new_with_queue_capacity(
+        Self::new_with_runtime_options(
             path,
             auto_migrate,
             crate::config::default_sqlite_queue_capacity(),
+            0,
         )
         .await
     }
@@ -31,6 +32,15 @@ impl SqliteStore {
         path: String,
         auto_migrate: bool,
         queue_capacity: usize,
+    ) -> Result<Self> {
+        Self::new_with_runtime_options(path, auto_migrate, queue_capacity, 0).await
+    }
+
+    pub async fn new_with_runtime_options(
+        path: String,
+        auto_migrate: bool,
+        queue_capacity: usize,
+        pool_size: usize,
     ) -> Result<Self> {
         let db_path = PathBuf::from(path);
         ensure_parent_dir(&db_path).await?;
@@ -43,7 +53,8 @@ impl SqliteStore {
             auto_migrate
         );
 
-        let pool = match open_pool(&db_path, auto_migrate).await {
+        let pool_size = pool_size.clamp(1, 32) as u32;
+        let pool = match open_pool(&db_path, auto_migrate, pool_size).await {
             Ok(pool) => {
                 info!("SQLite database is ready: {}", db_path.display());
                 pool
@@ -58,7 +69,7 @@ impl SqliteStore {
                     "Moved corrupted SQLite database to backup: {}",
                     backup_path.display()
                 );
-                let pool = open_pool(&db_path, auto_migrate).await?;
+                let pool = open_pool(&db_path, auto_migrate, pool_size).await?;
                 info!(
                     "Recreated SQLite database after recovery: {}",
                     db_path.display()

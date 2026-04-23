@@ -71,6 +71,7 @@ fn normalize_base_config(config: &mut Config) {
     } else {
         clamp_or_default(config.sqlite_queue_capacity, 1024).clamp(256, 16_384)
     };
+    config.sqlite_pool_size = clamp_or_default(config.sqlite_pool_size, 0).min(32);
 
     if config.listen_addrs.is_empty() {
         config.listen_addrs = vec!["0.0.0.0:66".to_string()];

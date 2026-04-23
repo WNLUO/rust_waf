@@ -29,6 +29,7 @@ impl Default for Config {
             sqlite_path: default_sqlite_path(),
             sqlite_auto_migrate: default_sqlite_auto_migrate(),
             sqlite_queue_capacity: default_sqlite_queue_capacity(),
+            sqlite_pool_size: 0,
             storage_policy: StoragePolicyConfig::default(),
             sqlite_rules_enabled: default_sqlite_rules_enabled(),
             max_concurrent_tasks: 0,

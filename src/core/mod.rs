@@ -5,6 +5,7 @@ mod ai_temp_policy_runtime;
 mod auto_tuning;
 pub(crate) mod bot_intelligence;
 pub(crate) mod bot_verifier;
+mod environment_profile;
 pub mod engine;
 mod engine_maintenance;
 mod engine_tls;
@@ -13,6 +14,7 @@ pub mod packet;
 mod resource_budget;
 mod resource_sentinel;
 mod rule_engine;
+mod runtime_planner;
 mod runtime_state;
 mod self_protection;
 mod storage_runtime;
@@ -420,6 +422,8 @@ pub struct AiDefenseRunResult {
 
 impl WafContext {
     pub async fn new(config: Config) -> Result<Self> {
+        let plan = runtime_planner::apply_dynamic_runtime_plan(config, None, None);
+        let config = plan.config;
         let l4_enabled =
             config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
         let bloom_enabled = config.bloom_enabled;
@@ -432,10 +436,11 @@ impl WafContext {
         };
         let sqlite_store = if config.sqlite_enabled {
             Some(Arc::new(
-                SqliteStore::new_with_queue_capacity(
+                SqliteStore::new_with_runtime_options(
                     config.sqlite_path.clone(),
                     config.sqlite_auto_migrate,
                     config.sqlite_queue_capacity,
+                    config.sqlite_pool_size,
                 )
                 .await?,
             ))
@@ -578,6 +583,14 @@ impl WafContext {
     }
 
     pub fn apply_runtime_config(&self, config: Config) {
+        let metrics = self.metrics_snapshot();
+        let queue_usage = self
+            .sqlite_store
+            .as_ref()
+            .map(|store| store.queue_usage_percent());
+        let plan =
+            runtime_planner::apply_dynamic_runtime_plan(config, metrics.as_ref(), queue_usage);
+        let config = plan.config;
         {
             let mut guard = write_lock(&self.runtime_config, "runtime_config");
             *guard = config;

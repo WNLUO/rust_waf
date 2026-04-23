@@ -33,6 +33,8 @@ pub struct Config {
     #[serde(default = "super::default_sqlite_queue_capacity")]
     pub sqlite_queue_capacity: usize,
     #[serde(default)]
+    pub sqlite_pool_size: usize,
+    #[serde(default)]
     pub storage_policy: StoragePolicyConfig,
     #[serde(default, deserialize_with = "super::deserialize_boolish")]
     pub sqlite_rules_enabled: bool,

@@ -6,9 +6,11 @@ use sqlx::SqlitePool;
 use std::path::Path;
 use std::str::FromStr;
 
-const SQLITE_POOL_MAX_CONNECTIONS: u32 = 8;
-
-pub(crate) async fn open_pool(db_path: &Path, auto_migrate: bool) -> Result<SqlitePool> {
+pub(crate) async fn open_pool(
+    db_path: &Path,
+    auto_migrate: bool,
+    pool_size: u32,
+) -> Result<SqlitePool> {
     let connect_options =
         SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))?
             .create_if_missing(true)
@@ -16,8 +18,9 @@ pub(crate) async fn open_pool(db_path: &Path, auto_migrate: bool) -> Result<Sqli
             // FULL reduces the risk of losing committed records when the process or host crashes.
             .synchronous(SqliteSynchronous::Full)
             .foreign_keys(true);
+    let pool_size = pool_size.max(1).min(32);
     let pool = SqlitePoolOptions::new()
-        .max_connections(SQLITE_POOL_MAX_CONNECTIONS)
+        .max_connections(pool_size)
         .connect_with(connect_options)
         .await?;
     validate_database(&pool).await?;

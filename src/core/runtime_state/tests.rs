@@ -169,11 +169,18 @@ async fn site_survival_budget_enables_runtime_event_aggregation_metadata() {
 
 #[test]
 fn protocol_stream_budgets_shrink_under_runtime_depth() {
-    assert_eq!(protocol_stream_budget(128, "survival"), 8);
-    assert_eq!(protocol_stream_budget(128, "lean"), 24);
-    assert_eq!(protocol_stream_budget(128, "balanced"), 64);
-    assert_eq!(protocol_stream_budget(4, "survival"), 4);
-    assert_eq!(protocol_stream_budget(128, "full"), 128);
+    assert_eq!(protocol_stream_budget(128, "survival", 100), 8);
+    assert_eq!(protocol_stream_budget(128, "lean", 100), 24);
+    assert_eq!(protocol_stream_budget(128, "balanced", 100), 64);
+    assert_eq!(protocol_stream_budget(4, "survival", 100), 4);
+    assert_eq!(protocol_stream_budget(128, "full", 100), 128);
+}
+
+#[test]
+fn protocol_stream_budgets_scale_with_server_mode() {
+    assert_eq!(protocol_stream_budget(128, "balanced", 120), 76);
+    assert_eq!(protocol_stream_budget(128, "balanced", 85), 54);
+    assert_eq!(protocol_stream_budget(128, "full", 120), 128);
 }
 
 #[tokio::test]
@@ -245,13 +252,13 @@ async fn site_runtime_budget_marks_best_effort_site_for_shedding_in_survival() {
     };
     let context = WafContext::new(config).await.unwrap();
 
-    let mut request = UnifiedHttpRequest::new(
-        HttpVersion::Http1_1,
-        "GET".to_string(),
-        "/".to_string(),
-    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
     request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
-    request.add_metadata("gateway.site_priority".to_string(), "best_effort".to_string());
+    request.add_metadata(
+        "gateway.site_priority".to_string(),
+        "best_effort".to_string(),
+    );
     request.add_metadata(
         "gateway.site_overload_policy".to_string(),
         "sacrificial".to_string(),
@@ -259,12 +266,21 @@ async fn site_runtime_budget_marks_best_effort_site_for_shedding_in_survival() {
     request.add_metadata("gateway.site_reserved_rps".to_string(), "1".to_string());
     request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
     request.add_metadata("runtime.capacity.class".to_string(), "small".to_string());
-    request.add_metadata("runtime.pressure.storage_queue_percent".to_string(), "90".to_string());
+    request.add_metadata(
+        "runtime.pressure.storage_queue_percent".to_string(),
+        "90".to_string(),
+    );
+    request.add_metadata(
+        "runtime.server.mode_scale_percent".to_string(),
+        "85".to_string(),
+    );
 
     context.annotate_site_runtime_budget(&mut request);
 
     assert_eq!(
-        request.get_metadata("runtime.site.action").map(String::as_str),
+        request
+            .get_metadata("runtime.site.action")
+            .map(String::as_str),
         Some("shed")
     );
     assert_eq!(
@@ -283,11 +299,8 @@ async fn site_runtime_budget_challenges_critical_site_when_rps_exceeded() {
     };
     let context = WafContext::new(config).await.unwrap();
 
-    let mut request = UnifiedHttpRequest::new(
-        HttpVersion::Http1_1,
-        "GET".to_string(),
-        "/".to_string(),
-    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
     request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
     request.add_metadata("gateway.site_priority".to_string(), "critical".to_string());
     request.add_metadata(
@@ -297,14 +310,19 @@ async fn site_runtime_budget_challenges_critical_site_when_rps_exceeded() {
     request.add_metadata("gateway.site_reserved_rps".to_string(), "1".to_string());
     request.add_metadata("runtime.defense.depth".to_string(), "lean".to_string());
     request.add_metadata("runtime.capacity.class".to_string(), "tiny".to_string());
-    request.add_metadata("runtime.pressure.storage_queue_percent".to_string(), "80".to_string());
+    request.add_metadata(
+        "runtime.pressure.storage_queue_percent".to_string(),
+        "80".to_string(),
+    );
 
     for _ in 0..800 {
         context.annotate_site_runtime_budget(&mut request);
     }
 
     assert_eq!(
-        request.get_metadata("runtime.site.action").map(String::as_str),
+        request
+            .get_metadata("runtime.site.action")
+            .map(String::as_str),
         Some("challenge")
     );
     assert_eq!(
@@ -312,5 +330,34 @@ async fn site_runtime_budget_challenges_critical_site_when_rps_exceeded() {
             .get_metadata("runtime.site.over_rps_budget")
             .map(String::as_str),
         Some("true")
+    );
+}
+
+#[tokio::test]
+async fn server_mode_scales_site_rps_budget() {
+    let config = crate::config::Config {
+        sqlite_enabled: false,
+        ..crate::config::Config::default()
+    };
+    let context = WafContext::new(config).await.unwrap();
+
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    request.add_metadata("gateway.site_id".to_string(), "site-a".to_string());
+    request.add_metadata("gateway.site_priority".to_string(), "critical".to_string());
+    request.add_metadata("gateway.site_reserved_rps".to_string(), "100".to_string());
+    request.add_metadata("runtime.defense.depth".to_string(), "balanced".to_string());
+    request.add_metadata(
+        "runtime.server.mode_scale_percent".to_string(),
+        "85".to_string(),
+    );
+
+    context.annotate_site_runtime_budget(&mut request);
+
+    assert_eq!(
+        request
+            .get_metadata("runtime.site.effective_rps_limit")
+            .map(String::as_str),
+        Some("76")
     );
 }

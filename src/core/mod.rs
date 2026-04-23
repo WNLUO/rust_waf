@@ -49,7 +49,7 @@ pub use packet::{
     CustomHttpResponse, InspectionAction, InspectionLayer, InspectionResult, PacketInfo, Protocol,
     RandomStatusConfig, TarpitConfig,
 };
-pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget};
+pub use resource_budget::{DefenseDepth, RuntimeCapacityClass, RuntimeResourceBudget, ServerMode};
 pub use resource_sentinel::{
     ResourceSentinelAttackDiagnosis, ResourceSentinelAttackLifecycle,
     ResourceSentinelAttackMigration, ResourceSentinelAttackReport, ResourceSentinelAttackSession,
@@ -128,6 +128,9 @@ pub struct RuntimePressureSnapshot {
     pub level: &'static str,
     pub capacity_class: &'static str,
     pub defense_depth: &'static str,
+    pub server_mode: &'static str,
+    pub server_mode_scale_percent: u32,
+    pub server_mode_reason: &'static str,
     pub storage_queue_usage_percent: u64,
     pub cpu_usage_percent: f64,
     pub cpu_pressure_score: u8,

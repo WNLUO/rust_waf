@@ -30,6 +30,5 @@ pub(crate) use routing::{
     apply_gateway_site_metadata, enforce_upstream_policy, generate_request_id, http_status_text,
     infer_forwarded_proto, redirect_to_https_location, request_hostname, resolve_client_identity,
     resolve_gateway_site, resolve_safeline_intercept_config, select_upstream_target,
-    site_proxy_shed_reason,
-    should_reject_unmatched_site, unix_timestamp,
+    should_reject_unmatched_site, site_proxy_shed_reason, unix_timestamp,
 };

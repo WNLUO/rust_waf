@@ -65,28 +65,44 @@ impl WafContext {
             _ => "attack",
         };
 
-        let budget =
-            resource_budget::current_runtime_resource_budget(level, storage_queue_usage_percent);
-
         let mut pressure = RuntimePressureSnapshot {
             level,
-            capacity_class: budget.capacity_class.as_str(),
-            defense_depth: budget.defense_depth.as_str(),
+            capacity_class: "",
+            defense_depth: "",
+            server_mode: "",
+            server_mode_scale_percent: 100,
+            server_mode_reason: "",
             storage_queue_usage_percent,
             cpu_usage_percent: cpu_pressure.usage_percent,
             cpu_pressure_score: cpu_pressure.score,
             cpu_sample_available: cpu_pressure.sample_available,
-            drop_delay: matches!(level, "high" | "attack") || budget.prefer_drop,
+            drop_delay: matches!(level, "high" | "attack"),
             trim_event_persistence: storage_queue_usage_percent >= 75
-                || matches!(level, "high" | "attack")
-                || budget.aggregate_events,
-            l7_bucket_limit: budget.l7_bucket_limit,
-            l7_page_window_limit: budget.l7_page_window_limit,
-            behavior_bucket_limit: budget.behavior_bucket_limit,
-            behavior_sample_stride: budget.behavior_sample_stride,
-            prefer_drop: budget.prefer_drop,
+                || matches!(level, "high" | "attack"),
+            l7_bucket_limit: 0,
+            l7_page_window_limit: 0,
+            behavior_bucket_limit: 0,
+            behavior_sample_stride: 1,
+            prefer_drop: false,
         };
         self.resource_sentinel.apply_runtime_pressure(&mut pressure);
+        let budget = resource_budget::current_runtime_resource_budget(
+            pressure.level,
+            pressure.storage_queue_usage_percent,
+        );
+        pressure.capacity_class = budget.capacity_class.as_str();
+        pressure.defense_depth = budget.defense_depth.as_str();
+        pressure.server_mode = budget.server_mode.as_str();
+        pressure.server_mode_scale_percent = budget.server_mode_scale_percent;
+        pressure.server_mode_reason = budget.server_mode_reason;
+        pressure.drop_delay = pressure.drop_delay || budget.prefer_drop;
+        pressure.trim_event_persistence =
+            pressure.trim_event_persistence || budget.aggregate_events;
+        pressure.l7_bucket_limit = budget.l7_bucket_limit;
+        pressure.l7_page_window_limit = budget.l7_page_window_limit;
+        pressure.behavior_bucket_limit = budget.behavior_bucket_limit;
+        pressure.behavior_sample_stride = budget.behavior_sample_stride;
+        pressure.prefer_drop = budget.prefer_drop;
         pressure
     }
 
@@ -119,6 +135,18 @@ impl WafContext {
         request.add_metadata(
             "runtime.defense.depth".to_string(),
             pressure.defense_depth.to_string(),
+        );
+        request.add_metadata(
+            "runtime.server.mode".to_string(),
+            pressure.server_mode.to_string(),
+        );
+        request.add_metadata(
+            "runtime.server.mode_scale_percent".to_string(),
+            pressure.server_mode_scale_percent.to_string(),
+        );
+        request.add_metadata(
+            "runtime.server.mode_reason".to_string(),
+            pressure.server_mode_reason.to_string(),
         );
         request.add_metadata(
             "runtime.budget.l7_bucket_limit".to_string(),
@@ -187,6 +215,11 @@ impl WafContext {
             .get_metadata("runtime.pressure.storage_queue_percent")
             .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(0);
+        let server_mode_scale_percent = request
+            .get_metadata("runtime.server.mode_scale_percent")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(100)
+            .clamp(50, 140);
         let budget =
             resource_budget::current_runtime_resource_budget(pseudo_pressure, current_queue);
         if defense_depth_is_stricter(effective_depth, current_depth) {
@@ -246,6 +279,10 @@ impl WafContext {
         } else {
             capacity_rps_floor(budget.capacity_class.as_str(), site_priority)
         };
+        let base_rps_limit = base_rps_limit
+            .saturating_mul(server_mode_scale_percent)
+            .saturating_div(100)
+            .max(1);
         let effective_rps_limit = base_rps_limit
             .saturating_mul(depth_rps_scale_percent(effective_depth))
             .saturating_div(100)
@@ -295,10 +332,7 @@ impl WafContext {
             "runtime.site.current_rps".to_string(),
             current_rps.to_string(),
         );
-        request.add_metadata(
-            "runtime.site.action".to_string(),
-            site_action.to_string(),
-        );
+        request.add_metadata("runtime.site.action".to_string(), site_action.to_string());
         request.add_metadata(
             "runtime.site.proxy_mode".to_string(),
             if matches!(site_action, "fail_close" | "shed") {
@@ -311,7 +345,10 @@ impl WafContext {
             .to_string(),
         );
         if over_rps_budget {
-            request.add_metadata("runtime.site.over_rps_budget".to_string(), "true".to_string());
+            request.add_metadata(
+                "runtime.site.over_rps_budget".to_string(),
+                "true".to_string(),
+            );
             request.add_metadata(
                 "runtime.site.defense_reason".to_string(),
                 "site_reserved_rps_budget_exceeded".to_string(),
@@ -424,13 +461,20 @@ impl WafContext {
 
     pub fn effective_http2_max_concurrent_streams(&self, configured: usize) -> usize {
         let pressure = self.runtime_pressure_snapshot();
-        protocol_stream_budget(configured, pressure.defense_depth)
+        protocol_stream_budget(
+            configured,
+            pressure.defense_depth,
+            pressure.server_mode_scale_percent,
+        )
     }
 
     pub fn apply_http3_runtime_budget(&self, config: &mut crate::config::Http3Config) {
         let pressure = self.runtime_pressure_snapshot();
-        config.max_concurrent_streams =
-            protocol_stream_budget(config.max_concurrent_streams, pressure.defense_depth);
+        config.max_concurrent_streams = protocol_stream_budget(
+            config.max_concurrent_streams,
+            pressure.defense_depth,
+            pressure.server_mode_scale_percent,
+        );
         if matches!(pressure.defense_depth, "lean" | "survival") {
             config.enable_connection_migration = false;
             config.qpack_table_size = config.qpack_table_size.min(1024);

@@ -1,13 +1,28 @@
 use super::*;
 use crate::core::gateway::{GatewaySiteOverloadPolicy, GatewaySitePriority};
 
-pub(super) fn protocol_stream_budget(configured: usize, defense_depth: &str) -> usize {
+pub(super) fn protocol_stream_budget(
+    configured: usize,
+    defense_depth: &str,
+    server_mode_scale_percent: u32,
+) -> usize {
     let configured = configured.max(1);
-    match defense_depth {
-        "survival" => configured.min(8),
-        "lean" => configured.min(24),
-        "balanced" => configured.min(64),
+    let scale = server_mode_scale_percent.max(50) as usize;
+    let depth_budget = match defense_depth {
+        "survival" => 8,
+        "lean" => 24,
+        "balanced" => 64,
         _ => configured,
+    };
+    if matches!(defense_depth, "full" | "") {
+        configured
+    } else {
+        configured.min(
+            depth_budget
+                .saturating_mul(scale)
+                .saturating_div(100)
+                .max(1),
+        )
     }
 }
 
@@ -34,10 +49,7 @@ pub(super) fn metadata_u32(request: &UnifiedHttpRequest, key: &str) -> u32 {
         .unwrap_or(0)
 }
 
-pub(super) fn capacity_rps_floor(
-    capacity_class: &str,
-    priority: GatewaySitePriority,
-) -> u32 {
+pub(super) fn capacity_rps_floor(capacity_class: &str, priority: GatewaySitePriority) -> u32 {
     match capacity_class {
         "tiny" => match priority {
             GatewaySitePriority::Critical => 120,

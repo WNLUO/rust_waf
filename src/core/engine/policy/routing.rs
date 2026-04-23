@@ -156,8 +156,11 @@ pub(crate) fn select_upstream_target(site: Option<&GatewaySiteRuntime>) -> Optio
 }
 
 pub(crate) fn site_proxy_shed_reason(request: &UnifiedHttpRequest) -> Option<&'static str> {
-    (request.get_metadata("runtime.site.proxy_mode").map(String::as_str) == Some("shed"))
-        .then_some("site temporarily shed under runtime pressure")
+    (request
+        .get_metadata("runtime.site.proxy_mode")
+        .map(String::as_str)
+        == Some("shed"))
+    .then_some("site temporarily shed under runtime pressure")
 }
 
 pub(crate) fn resolve_safeline_intercept_config<'a>(

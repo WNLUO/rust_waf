@@ -215,8 +215,7 @@ impl LocalSiteUpsertRequest {
             .transpose()?;
         let priority = crate::core::gateway::normalize_site_priority(&self.priority).to_string();
         let overload_policy =
-            crate::core::gateway::normalize_site_overload_policy(&self.overload_policy)
-                .to_string();
+            crate::core::gateway::normalize_site_overload_policy(&self.overload_policy).to_string();
         let source = non_empty_string(self.source).unwrap_or_else(|| "manual".to_string());
         let sync_mode = non_empty_string(self.sync_mode).unwrap_or_else(|| "manual".to_string());
         let notes = self.notes.trim().to_string();

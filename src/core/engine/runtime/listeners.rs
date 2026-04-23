@@ -69,12 +69,23 @@ fn channel_limits(context: &WafContext, channel: &str) -> (usize, usize) {
     }
 }
 
+fn effective_limits(
+    context: &WafContext,
+    channel: &str,
+    capacity_override: Option<usize>,
+) -> (usize, usize) {
+    let (logical_limit, default_capacity) = channel_limits(context, channel);
+    let capacity = capacity_override.unwrap_or(default_capacity).max(1);
+    (logical_limit.min(capacity), capacity)
+}
+
 fn semaphore_pressure(
     context: &WafContext,
     semaphore: &Semaphore,
     channel: &str,
+    capacity_override: Option<usize>,
 ) -> (usize, usize, usize, u64) {
-    let (logical_limit, capacity) = channel_limits(context, channel);
+    let (logical_limit, capacity) = effective_limits(context, channel, capacity_override);
     let available_total = semaphore.available_permits().min(capacity);
     let used = capacity.saturating_sub(available_total);
     let available_within_limit = logical_limit.saturating_sub(used.min(logical_limit));
@@ -82,8 +93,14 @@ fn semaphore_pressure(
     (available_within_limit, logical_limit, used, usage_percent)
 }
 
-fn adaptive_permit_wait_ms(context: &WafContext, semaphore: &Semaphore, channel: &str) -> u64 {
-    let (_, _, _, usage_percent) = semaphore_pressure(context, semaphore, channel);
+fn adaptive_permit_wait_ms(
+    context: &WafContext,
+    semaphore: &Semaphore,
+    channel: &str,
+    capacity_override: Option<usize>,
+) -> u64 {
+    let (_, _, _, usage_percent) =
+        semaphore_pressure(context, semaphore, channel, capacity_override);
     let auto = context.auto_tuning_snapshot();
     let cpu_cores = auto.detected_cpu_cores.max(1);
     let memory_mb = auto.detected_memory_limit_mb.unwrap_or(2048);
@@ -111,8 +128,9 @@ fn adaptive_permit_wait_ms_for_peer(
     semaphore: &Semaphore,
     peer_addr: std::net::SocketAddr,
     channel: &str,
+    capacity_override: Option<usize>,
 ) -> u64 {
-    let wait_ms = adaptive_permit_wait_ms(context, semaphore, channel);
+    let wait_ms = adaptive_permit_wait_ms(context, semaphore, channel, capacity_override);
     let trusted_proxy_peer =
         crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
     let is_tls_post_handshake = channel.eq_ignore_ascii_case("TLS post-handshake");
@@ -134,9 +152,20 @@ pub(crate) async fn acquire_permit_auto(
     peer_addr: std::net::SocketAddr,
     channel: &str,
 ) -> Option<OwnedSemaphorePermit> {
+    acquire_permit_auto_with_capacity(context, semaphore, peer_addr, channel, None).await
+}
+
+pub(crate) async fn acquire_permit_auto_with_capacity(
+    context: &WafContext,
+    semaphore: Arc<Semaphore>,
+    peer_addr: std::net::SocketAddr,
+    channel: &str,
+    capacity_override: Option<usize>,
+) -> Option<OwnedSemaphorePermit> {
     let trusted_proxy_peer =
         crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
-    let (_, logical_limit, used, _) = semaphore_pressure(context, semaphore.as_ref(), channel);
+    let (_, logical_limit, used, _) =
+        semaphore_pressure(context, semaphore.as_ref(), channel, capacity_override);
     if used < logical_limit {
         if let Ok(permit) = semaphore.clone().try_acquire_owned() {
             return Some(permit);
@@ -144,12 +173,17 @@ pub(crate) async fn acquire_permit_auto(
     }
 
     if used >= logical_limit {
-        let wait_ms =
-            adaptive_permit_wait_ms_for_peer(context, semaphore.as_ref(), peer_addr, channel);
+        let wait_ms = adaptive_permit_wait_ms_for_peer(
+            context,
+            semaphore.as_ref(),
+            peer_addr,
+            channel,
+            capacity_override,
+        );
         let wait = std::time::Duration::from_millis(wait_ms);
         tokio::time::sleep(wait).await;
         let (_, logical_limit, used, usage_percent) =
-            semaphore_pressure(context, semaphore.as_ref(), channel);
+            semaphore_pressure(context, semaphore.as_ref(), channel, capacity_override);
         if used >= logical_limit {
             if trusted_proxy_peer {
                 if let Some(metrics) = context.metrics.as_ref() {
@@ -168,14 +202,20 @@ pub(crate) async fn acquire_permit_auto(
         return Some(permit);
     }
 
-    let wait_ms = adaptive_permit_wait_ms_for_peer(context, semaphore.as_ref(), peer_addr, channel);
+    let wait_ms = adaptive_permit_wait_ms_for_peer(
+        context,
+        semaphore.as_ref(),
+        peer_addr,
+        channel,
+        capacity_override,
+    );
     let wait = std::time::Duration::from_millis(wait_ms);
     match tokio::time::timeout(wait, semaphore.clone().acquire_owned()).await {
         Ok(Ok(permit)) => Some(permit),
         Ok(Err(_)) => None,
         Err(_) => {
             let (available, total, _, usage_percent) =
-                semaphore_pressure(context, semaphore.as_ref(), channel);
+                semaphore_pressure(context, semaphore.as_ref(), channel, capacity_override);
             if trusted_proxy_peer {
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_trusted_proxy_permit_drop();
@@ -581,11 +621,12 @@ async fn spawn_https_entry_listener(
                 accept_result = listener.accept() => {
                     match accept_result {
                         Ok((stream, peer_addr)) => {
-                            if let Some(handshake_permit) = acquire_permit_auto(
+                            if let Some(handshake_permit) = acquire_permit_auto_with_capacity(
                                 context.as_ref(),
                                 Arc::clone(&handshake_semaphore),
                                 peer_addr,
                                 "TLS handshake",
+                                Some(handshake_limit),
                             )
                             .await {
                                 let ctx = Arc::clone(&context);
@@ -732,4 +773,58 @@ pub(super) fn build_http3_endpoint(
     config: &crate::config::Http3Config,
 ) -> Result<Option<quinn::Endpoint>> {
     engine_tls::build_http3_endpoint(config)
+}
+
+#[cfg(test)]
+mod tests {
+    struct FakeContext {
+        request_limit: usize,
+        request_capacity: usize,
+        connection_limit: usize,
+        connection_capacity: usize,
+    }
+
+    impl FakeContext {
+        fn as_limits(&self, channel: &str, capacity_override: Option<usize>) -> (usize, usize) {
+            let (logical_limit, default_capacity) = if channel.eq_ignore_ascii_case("HTTP/1.1 request")
+                || channel.eq_ignore_ascii_case("HTTP/2 request")
+                || channel.eq_ignore_ascii_case("HTTP/3 request")
+                || channel.eq_ignore_ascii_case("UDP request")
+            {
+                (self.request_limit, self.request_capacity)
+            } else {
+                (self.connection_limit, self.connection_capacity)
+            };
+            let capacity = capacity_override.unwrap_or(default_capacity).max(1);
+            (logical_limit.min(capacity), capacity)
+        }
+    }
+
+    #[test]
+    fn handshake_capacity_override_caps_logical_limit_to_real_semaphore_size() {
+        let fake = FakeContext {
+            request_limit: 128,
+            request_capacity: 1024,
+            connection_limit: 1024,
+            connection_capacity: 4096,
+        };
+        assert_eq!(
+            fake.as_limits("TLS handshake", Some(1024)),
+            (1024, 1024)
+        );
+    }
+
+    #[test]
+    fn handshake_capacity_override_prevents_phantom_used_permits_math() {
+        let fake = FakeContext {
+            request_limit: 128,
+            request_capacity: 1024,
+            connection_limit: 1024,
+            connection_capacity: 4096,
+        };
+        let (logical_limit, capacity) = fake.as_limits("TLS handshake", Some(1024));
+        let available_total = 1024usize.min(capacity);
+        let used = capacity.saturating_sub(available_total);
+        assert_eq!((logical_limit, capacity, used), (1024, 1024, 0));
+    }
 }

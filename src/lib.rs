@@ -2,7 +2,7 @@
 // 导出公共API用于测试
 
 use anyhow::Result;
-use log::info;
+use log::{info, warn};
 use rand::distributions::{Alphanumeric, DistString};
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use std::path::{Path, PathBuf};
@@ -71,7 +71,21 @@ pub async fn load_runtime_config() -> Result<Config> {
     config.sqlite_path = sqlite_path;
     config.sqlite_auto_migrate = true;
 
-    Ok(config::apply_env_overrides(config).normalized())
+    let mut config = config::apply_env_overrides(config).normalized();
+    if let Ok(value) = std::env::var("WAF_SQLITE_QUEUE_CAPACITY") {
+        match value.trim().parse::<usize>() {
+            Ok(capacity) if capacity > 0 => {
+                config.sqlite_queue_capacity = capacity;
+                info!("Overrode SQLite queue capacity via environment: {}", capacity);
+            }
+            _ => warn!(
+                "Unsupported WAF_SQLITE_QUEUE_CAPACITY '{}', keeping normalized value",
+                value
+            ),
+        }
+    }
+
+    Ok(config)
 }
 
 pub async fn build_engine() -> Result<WafEngine> {

@@ -7,8 +7,10 @@ use anyhow::Result;
 use log::{debug, warn};
 use serde_json::Value;
 use sqlx::SqlitePool;
+use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Notify};
 
 const MAX_EVENT_DETAILS_BYTES: usize = 4 * 1024;
@@ -21,6 +23,7 @@ pub(crate) async fn run_writer(
     pending_writes: Arc<AtomicU64>,
     pending_write_notify: Arc<Notify>,
 ) {
+    let writer_delay = writer_delay_from_env();
     while let Some(command) = receiver.recv().await {
         let result = match command {
             StorageCommand::SecurityEvent(event) => {
@@ -57,8 +60,20 @@ pub(crate) async fn run_writer(
                 warn!("SQLite writer task failed to persist record: {}", err);
             }
         }
+        if !writer_delay.is_zero() {
+            tokio::time::sleep(writer_delay).await;
+        }
         finish_pending_write(&pending_writes, &pending_write_notify);
     }
+}
+
+fn writer_delay_from_env() -> Duration {
+    env::var("WAF_SQLITE_WRITER_DELAY_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|delay_ms| *delay_ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or_default()
 }
 
 pub(crate) async fn persist_security_event(

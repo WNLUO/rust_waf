@@ -237,7 +237,7 @@ fn server_mode(
     pressure_level: &str,
     storage_queue_usage_percent: u64,
 ) -> ServerMode {
-    if pressure_level == "attack" || storage_queue_usage_percent >= 95 {
+    if storage_queue_usage_percent >= 95 {
         return ServerMode::Survival;
     }
 
@@ -252,15 +252,21 @@ fn server_mode(
         RuntimeCapacityClass::Small => {
             if pressure_level == "normal" {
                 ServerMode::Conservative
+            } else if pressure_level == "attack" && storage_queue_usage_percent < 75 {
+                ServerMode::Conservative
             } else if pressure_level == "elevated" && storage_queue_usage_percent < 75 {
                 ServerMode::Balanced
-            } else {
+            } else if pressure_level == "high" || storage_queue_usage_percent >= 75 {
                 ServerMode::Conservative
+            } else {
+                ServerMode::Balanced
             }
         }
         RuntimeCapacityClass::Standard => {
             if pressure_level == "normal" && storage_queue_usage_percent < 60 {
                 ServerMode::Balanced
+            } else if pressure_level == "attack" && storage_queue_usage_percent < 85 {
+                ServerMode::Conservative
             } else if pressure_level == "high" || storage_queue_usage_percent >= 75 {
                 ServerMode::Conservative
             } else {
@@ -272,7 +278,7 @@ fn server_mode(
                 ServerMode::Throughput
             } else if pressure_level == "elevated" && storage_queue_usage_percent < 70 {
                 ServerMode::Balanced
-            } else if pressure_level == "high" {
+            } else if pressure_level == "high" || pressure_level == "attack" {
                 ServerMode::Conservative
             } else {
                 ServerMode::Balanced
@@ -302,11 +308,19 @@ fn defense_depth(
     pressure_level: &str,
     storage_queue_usage_percent: u64,
 ) -> DefenseDepth {
-    if pressure_level == "attack" || storage_queue_usage_percent >= 90 {
+    if storage_queue_usage_percent >= 90 {
         return DefenseDepth::Survival;
     }
     if matches!(capacity_class, RuntimeCapacityClass::Tiny) && pressure_level != "normal" {
         return DefenseDepth::Survival;
+    }
+    if pressure_level == "attack" {
+        return match capacity_class {
+            RuntimeCapacityClass::Small
+            | RuntimeCapacityClass::Standard
+            | RuntimeCapacityClass::Large => DefenseDepth::Lean,
+            RuntimeCapacityClass::Tiny => DefenseDepth::Survival,
+        };
     }
     if pressure_level == "high" || storage_queue_usage_percent >= 75 {
         return DefenseDepth::Lean;
@@ -379,6 +393,17 @@ mod tests {
         assert!(survival.prefer_drop);
         assert_eq!(survival.behavior_sample_stride, u64::MAX);
         assert_eq!(survival.server_mode, ServerMode::Balanced);
+    }
+
+    #[test]
+    fn standard_system_prefers_conservative_attack_mode_before_queue_saturation() {
+        let budget =
+            RuntimeResourceBudget::from_system_and_pressure(&profile(2, Some(4096)), "attack", 0);
+
+        assert_eq!(budget.capacity_class, RuntimeCapacityClass::Standard);
+        assert_eq!(budget.defense_depth, DefenseDepth::Lean);
+        assert_eq!(budget.server_mode, ServerMode::Conservative);
+        assert_eq!(budget.server_mode_scale_percent, 85);
     }
 
     #[test]

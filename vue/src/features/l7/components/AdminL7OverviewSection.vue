@@ -4,6 +4,11 @@ import { Activity, ArrowUpRight, Cpu, Gauge, Shield, TimerReset, Zap } from 'luc
 import CyberCard from '@/shared/ui/CyberCard.vue'
 import MetricWidget from '@/shared/ui/MetricWidget.vue'
 import StatusBadge from '@/shared/ui/StatusBadge.vue'
+import {
+  serverModeBadgeType,
+  serverModeLabel,
+  serverModeReasonLabel,
+} from '@/features/dashboard/utils/dashboardLabels'
 import type { L7ConfigForm } from '@/features/l7/utils/adminL7'
 import type { L7StatsPayload } from '@/shared/types'
 
@@ -311,6 +316,10 @@ function defenseDepthLabel(value?: string) {
       return value || 'unknown'
   }
 }
+
+function serverModeText(value?: string) {
+  return serverModeLabel(value)
+}
 </script>
 
 <template>
@@ -419,9 +428,13 @@ function defenseDepthLabel(value?: string) {
             :text="defenseDepthLabel(stats?.runtime_defense_depth)"
             :type="stats?.runtime_defense_depth === 'survival' ? 'warning' : 'info'"
           />
+          <StatusBadge
+            :text="serverModeText(stats?.runtime_server_mode)"
+            :type="serverModeBadgeType(stats?.runtime_server_mode)"
+          />
         </div>
       </template>
-      <div class="grid gap-3 md:grid-cols-2">
+      <div class="grid gap-3 md:grid-cols-3">
         <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
           <p class="text-xs tracking-wide text-slate-500">CPU 压力</p>
           <p class="mt-3 text-2xl font-semibold text-stone-900">
@@ -441,6 +454,16 @@ function defenseDepthLabel(value?: string) {
             {{ formatNumber(stats?.runtime_pressure_storage_queue_percent || 0) }}%
           </p>
           <p class="mt-1 text-xs text-slate-500">事件持久化压力输入</p>
+        </div>
+        <div class="rounded-xl border border-slate-200 bg-white/80 p-4">
+          <p class="text-xs tracking-wide text-slate-500">服务器模式</p>
+          <p class="mt-3 text-2xl font-semibold text-stone-900">
+            {{ serverModeText(stats?.runtime_server_mode) }}
+          </p>
+          <p class="mt-1 text-xs text-slate-500">
+            缩放 {{ formatNumber(stats?.runtime_server_mode_scale_percent || 0) }}%
+            · {{ serverModeReasonLabel(stats?.runtime_server_mode_reason) }}
+          </p>
         </div>
       </div>
     </CyberCard>

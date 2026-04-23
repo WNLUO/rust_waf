@@ -249,6 +249,9 @@ export interface L7StatsPayload {
   average_proxy_latency_micros: number
   runtime_pressure_level: string
   runtime_defense_depth: string
+  runtime_server_mode: string
+  runtime_server_mode_scale_percent: number
+  runtime_server_mode_reason: string
   runtime_pressure_cpu_percent: number
   runtime_pressure_cpu_score: number
   runtime_pressure_cpu_sample_available: boolean

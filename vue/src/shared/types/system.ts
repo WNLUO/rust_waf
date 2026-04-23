@@ -88,6 +88,9 @@ export interface MetricsResponse {
   runtime_pressure_level: string
   runtime_capacity_class: string
   runtime_defense_depth: string
+  runtime_server_mode: string
+  runtime_server_mode_scale_percent: number
+  runtime_server_mode_reason: string
   runtime_pressure_drop_delay: boolean
   runtime_pressure_trim_event_persistence: boolean
   runtime_pressure_storage_queue_percent: number

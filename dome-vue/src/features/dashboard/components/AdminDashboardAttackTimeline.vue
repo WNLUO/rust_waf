@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Activity, Gauge, ShieldCheck, Zap } from 'lucide-vue-next'
+import {
+  serverModeLabel,
+  serverModeReasonLabel,
+} from '@/features/dashboard/utils/dashboardLabels'
 
 type Timeline = {
   timestamps: number[]
@@ -20,6 +24,9 @@ const props = defineProps<{
   timeline: Timeline
   currentPressure: string
   currentDepth: string
+  currentServerMode: string
+  currentServerModeScalePercent: number
+  currentServerModeReason: string
   cpuScore: number
   formatNumber: (value: number) => string
 }>()
@@ -94,6 +101,13 @@ const pressureLabel = (pressure: string) => {
 }
 
 const depthLabel = (depth: string) => depth || 'unknown'
+const serverModeTone = (mode: string) => {
+  if (mode === 'throughput') return 'bg-emerald-500'
+  if (mode === 'balanced') return 'bg-sky-500'
+  if (mode === 'conservative') return 'bg-amber-500'
+  if (mode === 'survival') return 'bg-red-500'
+  return 'bg-slate-500'
+}
 
 const cards = computed(() => [
   {
@@ -157,6 +171,17 @@ const cards = computed(() => [
           class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600"
         >
           CPU分 {{ formatNumber(cpuScore) }}
+        </span>
+        <span
+          class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600"
+          :title="serverModeReasonLabel(currentServerModeReason)"
+        >
+          模式 {{ serverModeLabel(currentServerMode) }}
+          <i
+            class="inline-block h-2 w-2 rounded-full"
+            :class="serverModeTone(currentServerMode)"
+          ></i>
+          {{ currentServerModeScalePercent }}%
         </span>
       </div>
     </div>

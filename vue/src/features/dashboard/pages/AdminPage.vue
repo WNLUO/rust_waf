@@ -25,6 +25,8 @@ import {
   l7ModeLabel,
   pressureLabel,
   providerLabel,
+  serverModeLabel,
+  serverModeReasonLabel,
   trendWindowLabel,
 } from '@/features/dashboard/utils/dashboardLabels'
 
@@ -556,6 +558,30 @@ const defenseMatrix = computed(() => {
               : '',
         },
         {
+          label: '服务器模式',
+          value: serverModeLabel(metrics?.runtime_server_mode),
+          class:
+            metrics?.runtime_server_mode === 'survival'
+              ? 'text-red-700'
+              : metrics?.runtime_server_mode === 'conservative'
+                ? 'text-amber-700'
+                : metrics?.runtime_server_mode === 'throughput'
+                  ? 'text-emerald-700'
+                  : 'text-sky-700',
+        },
+        {
+          label: '模式缩放',
+          value: `${metrics?.runtime_server_mode_scale_percent || 0}%`,
+          class:
+            (metrics?.runtime_server_mode_scale_percent || 0) !== 100
+              ? 'text-slate-700'
+              : '',
+        },
+        {
+          label: '模式原因',
+          value: serverModeReasonLabel(metrics?.runtime_server_mode_reason),
+        },
+        {
           label: 'TLS超时',
           value: `${(
             l7Tuning?.last_observed_tls_handshake_timeout_rate_percent || 0
@@ -807,6 +833,15 @@ const defenseMatrix = computed(() => {
           dashboard?.metrics.runtime_pressure_level || 'normal'
         "
         :current-depth="dashboard?.metrics.runtime_defense_depth || 'unknown'"
+        :current-server-mode="
+          dashboard?.metrics.runtime_server_mode || 'balanced'
+        "
+        :current-server-mode-scale-percent="
+          dashboard?.metrics.runtime_server_mode_scale_percent || 100
+        "
+        :current-server-mode-reason="
+          dashboard?.metrics.runtime_server_mode_reason || 'general_purpose_server'
+        "
         :cpu-score="dashboard?.metrics.runtime_pressure_cpu_score || 0"
         :format-number="formatNumber"
       />

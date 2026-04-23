@@ -16,6 +16,41 @@ export const l4OverloadLabel = (level?: string) => {
   return labels[level || ''] || '正常'
 }
 
+export const serverModeLabel = (mode?: string) => {
+  const labels: Record<string, string> = {
+    throughput: '吞吐优先',
+    balanced: '均衡',
+    conservative: '保守',
+    survival: '生存',
+  }
+  return labels[mode || ''] || mode || '未知'
+}
+
+export const serverModeBadgeType = (mode?: string) => {
+  switch (mode) {
+    case 'throughput':
+      return 'success' as const
+    case 'balanced':
+      return 'info' as const
+    case 'conservative':
+      return 'warning' as const
+    case 'survival':
+      return 'error' as const
+    default:
+      return 'muted' as const
+  }
+}
+
+export const serverModeReasonLabel = (reason?: string) => {
+  const labels: Record<string, string> = {
+    large_capacity_or_low_pressure: '大容量或低压力',
+    general_purpose_server: '通用服务器',
+    small_or_busy_server: '小型或繁忙服务器',
+    attack_or_queue_saturation: '攻击或队列饱和',
+  }
+  return labels[reason || ''] || reason || '未知原因'
+}
+
 export const controllerStateLabel = (state?: string) => {
   const labels: Record<string, string> = {
     active_bootstrap_pending: '主动预热',

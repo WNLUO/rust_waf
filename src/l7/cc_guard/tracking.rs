@@ -6,28 +6,26 @@ use crate::config::l7::CcDefenseConfig;
 use crate::protocol::UnifiedHttpRequest;
 use dashmap::DashMap;
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 impl L7CcGuard {
     pub(super) fn observe(
         &self,
         map: &DashMap<String, SlidingWindowCounter>,
         key: String,
-        now: Instant,
         unix_now: i64,
         window: Duration,
         limit: usize,
     ) -> u32 {
         let key = bounded_dashmap_key(map, key, limit, "cc", OVERFLOW_SHARDS);
         let mut entry = map.entry(key).or_insert_with(SlidingWindowCounter::new);
-        entry.observe(now, unix_now, window)
+        entry.observe(unix_now, window)
     }
 
     pub(super) fn observe_weighted(
         &self,
         map: &DashMap<String, WeightedSlidingWindowCounter>,
         key: String,
-        now: Instant,
         unix_now: i64,
         window: Duration,
         weight_percent: u8,
@@ -37,7 +35,7 @@ impl L7CcGuard {
         let mut entry = map
             .entry(key)
             .or_insert_with(WeightedSlidingWindowCounter::new);
-        entry.observe(now, unix_now, window, weight_percent)
+        entry.observe(unix_now, window, weight_percent)
     }
 
     pub(super) fn observe_distinct(
@@ -45,7 +43,6 @@ impl L7CcGuard {
         map: &DashMap<String, DistinctSlidingWindowCounter>,
         key: String,
         value: String,
-        now: Instant,
         unix_now: i64,
         window: Duration,
         limit: usize,
@@ -54,7 +51,7 @@ impl L7CcGuard {
         let mut entry = map
             .entry(key)
             .or_insert_with(DistinctSlidingWindowCounter::new);
-        entry.observe(value, now, unix_now, window)
+        entry.observe(value, unix_now, window)
     }
 
     pub(super) fn observe_fast(

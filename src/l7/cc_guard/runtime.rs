@@ -5,7 +5,7 @@ use super::L7CcGuard;
 use crate::core::{InspectionLayer, InspectionResult};
 use crate::protocol::UnifiedHttpRequest;
 use log::debug;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 impl L7CcGuard {
     pub async fn inspect_request(
@@ -112,7 +112,6 @@ impl L7CcGuard {
         let spoofed_forward_header = identity_state == "spoofed_forward_header";
         let verified = self.has_valid_challenge_cookie(request, client_ip, &host, &config);
         let interactive_session = is_interactive_session(request, &host, verified);
-        let now = Instant::now();
         let unix_now = unix_timestamp();
         let window = Duration::from_secs(config.request_window_secs.max(1));
 
@@ -192,7 +191,6 @@ impl L7CcGuard {
         let ip_count = self.observe(
             &self.ip_buckets,
             client_ip.to_string(),
-            now,
             unix_now,
             window,
             bucket_limit,
@@ -200,7 +198,6 @@ impl L7CcGuard {
         let host_count = self.observe(
             &self.host_buckets,
             format!("{client_ip}|{host}"),
-            now,
             unix_now,
             window,
             bucket_limit,
@@ -208,7 +205,6 @@ impl L7CcGuard {
         let route_count = self.observe(
             &self.route_buckets,
             format!("{client_ip}|{host}|{method}|{route_path}"),
-            now,
             unix_now,
             window,
             bucket_limit,
@@ -216,7 +212,6 @@ impl L7CcGuard {
         let hot_path_count = self.observe(
             &self.hot_path_buckets,
             format!("{host}|{route_path}"),
-            now,
             unix_now,
             window,
             bucket_limit,
@@ -226,7 +221,6 @@ impl L7CcGuard {
                 &self.hot_path_client_buckets,
                 format!("{host}|{route_path}"),
                 client_ip.to_string(),
-                now,
                 unix_now,
                 window,
                 bucket_limit,
@@ -245,7 +239,6 @@ impl L7CcGuard {
                 self.observe_weighted(
                     &self.ip_weighted_buckets,
                     client_ip.to_string(),
-                    now,
                     unix_now,
                     window,
                     weight_percent,
@@ -254,7 +247,6 @@ impl L7CcGuard {
                 self.observe_weighted(
                     &self.host_weighted_buckets,
                     format!("{client_ip}|{host}"),
-                    now,
                     unix_now,
                     window,
                     weight_percent,
@@ -263,7 +255,6 @@ impl L7CcGuard {
                 self.observe_weighted(
                     &self.route_weighted_buckets,
                     format!("{client_ip}|{host}|{method}|{route_path}"),
-                    now,
                     unix_now,
                     window,
                     weight_percent,
@@ -272,7 +263,6 @@ impl L7CcGuard {
                 self.observe_weighted(
                     &self.hot_path_weighted_buckets,
                     format!("{host}|{route_path}"),
-                    now,
                     unix_now,
                     window,
                     weight_percent,

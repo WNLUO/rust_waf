@@ -1,12 +1,13 @@
 use dashmap::DashMap;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::types::{
-    DistinctSlidingWindowCounter, FastWindowCounter, FastWindowObservation, FastWindowSlot,
-    FastWindowState, HotBlockEntry, PageLoadWindowState, SlidingWindowCounter,
+    DistinctSlidingWindowCounter, DistinctWindowSlot, DistinctWindowState, FastWindowCounter,
+    FastWindowObservation, FastWindowSlot, FastWindowState, FixedWindowSlot, FixedWindowState,
+    HotBlockEntry, PageLoadWindowState, SlidingWindowCounter, MAX_TRACKED_DISTINCT_VALUES,
     WeightedSlidingWindowCounter, FAST_WINDOW_BUCKETS,
 };
 use super::unix_timestamp;
@@ -14,63 +15,38 @@ use super::unix_timestamp;
 impl SlidingWindowCounter {
     pub(super) fn new() -> Self {
         Self {
-            events: Mutex::new(VecDeque::new()),
+            state: Mutex::new(FixedWindowState::new()),
             last_seen_unix: AtomicI64::new(unix_timestamp()),
         }
     }
 
-    pub(super) fn observe(&mut self, now: Instant, unix_now: i64, window: Duration) -> u32 {
-        let mut events = self.events.lock().expect("cc bucket lock poisoned");
-        while let Some(front) = events.front() {
-            if now.duration_since(*front) > window {
-                events.pop_front();
-            } else {
-                break;
-            }
-        }
-        events.push_back(now);
+    pub(super) fn observe(&mut self, unix_now: i64, window: Duration) -> u32 {
+        let mut state = self.state.lock().expect("cc bucket lock poisoned");
+        state.observe(unix_now, window, 1);
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
-        events.len() as u32
+        state.sum(unix_now, window)
     }
 }
 
 impl WeightedSlidingWindowCounter {
     pub(super) fn new() -> Self {
         Self {
-            events: Mutex::new(VecDeque::new()),
-            total_weight: AtomicU64::new(0),
+            state: Mutex::new(FixedWindowState::new()),
             last_seen_unix: AtomicI64::new(unix_timestamp()),
         }
     }
 
     pub(super) fn observe(
         &mut self,
-        now: Instant,
         unix_now: i64,
         window: Duration,
         weight_percent: u8,
     ) -> u32 {
-        let mut events = self
-            .events
-            .lock()
-            .expect("cc weighted bucket lock poisoned");
-        let mut total_weight = self.total_weight.load(Ordering::Relaxed) as u32;
-        while let Some((front, _)) = events.front() {
-            if now.duration_since(*front) > window {
-                if let Some((_, expired_weight)) = events.pop_front() {
-                    total_weight = total_weight.saturating_sub(u32::from(expired_weight));
-                }
-            } else {
-                break;
-            }
-        }
+        let mut state = self.state.lock().expect("cc weighted bucket lock poisoned");
         let weight = u16::from(weight_percent.max(1));
-        events.push_back((now, weight));
-        total_weight = total_weight.saturating_add(u32::from(weight));
-        self.total_weight
-            .store(u64::from(total_weight), Ordering::Relaxed);
+        state.observe(unix_now, window, u32::from(weight));
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);
-        total_weight
+        state.sum(unix_now, window)
     }
 }
 
@@ -96,8 +72,7 @@ impl PageLoadWindowState {
 impl DistinctSlidingWindowCounter {
     pub(super) fn new() -> Self {
         Self {
-            events: Mutex::new(VecDeque::new()),
-            counts: Mutex::new(HashMap::new()),
+            state: Mutex::new(DistinctWindowState::new()),
             last_seen_unix: AtomicI64::new(unix_timestamp()),
         }
     }
@@ -105,36 +80,119 @@ impl DistinctSlidingWindowCounter {
     pub(super) fn observe(
         &mut self,
         value: String,
-        now: Instant,
         unix_now: i64,
         window: Duration,
     ) -> u32 {
-        let mut events = self
-            .events
-            .lock()
-            .expect("cc distinct bucket lock poisoned");
-        let mut counts = self
-            .counts
-            .lock()
-            .expect("cc distinct counts lock poisoned");
-        while let Some((front, _)) = events.front() {
-            if now.duration_since(*front) > window {
-                if let Some((_, expired)) = events.pop_front() {
-                    if let Some(count) = counts.get_mut(&expired) {
-                        *count = count.saturating_sub(1);
-                        if *count == 0 {
-                            counts.remove(&expired);
-                        }
-                    }
-                }
-            } else {
-                break;
+        let mut state = self.state.lock().expect("cc distinct bucket lock poisoned");
+        state.observe(hash_distinct_value(&value), unix_now, window);
+        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
+        state.len()
+    }
+}
+
+impl FixedWindowState {
+    fn new() -> Self {
+        Self {
+            slots: [FixedWindowSlot::default(); super::types::FIXED_WINDOW_SLOTS],
+        }
+    }
+
+    fn observe(&mut self, unix_now: i64, window: Duration, increment: u32) {
+        let index = unix_now.rem_euclid(super::types::FIXED_WINDOW_SLOTS as i64) as usize;
+        let slot = &mut self.slots[index];
+        if slot.tick != unix_now {
+            slot.tick = unix_now;
+            slot.count = 0;
+        }
+        slot.count = slot.count.saturating_add(increment.max(1));
+        self.clear_stale(unix_now, window);
+    }
+
+    fn sum(&self, unix_now: i64, window: Duration) -> u32 {
+        let oldest_tick = window_start(unix_now, window);
+        self.slots
+            .iter()
+            .filter(|slot| slot.tick >= oldest_tick && slot.tick <= unix_now)
+            .fold(0u32, |acc, slot| acc.saturating_add(slot.count))
+    }
+
+    fn clear_stale(&mut self, unix_now: i64, window: Duration) {
+        let oldest_tick = window_start(unix_now, window);
+        for slot in &mut self.slots {
+            if slot.tick < oldest_tick || slot.tick > unix_now {
+                slot.tick = 0;
+                slot.count = 0;
             }
         }
-        events.push_back((now, value.clone()));
-        *counts.entry(value).or_insert(0) += 1;
-        self.last_seen_unix.store(unix_now, Ordering::Relaxed);
-        counts.len().min(u32::MAX as usize) as u32
+    }
+}
+
+impl DistinctWindowState {
+    fn new() -> Self {
+        Self {
+            slots: [DistinctWindowSlot::default(); super::types::DISTINCT_WINDOW_SLOTS],
+            counts: HashMap::new(),
+            saturated: false,
+            next_index: 0,
+        }
+    }
+
+    fn observe(&mut self, hash: u64, unix_now: i64, window: Duration) {
+        self.evict_stale(unix_now, window);
+        if !self.counts.contains_key(&hash) && self.counts.len() >= MAX_TRACKED_DISTINCT_VALUES {
+            self.saturated = true;
+            return;
+        }
+
+        let index = self.next_index % super::types::DISTINCT_WINDOW_SLOTS;
+        self.next_index = self.next_index.wrapping_add(1);
+        if self.slots[index].occupied {
+            let previous_hash = self.slots[index].hash;
+            self.remove_hash(previous_hash);
+        }
+
+        let slot = &mut self.slots[index];
+        slot.tick = unix_now;
+        slot.hash = hash;
+        slot.occupied = true;
+        *self.counts.entry(hash).or_insert(0) += 1;
+    }
+
+    fn len(&self) -> u32 {
+        let base = self.counts.len().min(u32::MAX as usize) as u32;
+        if self.saturated {
+            base.saturating_add(1)
+        } else {
+            base
+        }
+    }
+
+    fn evict_stale(&mut self, unix_now: i64, window: Duration) {
+        let oldest_tick = window_start(unix_now, window);
+        let mut expired_hashes = Vec::new();
+        for slot in &mut self.slots {
+            if slot.occupied && (slot.tick < oldest_tick || slot.tick > unix_now) {
+                expired_hashes.push(slot.hash);
+                slot.tick = 0;
+                slot.hash = 0;
+                slot.occupied = false;
+            }
+        }
+        for hash in expired_hashes {
+            self.remove_hash(hash);
+        }
+        if self.counts.len() < MAX_TRACKED_DISTINCT_VALUES {
+            self.saturated = false;
+        }
+    }
+
+    fn remove_hash(&mut self, hash: u64) {
+        if let Some(count) = self.counts.get_mut(&hash) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.counts.remove(&hash);
+            }
+        }
     }
 }
 
@@ -232,6 +290,18 @@ pub(super) fn adaptive_hot_cache_ttl(base_ttl_secs: u64, hits: u64) -> u64 {
         _ => 12,
     };
     base.saturating_mul(multiplier).clamp(3, 900)
+}
+
+fn window_start(unix_now: i64, window: Duration) -> i64 {
+    unix_now.saturating_sub(window.as_secs().max(1) as i64 - 1)
+}
+
+fn hash_distinct_value(value: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 pub(super) fn weighted_points_to_requests(points: u32) -> u32 {

@@ -1,7 +1,6 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64};
 use std::sync::Mutex;
-use std::time::Instant;
 
 pub(super) const BYPASS_PATHS: &[&str] = &["/.well-known/waf/browser-fingerprint-report"];
 pub(super) const API_REQUEST_WEIGHT_PERCENT: u8 = 140;
@@ -12,17 +11,19 @@ pub(super) const MAX_ROUTE_PATH_LEN: usize = 160;
 pub(super) const MAX_HOST_LEN: usize = 96;
 pub(super) const OVERFLOW_SHARDS: u64 = 64;
 pub(super) const FAST_WINDOW_BUCKETS: usize = 8;
+pub(super) const FIXED_WINDOW_SLOTS: usize = 128;
+pub(super) const DISTINCT_WINDOW_SLOTS: usize = 512;
+pub(super) const MAX_TRACKED_DISTINCT_VALUES: usize = 256;
 
 #[derive(Debug)]
 pub(super) struct SlidingWindowCounter {
-    pub(super) events: Mutex<VecDeque<Instant>>,
+    pub(super) state: Mutex<FixedWindowState>,
     pub(super) last_seen_unix: AtomicI64,
 }
 
 #[derive(Debug)]
 pub(super) struct WeightedSlidingWindowCounter {
-    pub(super) events: Mutex<VecDeque<(Instant, u16)>>,
-    pub(super) total_weight: AtomicU64,
+    pub(super) state: Mutex<FixedWindowState>,
     pub(super) last_seen_unix: AtomicI64,
 }
 
@@ -34,8 +35,7 @@ pub(super) struct PageLoadWindowState {
 
 #[derive(Debug)]
 pub(super) struct DistinctSlidingWindowCounter {
-    pub(super) events: Mutex<VecDeque<(Instant, String)>>,
-    pub(super) counts: Mutex<HashMap<String, u32>>,
+    pub(super) state: Mutex<DistinctWindowState>,
     pub(super) last_seen_unix: AtomicI64,
 }
 
@@ -59,6 +59,32 @@ pub(super) struct FastWindowSlot {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FastWindowObservation {
     pub(super) count: u32,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct FixedWindowState {
+    pub(super) slots: [FixedWindowSlot; FIXED_WINDOW_SLOTS],
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct FixedWindowSlot {
+    pub(super) tick: i64,
+    pub(super) count: u32,
+}
+
+#[derive(Debug)]
+pub(super) struct DistinctWindowState {
+    pub(super) slots: [DistinctWindowSlot; DISTINCT_WINDOW_SLOTS],
+    pub(super) counts: HashMap<u64, u16>,
+    pub(super) saturated: bool,
+    pub(super) next_index: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct DistinctWindowSlot {
+    pub(super) tick: i64,
+    pub(super) hash: u64,
+    pub(super) occupied: bool,
 }
 
 #[derive(Debug)]

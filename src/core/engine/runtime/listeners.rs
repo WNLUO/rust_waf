@@ -51,16 +51,39 @@ fn is_benign_http2_disconnect_message(message: &str) -> bool {
             || message.contains("connection closed"))
 }
 
-fn semaphore_pressure(context: &WafContext, semaphore: &Semaphore) -> (usize, usize, u64) {
-    let total = context.config_snapshot().max_concurrent_tasks.max(1);
-    let available = semaphore.available_permits().min(total);
-    let used = total.saturating_sub(available);
-    let usage_percent = (used as u64).saturating_mul(100) / total as u64;
-    (available, total, usage_percent)
+fn channel_limits(context: &WafContext, channel: &str) -> (usize, usize) {
+    if channel.eq_ignore_ascii_case("HTTP/1.1 request")
+        || channel.eq_ignore_ascii_case("HTTP/2 request")
+        || channel.eq_ignore_ascii_case("HTTP/3 request")
+        || channel.eq_ignore_ascii_case("UDP request")
+    {
+        (
+            context.runtime_request_limit(),
+            context.runtime_request_capacity(),
+        )
+    } else {
+        (
+            context.runtime_connection_limit(),
+            context.runtime_connection_capacity(),
+        )
+    }
 }
 
-fn adaptive_permit_wait_ms(context: &WafContext, semaphore: &Semaphore) -> u64 {
-    let (_, _, usage_percent) = semaphore_pressure(context, semaphore);
+fn semaphore_pressure(
+    context: &WafContext,
+    semaphore: &Semaphore,
+    channel: &str,
+) -> (usize, usize, usize, u64) {
+    let (logical_limit, capacity) = channel_limits(context, channel);
+    let available_total = semaphore.available_permits().min(capacity);
+    let used = capacity.saturating_sub(available_total);
+    let available_within_limit = logical_limit.saturating_sub(used.min(logical_limit));
+    let usage_percent = (used.min(logical_limit) as u64).saturating_mul(100) / logical_limit as u64;
+    (available_within_limit, logical_limit, used, usage_percent)
+}
+
+fn adaptive_permit_wait_ms(context: &WafContext, semaphore: &Semaphore, channel: &str) -> u64 {
+    let (_, _, _, usage_percent) = semaphore_pressure(context, semaphore, channel);
     let auto = context.auto_tuning_snapshot();
     let cpu_cores = auto.detected_cpu_cores.max(1);
     let memory_mb = auto.detected_memory_limit_mb.unwrap_or(2048);
@@ -89,7 +112,7 @@ fn adaptive_permit_wait_ms_for_peer(
     peer_addr: std::net::SocketAddr,
     channel: &str,
 ) -> u64 {
-    let wait_ms = adaptive_permit_wait_ms(context, semaphore);
+    let wait_ms = adaptive_permit_wait_ms(context, semaphore, channel);
     let trusted_proxy_peer =
         crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
     let is_tls_post_handshake = channel.eq_ignore_ascii_case("TLS post-handshake");
@@ -113,6 +136,34 @@ pub(crate) async fn acquire_permit_auto(
 ) -> Option<OwnedSemaphorePermit> {
     let trusted_proxy_peer =
         crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
+    let (_, logical_limit, used, _) = semaphore_pressure(context, semaphore.as_ref(), channel);
+    if used < logical_limit {
+        if let Ok(permit) = semaphore.clone().try_acquire_owned() {
+            return Some(permit);
+        }
+    }
+
+    if used >= logical_limit {
+        let wait_ms =
+            adaptive_permit_wait_ms_for_peer(context, semaphore.as_ref(), peer_addr, channel);
+        let wait = std::time::Duration::from_millis(wait_ms);
+        tokio::time::sleep(wait).await;
+        let (_, logical_limit, used, usage_percent) =
+            semaphore_pressure(context, semaphore.as_ref(), channel);
+        if used >= logical_limit {
+            if trusted_proxy_peer {
+                if let Some(metrics) = context.metrics.as_ref() {
+                    metrics.record_trusted_proxy_permit_drop();
+                }
+            }
+            warn!(
+                "Dropping {} connection from {} because dynamic limit {} is exhausted (used {}, usage {}%)",
+                channel, peer_addr, logical_limit, used, usage_percent
+            );
+            return None;
+        }
+    }
+
     if let Ok(permit) = semaphore.clone().try_acquire_owned() {
         return Some(permit);
     }
@@ -123,7 +174,8 @@ pub(crate) async fn acquire_permit_auto(
         Ok(Ok(permit)) => Some(permit),
         Ok(Err(_)) => None,
         Err(_) => {
-            let (available, total, usage_percent) = semaphore_pressure(context, semaphore.as_ref());
+            let (available, total, _, usage_percent) =
+                semaphore_pressure(context, semaphore.as_ref(), channel);
             if trusted_proxy_peer {
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_trusted_proxy_permit_drop();

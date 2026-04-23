@@ -37,7 +37,7 @@ use crate::storage::{AiRouteProfileEntry, AiTempPolicyEntry, SqliteStore};
 use anyhow::Result;
 use dashmap::DashMap;
 use rule_engine::load_rule_engine_state;
-use std::sync::atomic::{AtomicI64, AtomicU64};
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use storage_runtime::restore_runtime_blocked_ips;
@@ -89,6 +89,10 @@ pub struct Http3RuntimeSnapshot {
 pub struct WafContext {
     pub config: Config,
     runtime_config: Arc<RwLock<Config>>,
+    runtime_request_limit: AtomicUsize,
+    runtime_connection_limit: AtomicUsize,
+    runtime_request_capacity: AtomicUsize,
+    runtime_connection_capacity: AtomicUsize,
     l4_inspector: RwLock<Option<Arc<L4Inspector>>>,
     l7_bloom_filter: RwLock<Option<Arc<L7BloomFilterManager>>>,
     l7_cc_guard: RwLock<Arc<L7CcGuard>>,
@@ -422,7 +426,7 @@ pub struct AiDefenseRunResult {
 
 impl WafContext {
     pub async fn new(config: Config) -> Result<Self> {
-        let plan = runtime_planner::apply_dynamic_runtime_plan(config, None, None);
+        let plan = runtime_planner::apply_dynamic_runtime_plan(config, None, None, None);
         let config = plan.config;
         let l4_enabled =
             config.l4_config.ddos_protection_enabled || config.l4_config.connection_rate_limit > 0;
@@ -464,6 +468,14 @@ impl WafContext {
 
         let context = Self {
             runtime_config: Arc::new(RwLock::new(config.clone())),
+            runtime_request_limit: AtomicUsize::new(config.max_concurrent_tasks.max(1)),
+            runtime_connection_limit: AtomicUsize::new(
+                config.max_concurrent_tasks.saturating_mul(4).clamp(32, 4096),
+            ),
+            runtime_request_capacity: AtomicUsize::new(config.max_concurrent_tasks.max(1)),
+            runtime_connection_capacity: AtomicUsize::new(
+                config.max_concurrent_tasks.saturating_mul(4).clamp(32, 4096),
+            ),
             l4_inspector: RwLock::new(l4_enabled.then(|| {
                 Arc::new(L4Inspector::new(
                     effective_l4_config,
@@ -589,8 +601,14 @@ impl WafContext {
             .as_ref()
             .map(|store| store.queue_usage_percent());
         let plan =
-            runtime_planner::apply_dynamic_runtime_plan(config, metrics.as_ref(), queue_usage);
+            runtime_planner::apply_dynamic_runtime_plan(
+                config,
+                metrics.as_ref(),
+                queue_usage,
+                Some(self.cpu_pressure_snapshot().usage_percent),
+            );
         let config = plan.config;
+        self.set_runtime_capacity_limits(config.max_concurrent_tasks.max(1));
         {
             let mut guard = write_lock(&self.runtime_config, "runtime_config");
             *guard = config;
@@ -726,6 +744,69 @@ impl WafContext {
     pub fn metrics_snapshot(&self) -> Option<crate::metrics::MetricsSnapshot> {
         self.metrics.as_ref().map(MetricsCollector::get_stats)
     }
+
+    pub fn refresh_dynamic_runtime_plan(&self) -> bool {
+        let current = self.config_snapshot();
+        let metrics = self.metrics_snapshot();
+        let queue_usage = self
+            .sqlite_store
+            .as_ref()
+            .map(|store| store.queue_usage_percent());
+        let cpu_usage_percent = self.cpu_pressure_snapshot().usage_percent;
+        let planned = runtime_planner::apply_dynamic_runtime_plan(
+            current.clone(),
+            metrics.as_ref(),
+            queue_usage,
+            Some(cpu_usage_percent),
+        )
+        .config;
+
+        if !dynamic_runtime_relevant_changed(&current, &planned) {
+            self.set_runtime_capacity_limits(current.max_concurrent_tasks.max(1));
+            return false;
+        }
+
+        self.apply_runtime_config(planned);
+        true
+    }
+
+    pub fn set_runtime_capacity_ceiling(
+        &self,
+        request_capacity: usize,
+        connection_capacity: usize,
+    ) {
+        self.runtime_request_capacity
+            .store(request_capacity.max(1), Ordering::Relaxed);
+        self.runtime_connection_capacity
+            .store(connection_capacity.max(1), Ordering::Relaxed);
+    }
+
+    pub fn set_runtime_capacity_limits(&self, request_limit: usize) {
+        let request_limit = request_limit.max(1);
+        let connection_limit = request_limit.saturating_mul(4).clamp(32, 4096);
+        self.runtime_request_limit
+            .store(request_limit, Ordering::Relaxed);
+        self.runtime_connection_limit
+            .store(connection_limit, Ordering::Relaxed);
+    }
+
+    pub fn runtime_request_limit(&self) -> usize {
+        self.runtime_request_limit.load(Ordering::Relaxed).max(1)
+    }
+
+    pub fn runtime_connection_limit(&self) -> usize {
+        self.runtime_connection_limit.load(Ordering::Relaxed).max(1)
+    }
+
+    pub fn runtime_request_capacity(&self) -> usize {
+        self.runtime_request_capacity.load(Ordering::Relaxed).max(1)
+    }
+
+    pub fn runtime_connection_capacity(&self) -> usize {
+        self.runtime_connection_capacity
+            .load(Ordering::Relaxed)
+            .max(1)
+    }
 }
 
 fn unix_timestamp() -> i64 {
@@ -733,6 +814,52 @@ fn unix_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn dynamic_runtime_relevant_changed(current: &Config, planned: &Config) -> bool {
+    current.max_concurrent_tasks != planned.max_concurrent_tasks
+        || current.sqlite_queue_capacity != planned.sqlite_queue_capacity
+        || current.sqlite_pool_size != planned.sqlite_pool_size
+        || current.runtime_profile != planned.runtime_profile
+        || current.api_enabled != planned.api_enabled
+        || current.http3_config.enabled != planned.http3_config.enabled
+        || current.http3_config.max_concurrent_streams != planned.http3_config.max_concurrent_streams
+        || current.http3_config.idle_timeout_secs != planned.http3_config.idle_timeout_secs
+        || current.l7_config.max_request_size != planned.l7_config.max_request_size
+        || current.l7_config.http2_config.enabled != planned.l7_config.http2_config.enabled
+        || current.l7_config.http2_config.max_concurrent_streams
+            != planned.l7_config.http2_config.max_concurrent_streams
+        || current.l7_config.first_byte_timeout_ms != planned.l7_config.first_byte_timeout_ms
+        || current.l7_config.read_idle_timeout_ms != planned.l7_config.read_idle_timeout_ms
+        || current.l7_config.tls_handshake_timeout_ms != planned.l7_config.tls_handshake_timeout_ms
+        || current.l7_config.proxy_connect_timeout_ms != planned.l7_config.proxy_connect_timeout_ms
+        || current.l7_config.proxy_write_timeout_ms != planned.l7_config.proxy_write_timeout_ms
+        || current.l7_config.proxy_read_timeout_ms != planned.l7_config.proxy_read_timeout_ms
+        || current.l7_config.upstream_healthcheck_interval_secs
+            != planned.l7_config.upstream_healthcheck_interval_secs
+        || current.l7_config.upstream_healthcheck_timeout_ms
+            != planned.l7_config.upstream_healthcheck_timeout_ms
+        || current.l7_config.bloom_filter_scale != planned.l7_config.bloom_filter_scale
+        || current.l7_config.slow_attack_defense.idle_keepalive_timeout_ms
+            != planned.l7_config.slow_attack_defense.idle_keepalive_timeout_ms
+        || current.l4_config.max_tracked_ips != planned.l4_config.max_tracked_ips
+        || current.l4_config.max_blocked_ips != planned.l4_config.max_blocked_ips
+        || current.l4_config.behavior_event_channel_capacity
+            != planned.l4_config.behavior_event_channel_capacity
+        || current.l4_config.connection_rate_limit != planned.l4_config.connection_rate_limit
+        || current.l4_config.syn_flood_threshold != planned.l4_config.syn_flood_threshold
+        || current.l4_config.bloom_filter_scale != planned.l4_config.bloom_filter_scale
+        || current.integrations.ai_audit.timeout_ms != planned.integrations.ai_audit.timeout_ms
+        || current.integrations.ai_audit.event_sample_limit
+            != planned.integrations.ai_audit.event_sample_limit
+        || current.integrations.ai_audit.recent_event_limit
+            != planned.integrations.ai_audit.recent_event_limit
+        || current.integrations.ai_audit.max_active_temp_policies
+            != planned.integrations.ai_audit.max_active_temp_policies
+        || current.integrations.ai_audit.auto_audit_enabled
+            != planned.integrations.ai_audit.auto_audit_enabled
+        || current.integrations.ai_audit.auto_defense_max_apply_per_tick
+            != planned.integrations.ai_audit.auto_defense_max_apply_per_tick
 }
 
 #[cfg(test)]

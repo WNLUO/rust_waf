@@ -362,7 +362,7 @@ impl WafContext {
         }
     }
 
-    fn cpu_pressure_snapshot(&self) -> super::system_pressure::CpuPressureSnapshot {
+    pub(crate) fn cpu_pressure_snapshot(&self) -> super::system_pressure::CpuPressureSnapshot {
         self.cpu_pressure_monitor
             .lock()
             .map(|mut monitor| monitor.snapshot())
@@ -819,6 +819,7 @@ impl WafContext {
             metrics.l4_direct_idle_no_request_connections =
                 overview.direct_idle_no_request_connections;
         }
+        let _ = self.refresh_dynamic_runtime_plan();
         let config = self.config_snapshot();
         let now = unix_timestamp();
 

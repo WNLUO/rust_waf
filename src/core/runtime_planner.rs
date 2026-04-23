@@ -12,17 +12,24 @@ pub struct RuntimePlanningSignals {
 }
 
 impl RuntimePlanningSignals {
-    pub fn from_metrics(metrics: &MetricsSnapshot, storage_queue_usage_percent: u64) -> Self {
+    pub fn from_metrics(
+        metrics: &MetricsSnapshot,
+        storage_queue_usage_percent: u64,
+        cpu_usage_percent: f64,
+    ) -> Self {
+        let proxied = metrics.proxied_requests.max(1);
+        let tls_handshake_timeout_rate_percent =
+            metrics.tls_handshake_timeouts as f64 * 100.0 / proxied as f64;
         Self {
             storage_queue_usage_percent,
-            cpu_usage_percent: 0.0,
+            cpu_usage_percent,
             avg_proxy_latency_ms: metrics.average_proxy_latency_micros / 1_000,
-            tls_handshake_timeout_rate_percent: 0.0,
+            tls_handshake_timeout_rate_percent,
         }
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DynamicRuntimePlan {
     pub environment: EnvironmentProfile,
@@ -37,12 +44,14 @@ pub fn apply_dynamic_runtime_plan(
     mut config: Config,
     metrics: Option<&MetricsSnapshot>,
     storage_queue_usage_percent: Option<u64>,
+    cpu_usage_percent: Option<f64>,
 ) -> DynamicRuntimePlan {
     let environment = EnvironmentProfile::detect();
     let signals = metrics.map(|metrics| {
         RuntimePlanningSignals::from_metrics(
             metrics,
             storage_queue_usage_percent.unwrap_or_default(),
+            cpu_usage_percent.unwrap_or(0.0),
         )
     });
 

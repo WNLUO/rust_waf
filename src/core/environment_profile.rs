@@ -2,7 +2,7 @@ use std::fs;
 
 use super::system_profile::{detect_system_profile, SystemProfile};
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EnvironmentProfile {
     pub system: SystemProfile,

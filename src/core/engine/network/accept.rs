@@ -21,7 +21,7 @@ pub(crate) async fn handle_connection(
     let admission = context.resource_sentinel.admit_connection(
         packet.source_ip,
         "tcp",
-        request_semaphore.available_permits(),
+        context.runtime_request_limit(),
         storage_queue_usage_percent,
     );
     if !admission.allow {
@@ -125,7 +125,7 @@ pub(crate) async fn handle_tls_connection(
     let admission = context.resource_sentinel.admit_connection(
         packet.source_ip,
         "tls",
-        connection_semaphore.available_permits(),
+        context.runtime_connection_limit(),
         storage_queue_usage_percent,
     );
     if !admission.allow {

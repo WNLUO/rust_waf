@@ -4,11 +4,13 @@ use crate::core::engine_maintenance;
 mod auto_audit;
 mod maintenance;
 
+const REQUEST_SEMAPHORE_CAPACITY: usize = 1024;
+const CONNECTION_SEMAPHORE_CAPACITY: usize = 4096;
+
 pub struct WafEngine {
     context: Arc<WafContext>,
     _shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
-    connection_limit: usize,
     connection_semaphore: Arc<Semaphore>,
     request_semaphore: Arc<Semaphore>,
 }
@@ -18,26 +20,28 @@ impl WafEngine {
         info!("Initializing WAF engine...");
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-        let request_limit = config.max_concurrent_tasks.max(1);
-        let connection_limit = derive_connection_limit(request_limit);
         let context = Arc::new(WafContext::new(config).await?);
+        context.set_runtime_capacity_ceiling(
+            REQUEST_SEMAPHORE_CAPACITY,
+            CONNECTION_SEMAPHORE_CAPACITY,
+        );
 
         Ok(Self {
             context,
             _shutdown_tx: shutdown_tx,
             shutdown_rx,
-            connection_limit,
-            connection_semaphore: Arc::new(Semaphore::new(connection_limit)),
-            request_semaphore: Arc::new(Semaphore::new(request_limit)),
+            connection_semaphore: Arc::new(Semaphore::new(CONNECTION_SEMAPHORE_CAPACITY)),
+            request_semaphore: Arc::new(Semaphore::new(REQUEST_SEMAPHORE_CAPACITY)),
         })
     }
 
     pub async fn start(&mut self) -> Result<()> {
         let startup_config = self.context.config_snapshot();
         info!("WAF engine started");
+        info!("Dynamic request limit set to {}", self.context.runtime_request_limit());
         info!(
-            "Concurrency limit set to {} inflight connections",
-            startup_config.max_concurrent_tasks
+            "Dynamic connection limit set to {}",
+            self.context.runtime_connection_limit()
         );
 
         if let Some(l4_inspector) = self.context.l4_inspector() {
@@ -147,30 +151,32 @@ impl WafEngine {
                         recv_result = socket.recv_from(&mut buffer) => {
                             match recv_result {
                                 Ok((bytes_read, peer_addr)) => {
-                                    match request_semaphore.clone().try_acquire_owned() {
-                                        Ok(permit) => {
-                                            let ctx = Arc::clone(&context);
-                                            let listener_socket = Arc::clone(&socket);
-                                            let payload = buffer[..bytes_read].to_vec();
-                                            tokio::spawn(async move {
-                                                if let Err(err) = handle_udp_datagram(
-                                                    ctx,
-                                                    listener_socket,
-                                                    peer_addr,
-                                                    addr,
-                                                    payload,
-                                                    permit,
-                                                ).await {
-                                                    warn!("UDP datagram handling failed: {}", err);
-                                                }
-                                            });
-                                        }
-                                        Err(_) => {
-                                            warn!(
-                                                "Dropping UDP datagram from {} due to concurrency limit",
-                                                peer_addr
-                                            );
-                                        }
+                                    if let Some(permit) = crate::core::engine::runtime::acquire_permit_auto(
+                                        context.as_ref(),
+                                        request_semaphore.clone(),
+                                        peer_addr,
+                                        "UDP request",
+                                    ).await {
+                                        let ctx = Arc::clone(&context);
+                                        let listener_socket = Arc::clone(&socket);
+                                        let payload = buffer[..bytes_read].to_vec();
+                                        tokio::spawn(async move {
+                                            if let Err(err) = handle_udp_datagram(
+                                                ctx,
+                                                listener_socket,
+                                                peer_addr,
+                                                addr,
+                                                payload,
+                                                permit,
+                                            ).await {
+                                                warn!("UDP datagram handling failed: {}", err);
+                                            }
+                                        });
+                                    } else {
+                                        warn!(
+                                            "Dropping UDP datagram from {} due to dynamic concurrency limit",
+                                            peer_addr
+                                        );
                                     }
                                 }
                                 Err(err) => {
@@ -205,7 +211,7 @@ impl WafEngine {
         super::sync_http3_listener_runtime(
             Arc::clone(&self.context),
             self.connection_limit(),
-            startup_config.max_concurrent_tasks,
+            self.context.runtime_request_limit(),
         )
         .await?;
 
@@ -241,10 +247,6 @@ impl WafEngine {
     }
 
     fn connection_limit(&self) -> usize {
-        self.connection_limit
+        self.context.runtime_connection_limit()
     }
-}
-
-fn derive_connection_limit(request_limit: usize) -> usize {
-    request_limit.saturating_mul(4).clamp(128, 4096)
 }

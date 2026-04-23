@@ -462,16 +462,17 @@ impl L7CcGuard {
                 client_identity_unresolved,
             );
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-            request.add_metadata("l7.drop_reason".to_string(), "cc_hard_block".to_string());
+            request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+            request.add_metadata("l7.block_reason".to_string(), "cc_hard_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
             let should_persist_ip = static_asset_persist_block
                 || ip_count >= hard_ip_block_threshold
                 || ip_effective >= ip_block_threshold;
+            let response = self.build_block_response(request, &reason, html_mode);
             return Some(if should_persist_ip {
-                InspectionResult::drop_and_persist_ip(InspectionLayer::L7, reason)
+                InspectionResult::respond_and_persist_ip(InspectionLayer::L7, reason, response)
             } else {
-                InspectionResult::drop(InspectionLayer::L7, reason)
+                InspectionResult::respond(InspectionLayer::L7, reason, response)
             });
         }
 
@@ -690,12 +691,19 @@ impl L7CcGuard {
             if active {
                 request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
                 request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+                request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
                 request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                return SurvivalFastPathResult::Block(InspectionResult::drop(
+                let reason = "l7 cc fast path hot block".to_string();
+                let response = self.build_block_response(
+                    request,
+                    &reason,
+                    challenge_mode(request, &route_path),
+                );
+                return SurvivalFastPathResult::Block(InspectionResult::respond(
                     InspectionLayer::L7,
-                    "l7 cc fast path hot block".to_string(),
+                    reason,
+                    response,
                 ));
             }
             hot_cache_expired = true;
@@ -708,12 +716,19 @@ impl L7CcGuard {
                 if active {
                     request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
                     request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                    request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+                    request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
                     request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                    return SurvivalFastPathResult::Block(InspectionResult::drop(
+                    let reason = "l7 cc fast path hot block".to_string();
+                    let response = self.build_block_response(
+                        request,
+                        &reason,
+                        challenge_mode(request, &route_path),
+                    );
+                    return SurvivalFastPathResult::Block(InspectionResult::respond(
                         InspectionLayer::L7,
-                        "l7 cc fast path hot block".to_string(),
+                        reason,
+                        response,
                     ));
                 }
                 hot_cache_expired = true;
@@ -737,12 +752,19 @@ impl L7CcGuard {
                 if active {
                     request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
                     request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                    request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+                    request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
                     request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                    return SurvivalFastPathResult::Block(InspectionResult::drop(
+                    let reason = "l7 cc fast path hot block".to_string();
+                    let response = self.build_block_response(
+                        request,
+                        &reason,
+                        challenge_mode(request, &route_path),
+                    );
+                    return SurvivalFastPathResult::Block(InspectionResult::respond(
                         InspectionLayer::L7,
-                        "l7 cc fast path hot block".to_string(),
+                        reason,
+                        response,
                     ));
                 }
                 hot_cache_expired = true;
@@ -753,12 +775,19 @@ impl L7CcGuard {
                 if active {
                     request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
                     request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-                    request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+                    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+                    request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
                     request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                    return SurvivalFastPathResult::Block(InspectionResult::drop(
+                    let reason = "l7 cc fast path hot block".to_string();
+                    let response = self.build_block_response(
+                        request,
+                        &reason,
+                        challenge_mode(request, &route_path),
+                    );
+                    return SurvivalFastPathResult::Block(InspectionResult::respond(
                         InspectionLayer::L7,
-                        "l7 cc fast path hot block".to_string(),
+                        reason,
+                        response,
                     ));
                 }
                 hot_cache_expired = true;
@@ -887,15 +916,19 @@ impl L7CcGuard {
                 self.insert_hot_block_cache(site_hot_key, unix_now, ttl.min(30));
             }
             request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
-            request.add_metadata("l7.drop_reason".to_string(), "cc_fast_block".to_string());
+            request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+            request.add_metadata("l7.block_reason".to_string(), "cc_fast_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            return SurvivalFastPathResult::Block(InspectionResult::drop(
+            let reason = format!(
+                "l7 cc fast path blocked request: ip={} route={} ip_count={} route_count={} hot_path_count={}",
+                client_ip, route_path, ip_count, route_count, hot_path_count
+            );
+            let response =
+                self.build_block_response(request, &reason, challenge_mode(request, &route_path));
+            return SurvivalFastPathResult::Block(InspectionResult::respond(
                 InspectionLayer::L7,
-                format!(
-                    "l7 cc fast path blocked request: ip={} route={} ip_count={} route_count={} hot_path_count={}",
-                    client_ip, route_path, ip_count, route_count, hot_path_count
-                ),
+                reason,
+                response,
             ));
         }
 

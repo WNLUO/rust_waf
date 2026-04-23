@@ -7,6 +7,59 @@ use crate::protocol::UnifiedHttpRequest;
 use rand::Rng;
 
 impl L7CcGuard {
+    pub(super) fn build_block_response(
+        &self,
+        _request: &UnifiedHttpRequest,
+        reason: &str,
+        mode: HtmlResponseMode,
+    ) -> CustomHttpResponse {
+        let headers = vec![
+            (
+                "content-type".to_string(),
+                match mode {
+                    HtmlResponseMode::HtmlChallenge => "text/html; charset=utf-8",
+                    HtmlResponseMode::TextOnly => "application/json; charset=utf-8",
+                }
+                .to_string(),
+            ),
+            ("cache-control".to_string(), "no-store".to_string()),
+            ("retry-after".to_string(), "30".to_string()),
+            ("x-rust-waf-cc-action".to_string(), "block".to_string()),
+        ];
+        let body = match mode {
+            HtmlResponseMode::HtmlChallenge => format!(
+                concat!(
+                    "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">",
+                    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+                    "<title>请求过于频繁</title></head><body>",
+                    "<main style=\"font-family:system-ui,sans-serif;max-width:520px;margin:12vh auto;padding:24px;line-height:1.6\">",
+                    "<h1>请求过于频繁</h1>",
+                    "<p>当前访问频率过高，请稍后再试。</p>",
+                    "<p style=\"color:#6b7280;font-size:13px\"><code>{}</code></p>",
+                    "</main></body></html>"
+                ),
+                escape_html(reason)
+            )
+            .into_bytes(),
+            HtmlResponseMode::TextOnly => serde_json::json!({
+                "success": false,
+                "action": "block",
+                "message": "请求频率过高，请稍后重试。",
+                "reason": reason,
+            })
+            .to_string()
+            .into_bytes(),
+        };
+
+        CustomHttpResponse {
+            status_code: 429,
+            headers,
+            body,
+            tarpit: None,
+            random_status: None,
+        }
+    }
+
     pub(super) fn build_challenge_response(
         &self,
         request: &UnifiedHttpRequest,

@@ -212,7 +212,10 @@ mod tests {
         }
         .normalized();
 
-        assert_eq!(config.gateway_config.source_ip_strategy, SourceIpStrategy::Header);
+        assert_eq!(
+            config.gateway_config.source_ip_strategy,
+            SourceIpStrategy::Header
+        );
         assert_eq!(
             config.gateway_config.custom_source_ip_header,
             "cf-connecting-ip"

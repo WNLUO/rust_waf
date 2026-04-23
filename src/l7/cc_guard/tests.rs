@@ -463,10 +463,10 @@ async fn distributed_api_hard_block_does_not_persist_shared_ip() {
 
     let result = result.expect("distributed hot path should hard block");
     let last = last.expect("last request");
-    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert_eq!(result.action, crate::core::InspectionAction::Respond);
     assert!(!result.persist_blocked_ip);
     assert_eq!(
-        last.get_metadata("l7.drop_reason").map(String::as_str),
+        last.get_metadata("l7.block_reason").map(String::as_str),
         Some("cc_hard_block")
     );
 }
@@ -583,7 +583,7 @@ async fn survival_fast_path_blocks_and_uses_hot_cache() {
     assert!(result.blocked);
     assert!(!result.persist_blocked_ip);
     assert_eq!(
-        second.get_metadata("l7.drop_reason").map(String::as_str),
+        second.get_metadata("l7.block_reason").map(String::as_str),
         Some("cc_fast_block")
     );
 
@@ -905,13 +905,13 @@ async fn hard_multiplier_configuration_can_force_block_for_subresources() {
     let result = guard.inspect_request(&mut second_img).await;
     assert!(result.is_some());
     let result = result.unwrap();
-    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert_eq!(result.action, crate::core::InspectionAction::Respond);
     assert!(result.persist_blocked_ip);
     assert_eq!(
         second_img
             .get_metadata("l7.enforcement")
             .map(String::as_str),
-        Some("drop")
+        Some("respond")
     );
 }
 

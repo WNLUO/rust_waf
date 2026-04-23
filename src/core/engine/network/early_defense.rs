@@ -277,6 +277,20 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
 }
 
 fn apply_early_defense_decision(request: &mut UnifiedHttpRequest, decision: &EarlyDefenseDecision) {
+    let effective_stage = match decision.action {
+        EarlyDefenseAction::Allow => request
+            .get_metadata("runtime.defense.base_stage")
+            .cloned()
+            .unwrap_or_else(|| "observe".to_string()),
+        EarlyDefenseAction::LightweightL7 => "tighten".to_string(),
+        EarlyDefenseAction::Challenge => "challenge".to_string(),
+        EarlyDefenseAction::Drop => "drop".to_string(),
+    };
+    request.add_metadata("runtime.defense.stage".to_string(), effective_stage);
+    request.add_metadata(
+        "runtime.defense.effective_reason".to_string(),
+        decision.reason.to_string(),
+    );
     if matches!(decision.action, EarlyDefenseAction::Allow) {
         return;
     }
@@ -609,6 +623,10 @@ mod tests {
             "lightweight_l7"
         );
         assert_eq!(
+            request.get_metadata("runtime.defense.stage").map(String::as_str),
+            Some("tighten")
+        );
+        assert_eq!(
             request
                 .get_metadata("ai.cc.route_threshold_scale_percent")
                 .unwrap(),
@@ -649,6 +667,10 @@ mod tests {
         assert_eq!(
             request.get_metadata("early_defense.action").unwrap(),
             "challenge"
+        );
+        assert_eq!(
+            request.get_metadata("runtime.defense.stage").map(String::as_str),
+            Some("challenge")
         );
         assert_eq!(
             request.get_metadata("ai.cc.force_challenge").unwrap(),
@@ -763,6 +785,10 @@ mod tests {
         assert_eq!(
             request.get_metadata("early_defense.action").unwrap(),
             "drop"
+        );
+        assert_eq!(
+            request.get_metadata("runtime.defense.stage").map(String::as_str),
+            Some("drop")
         );
         assert_eq!(request.get_metadata("l7.enforcement").unwrap(), "drop");
         assert_eq!(

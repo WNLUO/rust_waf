@@ -999,6 +999,14 @@ fn runtime_tracking_mode(
     request: &UnifiedHttpRequest,
     defense_depth: crate::core::DefenseDepth,
 ) -> CcTrackingMode {
+    match request
+        .get_metadata("runtime.defense.stage")
+        .map(String::as_str)
+    {
+        Some("drop") => return CcTrackingMode::Minimal,
+        Some("challenge" | "tighten") => return CcTrackingMode::Core,
+        _ => {}
+    }
     if request
         .get_metadata("early_defense.action")
         .map(String::as_str)

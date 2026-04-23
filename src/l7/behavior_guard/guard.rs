@@ -297,6 +297,14 @@ impl L7BehaviorGuard {
             "l7.behavior.challenge_count_window".to_string(),
             assessment.recent_challenges.to_string(),
         );
+        let defense_stage = request
+            .get_metadata("runtime.defense.stage")
+            .cloned()
+            .unwrap_or_else(|| "observe".to_string());
+        request.add_metadata(
+            "l7.behavior.runtime_stage".to_string(),
+            defense_stage.clone(),
+        );
         request.add_metadata(
             "l7.behavior.session_span_secs".to_string(),
             assessment.session_span_secs.to_string(),
@@ -325,7 +333,10 @@ impl L7BehaviorGuard {
 
         self.maybe_cleanup(unix_now);
 
-        let should_auto_block = assessment.score >= BLOCK_SCORE
+        let stage_prefers_block = defense_stage == "drop"
+            && (assessment.score >= CHALLENGE_SCORE || assessment.recent_challenges >= 1);
+        let should_auto_block = stage_prefers_block
+            || assessment.score >= BLOCK_SCORE
             || (assessment.score >= CHALLENGE_SCORE
                 && assessment.recent_challenges >= CHALLENGES_BEFORE_AUTO_BLOCK);
 
@@ -359,7 +370,9 @@ impl L7BehaviorGuard {
             ));
         }
 
-        if assessment.score >= CHALLENGE_SCORE {
+        let stage_prefers_challenge = matches!(defense_stage.as_str(), "challenge" | "drop")
+            && assessment.score >= DELAY_SCORE;
+        if stage_prefers_challenge || assessment.score >= CHALLENGE_SCORE {
             self.activate_aggregate_enforcement(
                 &assessment,
                 AggregateEnforcementAction::Challenge,

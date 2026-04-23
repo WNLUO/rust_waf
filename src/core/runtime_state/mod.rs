@@ -20,6 +20,108 @@ use helpers::*;
 
 const MAX_ROUTE_DEFENSE_BUCKETS: usize = 8_192;
 
+fn derive_runtime_defense_stage(
+    pressure: &RuntimePressureSnapshot,
+    adaptive: &adaptive_protection::AdaptiveProtectionRuntimeSnapshot,
+    auto: &auto_tuning::AutoTuningRuntimeSnapshot,
+) -> (&'static str, u8, String) {
+    let mut score = 0u8;
+    let mut reasons = Vec::new();
+
+    match pressure.level {
+        "attack" => {
+            score = score.saturating_add(3);
+            reasons.push("runtime_attack");
+        }
+        "high" => {
+            score = score.saturating_add(2);
+            reasons.push("runtime_high");
+        }
+        "elevated" => {
+            score = score.saturating_add(1);
+            reasons.push("runtime_elevated");
+        }
+        _ => {}
+    }
+    match adaptive.system_pressure.as_str() {
+        "attack" => {
+            score = score.saturating_add(2);
+            reasons.push("adaptive_attack");
+        }
+        "high" => {
+            score = score.saturating_add(1);
+            reasons.push("adaptive_high");
+        }
+        _ => {}
+    }
+    if pressure.storage_queue_usage_percent >= 90 {
+        score = score.saturating_add(2);
+        reasons.push("storage_queue_hot");
+    } else if pressure.storage_queue_usage_percent >= 75 {
+        score = score.saturating_add(1);
+        reasons.push("storage_queue_warm");
+    }
+    if pressure.cpu_pressure_score >= 3 {
+        score = score.saturating_add(1);
+        reasons.push("cpu_extreme");
+    }
+    let persistent_windows = [
+        auto.consecutive_identity_high >= 2,
+        auto.consecutive_slow_attack_high >= 2,
+        auto.consecutive_budget_high >= 2,
+        auto.consecutive_latency_high >= 2,
+    ]
+    .into_iter()
+    .filter(|hot| *hot)
+    .count();
+    if persistent_windows >= 2 {
+        score = score.saturating_add(2);
+        reasons.push("persistent_multi_window_pressure");
+    } else if persistent_windows == 1 {
+        score = score.saturating_add(1);
+        reasons.push("persistent_single_window_pressure");
+    }
+    if auto.recent_pressure_memory_windows >= 2 {
+        score = score.saturating_add(1);
+        reasons.push("pressure_memory_active");
+    }
+    if auto.last_observed_challenge_issued >= 3
+        && auto.last_observed_challenge_verify_rate_percent < 20.0
+        && auto.last_observed_challenge_block_rate_percent >= 30.0
+    {
+        score = score.saturating_add(1);
+        reasons.push("challenge_effect_poor");
+    }
+    if auto.last_observed_challenge_issued >= 3
+        && auto.last_observed_challenge_verify_rate_percent >= 50.0
+        && auto.consecutive_recovery_windows >= 1
+    {
+        score = score.saturating_sub(1);
+        reasons.push("challenge_effect_good");
+    }
+
+    let stage = if pressure.prefer_drop
+        || (pressure.defense_depth == "survival"
+            && (pressure.level == "attack" || pressure.storage_queue_usage_percent >= 90))
+        || score >= 6
+    {
+        "drop"
+    } else if score >= 3 {
+        "challenge"
+    } else if score >= 1 {
+        "tighten"
+    } else {
+        "observe"
+    };
+
+    let reason = if reasons.is_empty() {
+        "steady_state".to_string()
+    } else {
+        reasons.join(",")
+    };
+    (stage, score, reason)
+}
+
 impl WafContext {
     pub fn runtime_pressure_snapshot(&self) -> RuntimePressureSnapshot {
         let auto = self.auto_tuning_snapshot();
@@ -111,6 +213,8 @@ impl WafContext {
         let pressure = self.runtime_pressure_snapshot();
         let adaptive = self.adaptive_protection_snapshot();
         let auto = self.auto_tuning_snapshot();
+        let (base_stage, base_stage_score, base_stage_reason) =
+            derive_runtime_defense_stage(&pressure, &adaptive, &auto);
         request.add_metadata(
             "runtime.pressure.level".to_string(),
             pressure.level.to_string(),
@@ -138,6 +242,22 @@ impl WafContext {
         request.add_metadata(
             "runtime.defense.depth".to_string(),
             pressure.defense_depth.to_string(),
+        );
+        request.add_metadata(
+            "runtime.defense.base_stage".to_string(),
+            base_stage.to_string(),
+        );
+        request.add_metadata(
+            "runtime.defense.stage".to_string(),
+            base_stage.to_string(),
+        );
+        request.add_metadata(
+            "runtime.defense.stage_score".to_string(),
+            base_stage_score.to_string(),
+        );
+        request.add_metadata(
+            "runtime.defense.stage_reason".to_string(),
+            base_stage_reason,
         );
         request.add_metadata(
             "runtime.server.mode".to_string(),

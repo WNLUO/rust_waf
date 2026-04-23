@@ -244,8 +244,23 @@ async fn annotate_runtime_pressure_exposes_adaptive_pressure_metadata() {
             .map(String::as_str),
         Some("0.00")
     );
+    assert_eq!(
+        request
+            .get_metadata("runtime.defense.base_stage")
+            .map(String::as_str),
+        Some("observe")
+    );
+    assert_eq!(
+        request
+            .get_metadata("runtime.defense.stage")
+            .map(String::as_str),
+        Some("observe")
+    );
     assert!(request
         .get_metadata("runtime.auto_tuning.controller_state")
+        .is_some());
+    assert!(request
+        .get_metadata("runtime.defense.stage_reason")
         .is_some());
 }
 

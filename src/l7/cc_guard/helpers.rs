@@ -474,6 +474,12 @@ pub(super) fn stable_hash(value: &str) -> u64 {
 }
 
 pub(super) fn should_drop_delay_under_pressure(request: &UnifiedHttpRequest) -> bool {
+    if request
+        .get_metadata("runtime.defense.stage")
+        .is_some_and(|value| matches!(value.as_str(), "challenge" | "drop"))
+    {
+        return true;
+    }
     request
         .get_metadata("runtime.pressure.drop_delay")
         .map(|value| value == "true")

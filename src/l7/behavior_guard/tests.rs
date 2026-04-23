@@ -635,3 +635,29 @@ async fn delay_is_upgraded_to_challenge_under_runtime_pressure() {
         Some("challenge")
     );
 }
+
+#[tokio::test]
+async fn tighten_stage_is_recorded_on_behavior_challenge() {
+    let guard = L7BehaviorGuard::new();
+    let mut request = request("GET", "/", "text/html");
+    request.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+    request.add_metadata("l7.cc.route".to_string(), "/".to_string());
+    request.add_metadata("ai.behavior.force_watch".to_string(), "true".to_string());
+    request.add_metadata("runtime.defense.stage".to_string(), "challenge".to_string());
+
+    let result = guard.inspect_request(&mut request).await;
+
+    assert!(result.is_some());
+    assert_eq!(
+        request
+            .get_metadata("l7.behavior.runtime_stage")
+            .map(String::as_str),
+        Some("challenge")
+    );
+    assert_eq!(
+        request
+            .get_metadata("l7.behavior.action")
+            .map(String::as_str),
+        Some("challenge")
+    );
+}

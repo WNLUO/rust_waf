@@ -26,6 +26,7 @@ where
     let traffic_source_ip = traffic_source_ip.to_string();
     let upstream_addr = select_upstream_target(matched_site);
     if let Some(upstream_addr) = upstream_addr.as_deref() {
+        let safeline_intercept = resolve_safeline_intercept_config(config, matched_site);
         if let Err(reason) = enforce_upstream_policy(context) {
             context
                 .traffic_map
@@ -44,8 +45,86 @@ where
             return Ok(Http1RequestFlow::Close);
         }
         if let Some(metrics) = context.metrics.as_ref() {
-            let labels = proxy_metric_labels(&request);
-            metrics.record_proxy_attempt_with_labels(proxy_traffic_kind(&request), &labels);
+            let labels = proxy_metric_labels(request);
+            metrics.record_proxy_attempt_with_labels(proxy_traffic_kind(request), &labels);
+        }
+        if !safeline_intercept.enabled {
+            let proxy_started_at = Instant::now();
+            match stream_http_request_to_http1_client(
+                context,
+                request,
+                upstream_addr,
+                config.l7_config.proxy_connect_timeout_ms,
+                config.l7_config.proxy_write_timeout_ms,
+                config.l7_config.proxy_read_timeout_ms,
+                stream,
+            )
+            .await
+            {
+                Ok(response) => {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        let labels = proxy_metric_labels(request);
+                        metrics.record_proxy_success_with_labels(
+                            proxy_traffic_kind(request),
+                            proxy_started_at.elapsed(),
+                            &labels,
+                        );
+                        metrics.record_streamed_proxy_response();
+                    }
+                    context.traffic_map.record_ingress(
+                        traffic_source_ip.clone(),
+                        request_dump_len,
+                        false,
+                    );
+                    context.traffic_map.record_egress(
+                        traffic_source_ip.clone(),
+                        response.body_bytes_sent,
+                        proxy_started_at.elapsed(),
+                    );
+                    context.note_ai_route_result(
+                        request,
+                        AiRouteResultObservation {
+                            status_code: response.status_code,
+                            latency_ms: Some(proxy_started_at.elapsed().as_millis() as u64),
+                            upstream_error: response.status_code >= 500,
+                            local_response: false,
+                            blocked: false,
+                        },
+                    );
+                    return Ok(Http1RequestFlow::Close);
+                }
+                Err(err) => {
+                    context.traffic_map.record_ingress(
+                        traffic_source_ip.clone(),
+                        request_dump_len,
+                        false,
+                    );
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        let labels = proxy_metric_labels(request);
+                        metrics
+                            .record_proxy_failure_with_labels(proxy_traffic_kind(request), &labels);
+                    }
+                    context.set_upstream_health(false, Some(err.to_string()));
+                    warn!(
+                        "Failed to stream HTTP/1.1 request from {} to {}: {}",
+                        peer_addr, upstream_addr, err
+                    );
+                    http1_handler
+                        .write_response(stream, 502, "Bad Gateway", b"upstream proxy failed")
+                        .await?;
+                    context.note_ai_route_result(
+                        request,
+                        AiRouteResultObservation {
+                            status_code: 502,
+                            latency_ms: Some(proxy_started_at.elapsed().as_millis() as u64),
+                            upstream_error: true,
+                            local_response: false,
+                            blocked: false,
+                        },
+                    );
+                    return Ok(Http1RequestFlow::Close);
+                }
+            }
         }
         let proxy_started_at = Instant::now();
         let proxy_result = if config.gateway_config.enable_ntlm
@@ -76,9 +155,9 @@ where
         match proxy_result {
             Ok(response) => {
                 if let Some(metrics) = context.metrics.as_ref() {
-                    let labels = proxy_metric_labels(&request);
+                    let labels = proxy_metric_labels(request);
                     metrics.record_proxy_success_with_labels(
-                        proxy_traffic_kind(&request),
+                        proxy_traffic_kind(request),
                         proxy_started_at.elapsed(),
                         &labels,
                     );
@@ -93,7 +172,7 @@ where
                     packet,
                     &request,
                     matched_site,
-                    resolve_safeline_intercept_config(&config, matched_site),
+                    safeline_intercept,
                     response,
                 ) {
                     UpstreamResponseDisposition::Forward(response) => {
@@ -169,8 +248,8 @@ where
                     false,
                 );
                 if let Some(metrics) = context.metrics.as_ref() {
-                    let labels = proxy_metric_labels(&request);
-                    metrics.record_proxy_failure_with_labels(proxy_traffic_kind(&request), &labels);
+                    let labels = proxy_metric_labels(request);
+                    metrics.record_proxy_failure_with_labels(proxy_traffic_kind(request), &labels);
                 }
                 context.set_upstream_health(false, Some(err.to_string()));
                 warn!(
@@ -199,7 +278,7 @@ where
         http1_handler
             .write_response(stream, 502, "Bad Gateway", b"site upstream not configured")
             .await?;
-    } else if should_reject_unmatched_site(context, &request) {
+    } else if should_reject_unmatched_site(context, request) {
         context
             .traffic_map
             .record_ingress(traffic_source_ip.clone(), request_dump_len, false);

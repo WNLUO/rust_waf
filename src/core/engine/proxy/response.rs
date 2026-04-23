@@ -8,7 +8,32 @@ pub(crate) struct UpstreamHttpResponse {
     pub(crate) body: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct UpstreamHttp1ResponseHead {
+    pub(crate) status_code: u16,
+    pub(crate) status_text: Option<String>,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) body_offset: usize,
+    pub(crate) chunked: bool,
+}
+
 pub(crate) fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpResponse> {
+    let head = parse_http1_response_head(response)?;
+    let body = if head.chunked {
+        decode_chunked_body(&response[head.body_offset..])?
+    } else {
+        response[head.body_offset..].to_vec()
+    };
+
+    Ok(UpstreamHttpResponse {
+        status_code: head.status_code,
+        status_text: head.status_text,
+        headers: head.headers,
+        body,
+    })
+}
+
+pub(crate) fn parse_http1_response_head(response: &[u8]) -> Result<UpstreamHttp1ResponseHead> {
     let headers_end = response
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
@@ -51,17 +76,12 @@ pub(crate) fn parse_http1_response(response: &[u8]) -> Result<UpstreamHttpRespon
         }
     }
 
-    let body = if chunked {
-        decode_chunked_body(&response[body_offset..])?
-    } else {
-        response[body_offset..].to_vec()
-    };
-
-    Ok(UpstreamHttpResponse {
+    Ok(UpstreamHttp1ResponseHead {
         status_code,
         status_text,
         headers,
-        body,
+        body_offset,
+        chunked,
     })
 }
 

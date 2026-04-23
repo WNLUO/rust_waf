@@ -75,10 +75,13 @@ use self::policy::{
     should_keep_client_connection_open, should_reject_unmatched_site,
     try_handle_browser_fingerprint_report,
 };
+#[cfg(feature = "http3")]
+use self::proxy::stream_http_request_to_http3_client;
 use self::proxy::{
     apply_safeline_upstream_action, enforce_http1_request_safety, proxy_http_request,
     proxy_http_request_with_session_affinity, resolve_runtime_custom_response,
-    write_http1_upstream_response, UpstreamClientConnection, UpstreamResponseDisposition,
+    stream_http_request_to_http1_client, write_http1_upstream_response, UpstreamClientConnection,
+    UpstreamResponseDisposition,
 };
 #[cfg(feature = "http3")]
 pub(crate) use self::runtime::sync_http3_listener_runtime;

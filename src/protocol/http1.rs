@@ -346,10 +346,50 @@ impl Http1Handler {
     where
         W: AsyncWriteExt + Unpin,
     {
+        let response =
+            self.build_response_head(status_code, status_text, headers, Some(body.len()), true);
+        writer.write_all(&response).await?;
+        if !body.is_empty() {
+            writer.write_all(body).await?;
+        }
+        writer.flush().await?;
+
+        debug!("Wrote HTTP/1.1 response: {} {}", status_code, status_text);
+        Ok(())
+    }
+
+    pub async fn write_response_head_with_headers<W>(
+        &self,
+        writer: &mut W,
+        status_code: u16,
+        status_text: &str,
+        headers: &[(String, String)],
+        body_len: Option<usize>,
+        force_close: bool,
+    ) -> Result<(), ProtocolError>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let response =
+            self.build_response_head(status_code, status_text, headers, body_len, force_close);
+        writer.write_all(&response).await?;
+        writer.flush().await?;
+        Ok(())
+    }
+
+    fn build_response_head(
+        &self,
+        status_code: u16,
+        status_text: &str,
+        headers: &[(String, String)],
+        body_len: Option<usize>,
+        force_close: bool,
+    ) -> Vec<u8> {
         let mut response = format!("HTTP/1.1 {} {}\r\n", status_code, status_text).into_bytes();
         let mut has_content_type = false;
         let mut has_connection = false;
         let mut has_content_length = false;
+        let mut has_transfer_encoding = false;
 
         for (key, value) in headers {
             if key.eq_ignore_ascii_case("content-type") {
@@ -358,6 +398,8 @@ impl Http1Handler {
                 has_connection = true;
             } else if key.eq_ignore_ascii_case("content-length") {
                 has_content_length = true;
+            } else if key.eq_ignore_ascii_case("transfer-encoding") {
+                has_transfer_encoding = true;
             }
             response.extend_from_slice(format!("{}: {}\r\n", key, value).as_bytes());
         }
@@ -365,21 +407,17 @@ impl Http1Handler {
         if !has_content_type {
             response.extend_from_slice(b"Content-Type: text/plain\r\n");
         }
-        if !has_content_length {
-            response.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+        if !has_content_length && !has_transfer_encoding {
+            if let Some(body_len) = body_len {
+                response.extend_from_slice(format!("Content-Length: {}\r\n", body_len).as_bytes());
+            }
         }
-        if !has_connection {
+        if force_close && !has_connection {
             response.extend_from_slice(b"Connection: close\r\n");
         }
 
         response.extend_from_slice(b"\r\n");
-        response.extend_from_slice(body);
-
-        writer.write_all(&response).await?;
-        writer.flush().await?;
-
-        debug!("Wrote HTTP/1.1 response: {} {}", status_code, status_text);
-        Ok(())
+        response
     }
 
     pub async fn write_response_with_headers_tarpit<W>(

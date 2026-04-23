@@ -12,6 +12,12 @@ use self::http2::{proxy_http2_request, select_upstream_transport, UpstreamTransp
 pub(crate) use self::request::enforce_http1_request_safety;
 use self::tls::{connect_upstream_client, resolve_upstream_tls_server_name};
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StreamedUpstreamResponse {
+    pub(crate) status_code: u16,
+    pub(crate) body_bytes_sent: usize,
+}
+
 #[allow(dead_code)]
 async fn forward_http1_request<W>(
     client_stream: &mut W,
@@ -96,6 +102,84 @@ pub(crate) async fn proxy_http_request(
                 &upstream,
                 connect_timeout_ms,
                 read_timeout_ms,
+            )
+            .await
+        }
+    }
+}
+
+pub(crate) async fn stream_http_request_to_http1_client<W>(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream_addr: &str,
+    connect_timeout_ms: u64,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
+    client_stream: &mut W,
+) -> Result<StreamedUpstreamResponse>
+where
+    W: AsyncWrite + Unpin,
+{
+    let upstream = parse_upstream_endpoint(upstream_addr)?;
+    match select_upstream_transport(context, request, &upstream)? {
+        UpstreamTransport::Http1 => {
+            self::http1::proxy_http1_request_to_http1_client(
+                context,
+                request,
+                &upstream,
+                connect_timeout_ms,
+                write_timeout_ms,
+                read_timeout_ms,
+                client_stream,
+            )
+            .await
+        }
+        UpstreamTransport::Http2 => {
+            self::http2::proxy_http2_request_to_http1_client(
+                context,
+                request,
+                &upstream,
+                connect_timeout_ms,
+                read_timeout_ms,
+                client_stream,
+            )
+            .await
+        }
+    }
+}
+
+#[cfg(feature = "http3")]
+pub(crate) async fn stream_http_request_to_http3_client(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream_addr: &str,
+    connect_timeout_ms: u64,
+    write_timeout_ms: u64,
+    read_timeout_ms: u64,
+    stream: &mut RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+) -> Result<StreamedUpstreamResponse> {
+    let upstream = parse_upstream_endpoint(upstream_addr)?;
+    match select_upstream_transport(context, request, &upstream)? {
+        UpstreamTransport::Http1 => {
+            self::http1::proxy_http1_request_to_http3_client(
+                context,
+                request,
+                &upstream,
+                connect_timeout_ms,
+                write_timeout_ms,
+                read_timeout_ms,
+                stream,
+            )
+            .await
+        }
+        UpstreamTransport::Http2 => {
+            self::http2::proxy_http2_request_to_http3_client(
+                context,
+                request,
+                &upstream,
+                connect_timeout_ms,
+                read_timeout_ms,
+                stream,
             )
             .await
         }

@@ -7,8 +7,8 @@ use std::time::Duration;
 use super::types::{
     DistinctSlidingWindowCounter, DistinctWindowSlot, DistinctWindowState, FastWindowCounter,
     FastWindowObservation, FastWindowSlot, FastWindowState, FixedWindowSlot, FixedWindowState,
-    HotBlockEntry, PageLoadWindowState, SlidingWindowCounter, MAX_TRACKED_DISTINCT_VALUES,
-    WeightedSlidingWindowCounter, FAST_WINDOW_BUCKETS,
+    HotBlockEntry, PageLoadWindowState, SlidingWindowCounter, WeightedSlidingWindowCounter,
+    FAST_WINDOW_BUCKETS, MAX_TRACKED_DISTINCT_VALUES,
 };
 use super::unix_timestamp;
 
@@ -36,12 +36,7 @@ impl WeightedSlidingWindowCounter {
         }
     }
 
-    pub(super) fn observe(
-        &mut self,
-        unix_now: i64,
-        window: Duration,
-        weight_percent: u8,
-    ) -> u32 {
+    pub(super) fn observe(&mut self, unix_now: i64, window: Duration, weight_percent: u8) -> u32 {
         let mut state = self.state.lock().expect("cc weighted bucket lock poisoned");
         let weight = u16::from(weight_percent.max(1));
         state.observe(unix_now, window, u32::from(weight));
@@ -77,12 +72,7 @@ impl DistinctSlidingWindowCounter {
         }
     }
 
-    pub(super) fn observe(
-        &mut self,
-        value: String,
-        unix_now: i64,
-        window: Duration,
-    ) -> u32 {
+    pub(super) fn observe(&mut self, value: String, unix_now: i64, window: Duration) -> u32 {
         let mut state = self.state.lock().expect("cc distinct bucket lock poisoned");
         state.observe(hash_distinct_value(&value), unix_now, window);
         self.last_seen_unix.store(unix_now, Ordering::Relaxed);

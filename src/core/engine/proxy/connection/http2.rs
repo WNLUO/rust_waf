@@ -7,6 +7,11 @@ use http::Request;
 use http_body_util::{BodyExt, Full};
 use hyper::client::conn::http2 as hyper_http2;
 use hyper_util::rt::{TokioExecutor, TokioIo};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const HTTP2_POOL_MAX_ENTRIES: usize = 128;
+const HTTP2_POOL_IDLE_SECS: u64 = 120;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum UpstreamTransport {
@@ -18,12 +23,12 @@ type Http2Sender = hyper_http2::SendRequest<Full<Bytes>>;
 
 #[derive(Debug)]
 struct PooledHttp2Connection {
-    sender: Http2Sender,
+    sender: tokio::sync::Mutex<Http2Sender>,
+    last_used_unix: AtomicU64,
 }
 
-fn http2_pool() -> &'static DashMap<String, Arc<tokio::sync::Mutex<PooledHttp2Connection>>> {
-    static POOL: OnceLock<DashMap<String, Arc<tokio::sync::Mutex<PooledHttp2Connection>>>> =
-        OnceLock::new();
+fn http2_pool() -> &'static DashMap<String, Arc<PooledHttp2Connection>> {
+    static POOL: OnceLock<DashMap<String, Arc<PooledHttp2Connection>>> = OnceLock::new();
     POOL.get_or_init(DashMap::new)
 }
 
@@ -80,10 +85,13 @@ pub(super) async fn proxy_http2_request(
             .await?;
     let upstream_request = build_http2_upstream_request(request, upstream)?;
     emit_http2_upstream_request_debug_event(context, request, upstream, &upstream_request)?;
-    let mut guard = pooled.lock().await;
+    pooled
+        .last_used_unix
+        .store(current_unix_second(), Ordering::Relaxed);
+    let mut guard = pooled.sender.lock().await;
     let response = tokio::time::timeout(
         std::time::Duration::from_millis(read_timeout_ms),
-        guard.sender.send_request(upstream_request),
+        guard.send_request(upstream_request),
     )
     .await;
     match response {
@@ -92,6 +100,210 @@ pub(super) async fn proxy_http2_request(
             let mapped = map_http2_upstream_response(response).await?;
             context.set_upstream_health(true, None);
             Ok(mapped)
+        }
+        Ok(Err(err)) => {
+            http2_pool().remove(&pool_key);
+            emit_http2_upstream_error_debug_event(
+                context,
+                request,
+                "send_request",
+                &err.to_string(),
+            );
+            Err(err.into())
+        }
+        Err(_) => {
+            http2_pool().remove(&pool_key);
+            emit_http2_upstream_error_debug_event(
+                context,
+                request,
+                "timeout",
+                "Upstream HTTP/2 request timed out",
+            );
+            Err(anyhow::anyhow!("Upstream HTTP/2 request timed out"))
+        }
+    }
+}
+
+pub(super) async fn proxy_http2_request_to_http1_client<W>(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    connect_timeout_ms: u64,
+    read_timeout_ms: u64,
+    client_stream: &mut W,
+) -> Result<super::StreamedUpstreamResponse>
+where
+    W: AsyncWrite + Unpin,
+{
+    if !matches!(upstream.scheme, UpstreamScheme::Https) {
+        anyhow::bail!("Upstream HTTP/2 currently requires HTTPS upstreams");
+    }
+
+    let pool_key = build_http2_pool_key(context, request, upstream)?;
+    let pooled =
+        get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
+            .await?;
+    let upstream_request = build_http2_upstream_request(request, upstream)?;
+    emit_http2_upstream_request_debug_event(context, request, upstream, &upstream_request)?;
+    pooled
+        .last_used_unix
+        .store(current_unix_second(), Ordering::Relaxed);
+    let mut guard = pooled.sender.lock().await;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(read_timeout_ms),
+        guard.send_request(upstream_request),
+    )
+    .await;
+    match response {
+        Ok(Ok(response)) => {
+            emit_http2_upstream_response_debug_event(context, request, &response);
+            let (parts, mut body) = response.into_parts();
+            let mut headers = parts
+                .headers
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_string(), value.to_string()))
+                })
+                .collect::<Vec<_>>();
+            apply_response_policies(context, &mut headers, parts.status.as_u16());
+            Http1Handler::new()
+                .write_response_head_with_headers(
+                    client_stream,
+                    parts.status.as_u16(),
+                    parts
+                        .status
+                        .canonical_reason()
+                        .unwrap_or(http_status_text(parts.status.as_u16())),
+                    &headers,
+                    None,
+                    true,
+                )
+                .await?;
+
+            let mut body_bytes_sent = 0usize;
+            while let Some(frame) = tokio::time::timeout(
+                std::time::Duration::from_millis(read_timeout_ms),
+                body.frame(),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Upstream HTTP/2 body read timed out"))?
+            {
+                let frame = frame?;
+                if let Ok(data) = frame.into_data() {
+                    body_bytes_sent = body_bytes_sent.saturating_add(data.len());
+                    client_stream.write_all(data.as_ref()).await?;
+                    client_stream.flush().await?;
+                }
+            }
+
+            context.set_upstream_health(true, None);
+            Ok(super::StreamedUpstreamResponse {
+                status_code: parts.status.as_u16(),
+                body_bytes_sent,
+            })
+        }
+        Ok(Err(err)) => {
+            http2_pool().remove(&pool_key);
+            emit_http2_upstream_error_debug_event(
+                context,
+                request,
+                "send_request",
+                &err.to_string(),
+            );
+            Err(err.into())
+        }
+        Err(_) => {
+            http2_pool().remove(&pool_key);
+            emit_http2_upstream_error_debug_event(
+                context,
+                request,
+                "timeout",
+                "Upstream HTTP/2 request timed out",
+            );
+            Err(anyhow::anyhow!("Upstream HTTP/2 request timed out"))
+        }
+    }
+}
+
+#[cfg(feature = "http3")]
+pub(super) async fn proxy_http2_request_to_http3_client(
+    context: &WafContext,
+    request: &UnifiedHttpRequest,
+    upstream: &crate::core::gateway::UpstreamEndpoint,
+    connect_timeout_ms: u64,
+    read_timeout_ms: u64,
+    stream: &mut RequestStream<h3_quinn::BidiStream<Bytes>, Bytes>,
+) -> Result<super::StreamedUpstreamResponse> {
+    if !matches!(upstream.scheme, UpstreamScheme::Https) {
+        anyhow::bail!("Upstream HTTP/2 currently requires HTTPS upstreams");
+    }
+
+    let pool_key = build_http2_pool_key(context, request, upstream)?;
+    let pooled =
+        get_or_connect_http2_sender(context, request, upstream, &pool_key, connect_timeout_ms)
+            .await?;
+    let upstream_request = build_http2_upstream_request(request, upstream)?;
+    emit_http2_upstream_request_debug_event(context, request, upstream, &upstream_request)?;
+    pooled
+        .last_used_unix
+        .store(current_unix_second(), Ordering::Relaxed);
+    let mut guard = pooled.sender.lock().await;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_millis(read_timeout_ms),
+        guard.send_request(upstream_request),
+    )
+    .await;
+    match response {
+        Ok(Ok(response)) => {
+            emit_http2_upstream_response_debug_event(context, request, &response);
+            let (parts, mut body) = response.into_parts();
+            let mut builder = http::Response::builder().status(parts.status.as_u16());
+            let mut headers = parts
+                .headers
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .to_str()
+                        .ok()
+                        .map(|value| (name.as_str().to_string(), value.to_string()))
+                })
+                .collect::<Vec<_>>();
+            apply_response_policies(context, &mut headers, parts.status.as_u16());
+            for (key, value) in &headers {
+                if key.eq_ignore_ascii_case("transfer-encoding")
+                    || key.eq_ignore_ascii_case("connection")
+                    || key.starts_with(':')
+                {
+                    continue;
+                }
+                builder = builder.header(key, value);
+            }
+            stream.send_response(builder.body(())?).await?;
+
+            let mut body_bytes_sent = 0usize;
+            while let Some(frame) = tokio::time::timeout(
+                std::time::Duration::from_millis(read_timeout_ms),
+                body.frame(),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("Upstream HTTP/2 body read timed out"))?
+            {
+                let frame = frame?;
+                if let Ok(data) = frame.into_data() {
+                    body_bytes_sent = body_bytes_sent.saturating_add(data.len());
+                    stream.send_data(data).await?;
+                }
+            }
+            stream.finish().await?;
+
+            context.set_upstream_health(true, None);
+            Ok(super::StreamedUpstreamResponse {
+                status_code: parts.status.as_u16(),
+                body_bytes_sent,
+            })
         }
         Ok(Err(err)) => {
             http2_pool().remove(&pool_key);
@@ -136,17 +348,28 @@ async fn get_or_connect_http2_sender(
     upstream: &crate::core::gateway::UpstreamEndpoint,
     pool_key: &str,
     connect_timeout_ms: u64,
-) -> Result<Arc<tokio::sync::Mutex<PooledHttp2Connection>>> {
+) -> Result<Arc<PooledHttp2Connection>> {
+    cleanup_http2_pool(context);
     if let Some(existing) = http2_pool().get(pool_key) {
+        existing
+            .last_used_unix
+            .store(current_unix_second(), Ordering::Relaxed);
         return Ok(existing.clone());
     }
 
     let sender = connect_http2_sender(context, request, upstream, connect_timeout_ms).await?;
-    let pooled = Arc::new(tokio::sync::Mutex::new(PooledHttp2Connection { sender }));
+    let pooled = Arc::new(PooledHttp2Connection {
+        sender: tokio::sync::Mutex::new(sender),
+        last_used_unix: AtomicU64::new(current_unix_second()),
+    });
     let pooled_ref = pooled.clone();
     let entry = http2_pool()
         .entry(pool_key.to_string())
         .or_insert_with(|| pooled_ref);
+    entry
+        .value()
+        .last_used_unix
+        .store(current_unix_second(), Ordering::Relaxed);
     Ok(entry.clone())
 }
 
@@ -185,6 +408,58 @@ async fn connect_http2_sender(
         }
     });
     Ok(sender)
+}
+
+fn cleanup_http2_pool(context: &WafContext) {
+    let now = current_unix_second();
+    let idle_before = now.saturating_sub(HTTP2_POOL_IDLE_SECS);
+    let mut removed = 0u64;
+
+    http2_pool().retain(|_, connection| {
+        let keep = connection.last_used_unix.load(Ordering::Relaxed) >= idle_before;
+        if !keep {
+            removed = removed.saturating_add(1);
+        }
+        keep
+    });
+
+    let overflow = http2_pool().len().saturating_sub(HTTP2_POOL_MAX_ENTRIES);
+    if overflow > 0 {
+        let mut idle_entries = http2_pool()
+            .iter()
+            .map(|entry| {
+                (
+                    entry.key().clone(),
+                    entry.value().last_used_unix.load(Ordering::Relaxed),
+                )
+            })
+            .collect::<Vec<_>>();
+        idle_entries.sort_by_key(|(_, last_used)| *last_used);
+        for (key, _) in idle_entries.into_iter().take(overflow) {
+            if http2_pool().remove(&key).is_some() {
+                removed = removed.saturating_add(1);
+            }
+        }
+    }
+
+    if removed > 0 {
+        if let Some(metrics) = context.metrics.as_ref() {
+            for _ in 0..removed {
+                metrics.record_http2_pool_eviction();
+            }
+        }
+        debug!(
+            "Evicted {} idle/excess HTTP/2 upstream pooled connection(s)",
+            removed
+        );
+    }
+}
+
+fn current_unix_second() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn emit_http2_upstream_request_debug_event(

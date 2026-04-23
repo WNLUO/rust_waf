@@ -16,6 +16,7 @@ pub(super) async fn handle_http3_proxy_or_local_response(
         .traffic_map
         .record_ingress(traffic_source_ip.clone(), request_dump_len, false);
     if let Some(upstream_addr) = upstream_addr.as_deref() {
+        let safeline_intercept = resolve_safeline_intercept_config(config, matched_site);
         if let Err(reason) = enforce_upstream_policy(context) {
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_fail_close_rejection();
@@ -28,6 +29,54 @@ pub(super) async fn handle_http3_proxy_or_local_response(
             metrics.record_proxy_attempt_with_labels(proxy_traffic_kind(request), &labels);
         }
         let proxy_started_at = Instant::now();
+        if !safeline_intercept.enabled {
+            match stream_http_request_to_http3_client(
+                context,
+                request,
+                upstream_addr,
+                config.l7_config.proxy_connect_timeout_ms,
+                config.l7_config.proxy_write_timeout_ms,
+                config.l7_config.proxy_read_timeout_ms,
+                stream,
+            )
+            .await
+            {
+                Ok(response) => {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        let labels = proxy_metric_labels(request);
+                        metrics.record_proxy_success_with_labels(
+                            proxy_traffic_kind(request),
+                            proxy_started_at.elapsed(),
+                            &labels,
+                        );
+                        metrics.record_streamed_proxy_response();
+                    }
+                    context.traffic_map.record_egress(
+                        traffic_source_ip.clone(),
+                        response.body_bytes_sent,
+                        proxy_started_at.elapsed(),
+                    );
+                    return Ok(());
+                }
+                Err(err) => {
+                    if let Some(metrics) = context.metrics.as_ref() {
+                        let labels = proxy_metric_labels(request);
+                        metrics
+                            .record_proxy_failure_with_labels(proxy_traffic_kind(request), &labels);
+                    }
+                    context.set_upstream_health(false, Some(err.to_string()));
+                    warn!(
+                        "Failed to stream HTTP/3 request from {} to {}: {}",
+                        request.client_ip.as_deref().unwrap_or("unknown"),
+                        upstream_addr,
+                        err
+                    );
+                    send_http3_response(stream, 502, &[], b"upstream proxy failed".to_vec(), None)
+                        .await?;
+                    return Ok(());
+                }
+            }
+        }
         match proxy_http_request(
             context,
             request,

@@ -75,6 +75,9 @@ pub struct MetricsCollector {
     upstream_healthcheck_successes: AtomicU64,
     upstream_healthcheck_failures: AtomicU64,
     proxy_latency_micros_total: AtomicU64,
+    streamed_proxy_responses: AtomicU64,
+    proxy_body_preview_truncations: AtomicU64,
+    http2_pool_evictions: AtomicU64,
     document_proxy_requests: AtomicU64,
     document_proxy_successes: AtomicU64,
     document_proxy_failures: AtomicU64,
@@ -174,6 +177,9 @@ impl MetricsCollector {
             upstream_healthcheck_successes: AtomicU64::new(0),
             upstream_healthcheck_failures: AtomicU64::new(0),
             proxy_latency_micros_total: AtomicU64::new(0),
+            streamed_proxy_responses: AtomicU64::new(0),
+            proxy_body_preview_truncations: AtomicU64::new(0),
+            http2_pool_evictions: AtomicU64::new(0),
             document_proxy_requests: AtomicU64::new(0),
             document_proxy_successes: AtomicU64::new(0),
             document_proxy_failures: AtomicU64::new(0),
@@ -522,6 +528,20 @@ impl MetricsCollector {
         }
     }
 
+    pub fn record_streamed_proxy_response(&self) {
+        self.streamed_proxy_responses
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_proxy_body_preview_truncation(&self) {
+        self.proxy_body_preview_truncations
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_http2_pool_eviction(&self) {
+        self.http2_pool_evictions.fetch_add(1, Ordering::Relaxed);
+    }
+
     fn proxy_requests_counter(&self, kind: ProxyTrafficKind) -> &AtomicU64 {
         match kind {
             ProxyTrafficKind::Document => &self.document_proxy_requests,
@@ -657,6 +677,11 @@ impl MetricsCollector {
             } else {
                 proxy_latency_micros_total / proxy_successes
             },
+            streamed_proxy_responses: self.streamed_proxy_responses.load(Ordering::Relaxed),
+            proxy_body_preview_truncations: self
+                .proxy_body_preview_truncations
+                .load(Ordering::Relaxed),
+            http2_pool_evictions: self.http2_pool_evictions.load(Ordering::Relaxed),
             document_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Document),
             api_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Api),
             static_proxy: self.proxy_traffic_snapshot(ProxyTrafficKind::Static),

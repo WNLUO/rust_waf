@@ -2,6 +2,8 @@ use super::HttpVersion;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+const INSPECTION_BODY_PREVIEW_BYTES: usize = 4 * 1024;
+
 /// 统一的HTTP请求抽象
 ///
 /// 这个结构提供了协议无关的HTTP请求表示，
@@ -117,8 +119,16 @@ impl UnifiedHttpRequest {
         // 添加请求体
         if include_body && !self.body.is_empty() {
             inspection_text.push('\n');
-            let body_str = String::from_utf8_lossy(&self.body);
+            let preview_len = self.body.len().min(INSPECTION_BODY_PREVIEW_BYTES);
+            let body_str = String::from_utf8_lossy(&self.body[..preview_len]);
             inspection_text.push_str(&body_str);
+            if self.body.len() > preview_len {
+                inspection_text.push_str(&format!(
+                    "\n[body truncated: previewed {} of {} bytes]",
+                    preview_len,
+                    self.body.len()
+                ));
+            }
         }
 
         inspection_text

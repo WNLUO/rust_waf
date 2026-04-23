@@ -38,6 +38,11 @@ impl Config {
                 cidrs.push(cidr);
             }
         }
+        for cidr in &self.l7_config.trusted_proxy_cidrs {
+            if !cidrs.iter().any(|item| item == cidr) {
+                cidrs.push(cidr.clone());
+            }
+        }
 
         cidrs
     }
@@ -157,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn effective_trusted_proxy_cidrs_uses_trusted_cdn_only() {
+    fn effective_trusted_proxy_cidrs_merges_trusted_cdn_and_l7_proxy_cidrs() {
         let config = Config {
             l4_config: L4Config {
                 trusted_cdn: l4::TrustedCdnConfig {
@@ -181,7 +186,11 @@ mod tests {
 
         assert_eq!(
             config.effective_trusted_proxy_cidrs(),
-            vec!["192.0.2.0/24".to_string(), "198.51.100.0/24".to_string()]
+            vec![
+                "192.0.2.0/24".to_string(),
+                "198.51.100.0/24".to_string(),
+                "203.0.113.0/24".to_string()
+            ]
         );
     }
 
@@ -189,6 +198,25 @@ mod tests {
     fn legacy_source_ip_strategy_alias_deserializes_to_first() {
         let strategy: SourceIpStrategy = serde_json::from_str("\"x_forwarded_for_any\"").unwrap();
         assert_eq!(strategy, SourceIpStrategy::XForwardedForFirst);
+    }
+
+    #[test]
+    fn normalized_custom_source_ip_header_enables_header_strategy() {
+        let config = Config {
+            gateway_config: GatewayConfig {
+                source_ip_strategy: SourceIpStrategy::Connection,
+                custom_source_ip_header: " CF-Connecting-IP ".to_string(),
+                ..GatewayConfig::default()
+            },
+            ..Config::default()
+        }
+        .normalized();
+
+        assert_eq!(config.gateway_config.source_ip_strategy, SourceIpStrategy::Header);
+        assert_eq!(
+            config.gateway_config.custom_source_ip_header,
+            "cf-connecting-ip"
+        );
     }
 
     #[test]

@@ -389,6 +389,14 @@ pub(super) fn normalize_console_and_gateway(config: &mut Config) {
         .custom_source_ip_header
         .trim()
         .to_ascii_lowercase();
+    if !config.gateway_config.custom_source_ip_header.is_empty()
+        && matches!(
+            config.gateway_config.source_ip_strategy,
+            crate::config::SourceIpStrategy::Connection
+        )
+    {
+        config.gateway_config.source_ip_strategy = crate::config::SourceIpStrategy::Header;
+    }
     config.gateway_config.custom_source_ip_header_auth_header = config
         .gateway_config
         .custom_source_ip_header_auth_header

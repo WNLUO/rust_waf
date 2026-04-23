@@ -422,7 +422,11 @@ fn should_hard_drop_under_pressure(
         return true;
     }
     if survival
-        && (runtime_attack || adaptive_attack || queue_hot || defense_heat >= 2 || persistent_heat >= 2)
+        && (runtime_attack
+            || adaptive_attack
+            || queue_hot
+            || defense_heat >= 2
+            || persistent_heat >= 2)
     {
         return true;
     }
@@ -508,7 +512,8 @@ fn should_force_challenge_under_pressure(
     if persistent_heat >= 2 {
         return true;
     }
-    if downgrade_hold && (runtime_high || adaptive_high || defense_heat >= 1 || persistent_heat >= 1)
+    if downgrade_hold
+        && (runtime_high || adaptive_high || defense_heat >= 1 || persistent_heat >= 1)
     {
         return true;
     }
@@ -623,7 +628,9 @@ mod tests {
             "lightweight_l7"
         );
         assert_eq!(
-            request.get_metadata("runtime.defense.stage").map(String::as_str),
+            request
+                .get_metadata("runtime.defense.stage")
+                .map(String::as_str),
             Some("tighten")
         );
         assert_eq!(
@@ -657,7 +664,10 @@ mod tests {
     fn high_l4_risk_persistent_identity_pressure_forces_challenge() {
         let mut request = request();
         request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
-        request.add_metadata("runtime.auto_tuning.identity_windows".to_string(), "2".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.identity_windows".to_string(),
+            "2".to_string(),
+        );
         request.add_metadata(
             "runtime.adaptive.identity_pressure_percent".to_string(),
             "6.20".to_string(),
@@ -669,7 +679,9 @@ mod tests {
             "challenge"
         );
         assert_eq!(
-            request.get_metadata("runtime.defense.stage").map(String::as_str),
+            request
+                .get_metadata("runtime.defense.stage")
+                .map(String::as_str),
             Some("challenge")
         );
         assert_eq!(
@@ -693,7 +705,10 @@ mod tests {
             "runtime.auto_tuning.pressure_memory_windows".to_string(),
             "2".to_string(),
         );
-        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "1".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.recovery_windows".to_string(),
+            "1".to_string(),
+        );
 
         assert!(evaluate_early_defense(&mut request).is_none());
         assert_eq!(
@@ -711,7 +726,10 @@ mod tests {
             "runtime.auto_tuning.pressure_memory_windows".to_string(),
             "2".to_string(),
         );
-        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "2".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.recovery_windows".to_string(),
+            "2".to_string(),
+        );
 
         assert!(evaluate_early_defense(&mut request).is_none());
         assert_eq!(
@@ -728,8 +746,14 @@ mod tests {
             "runtime.auto_tuning.pressure_memory_windows".to_string(),
             "2".to_string(),
         );
-        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "1".to_string());
-        request.add_metadata("runtime.auto_tuning.challenge_issued".to_string(), "4".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.recovery_windows".to_string(),
+            "1".to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_issued".to_string(),
+            "4".to_string(),
+        );
         request.add_metadata(
             "runtime.auto_tuning.challenge_verify_rate_percent".to_string(),
             "75.00".to_string(),
@@ -750,8 +774,14 @@ mod tests {
             "runtime.auto_tuning.pressure_memory_windows".to_string(),
             "2".to_string(),
         );
-        request.add_metadata("runtime.auto_tuning.recovery_windows".to_string(), "1".to_string());
-        request.add_metadata("runtime.auto_tuning.challenge_issued".to_string(), "5".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.recovery_windows".to_string(),
+            "1".to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.challenge_issued".to_string(),
+            "5".to_string(),
+        );
         request.add_metadata(
             "runtime.auto_tuning.challenge_verify_rate_percent".to_string(),
             "0.00".to_string(),
@@ -787,7 +817,9 @@ mod tests {
             "drop"
         );
         assert_eq!(
-            request.get_metadata("runtime.defense.stage").map(String::as_str),
+            request
+                .get_metadata("runtime.defense.stage")
+                .map(String::as_str),
             Some("drop")
         );
         assert_eq!(request.get_metadata("l7.enforcement").unwrap(), "drop");
@@ -869,7 +901,10 @@ mod tests {
     fn high_l4_risk_drops_under_compound_adaptive_pressure() {
         let mut request = request();
         request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
-        request.add_metadata("runtime.adaptive.system_pressure".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.adaptive.system_pressure".to_string(),
+            "high".to_string(),
+        );
         request.add_metadata(
             "runtime.adaptive.identity_pressure_percent".to_string(),
             "6.20".to_string(),
@@ -892,8 +927,14 @@ mod tests {
         let mut request = request();
         request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
         request.add_metadata("runtime.pressure.level".to_string(), "high".to_string());
-        request.add_metadata("runtime.auto_tuning.identity_windows".to_string(), "2".to_string());
-        request.add_metadata("runtime.auto_tuning.budget_windows".to_string(), "2".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.identity_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.budget_windows".to_string(),
+            "2".to_string(),
+        );
 
         let result = evaluate_early_defense(&mut request).expect("drop decision");
         assert!(result.blocked);

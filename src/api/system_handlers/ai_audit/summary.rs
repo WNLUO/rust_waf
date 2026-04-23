@@ -1,6 +1,108 @@
 use super::*;
 use std::collections::BTreeMap;
 
+fn derive_audit_runtime_defense_stage(
+    pressure: &crate::core::RuntimePressureSnapshot,
+    adaptive: &crate::core::AdaptiveProtectionRuntimeSnapshot,
+    auto: &crate::core::AutoTuningRuntimeSnapshot,
+) -> (&'static str, u8, String) {
+    let mut score = 0u8;
+    let mut reasons = Vec::new();
+
+    match pressure.level {
+        "attack" => {
+            score = score.saturating_add(3);
+            reasons.push("runtime_attack");
+        }
+        "high" => {
+            score = score.saturating_add(2);
+            reasons.push("runtime_high");
+        }
+        "elevated" => {
+            score = score.saturating_add(1);
+            reasons.push("runtime_elevated");
+        }
+        _ => {}
+    }
+    match adaptive.system_pressure.as_str() {
+        "attack" => {
+            score = score.saturating_add(2);
+            reasons.push("adaptive_attack");
+        }
+        "high" => {
+            score = score.saturating_add(1);
+            reasons.push("adaptive_high");
+        }
+        _ => {}
+    }
+    if pressure.storage_queue_usage_percent >= 90 {
+        score = score.saturating_add(2);
+        reasons.push("storage_queue_hot");
+    } else if pressure.storage_queue_usage_percent >= 75 {
+        score = score.saturating_add(1);
+        reasons.push("storage_queue_warm");
+    }
+    if pressure.cpu_pressure_score >= 3 {
+        score = score.saturating_add(1);
+        reasons.push("cpu_extreme");
+    }
+    let persistent_windows = [
+        auto.consecutive_identity_high >= 2,
+        auto.consecutive_slow_attack_high >= 2,
+        auto.consecutive_budget_high >= 2,
+        auto.consecutive_latency_high >= 2,
+    ]
+    .into_iter()
+    .filter(|hot| *hot)
+    .count();
+    if persistent_windows >= 2 {
+        score = score.saturating_add(2);
+        reasons.push("persistent_multi_window_pressure");
+    } else if persistent_windows == 1 {
+        score = score.saturating_add(1);
+        reasons.push("persistent_single_window_pressure");
+    }
+    if auto.recent_pressure_memory_windows >= 2 {
+        score = score.saturating_add(1);
+        reasons.push("pressure_memory_active");
+    }
+    if auto.last_observed_challenge_issued >= 3
+        && auto.last_observed_challenge_verify_rate_percent < 20.0
+        && auto.last_observed_challenge_block_rate_percent >= 30.0
+    {
+        score = score.saturating_add(1);
+        reasons.push("challenge_effect_poor");
+    }
+    if auto.last_observed_challenge_issued >= 3
+        && auto.last_observed_challenge_verify_rate_percent >= 50.0
+        && auto.consecutive_recovery_windows >= 1
+    {
+        score = score.saturating_sub(1);
+        reasons.push("challenge_effect_good");
+    }
+
+    let stage = if pressure.prefer_drop
+        || (pressure.defense_depth == "survival"
+            && (pressure.level == "attack" || pressure.storage_queue_usage_percent >= 90))
+        || score >= 6
+    {
+        "drop"
+    } else if score >= 3 {
+        "challenge"
+    } else if score >= 1 {
+        "tighten"
+    } else {
+        "observe"
+    };
+
+    let reason = if reasons.is_empty() {
+        "steady_state".to_string()
+    } else {
+        reasons.join(",")
+    };
+    (stage, score, reason)
+}
+
 pub(super) async fn build_ai_audit_summary(
     context: &WafContext,
     window_seconds: Option<u32>,
@@ -55,6 +157,9 @@ pub(super) async fn build_ai_audit_summary(
     let metrics = context.metrics_snapshot().unwrap_or_default();
     let auto = context.auto_tuning_snapshot();
     let adaptive = context.adaptive_protection_snapshot();
+    let pressure = context.runtime_pressure_snapshot();
+    let (runtime_defense_stage, runtime_defense_stage_score, runtime_defense_stage_reason) =
+        derive_audit_runtime_defense_stage(&pressure, &adaptive, &auto);
     let recent_policy_feedback = context
         .active_ai_temp_policies()
         .into_iter()
@@ -94,12 +199,23 @@ pub(super) async fn build_ai_audit_summary(
             adaptive_system_pressure: adaptive.system_pressure,
             adaptive_reasons: adaptive.reasons,
             l4_overload_level: metrics_l4_overload_level(&metrics),
+            runtime_defense_depth: pressure.defense_depth.to_string(),
+            runtime_defense_base_stage: runtime_defense_stage.to_string(),
+            runtime_defense_stage: runtime_defense_stage.to_string(),
+            runtime_defense_stage_score,
+            runtime_defense_stage_reason,
             auto_tuning_controller_state: auto.controller_state,
             auto_tuning_last_adjust_reason: auto.last_adjust_reason,
             auto_tuning_last_adjust_diff: auto.last_adjust_diff,
+            auto_tuning_recovery_windows: auto.consecutive_recovery_windows,
+            auto_tuning_pressure_memory_windows: auto.recent_pressure_memory_windows,
             identity_pressure_percent: auto.last_observed_identity_resolution_pressure_percent,
             l7_friction_pressure_percent: auto.last_observed_l7_friction_pressure_percent,
             slow_attack_pressure_percent: auto.last_observed_slow_attack_pressure_percent,
+            challenge_issued: auto.last_observed_challenge_issued,
+            challenge_verified: auto.last_observed_challenge_verified,
+            challenge_verify_rate_percent: auto.last_observed_challenge_verify_rate_percent,
+            challenge_block_rate_percent: auto.last_observed_challenge_block_rate_percent,
         },
         counters: AiAuditCountersResponse {
             proxied_requests: metrics.proxied_requests,

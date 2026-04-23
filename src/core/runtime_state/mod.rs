@@ -247,10 +247,7 @@ impl WafContext {
             "runtime.defense.base_stage".to_string(),
             base_stage.to_string(),
         );
-        request.add_metadata(
-            "runtime.defense.stage".to_string(),
-            base_stage.to_string(),
-        );
+        request.add_metadata("runtime.defense.stage".to_string(), base_stage.to_string());
         request.add_metadata(
             "runtime.defense.stage_score".to_string(),
             base_stage_score.to_string(),

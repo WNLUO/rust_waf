@@ -29,6 +29,105 @@ pub(super) fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditR
         ));
     }
 
+    match summary.current.runtime_defense_stage.as_str() {
+        "drop" => {
+            findings.push(AiAuditReportFinding {
+                key: "runtime_defense_drop_stage".to_string(),
+                severity: "high".to_string(),
+                title: "运行时已经进入硬防护档位".to_string(),
+                detail: format!(
+                    "当前运行时防护档位为 drop，深度为 {}，综合评分为 {}，说明系统已经把复合压力判断为需要硬拦截。",
+                    summary.current.runtime_defense_depth,
+                    summary.current.runtime_defense_stage_score
+                ),
+                evidence: vec![
+                    format!(
+                        "runtime_defense_stage_reason={}",
+                        summary.current.runtime_defense_stage_reason
+                    ),
+                    format!(
+                        "auto_tuning_pressure_memory_windows={}",
+                        summary.current.auto_tuning_pressure_memory_windows
+                    ),
+                ],
+            });
+            recommendations.push(AiAuditReportRecommendation {
+                key: "review_drop_stage_causes".to_string(),
+                priority: "high".to_string(),
+                title: "优先核对为什么已经升到 drop".to_string(),
+                action: "先对照 runtime_defense_stage_reason、queue 热度、challenge 最近效果，确认当前是资源逼近极限还是策略误伤放大。".to_string(),
+                rationale: "drop 应该只留给持续高压或明显恶意场景，一旦进入这一档，就值得优先复盘触发链路。".to_string(),
+                action_type: "investigate".to_string(),
+                rule_suggestion_key: None,
+            });
+        }
+        "challenge" => {
+            findings.push(AiAuditReportFinding {
+                key: "runtime_defense_challenge_stage".to_string(),
+                severity: "medium".to_string(),
+                title: "运行时正处于 challenge 档位".to_string(),
+                detail: format!(
+                    "当前运行时防护档位为 challenge，综合评分为 {}，说明系统判断已经超过单纯 tighten，但还没到必须硬 drop。",
+                    summary.current.runtime_defense_stage_score
+                ),
+                evidence: vec![
+                    format!(
+                        "runtime_defense_stage_reason={}",
+                        summary.current.runtime_defense_stage_reason
+                    ),
+                    format!(
+                        "auto_tuning_recovery_windows={}",
+                        summary.current.auto_tuning_recovery_windows
+                    ),
+                ],
+            });
+        }
+        _ => {}
+    }
+
+    if summary.current.challenge_issued >= 3
+        && summary.current.challenge_verify_rate_percent < 20.0
+        && summary.current.challenge_block_rate_percent >= 30.0
+    {
+        findings.push(AiAuditReportFinding {
+            key: "challenge_effectiveness_poor".to_string(),
+            severity: "high".to_string(),
+            title: "Challenge 最近效果偏差".to_string(),
+            detail: format!(
+                "最近窗口 challenge 发出 {} 次，验证通过率只有 {:.1}%，阻断占比 {:.1}%，说明当前 challenge 更像在制造摩擦，而不是稳定筛出真人。",
+                summary.current.challenge_issued,
+                summary.current.challenge_verify_rate_percent,
+                summary.current.challenge_block_rate_percent
+            ),
+            evidence: vec![
+                format!("challenge_verified={}", summary.current.challenge_verified),
+                format!(
+                    "runtime_defense_stage={}",
+                    summary.current.runtime_defense_stage
+                ),
+            ],
+        });
+        recommendations.push(AiAuditReportRecommendation {
+            key: "review_challenge_false_positive_risk".to_string(),
+            priority: "high".to_string(),
+            title: "复核 challenge 是否正在放大误伤".to_string(),
+            action: "结合最近热点路由、身份态和上游成功率，确认当前 challenge 是命中自动化流量，还是把正常访问也拦在外面。".to_string(),
+            rationale: "challenge 验证率持续过低时，说明它未必在有效分流，反而可能造成更多误伤和回源异常。".to_string(),
+            action_type: "investigate".to_string(),
+            rule_suggestion_key: None,
+        });
+    } else if summary.current.challenge_issued >= 3
+        && summary.current.challenge_verify_rate_percent >= 50.0
+        && summary.current.auto_tuning_recovery_windows >= 1
+    {
+        executive_summary.push(format!(
+            "最近窗口 challenge 发出 {} 次，验证通过率约 {:.1}%，并且已经出现 {} 个恢复窗口，说明当前 challenge 更像在筛流而不是单纯加压。",
+            summary.current.challenge_issued,
+            summary.current.challenge_verify_rate_percent,
+            summary.current.auto_tuning_recovery_windows
+        ));
+    }
+
     if !summary.safeline_correlation.overlap_hosts.is_empty()
         || !summary.safeline_correlation.overlap_routes.is_empty()
     {
@@ -390,6 +489,14 @@ pub(super) fn build_ai_audit_report(summary: AiAuditSummaryResponse) -> AiAuditR
             summary.current.auto_tuning_controller_state
         ));
     }
+    if summary.current.runtime_defense_stage != "observe" {
+        executive_summary.push(format!(
+            "当前运行时防护档位为 {}，评分 {}，主因是 {}。",
+            summary.current.runtime_defense_stage,
+            summary.current.runtime_defense_stage_score,
+            summary.current.runtime_defense_stage_reason
+        ));
+    }
     if let Some(top_signal) = summary.primary_signals.first() {
         executive_summary.push(format!(
             "最近窗口主导信号为 {}，命中 {} 次。",
@@ -523,14 +630,26 @@ mod tests {
                 adaptive_system_pressure: "elevated".to_string(),
                 adaptive_reasons: vec!["identity_resolution_pressure".to_string()],
                 l4_overload_level: "high".to_string(),
+                runtime_defense_depth: "balanced".to_string(),
+                runtime_defense_base_stage: "challenge".to_string(),
+                runtime_defense_stage: "challenge".to_string(),
+                runtime_defense_stage_score: 4,
+                runtime_defense_stage_reason: "runtime_high,persistent_single_window_pressure"
+                    .to_string(),
                 auto_tuning_controller_state: "adjusted".to_string(),
                 auto_tuning_last_adjust_reason: Some(
                     "adjust_for_identity_resolution_pressure".to_string(),
                 ),
                 auto_tuning_last_adjust_diff: vec!["l4 budget tightened".to_string()],
+                auto_tuning_recovery_windows: 0,
+                auto_tuning_pressure_memory_windows: 2,
                 identity_pressure_percent: 6.2,
                 l7_friction_pressure_percent: 24.0,
                 slow_attack_pressure_percent: 1.2,
+                challenge_issued: 12,
+                challenge_verified: 2,
+                challenge_verify_rate_percent: 16.7,
+                challenge_block_rate_percent: 50.0,
             },
             counters: AiAuditCountersResponse {
                 proxied_requests: 100,
@@ -615,11 +734,20 @@ mod tests {
         summary.current.identity_pressure_percent = 0.0;
         summary.current.l7_friction_pressure_percent = 0.0;
         summary.current.slow_attack_pressure_percent = 0.0;
+        summary.current.runtime_defense_base_stage = "observe".to_string();
+        summary.current.runtime_defense_stage = "observe".to_string();
+        summary.current.runtime_defense_stage_score = 0;
+        summary.current.runtime_defense_stage_reason = "steady_state".to_string();
         summary.current.auto_tuning_last_adjust_reason = None;
+        summary.current.auto_tuning_pressure_memory_windows = 0;
         summary.counters.l4_bucket_budget_rejections = 0;
         summary.counters.trusted_proxy_permit_drops = 0;
         summary.counters.trusted_proxy_l4_degrade_actions = 0;
         summary.counters.l4_request_budget_softened = 0;
+        summary.current.challenge_issued = 0;
+        summary.current.challenge_verified = 0;
+        summary.current.challenge_verify_rate_percent = 0.0;
+        summary.current.challenge_block_rate_percent = 0.0;
         summary.identity_states.clear();
         summary.primary_signals.clear();
         let report = build_ai_audit_report(summary);
@@ -707,6 +835,24 @@ mod tests {
             .suggested_local_rules
             .iter()
             .all(|item| !item.auto_apply));
+    }
+
+    #[test]
+    fn ai_audit_report_mentions_runtime_stage_and_challenge_quality() {
+        let report = build_ai_audit_report(base_summary());
+
+        assert!(report
+            .findings
+            .iter()
+            .any(|item| item.key == "runtime_defense_challenge_stage"));
+        assert!(report
+            .findings
+            .iter()
+            .any(|item| item.key == "challenge_effectiveness_poor"));
+        assert!(report
+            .executive_summary
+            .iter()
+            .any(|item| item.contains("防护档位")));
     }
 
     #[test]

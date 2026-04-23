@@ -277,17 +277,39 @@ pub struct AiAuditCurrentStateResponse {
     #[serde(default)]
     pub(crate) l4_overload_level: String,
     #[serde(default)]
+    pub(crate) runtime_defense_depth: String,
+    #[serde(default)]
+    pub(crate) runtime_defense_base_stage: String,
+    #[serde(default)]
+    pub(crate) runtime_defense_stage: String,
+    #[serde(default)]
+    pub(crate) runtime_defense_stage_score: u8,
+    #[serde(default)]
+    pub(crate) runtime_defense_stage_reason: String,
+    #[serde(default)]
     pub(crate) auto_tuning_controller_state: String,
     #[serde(default)]
     pub(crate) auto_tuning_last_adjust_reason: Option<String>,
     #[serde(default)]
     pub(crate) auto_tuning_last_adjust_diff: Vec<String>,
     #[serde(default)]
+    pub(crate) auto_tuning_recovery_windows: u8,
+    #[serde(default)]
+    pub(crate) auto_tuning_pressure_memory_windows: u8,
+    #[serde(default)]
     pub(crate) identity_pressure_percent: f64,
     #[serde(default)]
     pub(crate) l7_friction_pressure_percent: f64,
     #[serde(default)]
     pub(crate) slow_attack_pressure_percent: f64,
+    #[serde(default)]
+    pub(crate) challenge_issued: u64,
+    #[serde(default)]
+    pub(crate) challenge_verified: u64,
+    #[serde(default)]
+    pub(crate) challenge_verify_rate_percent: f64,
+    #[serde(default)]
+    pub(crate) challenge_block_rate_percent: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

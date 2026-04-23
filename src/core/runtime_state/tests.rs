@@ -194,11 +194,8 @@ async fn annotate_runtime_pressure_exposes_adaptive_pressure_metadata() {
         ..crate::config::Config::default()
     };
     let context = WafContext::new(config).await.unwrap();
-    let mut request = UnifiedHttpRequest::new(
-        HttpVersion::Http1_1,
-        "GET".to_string(),
-        "/".to_string(),
-    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
 
     context.annotate_runtime_pressure(&mut request);
 

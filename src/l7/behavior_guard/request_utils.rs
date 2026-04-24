@@ -171,6 +171,116 @@ pub(super) fn is_browser_document_navigation(request: &UnifiedHttpRequest) -> bo
     matches!(fetch_mode.as_str(), "navigate") && matches!(fetch_dest.as_str(), "document")
 }
 
+pub(super) fn is_browser_same_origin_async_request(request: &UnifiedHttpRequest) -> bool {
+    if request.method.eq_ignore_ascii_case("GET")
+        && request
+            .get_header("accept")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"))
+    {
+        return false;
+    }
+
+    let fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let accept = request
+        .get_header("accept")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let content_type = request
+        .get_header("content-type")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let x_requested_with = request
+        .get_header("x-requested-with")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    let explicit_async = x_requested_with == "xmlhttprequest"
+        || matches!(fetch_mode.as_str(), "cors" | "same-origin")
+        || accept.contains("application/json")
+        || accept.contains("text/javascript")
+        || content_type.contains("application/json")
+        || content_type.contains("application/x-www-form-urlencoded");
+    if !explicit_async {
+        return false;
+    }
+
+    let same_origin_fetch = matches!(fetch_site.as_str(), "same-origin" | "same-site");
+    let same_origin_headers = request_has_same_origin_context(request);
+    let browser_ua = request
+        .get_header("user-agent")
+        .is_some_and(|value| looks_like_browser_user_agent(value));
+
+    browser_ua && (same_origin_fetch || same_origin_headers)
+}
+
+fn request_has_same_origin_context(request: &UnifiedHttpRequest) -> bool {
+    let Some(host) = request
+        .get_header("host")
+        .map(|value| normalized_host(value))
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    request
+        .get_header("origin")
+        .or_else(|| request.get_header("referer"))
+        .map(|value| normalized_origin_host(value) == host)
+        .unwrap_or(false)
+}
+
+fn normalized_origin_host(value: &str) -> String {
+    let trimmed = value.trim();
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    normalized_host(without_scheme.split('/').next().unwrap_or(without_scheme))
+}
+
+fn normalized_host(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('[')
+        .split(']')
+        .next()
+        .unwrap_or(value)
+        .split(':')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_lowercase()
+}
+
+pub(super) fn looks_like_browser_user_agent(value: &str) -> bool {
+    let ua = value.to_ascii_lowercase();
+    if [
+        "curl",
+        "wget",
+        "python",
+        "benchmark",
+        "wrk",
+        "ab/",
+        "go-http-client",
+        "okhttp",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+    {
+        return false;
+    }
+    [
+        "mozilla/", "chrome/", "safari/", "firefox/", "edg/", "mobile/",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+}
+
 pub(super) fn route_family(uri: &str, route: &str) -> Option<&'static str> {
     let route = route.to_ascii_lowercase();
     let uri = uri.to_ascii_lowercase();
@@ -275,8 +385,6 @@ pub(super) fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
         || sec_fetch_dest == "style"
         || sec_fetch_dest == "image"
         || sec_fetch_dest == "font"
-        || path == "/wp-admin/load-scripts.php"
-        || path == "/wp-admin/load-styles.php"
         || path.ends_with(".js")
         || path.ends_with(".css")
         || path.ends_with(".png")

@@ -112,6 +112,62 @@ async fn scripted_document_loop_still_persistently_blocks() {
 }
 
 #[tokio::test]
+async fn browser_same_origin_async_loop_is_skipped_by_behavior_guard() {
+    let guard = L7BehaviorGuard::new();
+
+    for index in 0..18 {
+        let mut api = request(
+            "POST",
+            "/admin/async/state",
+            "application/json, text/javascript, */*; q=0.01",
+        );
+        api.add_header(
+            "user-agent".to_string(),
+            "Mozilla/5.0 AppleWebKit/537.36 Chrome/147.0 Safari/537.36".to_string(),
+        );
+        api.add_header("host".to_string(), "example.com".to_string());
+        api.add_header("origin".to_string(), "https://example.com".to_string());
+        api.add_header(
+            "referer".to_string(),
+            "https://example.com/admin/".to_string(),
+        );
+        api.add_header(
+            "content-type".to_string(),
+            "application/x-www-form-urlencoded; charset=UTF-8".to_string(),
+        );
+        api.add_metadata("l7.cc.request_kind".to_string(), "api".to_string());
+        api.add_metadata("l7.cc.route".to_string(), "/admin/async/state".to_string());
+
+        let result = guard.inspect_request(&mut api).await;
+        assert!(
+            result.is_none(),
+            "same-origin browser async request should not be behavior challenged at request {index}"
+        );
+        assert_eq!(
+            api.get_metadata("l7.behavior.skipped").map(String::as_str),
+            Some("browser_same_origin_async")
+        );
+    }
+}
+
+#[tokio::test]
+async fn scripted_api_loop_still_persistently_blocks() {
+    let guard = L7BehaviorGuard::new();
+    let mut last = None;
+
+    for _ in 0..18 {
+        let mut api = request("POST", "/api/feed", "application/json");
+        api.add_header("user-agent".to_string(), "curl/8.0".to_string());
+        api.add_metadata("l7.cc.request_kind".to_string(), "api".to_string());
+        api.add_metadata("l7.cc.route".to_string(), "/api/feed".to_string());
+        last = guard.inspect_request(&mut api).await;
+    }
+
+    let result = last.expect("scripted api loop should be blocked");
+    assert!(result.persist_blocked_ip);
+}
+
+#[tokio::test]
 async fn unresolved_trusted_proxy_document_loop_is_not_persistently_blocked() {
     let guard = L7BehaviorGuard::new();
     let mut last = None;

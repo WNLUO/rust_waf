@@ -119,6 +119,15 @@ impl L7BehaviorGuard {
             );
             return None;
         }
+        if request_utils::is_browser_same_origin_async_request(request)
+            && !request_utils::is_high_value_route(&route)
+        {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "browser_same_origin_async".to_string(),
+            );
+            return None;
+        }
         let client_ip = request
             .client_ip
             .as_deref()
@@ -513,7 +522,7 @@ fn should_soften_browser_document_loop(
         .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"));
     let browser_ua = request
         .get_header("user-agent")
-        .is_some_and(|value| looks_like_browser_user_agent(value));
+        .is_some_and(|value| request_utils::looks_like_browser_user_agent(value));
     let unresolved_trusted_proxy = request
         .get_metadata("network.identity_state")
         .is_some_and(|value| value == "trusted_cdn_unresolved")
@@ -522,28 +531,4 @@ fn should_soften_browser_document_loop(
             .is_some_and(|value| value == "true");
 
     (accept_html && browser_ua) || unresolved_trusted_proxy
-}
-
-fn looks_like_browser_user_agent(value: &str) -> bool {
-    let ua = value.to_ascii_lowercase();
-    if [
-        "curl",
-        "wget",
-        "python",
-        "benchmark",
-        "wrk",
-        "ab/",
-        "go-http-client",
-        "okhttp",
-    ]
-    .iter()
-    .any(|needle| ua.contains(needle))
-    {
-        return false;
-    }
-    [
-        "mozilla/", "chrome/", "safari/", "firefox/", "edg/", "mobile/",
-    ]
-    .iter()
-    .any(|needle| ua.contains(needle))
 }

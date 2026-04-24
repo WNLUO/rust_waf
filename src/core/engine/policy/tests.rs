@@ -391,6 +391,46 @@ async fn inspect_blocked_client_ip_matches_resolved_forwarded_client_ip() {
 }
 
 #[tokio::test]
+async fn http_persisted_block_uses_request_block_duration_metadata() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut config = crate::config::Config::default();
+    config.sqlite_path = std::env::temp_dir()
+        .join(format!("waf_http_block_duration_{nanos}.db"))
+        .display()
+        .to_string();
+    let context = WafContext::new(config).await.unwrap();
+    let store = context.sqlite_store.as_ref().unwrap();
+    let packet = PacketInfo::from_socket_addrs(
+        "198.51.100.25:443".parse().unwrap(),
+        "203.0.113.10:8443".parse().unwrap(),
+        Protocol::TCP,
+    );
+    let mut request =
+        UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string());
+    request.set_client_ip("198.51.100.25".to_string());
+    request.add_metadata(
+        "ai.temp_block_duration_secs".to_string(),
+        "1234".to_string(),
+    );
+
+    let before = unix_timestamp();
+    let result = InspectionResult::drop_and_persist_ip(InspectionLayer::L7, "test block");
+    persist_http_inspection_event(&context, &packet, &request, &result);
+    store.flush().await.unwrap();
+
+    let entry = store
+        .load_active_local_blocked_ip_by_ip("198.51.100.25")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(entry.expires_at >= before + 1234);
+    assert!(entry.expires_at <= unix_timestamp() + 1234);
+}
+
+#[tokio::test]
 async fn inspect_blocked_client_ip_skips_socket_peer_when_header_strategy_unresolved() {
     let mut config = crate::config::Config::default();
     config.l4_config.trusted_cdn.manual_cidrs = vec!["111.123.42.0/24".to_string()];

@@ -95,11 +95,12 @@ pub(crate) fn persist_http_inspection_event(
         if context.is_server_public_ip_str(&ip) {
             return;
         }
+        let block_duration_secs = http_block_duration_secs(request);
         store.enqueue_blocked_ip(BlockedIpRecord::new(
             ip,
             result.reason.clone(),
             blocked_at,
-            blocked_at + crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS as i64,
+            blocked_at + block_duration_secs as i64,
         ));
     }
 }
@@ -345,11 +346,13 @@ pub(crate) fn enforce_runtime_http_block_if_needed(
     inspector.block_ip(
         &ip,
         &result.reason,
-        std::time::Duration::from_secs(
-            request
-                .get_metadata("ai.temp_block_duration_secs")
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS),
-        ),
+        std::time::Duration::from_secs(http_block_duration_secs(request)),
     );
+}
+
+fn http_block_duration_secs(request: &UnifiedHttpRequest) -> u64 {
+    request
+        .get_metadata("ai.temp_block_duration_secs")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(crate::l7::behavior_guard::AUTO_BLOCK_DURATION_SECS)
 }

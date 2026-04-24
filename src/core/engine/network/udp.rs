@@ -61,6 +61,12 @@ pub(crate) async fn handle_udp_datagram(
             }
 
             if inspection_result.blocked {
+                crate::core::engine::policy::enforce_runtime_http_block_if_needed(
+                    context.as_ref(),
+                    &packet,
+                    &request,
+                    &inspection_result,
+                );
                 if let Some(metrics) = context.metrics.as_ref() {
                     metrics.record_block(inspection_result.layer.clone());
                 }

@@ -685,21 +685,13 @@ async fn handle_http3_request(
     if inspection_result.should_persist_event() {
         persist_http_inspection_event(context.as_ref(), &packet, &unified, &inspection_result);
     }
-    if inspection_result.blocked && inspection_result.layer == crate::core::InspectionLayer::L7 {
-        if let Some(inspector) = context.l4_inspector() {
-            inspector.record_l7_feedback(
-                &packet,
-                &unified,
-                crate::l4::behavior::FeedbackSource::L7Block,
-            );
-        }
-    }
-
     if inspection_result.blocked {
         context
             .traffic_map
             .record_ingress(traffic_source_ip.clone(), request_dump.len(), true);
-        if let Some(metrics) = context.metrics.as_ref() {
+        if inspection_result.layer == crate::core::InspectionLayer::L7 {
+            record_l7_block_feedback(context.as_ref(), &packet, &unified, &inspection_result);
+        } else if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(inspection_result.layer.clone());
         }
         if result_should_drop_http3(&inspection_result, &unified) {

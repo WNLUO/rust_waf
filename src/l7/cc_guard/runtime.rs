@@ -678,6 +678,7 @@ impl L7CcGuard {
         let survival_low_risk_identity =
             is_survival_low_risk_identity_request(request, &route_path);
         let can_persist_client_ip = can_persist_survival_fast_client_ip(request);
+        let request_kind = fast_request_kind(request, &route_path);
 
         request.add_metadata("l7.cc.fast_path".to_string(), "true".to_string());
         request.add_metadata(
@@ -733,21 +734,13 @@ impl L7CcGuard {
                 self.hot_block_cache_hit_and_extend(&route_hot_key, unix_now, hot_cache_base_ttl)
             {
                 if active {
-                    request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
-                    request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
-                    request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                    let reason = "l7 cc fast path hot block".to_string();
-                    let response = self.build_block_response(
+                    return SurvivalFastPathResult::Block(build_survival_hot_path_result(
+                        self,
                         request,
-                        &reason,
-                        challenge_mode(request, &route_path),
-                    );
-                    return SurvivalFastPathResult::Block(InspectionResult::respond(
-                        InspectionLayer::L7,
-                        reason,
-                        response,
+                        &route_path,
+                        request_kind,
+                        "route_hot_cache",
+                        true,
                     ));
                 }
                 hot_cache_expired = true;
@@ -756,21 +749,13 @@ impl L7CcGuard {
                 self.hot_block_cache_hit_and_extend(&site_hot_key, unix_now, hot_cache_base_ttl)
             {
                 if active {
-                    request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
-                    request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
-                    request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                    let reason = "l7 cc fast path hot block".to_string();
-                    let response = self.build_block_response(
+                    return SurvivalFastPathResult::Block(build_survival_hot_path_result(
+                        self,
                         request,
-                        &reason,
-                        challenge_mode(request, &route_path),
-                    );
-                    return SurvivalFastPathResult::Block(InspectionResult::respond(
-                        InspectionLayer::L7,
-                        reason,
-                        response,
+                        &route_path,
+                        request_kind,
+                        "site_hot_cache",
+                        true,
                     ));
                 }
                 hot_cache_expired = true;
@@ -787,7 +772,7 @@ impl L7CcGuard {
         request.add_metadata("l7.cc.route".to_string(), route_path.clone());
         request.add_metadata(
             "l7.cc.request_kind".to_string(),
-            fast_request_kind(request, &route_path).as_str().to_string(),
+            request_kind.as_str().to_string(),
         );
 
         let bucket_limit = runtime_usize_metadata(
@@ -914,16 +899,14 @@ impl L7CcGuard {
                     false,
                 ));
             }
-            request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
-            request.add_metadata("l7.block_reason".to_string(), "cc_fast_block".to_string());
-            request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            let response =
-                self.build_block_response(request, &reason, challenge_mode(request, &route_path));
-            return SurvivalFastPathResult::Block(InspectionResult::respond(
-                InspectionLayer::L7,
+            return SurvivalFastPathResult::Block(build_survival_hot_path_result_with_reason(
+                self,
+                request,
+                &route_path,
+                request_kind,
+                "hot_path_threshold",
                 reason,
-                response,
+                false,
             ));
         }
 
@@ -1039,21 +1022,59 @@ fn build_survival_fast_ip_drop_with_reason(
     }
 }
 
+fn build_survival_hot_path_result(
+    guard: &L7CcGuard,
+    request: &mut UnifiedHttpRequest,
+    route_path: &str,
+    request_kind: RequestKind,
+    source: &'static str,
+    hot_cache_hit: bool,
+) -> InspectionResult {
+    build_survival_hot_path_result_with_reason(
+        guard,
+        request,
+        route_path,
+        request_kind,
+        source,
+        format!("l7 cc fast path hot block: source={source}"),
+        hot_cache_hit,
+    )
+}
+
+fn build_survival_hot_path_result_with_reason(
+    guard: &L7CcGuard,
+    request: &mut UnifiedHttpRequest,
+    route_path: &str,
+    request_kind: RequestKind,
+    source: &'static str,
+    reason: String,
+    hot_cache_hit: bool,
+) -> InspectionResult {
+    if hot_cache_hit {
+        request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
+    }
+    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+    request.add_metadata(
+        "l7.block_reason".to_string(),
+        "cc_hot_path_block".to_string(),
+    );
+    request.add_metadata("l4.force_close".to_string(), "true".to_string());
+    request.add_metadata("l7.cc.hot_path_source".to_string(), source.to_string());
+
+    if matches!(request_kind, RequestKind::ApiLike | RequestKind::Other) {
+        request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+        request.add_metadata("l7.drop_reason".to_string(), "cc_hot_block".to_string());
+        return InspectionResult::drop(InspectionLayer::L7, reason);
+    }
+
+    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+    let response =
+        guard.build_block_response(request, &reason, challenge_mode(request, route_path));
+    InspectionResult::respond(InspectionLayer::L7, reason, response)
+}
+
 fn fast_request_kind(request: &UnifiedHttpRequest, route_path: &str) -> RequestKind {
-    let method = request.method.as_str();
-    if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
-        return RequestKind::ApiLike;
-    }
-    if route_path.starts_with("/api/") {
-        return RequestKind::ApiLike;
-    }
-    if looks_like_static_asset(route_path) {
-        return RequestKind::StaticAsset;
-    }
-    if route_path == "/" || route_path.ends_with(".html") || route_path.ends_with(".htm") {
-        return RequestKind::Document;
-    }
-    RequestKind::Other
+    classify_request(request, route_path)
 }
 
 fn runtime_tracking_mode(

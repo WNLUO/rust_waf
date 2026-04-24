@@ -666,8 +666,22 @@ async fn survival_fast_path_uses_route_hot_cache_for_hot_paths() {
         .await
         .expect("hot path route block");
     assert!(result.blocked);
-    assert_eq!(result.action, crate::core::InspectionAction::Respond);
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
     assert!(!result.persist_blocked_ip);
+    assert_eq!(
+        second.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("cc_hot_block")
+    );
+    assert_eq!(
+        second.get_metadata("l7.block_reason").map(String::as_str),
+        Some("cc_hot_path_block")
+    );
+    assert_eq!(
+        second
+            .get_metadata("l7.cc.hot_path_source")
+            .map(String::as_str),
+        Some("hot_path_threshold")
+    );
 
     let mut third = request("/api/search");
     third.method = "POST".to_string();
@@ -684,8 +698,52 @@ async fn survival_fast_path_uses_route_hot_cache_for_hot_paths() {
             .map(String::as_str),
         Some("true")
     );
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert!(!result.persist_blocked_ip);
+    assert_eq!(
+        third.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("cc_hot_block")
+    );
+    assert_eq!(
+        third
+            .get_metadata("l7.cc.hot_path_source")
+            .map(String::as_str),
+        Some("route_hot_cache")
+    );
+}
+
+#[tokio::test]
+async fn survival_fast_path_responds_for_document_hot_path_without_persisting_ip() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 2,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        hot_path_challenge_threshold: 50,
+        hot_path_block_threshold: 2,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/index.php/2026/04/22/hello-world/");
+    first.set_client_ip("203.0.113.10".to_string());
+    first.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    assert!(guard.inspect_request(&mut first).await.is_none());
+
+    let mut second = request("/index.php/2026/04/22/hello-world/");
+    second.set_client_ip("203.0.113.11".to_string());
+    second.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    let result = guard
+        .inspect_request(&mut second)
+        .await
+        .expect("document hot path should respond instead of persistently blocking ip");
+
     assert_eq!(result.action, crate::core::InspectionAction::Respond);
     assert!(!result.persist_blocked_ip);
+    assert_eq!(
+        second.get_metadata("l7.enforcement").map(String::as_str),
+        Some("respond")
+    );
 }
 
 #[tokio::test]

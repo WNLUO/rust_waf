@@ -581,10 +581,15 @@ async fn survival_fast_path_blocks_and_uses_hot_cache() {
         .await
         .expect("fast block");
     assert!(result.blocked);
-    assert!(!result.persist_blocked_ip);
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert!(result.persist_blocked_ip);
     assert_eq!(
-        second.get_metadata("l7.block_reason").map(String::as_str),
+        second.get_metadata("l7.drop_reason").map(String::as_str),
         Some("cc_fast_block")
+    );
+    assert_eq!(
+        second.get_metadata("l7.enforcement").map(String::as_str),
+        Some("drop")
     );
 
     let mut third = request("/api/search");
@@ -600,6 +605,12 @@ async fn survival_fast_path_blocks_and_uses_hot_cache() {
             .get_metadata("l7.cc.hot_cache_hit")
             .map(String::as_str),
         Some("true")
+    );
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert!(!result.persist_blocked_ip);
+    assert_eq!(
+        third.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("cc_hot_block")
     );
 }
 
@@ -655,6 +666,8 @@ async fn survival_fast_path_uses_route_hot_cache_for_hot_paths() {
         .await
         .expect("hot path route block");
     assert!(result.blocked);
+    assert_eq!(result.action, crate::core::InspectionAction::Respond);
+    assert!(!result.persist_blocked_ip);
 
     let mut third = request("/api/search");
     third.method = "POST".to_string();
@@ -670,6 +683,56 @@ async fn survival_fast_path_uses_route_hot_cache_for_hot_paths() {
             .get_metadata("l7.cc.hot_cache_hit")
             .map(String::as_str),
         Some("true")
+    );
+    assert_eq!(result.action, crate::core::InspectionAction::Respond);
+    assert!(!result.persist_blocked_ip);
+}
+
+#[tokio::test]
+async fn survival_fast_path_unresolved_identity_drops_without_persisting_ip() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 50,
+        route_block_threshold: 2,
+        ip_challenge_threshold: 50,
+        ip_block_threshold: 50,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut first = request("/api/search");
+    first.method = "POST".to_string();
+    first.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    first.add_metadata(
+        "network.identity_state".to_string(),
+        "trusted_cdn_unresolved".to_string(),
+    );
+    first.add_metadata(
+        "network.client_ip_unresolved".to_string(),
+        "true".to_string(),
+    );
+    assert!(guard.inspect_request(&mut first).await.is_none());
+
+    let mut second = request("/api/search");
+    second.method = "POST".to_string();
+    second.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+    second.add_metadata(
+        "network.identity_state".to_string(),
+        "trusted_cdn_unresolved".to_string(),
+    );
+    second.add_metadata(
+        "network.client_ip_unresolved".to_string(),
+        "true".to_string(),
+    );
+    let result = guard
+        .inspect_request(&mut second)
+        .await
+        .expect("unresolved fast block should still drop");
+
+    assert_eq!(result.action, crate::core::InspectionAction::Drop);
+    assert!(!result.persist_blocked_ip);
+    assert_eq!(
+        second.get_metadata("l7.drop_reason").map(String::as_str),
+        Some("cc_fast_block")
     );
 }
 

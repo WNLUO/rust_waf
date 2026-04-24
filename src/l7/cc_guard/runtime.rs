@@ -677,6 +677,7 @@ impl L7CcGuard {
         let hot_cache_base_ttl = survival_hot_cache_base_ttl(config);
         let survival_low_risk_identity =
             is_survival_low_risk_identity_request(request, &route_path);
+        let can_persist_client_ip = can_persist_survival_fast_client_ip(request);
 
         request.add_metadata("l7.cc.fast_path".to_string(), "true".to_string());
         request.add_metadata(
@@ -689,21 +690,12 @@ impl L7CcGuard {
             self.hot_block_cache_hit_and_extend(&ip_route_hot_key, unix_now, hot_cache_base_ttl)
         {
             if active {
-                request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
-                request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
-                request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                let reason = "l7 cc fast path hot block".to_string();
-                let response = self.build_block_response(
+                return SurvivalFastPathResult::Block(build_survival_fast_ip_drop(
                     request,
-                    &reason,
-                    challenge_mode(request, &route_path),
-                );
-                return SurvivalFastPathResult::Block(InspectionResult::respond(
-                    InspectionLayer::L7,
-                    reason,
-                    response,
+                    "cc_hot_block",
+                    "ip_route_hot_cache",
+                    false,
+                    true,
                 ));
             }
             hot_cache_expired = true;
@@ -714,21 +706,12 @@ impl L7CcGuard {
                 self.hot_block_cache_hit_and_extend(&ip_hot_key, unix_now, hot_cache_base_ttl)
             {
                 if active {
-                    request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
-                    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-                    request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
-                    request.add_metadata("l7.block_reason".to_string(), "cc_hot_block".to_string());
-                    request.add_metadata("l4.force_close".to_string(), "true".to_string());
-                    let reason = "l7 cc fast path hot block".to_string();
-                    let response = self.build_block_response(
+                    return SurvivalFastPathResult::Block(build_survival_fast_ip_drop(
                         request,
-                        &reason,
-                        challenge_mode(request, &route_path),
-                    );
-                    return SurvivalFastPathResult::Block(InspectionResult::respond(
-                        InspectionLayer::L7,
-                        reason,
-                        response,
+                        "cc_hot_block",
+                        "ip_hot_cache",
+                        false,
+                        true,
                     ));
                 }
                 hot_cache_expired = true;
@@ -899,30 +882,42 @@ impl L7CcGuard {
         let hard_hot_path_threshold = hot_path_block_threshold
             .saturating_mul(u32::from(config.hard_hot_path_block_multiplier));
 
-        if ip_count >= hard_ip_threshold
+        let ip_scoped_block = ip_count >= hard_ip_threshold
             || route_count >= hard_route_threshold
-            || hot_path_count >= hard_hot_path_threshold
             || ip_count >= ip_block_threshold
-            || route_count >= route_block_threshold
-            || hot_path_count >= hot_path_block_threshold
-        {
+            || route_count >= route_block_threshold;
+        let hot_path_scoped_block =
+            hot_path_count >= hard_hot_path_threshold || hot_path_count >= hot_path_block_threshold;
+
+        if ip_scoped_block || hot_path_scoped_block {
             let ttl = hot_cache_base_ttl;
-            self.insert_hot_block_cache(ip_route_hot_key, unix_now, ttl);
-            self.insert_hot_block_cache(ip_hot_key, unix_now, ttl.min(180));
-            if hot_path_count >= hot_path_block_threshold {
+            if ip_scoped_block {
+                self.insert_hot_block_cache(ip_route_hot_key, unix_now, ttl);
+                self.insert_hot_block_cache(ip_hot_key, unix_now, ttl.min(180));
+            }
+            if hot_path_scoped_block {
                 self.insert_hot_block_cache(route_hot_key, unix_now, ttl.min(90));
             }
             if hot_path_count >= hard_hot_path_threshold {
                 self.insert_hot_block_cache(site_hot_key, unix_now, ttl.min(30));
             }
-            request.add_metadata("l7.cc.action".to_string(), "block".to_string());
-            request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
-            request.add_metadata("l7.block_reason".to_string(), "cc_fast_block".to_string());
-            request.add_metadata("l4.force_close".to_string(), "true".to_string());
             let reason = format!(
                 "l7 cc fast path blocked request: ip={} route={} ip_count={} route_count={} hot_path_count={}",
                 client_ip, route_path, ip_count, route_count, hot_path_count
             );
+            if ip_scoped_block {
+                return SurvivalFastPathResult::Block(build_survival_fast_ip_drop_with_reason(
+                    request,
+                    "cc_fast_block",
+                    reason,
+                    can_persist_client_ip,
+                    false,
+                ));
+            }
+            request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+            request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
+            request.add_metadata("l7.block_reason".to_string(), "cc_fast_block".to_string());
+            request.add_metadata("l4.force_close".to_string(), "true".to_string());
             let response =
                 self.build_block_response(request, &reason, challenge_mode(request, &route_path));
             return SurvivalFastPathResult::Block(InspectionResult::respond(
@@ -976,6 +971,72 @@ fn survival_hot_cache_base_ttl(config: &crate::config::l7::CcDefenseConfig) -> u
         .challenge_ttl_secs
         .max(config.request_window_secs.saturating_mul(4))
         .clamp(3, 900)
+}
+
+fn can_persist_survival_fast_client_ip(request: &UnifiedHttpRequest) -> bool {
+    if request
+        .get_metadata("network.server_public_ip_exempt")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    if request
+        .get_metadata("network.client_ip_unresolved")
+        .map(|value| value == "true")
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    !matches!(
+        request
+            .get_metadata("network.identity_state")
+            .map(String::as_str),
+        Some("trusted_cdn_unresolved")
+    )
+}
+
+fn build_survival_fast_ip_drop(
+    request: &mut UnifiedHttpRequest,
+    drop_reason: &'static str,
+    source: &'static str,
+    persist_client_ip: bool,
+    hot_cache_hit: bool,
+) -> InspectionResult {
+    build_survival_fast_ip_drop_with_reason(
+        request,
+        drop_reason,
+        format!("l7 cc fast path hot block: source={source}"),
+        persist_client_ip,
+        hot_cache_hit,
+    )
+}
+
+fn build_survival_fast_ip_drop_with_reason(
+    request: &mut UnifiedHttpRequest,
+    drop_reason: &'static str,
+    reason: String,
+    persist_client_ip: bool,
+    hot_cache_hit: bool,
+) -> InspectionResult {
+    if hot_cache_hit {
+        request.add_metadata("l7.cc.hot_cache_hit".to_string(), "true".to_string());
+    }
+    request.add_metadata("l7.cc.action".to_string(), "block".to_string());
+    request.add_metadata("l7.enforcement".to_string(), "drop".to_string());
+    request.add_metadata("l7.drop_reason".to_string(), drop_reason.to_string());
+    request.add_metadata("l7.block_reason".to_string(), drop_reason.to_string());
+    request.add_metadata("l4.force_close".to_string(), "true".to_string());
+    request.add_metadata(
+        "ai.temp_block_duration_secs".to_string(),
+        if persist_client_ip { "1800" } else { "900" }.to_string(),
+    );
+
+    if persist_client_ip {
+        InspectionResult::drop_and_persist_ip(InspectionLayer::L7, reason)
+    } else {
+        InspectionResult::drop(InspectionLayer::L7, reason)
+    }
 }
 
 fn fast_request_kind(request: &UnifiedHttpRequest, route_path: &str) -> RequestKind {

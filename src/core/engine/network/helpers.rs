@@ -31,6 +31,13 @@ pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
     context: &crate::core::WafContext,
     peer_ip: std::net::IpAddr,
 ) -> bool {
+    should_treat_peer_as_identity_proxy_before_http(context, peer_ip)
+}
+
+pub(crate) fn should_treat_peer_as_identity_proxy_before_http(
+    context: &crate::core::WafContext,
+    peer_ip: std::net::IpAddr,
+) -> bool {
     let config = context.config_snapshot();
     if matches!(
         config.gateway_config.source_ip_strategy,
@@ -39,7 +46,15 @@ pub(crate) fn should_skip_l4_connection_budget_for_trusted_proxy(
         return false;
     }
 
-    peer_is_configured_trusted_proxy(context, peer_ip)
+    if peer_is_configured_trusted_proxy(context, peer_ip) {
+        return true;
+    }
+
+    !config
+        .gateway_config
+        .custom_source_ip_header
+        .trim()
+        .is_empty()
 }
 
 pub(crate) async fn maybe_delay_policy(

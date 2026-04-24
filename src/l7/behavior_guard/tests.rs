@@ -25,6 +25,117 @@ async fn repeated_document_requests_trigger_behavior_response() {
 }
 
 #[tokio::test]
+async fn browser_document_navigation_refreshes_are_not_behavior_blocked() {
+    let guard = L7BehaviorGuard::new();
+
+    for index in 0..18 {
+        let mut document = request("GET", "/", "text/html");
+        document.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        document.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+        document.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        document.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+        let result = guard.inspect_request(&mut document).await;
+        assert!(
+            result.is_none(),
+            "browser navigation refresh should not be behavior blocked at request {index}"
+        );
+        assert_eq!(
+            document
+                .get_metadata("l7.behavior.skipped")
+                .map(String::as_str),
+            Some("browser_document_navigation")
+        );
+    }
+}
+
+#[tokio::test]
+async fn browser_document_navigation_skip_does_not_depend_on_cc_kind_metadata() {
+    let guard = L7BehaviorGuard::new();
+
+    for index in 0..18 {
+        let mut document = request("GET", "/", "*/*");
+        document.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        document.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+        document.add_metadata("l7.cc.request_kind".to_string(), "other".to_string());
+        document.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+        let result = guard.inspect_request(&mut document).await;
+        assert!(
+            result.is_none(),
+            "browser navigation signal should win over stale request kind at request {index}"
+        );
+        assert_eq!(
+            document
+                .get_metadata("l7.behavior.skipped")
+                .map(String::as_str),
+            Some("browser_document_navigation")
+        );
+    }
+}
+
+#[tokio::test]
+async fn browser_like_document_loop_without_fetch_headers_is_not_persistently_blocked() {
+    let guard = L7BehaviorGuard::new();
+    let mut last = None;
+
+    for _ in 0..18 {
+        let mut document = request("GET", "/", "text/html,application/xhtml+xml");
+        document.add_header(
+            "user-agent".to_string(),
+            "Mozilla/5.0 MobileSafari".to_string(),
+        );
+        document.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        document.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        last = guard.inspect_request(&mut document).await;
+    }
+
+    let result = last.expect("browser-like document loop should get a local response");
+    assert!(!result.persist_blocked_ip);
+}
+
+#[tokio::test]
+async fn scripted_document_loop_still_persistently_blocks() {
+    let guard = L7BehaviorGuard::new();
+    let mut last = None;
+
+    for _ in 0..18 {
+        let mut document = request("GET", "/", "*/*");
+        document.add_header("user-agent".to_string(), "curl/8.0".to_string());
+        document.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        document.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        last = guard.inspect_request(&mut document).await;
+    }
+
+    let result = last.expect("scripted document loop should be blocked");
+    assert!(result.persist_blocked_ip);
+}
+
+#[tokio::test]
+async fn unresolved_trusted_proxy_document_loop_is_not_persistently_blocked() {
+    let guard = L7BehaviorGuard::new();
+    let mut last = None;
+
+    for _ in 0..18 {
+        let mut document = request("GET", "/", "*/*");
+        document.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+        document.add_metadata(
+            "network.client_ip_unresolved".to_string(),
+            "true".to_string(),
+        );
+        document.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        document.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        last = guard.inspect_request(&mut document).await;
+    }
+
+    let result = last.expect("unresolved proxy document loop should get a local response");
+    assert!(!result.persist_blocked_ip);
+}
+
+#[tokio::test]
 async fn mixed_navigation_keeps_behavior_score_low() {
     let guard = L7BehaviorGuard::new();
     let mut doc = request("GET", "/", "text/html");
@@ -71,7 +182,7 @@ async fn repeated_document_refreshes_with_sparse_assets_trigger_challenge() {
 }
 
 #[tokio::test]
-async fn repeated_full_page_reloads_with_many_assets_trigger_challenge() {
+async fn repeated_full_page_reloads_with_many_assets_do_not_persist_block() {
     let guard = L7BehaviorGuard::new();
     let mut last = None;
 
@@ -89,7 +200,86 @@ async fn repeated_full_page_reloads_with_many_assets_trigger_challenge() {
         }
     }
 
-    assert!(last.is_some());
+    assert!(
+        last.as_ref()
+            .map(|result| !result.persist_blocked_ip)
+            .unwrap_or(true),
+        "browser page reloads with asset waterfalls must not persistently block the visitor"
+    );
+}
+
+#[tokio::test]
+async fn normal_page_asset_waterfall_is_ignored_by_behavior_guard() {
+    let guard = L7BehaviorGuard::new();
+
+    for cycle in 0..2 {
+        let mut doc = request("GET", "/", "text/html");
+        doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        doc.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+        doc.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+        doc.add_metadata("l7.cc.route".to_string(), "/".to_string());
+        let result = guard.inspect_request(&mut doc).await;
+        assert!(
+            result
+                .as_ref()
+                .map(|result| !result.persist_blocked_ip)
+                .unwrap_or(true),
+            "document request in a normal page load must not persistently block"
+        );
+
+        for asset in [
+            "/wp-content/themes/CoreNext/static/js/home.min.js",
+            "/wp-content/themes/CoreNext/static/js/global.min.js",
+            "/wp-content/themes/CoreNext/static/img/icon/icp.svg",
+            "/wp-content/themes/CoreNext/static/img/icon/police.svg",
+            "/wp-content/themes/CoreNext/static/lib/element-ui/fonts/element-icons.woff",
+            "/wp-content/themes/CoreNext/static/lib/strawberry/fonts/StrawberryIcon-Free.ttf?83lfek",
+            "/wp-content/plugins/wp-opt/static/js/front.min.js",
+            "/wp-content/uploads/2024/04/20240430084128505162.gif",
+            "/wp-content/uploads/2024/05/20240501113833599823.webp",
+            "/wp-content/uploads/2026/02/20260214160334660789.jpg",
+        ] {
+            let mut static_request = request("GET", asset, "*/*");
+            static_request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+            static_request.add_header("referer".to_string(), "https://example.com/".to_string());
+            static_request.add_metadata("l7.cc.request_kind".to_string(), "static".to_string());
+            static_request.add_metadata(
+                "l7.cc.route".to_string(),
+                normalized_route_path(request_path(asset)),
+            );
+
+            assert!(
+                guard.inspect_request(&mut static_request).await.is_none(),
+                "static asset {asset} in normal page cycle {cycle} should not be challenged or blocked"
+            );
+            assert_eq!(
+                static_request
+                    .get_metadata("l7.behavior.skipped")
+                    .map(String::as_str),
+                Some("static_asset")
+            );
+        }
+    }
+
+    let mut final_doc = request("GET", "/", "text/html");
+    final_doc.add_header("sec-fetch-dest".to_string(), "document".to_string());
+    final_doc.add_metadata("l7.cc.request_kind".to_string(), "document".to_string());
+    final_doc.add_metadata("l7.cc.route".to_string(), "/".to_string());
+
+    let result = guard.inspect_request(&mut final_doc).await;
+    assert!(
+        result
+            .as_ref()
+            .map(|result| !result.persist_blocked_ip)
+            .unwrap_or(true),
+        "follow-up document after asset waterfall must not persistently block"
+    );
+    assert_ne!(
+        final_doc
+            .get_metadata("l7.behavior.action")
+            .map(String::as_str),
+        Some("block")
+    );
 }
 
 #[tokio::test]

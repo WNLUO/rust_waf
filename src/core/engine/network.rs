@@ -17,6 +17,7 @@ pub(crate) use self::helpers::{
     proxy_metric_labels, proxy_traffic_kind, record_l7_behavior_metrics, record_l7_cc_metrics,
     record_l7_ip_access_metrics, request_in_critical_overload,
     should_skip_l4_connection_budget_for_trusted_proxy,
+    should_treat_peer_as_identity_proxy_before_http,
 };
 pub(super) use self::http1::handle_http1_connection;
 pub(super) use self::http2::handle_http2_connection;

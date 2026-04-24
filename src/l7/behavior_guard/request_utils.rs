@@ -155,6 +155,22 @@ pub(super) fn is_high_value_route(route: &str) -> bool {
     .any(|segment| route.contains(segment))
 }
 
+pub(super) fn is_browser_document_navigation(request: &UnifiedHttpRequest) -> bool {
+    if !request.method.eq_ignore_ascii_case("GET") && !request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    let fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    matches!(fetch_mode.as_str(), "navigate") && matches!(fetch_dest.as_str(), "document")
+}
+
 pub(super) fn route_family(uri: &str, route: &str) -> Option<&'static str> {
     let route = route.to_ascii_lowercase();
     let uri = uri.to_ascii_lowercase();
@@ -259,6 +275,8 @@ pub(super) fn request_kind(request: &UnifiedHttpRequest) -> RequestKind {
         || sec_fetch_dest == "style"
         || sec_fetch_dest == "image"
         || sec_fetch_dest == "font"
+        || path == "/wp-admin/load-scripts.php"
+        || path == "/wp-admin/load-styles.php"
         || path.ends_with(".js")
         || path.ends_with(".css")
         || path.ends_with(".png")

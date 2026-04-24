@@ -143,18 +143,28 @@ impl IpAccessGuard {
                 },
             )
         } else {
-            (
-                match config.mode {
-                    IpAccessMode::Monitor => IpAccessAction::Alert,
-                    _ => config.unknown_geo_action,
-                },
-                match config.unknown_geo_action {
-                    IpAccessAction::Block => "unknown_geo_blocked",
-                    IpAccessAction::Challenge => "unknown_geo_challenged",
-                    IpAccessAction::Alert => "unknown_geo_alerted",
-                    IpAccessAction::Allow => "unknown_geo_allowed",
-                },
-            )
+            let action = match config.mode {
+                IpAccessMode::Monitor => IpAccessAction::Alert,
+                _ => soft_unknown_geo_challenge_action(config.unknown_geo_action, &geo),
+            };
+            let reason = match (config.unknown_geo_action, action) {
+                (IpAccessAction::Challenge, IpAccessAction::Allow) => {
+                    "unknown_geo_challenge_soft_allowed"
+                }
+                (_, IpAccessAction::Block) => "unknown_geo_blocked",
+                (_, IpAccessAction::Challenge) => "unknown_geo_challenged",
+                (_, IpAccessAction::Alert) => "unknown_geo_alerted",
+                (_, IpAccessAction::Allow) => "unknown_geo_allowed",
+            };
+            if config.unknown_geo_action == IpAccessAction::Challenge
+                && action == IpAccessAction::Allow
+            {
+                request.add_metadata(
+                    "ip_access.unknown_geo_soft_allow".to_string(),
+                    geo.source.to_string(),
+                );
+            }
+            (action, reason)
         };
 
         self.enforce(
@@ -339,6 +349,18 @@ impl IpAccessGuard {
                 Some(InspectionResult::block(InspectionLayer::L7, reason_text))
             }
             IpAccessAction::Challenge => {
+                if should_skip_ip_access_challenge_for_subresource(request) {
+                    request.add_metadata("ip_access.action".to_string(), "allow".to_string());
+                    request.add_metadata(
+                        "ip_access.challenge_skipped".to_string(),
+                        "subresource".to_string(),
+                    );
+                    request.add_metadata(
+                        "ip_access.reason".to_string(),
+                        "challenge_skipped_subresource".to_string(),
+                    );
+                    return None;
+                }
                 if context.l7_cc_guard().has_valid_request_challenge(request) {
                     request.add_metadata(
                         "ip_access.action".to_string(),
@@ -353,6 +375,72 @@ impl IpAccessGuard {
             }
         }
     }
+}
+
+fn should_skip_ip_access_challenge_for_subresource(request: &UnifiedHttpRequest) -> bool {
+    let path = request.uri.split('?').next().unwrap_or(&request.uri);
+    let lower_path = path.to_ascii_lowercase();
+    if is_browser_same_origin_async_request(request) {
+        return true;
+    }
+    if !request.method.eq_ignore_ascii_case("GET") && !request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    if looks_like_static_subresource_path(&lower_path) {
+        return true;
+    }
+    let fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(
+        fetch_dest.as_str(),
+        "script" | "style" | "image" | "font" | "audio" | "video" | "manifest"
+    )
+}
+
+fn is_browser_same_origin_async_request(request: &UnifiedHttpRequest) -> bool {
+    if request.method.eq_ignore_ascii_case("GET") || request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    if request
+        .get_header("sec-fetch-dest")
+        .is_some_and(|value| value.eq_ignore_ascii_case("document"))
+    {
+        return false;
+    }
+    let fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let same_site_context = matches!(fetch_site.as_str(), "same-origin" | "same-site");
+    if !same_site_context {
+        return false;
+    }
+    let fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let explicit_async = request
+        .get_header("x-requested-with")
+        .is_some_and(|value| value.eq_ignore_ascii_case("XMLHttpRequest"))
+        || matches!(fetch_mode.as_str(), "cors" | "same-origin")
+        || request
+            .get_header("accept")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("application/json"));
+    let has_browser_session_context =
+        request.get_header("cookie").is_some() || request.get_header("referer").is_some();
+
+    explicit_async && has_browser_session_context
+}
+
+fn looks_like_static_subresource_path(path: &str) -> bool {
+    [
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".woff", ".woff2",
+        ".ttf", ".map",
+    ]
+    .iter()
+    .any(|suffix| path.ends_with(suffix))
 }
 
 impl IpAccessState {
@@ -416,6 +504,16 @@ fn is_private_or_local_ip(ip: IpAddr) -> bool {
                 || ip.is_unicast_link_local()
         }
     }
+}
+
+fn soft_unknown_geo_challenge_action(
+    configured_action: IpAccessAction,
+    geo: &GeoSignal,
+) -> IpAccessAction {
+    if configured_action == IpAccessAction::Challenge && !geo.trusted {
+        return IpAccessAction::Allow;
+    }
+    configured_action
 }
 
 fn add_optional_geo_header_metadata(
@@ -493,5 +591,69 @@ mod tests {
         let geo = guard.resolve_geo_signal(&mut request, "203.0.113.10".parse().unwrap(), &state);
         assert_eq!(geo.source, "cdn_header");
         assert_eq!(geo.country_code.as_deref(), Some("CN"));
+    }
+
+    #[test]
+    fn unknown_untrusted_geo_challenge_is_soft_allowed() {
+        let geo = GeoSignal {
+            country_code: None,
+            source: "unknown",
+            trusted: false,
+        };
+
+        assert_eq!(
+            soft_unknown_geo_challenge_action(IpAccessAction::Challenge, &geo),
+            IpAccessAction::Allow
+        );
+        assert_eq!(
+            soft_unknown_geo_challenge_action(IpAccessAction::Block, &geo),
+            IpAccessAction::Block
+        );
+    }
+
+    #[test]
+    fn ip_access_challenge_is_skipped_for_dynamic_static_subresources() {
+        let mut script = request("59.51.149.57");
+        script.uri = "/assets/combined-scripts?chunk=core".to_string();
+        script.add_header("accept".to_string(), "*/*".to_string());
+        script.add_header("sec-fetch-dest".to_string(), "script".to_string());
+
+        assert!(should_skip_ip_access_challenge_for_subresource(&script));
+
+        let mut style = request("59.51.149.57");
+        style.uri = "/assets/combined-styles?chunk=ui".to_string();
+        style.add_header("accept".to_string(), "text/css,*/*;q=0.1".to_string());
+        style.add_header("sec-fetch-dest".to_string(), "style".to_string());
+
+        assert!(should_skip_ip_access_challenge_for_subresource(&style));
+    }
+
+    #[test]
+    fn ip_access_challenge_is_skipped_for_browser_same_origin_async_requests() {
+        let mut api_request = request("59.51.149.57");
+        api_request.method = "POST".to_string();
+        api_request.uri = "/account/activity/poll".to_string();
+        api_request.add_header("accept".to_string(), "application/json".to_string());
+        api_request.add_header("x-requested-with".to_string(), "XMLHttpRequest".to_string());
+        api_request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        api_request.add_header("sec-fetch-mode".to_string(), "cors".to_string());
+        api_request.add_header(
+            "referer".to_string(),
+            "https://example.com/account/dashboard".to_string(),
+        );
+        api_request.add_header("cookie".to_string(), "session=test".to_string());
+
+        assert!(should_skip_ip_access_challenge_for_subresource(
+            &api_request
+        ));
+    }
+
+    #[test]
+    fn ip_access_challenge_still_applies_to_documents() {
+        let mut document = request("59.51.149.57");
+        document.add_header("accept".to_string(), "text/html".to_string());
+        document.add_header("sec-fetch-dest".to_string(), "document".to_string());
+
+        assert!(!should_skip_ip_access_challenge_for_subresource(&document));
     }
 }

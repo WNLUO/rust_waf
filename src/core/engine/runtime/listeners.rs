@@ -131,8 +131,10 @@ fn adaptive_permit_wait_ms_for_peer(
     capacity_override: Option<usize>,
 ) -> u64 {
     let wait_ms = adaptive_permit_wait_ms(context, semaphore, channel, capacity_override);
-    let trusted_proxy_peer =
-        crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
+    let trusted_proxy_peer = crate::core::engine::should_treat_peer_as_identity_proxy_before_http(
+        context,
+        peer_addr.ip(),
+    );
     let is_tls_post_handshake = channel.eq_ignore_ascii_case("TLS post-handshake");
 
     if is_tls_post_handshake {
@@ -162,8 +164,10 @@ pub(crate) async fn acquire_permit_auto_with_capacity(
     channel: &str,
     capacity_override: Option<usize>,
 ) -> Option<OwnedSemaphorePermit> {
-    let trusted_proxy_peer =
-        crate::core::engine::peer_is_configured_trusted_proxy(context, peer_addr.ip());
+    let trusted_proxy_peer = crate::core::engine::should_treat_peer_as_identity_proxy_before_http(
+        context,
+        peer_addr.ip(),
+    );
     let (_, logical_limit, used, _) =
         semaphore_pressure(context, semaphore.as_ref(), channel, capacity_override);
     if used < logical_limit {
@@ -786,7 +790,8 @@ mod tests {
 
     impl FakeContext {
         fn as_limits(&self, channel: &str, capacity_override: Option<usize>) -> (usize, usize) {
-            let (logical_limit, default_capacity) = if channel.eq_ignore_ascii_case("HTTP/1.1 request")
+            let (logical_limit, default_capacity) = if channel
+                .eq_ignore_ascii_case("HTTP/1.1 request")
                 || channel.eq_ignore_ascii_case("HTTP/2 request")
                 || channel.eq_ignore_ascii_case("HTTP/3 request")
                 || channel.eq_ignore_ascii_case("UDP request")
@@ -808,10 +813,7 @@ mod tests {
             connection_limit: 1024,
             connection_capacity: 4096,
         };
-        assert_eq!(
-            fake.as_limits("TLS handshake", Some(1024)),
-            (1024, 1024)
-        );
+        assert_eq!(fake.as_limits("TLS handshake", Some(1024)), (1024, 1024));
     }
 
     #[test]

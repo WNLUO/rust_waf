@@ -100,6 +100,11 @@ impl L7CcGuard {
         let route_path = normalized_route_path(&raw_path);
         let method = request.method.to_ascii_uppercase();
         let request_kind = classify_request(request, &raw_path);
+        let browser_document_navigation =
+            is_browser_document_navigation_request(request, request_kind)
+                && !is_high_value_cc_route(&route_path);
+        let browser_like_document_request =
+            is_browser_like_document_request(request, request_kind, &route_path);
         let html_mode = challenge_mode(request, &raw_path);
         let identity_state = request
             .get_metadata("network.identity_state")
@@ -291,6 +296,14 @@ impl L7CcGuard {
             request_kind.as_str().to_string(),
         );
         request.add_metadata(
+            "l7.cc.browser_document_navigation".to_string(),
+            browser_document_navigation.to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.browser_like_document".to_string(),
+            browser_like_document_request.to_string(),
+        );
+        request.add_metadata(
             "l7.cc.page_subresource".to_string(),
             is_page_subresource.to_string(),
         );
@@ -465,9 +478,11 @@ impl L7CcGuard {
             request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
             request.add_metadata("l7.block_reason".to_string(), "cc_hard_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
-            let should_persist_ip = static_asset_persist_block
-                || ip_count >= hard_ip_block_threshold
-                || ip_effective >= ip_block_threshold;
+            let should_persist_ip = !browser_document_navigation
+                && !browser_like_document_request
+                && (static_asset_persist_block
+                    || ip_count >= hard_ip_block_threshold
+                    || ip_effective >= ip_block_threshold);
             let response = self.build_block_response(request, &reason, html_mode);
             return Some(if should_persist_ip {
                 InspectionResult::respond_and_persist_ip(InspectionLayer::L7, reason, response)
@@ -679,6 +694,9 @@ impl L7CcGuard {
             is_survival_low_risk_identity_request(request, &route_path);
         let can_persist_client_ip = can_persist_survival_fast_client_ip(request);
         let request_kind = fast_request_kind(request, &route_path);
+        let browser_async_request = is_browser_same_origin_async_request(request, request_kind);
+        let browser_navigation_request =
+            is_browser_document_navigation_request(request, request_kind);
 
         request.add_metadata("l7.cc.fast_path".to_string(), "true".to_string());
         request.add_metadata(
@@ -702,7 +720,7 @@ impl L7CcGuard {
             hot_cache_expired = true;
         }
         let ip_hot_key = format!("ip:{}", client_ip_key);
-        if !survival_low_risk_identity {
+        if !survival_low_risk_identity && !browser_navigation_request {
             if let Some(active) =
                 self.hot_block_cache_hit_and_extend(&ip_hot_key, unix_now, hot_cache_base_ttl)
             {
@@ -728,6 +746,11 @@ impl L7CcGuard {
             request.add_metadata(
                 "l7.cc.survival_verified_normal".to_string(),
                 "true".to_string(),
+            );
+        } else if browser_navigation_request {
+            request.add_metadata(
+                "l7.cc.survival_bypass".to_string(),
+                "browser_document_navigation".to_string(),
             );
         } else {
             if let Some(active) =
@@ -784,15 +807,27 @@ impl L7CcGuard {
         let window_secs = config.request_window_secs.max(1);
         let route_key = format!("{}|{}|{}", client_ip_key, host, route_path);
         let hot_path_key = format!("{}|{}", host, route_path);
-        let ip_count = self
-            .observe_fast(
+        let ip_count = if request_kind == RequestKind::StaticAsset || browser_async_request {
+            let skip_reason = if browser_async_request {
+                "browser_same_origin_async"
+            } else {
+                "static_asset"
+            };
+            request.add_metadata(
+                "l7.cc.fast_ip_bucket_skipped".to_string(),
+                skip_reason.to_string(),
+            );
+            0
+        } else {
+            self.observe_fast(
                 &self.fast_ip_buckets,
                 client_ip_key.clone(),
                 unix_now,
                 window_secs,
                 bucket_limit,
             )
-            .count;
+            .count
+        };
         let route_count = self
             .observe_fast(
                 &self.fast_route_buckets,
@@ -867,16 +902,54 @@ impl L7CcGuard {
         let hard_hot_path_threshold = hot_path_block_threshold
             .saturating_mul(u32::from(config.hard_hot_path_block_multiplier));
 
-        let ip_scoped_block = ip_count >= hard_ip_threshold
-            || route_count >= hard_route_threshold
-            || ip_count >= ip_block_threshold
-            || route_count >= route_block_threshold;
+        let ip_threshold_block = ip_count >= hard_ip_threshold || ip_count >= ip_block_threshold;
+        let route_scoped_block =
+            route_count >= hard_route_threshold || route_count >= route_block_threshold;
+        let ip_scoped_block = ip_threshold_block || route_scoped_block;
         let hot_path_scoped_block =
             hot_path_count >= hard_hot_path_threshold || hot_path_count >= hot_path_block_threshold;
+        let browser_async_pressure = browser_async_request;
+        let browser_navigation_pressure = browser_navigation_request;
+        let static_asset_ip_only_pressure = request_kind == RequestKind::StaticAsset
+            && ip_threshold_block
+            && !route_scoped_block
+            && !hot_path_scoped_block;
+
+        if static_asset_ip_only_pressure {
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "static_asset_ip_pressure".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
+        }
+        if browser_async_pressure
+            && (ip_threshold_block || route_scoped_block)
+            && ip_count < hard_ip_threshold
+            && route_count < hard_route_threshold
+            && !hot_path_scoped_block
+        {
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "browser_same_origin_async_pressure".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
+        }
+        if browser_navigation_pressure
+            && (ip_threshold_block || route_scoped_block)
+            && ip_count < hard_ip_threshold
+            && route_count < hard_route_threshold
+            && !hot_path_scoped_block
+        {
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "browser_document_navigation_pressure".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
+        }
 
         if ip_scoped_block || hot_path_scoped_block {
             let ttl = hot_cache_base_ttl;
-            if ip_scoped_block {
+            if ip_scoped_block && request_kind != RequestKind::StaticAsset {
                 self.insert_hot_block_cache(ip_route_hot_key, unix_now, ttl);
                 self.insert_hot_block_cache(ip_hot_key, unix_now, ttl.min(180));
             }
@@ -890,7 +963,7 @@ impl L7CcGuard {
                 "l7 cc fast path blocked request: ip={} route={} ip_count={} route_count={} hot_path_count={}",
                 client_ip, route_path, ip_count, route_count, hot_path_count
             );
-            if ip_scoped_block {
+            if ip_scoped_block && request_kind != RequestKind::StaticAsset {
                 return SurvivalFastPathResult::Block(build_survival_fast_ip_drop_with_reason(
                     request,
                     "cc_fast_block",
@@ -912,10 +985,45 @@ impl L7CcGuard {
 
         let hot_path_challenge_threshold =
             hot_path_challenge_threshold.min(survival_hot_path_threshold);
-        let challenge_needed = route_count >= route_challenge_threshold
-            || hot_path_count >= hot_path_challenge_threshold
-            || ip_count >= config.ip_challenge_threshold;
+        let route_challenge_needed = route_count >= route_challenge_threshold;
+        let hot_path_challenge_needed = hot_path_count >= hot_path_challenge_threshold;
+        let ip_challenge_needed = ip_count >= config.ip_challenge_threshold;
+        let challenge_needed =
+            route_challenge_needed || hot_path_challenge_needed || ip_challenge_needed;
         if challenge_needed {
+            if request_kind == RequestKind::StaticAsset
+                && ip_challenge_needed
+                && !route_challenge_needed
+                && !hot_path_challenge_needed
+            {
+                request.add_metadata(
+                    "l7.cc.fast_path_no_decision".to_string(),
+                    "static_asset_ip_challenge_pressure".to_string(),
+                );
+                return SurvivalFastPathResult::NoDecision;
+            }
+            if browser_async_pressure
+                && ip_count < hard_ip_threshold
+                && route_count < hard_route_threshold
+                && !hot_path_challenge_needed
+            {
+                request.add_metadata(
+                    "l7.cc.fast_path_no_decision".to_string(),
+                    "browser_same_origin_async_challenge_pressure".to_string(),
+                );
+                return SurvivalFastPathResult::NoDecision;
+            }
+            if browser_navigation_pressure
+                && ip_count < hard_ip_threshold
+                && route_count < hard_route_threshold
+                && !hot_path_challenge_needed
+            {
+                request.add_metadata(
+                    "l7.cc.fast_path_no_decision".to_string(),
+                    "browser_document_navigation_challenge_pressure".to_string(),
+                );
+                return SurvivalFastPathResult::NoDecision;
+            }
             let verified = self.has_valid_challenge_cookie(request, client_ip, &host, config);
             request.add_metadata("l7.cc.challenge_verified".to_string(), verified.to_string());
             if !verified {
@@ -977,6 +1085,154 @@ fn can_persist_survival_fast_client_ip(request: &UnifiedHttpRequest) -> bool {
             .map(String::as_str),
         Some("trusted_cdn_unresolved")
     )
+}
+
+fn is_browser_same_origin_async_request(
+    request: &UnifiedHttpRequest,
+    request_kind: RequestKind,
+) -> bool {
+    if matches!(
+        request_kind,
+        RequestKind::Document | RequestKind::StaticAsset
+    ) {
+        return false;
+    }
+    let fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let same_site_context = matches!(fetch_site.as_str(), "same-origin" | "same-site");
+    if !same_site_context {
+        return false;
+    }
+    let fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let explicit_async = request
+        .get_header("x-requested-with")
+        .is_some_and(|value| value.eq_ignore_ascii_case("XMLHttpRequest"))
+        || matches!(fetch_mode.as_str(), "cors" | "same-origin")
+        || request
+            .get_header("accept")
+            .is_some_and(|value| value.to_ascii_lowercase().contains("application/json"));
+    let has_browser_session_context =
+        request.get_header("cookie").is_some() || request.get_header("referer").is_some();
+
+    explicit_async && has_browser_session_context
+}
+
+fn is_browser_document_navigation_request(
+    request: &UnifiedHttpRequest,
+    request_kind: RequestKind,
+) -> bool {
+    if request_kind != RequestKind::Document {
+        return false;
+    }
+    if !request.method.eq_ignore_ascii_case("GET") && !request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    let fetch_mode = request
+        .get_header("sec-fetch-mode")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    matches!(fetch_mode.as_str(), "navigate")
+        && matches!(fetch_dest.as_str(), "document")
+        && matches!(
+            fetch_site.as_str(),
+            "same-origin" | "same-site" | "none" | "cross-site"
+        )
+}
+
+fn is_browser_like_document_request(
+    request: &UnifiedHttpRequest,
+    request_kind: RequestKind,
+    route: &str,
+) -> bool {
+    if request_kind != RequestKind::Document || is_high_value_cc_route(route) {
+        return false;
+    }
+    if !request.method.eq_ignore_ascii_case("GET") && !request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    if is_browser_document_navigation_request(request, request_kind) {
+        return true;
+    }
+    let accept_html = request
+        .get_header("accept")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"));
+    let browser_ua = request
+        .get_header("user-agent")
+        .is_some_and(|value| looks_like_browser_user_agent(value));
+    let unresolved_trusted_proxy = request
+        .get_metadata("network.identity_state")
+        .is_some_and(|value| value == "trusted_cdn_unresolved")
+        || request
+            .get_metadata("network.client_ip_unresolved")
+            .is_some_and(|value| value == "true");
+
+    (accept_html && browser_ua) || unresolved_trusted_proxy
+}
+
+fn looks_like_browser_user_agent(value: &str) -> bool {
+    let ua = value.to_ascii_lowercase();
+    if [
+        "curl",
+        "wget",
+        "python",
+        "benchmark",
+        "wrk",
+        "ab/",
+        "go-http-client",
+        "okhttp",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+    {
+        return false;
+    }
+    [
+        "mozilla/", "chrome/", "safari/", "firefox/", "edg/", "mobile/",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+}
+
+fn is_high_value_cc_route(route: &str) -> bool {
+    let route = route.to_ascii_lowercase();
+    [
+        "/login",
+        "/signin",
+        "/signup",
+        "/register",
+        "/auth",
+        "/search",
+        "/query",
+        "/captcha",
+        "/verify",
+        "/otp",
+        "/checkout",
+        "/order",
+        "/pay",
+        "/submit",
+        "/detail",
+        "/product",
+        "/item",
+        "/cart",
+        "/user",
+        "/account",
+    ]
+    .iter()
+    .any(|segment| route.contains(segment))
 }
 
 fn build_survival_fast_ip_drop(

@@ -38,7 +38,10 @@ impl WafEngine {
     pub async fn start(&mut self) -> Result<()> {
         let startup_config = self.context.config_snapshot();
         info!("WAF engine started");
-        info!("Dynamic request limit set to {}", self.context.runtime_request_limit());
+        info!(
+            "Dynamic request limit set to {}",
+            self.context.runtime_request_limit()
+        );
         info!(
             "Dynamic connection limit set to {}",
             self.context.runtime_connection_limit()

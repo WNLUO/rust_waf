@@ -9,7 +9,6 @@ pub(crate) async fn handle_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
-    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let storage_queue_usage_percent = context
@@ -18,23 +17,25 @@ pub(crate) async fn handle_connection(
         .map(|store| store.queue_usage_percent())
         .unwrap_or(0);
 
-    let admission = context.resource_sentinel.admit_connection(
-        packet.source_ip,
-        "tcp",
-        context.runtime_request_limit(),
-        storage_queue_usage_percent,
-    );
-    if !admission.allow {
-        if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_l4_bucket_budget_rejection();
+    if !skip_l4_connection_budget {
+        let admission = context.resource_sentinel.admit_connection(
+            packet.source_ip,
+            "tcp",
+            context.runtime_request_limit(),
+            storage_queue_usage_percent,
+        );
+        if !admission.allow {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_l4_bucket_budget_rejection();
+            }
+            if let Some(reason) = admission.reason {
+                debug!("{reason}");
+            }
+            return Ok(());
         }
-        if let Some(reason) = admission.reason {
-            debug!("{reason}");
-        }
-        return Ok(());
     }
 
-    let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet, skip_l4_connection_budget);
     if l4_result.should_persist_event() {
         persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
     }
@@ -46,9 +47,11 @@ pub(crate) async fn handle_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
-        context
-            .resource_sentinel
-            .note_l4_rejection(packet.source_ip);
+        if !skip_l4_connection_budget {
+            context
+                .resource_sentinel
+                .note_l4_rejection(packet.source_ip);
+        }
         return Ok(());
     }
 
@@ -111,7 +114,6 @@ pub(crate) async fn handle_tls_connection(
 ) -> Result<()> {
     let local_addr = stream.local_addr()?;
     let packet = PacketInfo::from_socket_addrs(peer_addr, local_addr, Protocol::TCP);
-    let trusted_proxy_peer = peer_is_configured_trusted_proxy(context.as_ref(), packet.source_ip);
     let skip_l4_connection_budget =
         should_skip_l4_connection_budget_for_trusted_proxy(context.as_ref(), packet.source_ip);
     let config = context.config_snapshot();
@@ -122,29 +124,31 @@ pub(crate) async fn handle_tls_connection(
         .map(|store| store.queue_usage_percent())
         .unwrap_or(0);
 
-    let admission = context.resource_sentinel.admit_connection(
-        packet.source_ip,
-        "tls",
-        context.runtime_connection_limit(),
-        storage_queue_usage_percent,
-    );
-    if !admission.allow {
-        if let Some(metrics) = context.metrics.as_ref() {
-            metrics.record_tls_pre_handshake_rejection();
-            metrics.record_l4_bucket_budget_rejection();
-        }
-        persist_tls_transport_event(
-            context.as_ref(),
-            &packet,
-            "block",
-            admission
-                .reason
-                .unwrap_or_else(|| "resource sentinel rejected tls connection".to_string()),
+    if !skip_l4_connection_budget {
+        let admission = context.resource_sentinel.admit_connection(
+            packet.source_ip,
+            "tls",
+            context.runtime_connection_limit(),
+            storage_queue_usage_percent,
         );
-        return Ok(());
+        if !admission.allow {
+            if let Some(metrics) = context.metrics.as_ref() {
+                metrics.record_tls_pre_handshake_rejection();
+                metrics.record_l4_bucket_budget_rejection();
+            }
+            persist_tls_transport_event(
+                context.as_ref(),
+                &packet,
+                "block",
+                admission
+                    .reason
+                    .unwrap_or_else(|| "resource sentinel rejected tls connection".to_string()),
+            );
+            return Ok(());
+        }
     }
 
-    let l4_result = inspect_transport_layers(context.as_ref(), &packet, trusted_proxy_peer);
+    let l4_result = inspect_transport_layers(context.as_ref(), &packet, skip_l4_connection_budget);
     if l4_result.should_persist_event() {
         persist_l4_inspection_event(context.as_ref(), &packet, &l4_result);
     }
@@ -156,9 +160,11 @@ pub(crate) async fn handle_tls_connection(
         if let Some(metrics) = context.metrics.as_ref() {
             metrics.record_block(l4_result.layer.clone());
         }
-        context
-            .resource_sentinel
-            .note_l4_rejection(packet.source_ip);
+        if !skip_l4_connection_budget {
+            context
+                .resource_sentinel
+                .note_l4_rejection(packet.source_ip);
+        }
         return Ok(());
     }
 
@@ -214,7 +220,9 @@ pub(crate) async fn handle_tls_connection(
             if let Some(metrics) = context.metrics.as_ref() {
                 metrics.record_tls_handshake_failure();
             }
-            context.resource_sentinel.note_tls_failure(packet.source_ip);
+            if !skip_l4_connection_budget {
+                context.resource_sentinel.note_tls_failure(packet.source_ip);
+            }
             warn!(
                 "TLS handshake failed for peer {} on {}: {}",
                 peer_addr, local_addr, err
@@ -239,13 +247,13 @@ pub(crate) async fn handle_tls_connection(
                     kind: crate::l7::SlowAttackKind::SlowTlsHandshake,
                     peer_ip: packet.source_ip,
                     client_ip: None,
-                    trusted_proxy_peer,
-                    identity_state: if trusted_proxy_peer {
+                    trusted_proxy_peer: skip_l4_connection_budget,
+                    identity_state: if skip_l4_connection_budget {
                         "trusted_cdn_unresolved"
                     } else {
                         "direct_client"
                     },
-                    client_identity_unresolved: trusted_proxy_peer,
+                    client_identity_unresolved: skip_l4_connection_budget,
                     host: None,
                     detail: format!(
                         "listener={} timeout_ms={}",
@@ -259,7 +267,9 @@ pub(crate) async fn handle_tls_connection(
                     metrics.record_slow_attack_block();
                 }
             }
-            context.resource_sentinel.note_tls_timeout(packet.source_ip);
+            if !skip_l4_connection_budget {
+                context.resource_sentinel.note_tls_timeout(packet.source_ip);
+            }
             if assessment.should_block_ip {
                 if let Some(ip) = assessment.block_ip {
                     if context.is_server_public_ip(ip) {

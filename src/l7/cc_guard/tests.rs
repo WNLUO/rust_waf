@@ -43,6 +43,27 @@ fn root_request_with_generic_accept_is_classified_as_document() {
     assert_eq!(classify_request(&request, "/"), RequestKind::Document);
 }
 
+#[test]
+fn dynamic_asset_endpoints_with_static_fetch_destination_are_static_assets() {
+    let mut script = request("/assets/combined-scripts?chunk=core");
+    script.add_header("accept".to_string(), "*/*".to_string());
+    script.add_header("sec-fetch-dest".to_string(), "script".to_string());
+
+    assert_eq!(
+        classify_request(&script, "/assets/combined-scripts"),
+        RequestKind::StaticAsset
+    );
+
+    let mut style = request("/assets/combined-styles?chunk=ui");
+    style.add_header("accept".to_string(), "text/css,*/*;q=0.1".to_string());
+    style.add_header("sec-fetch-dest".to_string(), "style".to_string());
+
+    assert_eq!(
+        classify_request(&style, "/assets/combined-styles"),
+        RequestKind::StaticAsset
+    );
+}
+
 #[tokio::test]
 async fn issues_challenge_when_route_rate_crosses_threshold() {
     let config = CcDefenseConfig {
@@ -612,6 +633,239 @@ async fn survival_fast_path_blocks_and_uses_hot_cache() {
         third.get_metadata("l7.drop_reason").map(String::as_str),
         Some("cc_hot_block")
     );
+}
+
+#[tokio::test]
+async fn survival_fast_path_static_asset_burst_does_not_poison_ip_bucket() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 200,
+        route_block_threshold: 200,
+        ip_challenge_threshold: 3,
+        ip_block_threshold: 3,
+        hot_path_challenge_threshold: 200,
+        hot_path_block_threshold: 200,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..20 {
+        let mut asset = UnifiedHttpRequest::new(
+            HttpVersion::Http1_1,
+            "GET".to_string(),
+            format!("/wp-content/uploads/2026/04/page-image-{index}.webp"),
+        );
+        asset.set_client_ip("203.0.113.10".to_string());
+        asset.add_header("host".to_string(), "example.com".to_string());
+        asset.add_header(
+            "accept".to_string(),
+            "image/webp,image/*,*/*;q=0.8".to_string(),
+        );
+        asset.add_header("sec-fetch-dest".to_string(), "image".to_string());
+        asset.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+        let result = guard.inspect_request(&mut asset).await;
+        assert!(
+            result
+                .as_ref()
+                .map(|result| !result.persist_blocked_ip)
+                .unwrap_or(true),
+            "static asset burst should not persist a local block at request {index}"
+        );
+        assert_eq!(
+            asset
+                .get_metadata("l7.cc.fast_ip_bucket_skipped")
+                .map(String::as_str),
+            Some("static_asset")
+        );
+        assert_eq!(
+            asset.get_metadata("l7.cc.ip_count").map(String::as_str),
+            Some("0")
+        );
+    }
+
+    let mut document = request("/index.php/2026/04/22/hello-world/");
+    document.set_client_ip("203.0.113.10".to_string());
+    document.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut document).await.is_none());
+    assert_eq!(
+        document.get_metadata("l7.cc.ip_count").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(document.get_metadata("l7.cc.hot_cache_hit"), None);
+    assert_eq!(document.get_metadata("l7.cc.action"), None);
+}
+
+#[tokio::test]
+async fn survival_fast_path_browser_async_burst_does_not_persist_or_hot_block_ip() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 5,
+        route_block_threshold: 10,
+        ip_challenge_threshold: 8,
+        ip_block_threshold: 16,
+        hot_path_challenge_threshold: 200,
+        hot_path_block_threshold: 200,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..18 {
+        let mut api_request = request("/account/activity/poll");
+        api_request.method = "POST".to_string();
+        api_request.add_header("content-type".to_string(), "application/json".to_string());
+        api_request.add_header("accept".to_string(), "application/json".to_string());
+        api_request.add_header("x-requested-with".to_string(), "XMLHttpRequest".to_string());
+        api_request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        api_request.add_header("sec-fetch-mode".to_string(), "cors".to_string());
+        api_request.add_header(
+            "referer".to_string(),
+            "https://example.com/account/dashboard".to_string(),
+        );
+        api_request.add_header("cookie".to_string(), "session=test".to_string());
+        api_request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+        let result = guard.inspect_request(&mut api_request).await;
+        assert!(
+            result
+                .as_ref()
+                .map(|result| !result.persist_blocked_ip)
+                .unwrap_or(true),
+            "browser async burst should not persist a local block at request {index}"
+        );
+        assert_eq!(
+            api_request
+                .get_metadata("l7.cc.fast_ip_bucket_skipped")
+                .map(String::as_str),
+            Some("browser_same_origin_async")
+        );
+        if index >= 9 {
+            assert_eq!(
+                api_request
+                    .get_metadata("l7.cc.fast_path_no_decision")
+                    .map(String::as_str),
+                Some("browser_same_origin_async_pressure")
+            );
+        }
+    }
+
+    let mut document = request("/account/dashboard");
+    document.add_header("cookie".to_string(), "session=test".to_string());
+    document.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut document).await.is_none());
+    assert_eq!(document.get_metadata("l7.cc.hot_cache_hit"), None);
+    assert_eq!(document.get_metadata("l7.cc.action"), None);
+}
+
+#[tokio::test]
+async fn browser_document_navigation_hard_block_does_not_persist_ip() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 5,
+        route_block_threshold: 8,
+        ip_challenge_threshold: 5,
+        ip_block_threshold: 8,
+        hot_path_challenge_threshold: 200,
+        hot_path_block_threshold: 200,
+        hard_route_block_multiplier: 1,
+        hard_ip_block_multiplier: 1,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+    let mut last = None;
+
+    for _ in 0..12 {
+        let mut document = request("/");
+        document.add_header(
+            "accept".to_string(),
+            "text/html,application/xhtml+xml,*/*;q=0.8".to_string(),
+        );
+        document.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        document.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+        document.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        last = guard.inspect_request(&mut document).await;
+    }
+
+    let result = last.expect("browser navigation pressure should get a local response");
+    assert!(!result.persist_blocked_ip);
+}
+
+#[tokio::test]
+async fn unresolved_trusted_proxy_document_hard_block_does_not_persist_ip() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 5,
+        route_block_threshold: 8,
+        ip_challenge_threshold: 5,
+        ip_block_threshold: 8,
+        hot_path_challenge_threshold: 200,
+        hot_path_block_threshold: 200,
+        hard_route_block_multiplier: 1,
+        hard_ip_block_multiplier: 1,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+    let mut last = None;
+
+    for _ in 0..12 {
+        let mut document = request("/");
+        document.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+        document.add_metadata(
+            "network.client_ip_unresolved".to_string(),
+            "true".to_string(),
+        );
+        last = guard.inspect_request(&mut document).await;
+    }
+
+    let result = last.expect("unresolved proxy document pressure should get a local response");
+    assert!(!result.persist_blocked_ip);
+}
+
+#[tokio::test]
+async fn survival_fast_path_browser_document_navigation_burst_avoids_soft_challenge() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 5,
+        route_block_threshold: 10,
+        ip_challenge_threshold: 8,
+        ip_block_threshold: 16,
+        hot_path_challenge_threshold: 200,
+        hot_path_block_threshold: 200,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..18 {
+        let mut document = request("/");
+        document.add_header(
+            "accept".to_string(),
+            "text/html,application/xhtml+xml,*/*;q=0.8".to_string(),
+        );
+        document.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        document.add_header("sec-fetch-mode".to_string(), "navigate".to_string());
+        document.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        document.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+        let result = guard.inspect_request(&mut document).await;
+        assert!(
+            result.is_none(),
+            "browser document navigation should avoid soft challenge at request {index}"
+        );
+        assert_eq!(
+            document
+                .get_metadata("l7.cc.survival_bypass")
+                .map(String::as_str),
+            Some("browser_document_navigation")
+        );
+        if index >= 9 {
+            assert_eq!(
+                document
+                    .get_metadata("l7.cc.fast_path_no_decision")
+                    .map(String::as_str),
+                Some("browser_document_navigation_pressure")
+            );
+        }
+    }
 }
 
 #[tokio::test]

@@ -162,7 +162,7 @@ pub(super) fn assess_samples(
     {
         score += 35;
         flags.push("focused_api_burst");
-    } else if api_requests >= 3
+    } else if api_requests >= 4
         && api_repeated_ratio_percent >= 70
         && (!broad_navigation_context || distinct_routes <= 6)
     {
@@ -174,7 +174,7 @@ pub(super) fn assess_samples(
         && session_span_secs <= 30
         && distinct_routes <= 3
     {
-        score += 25;
+        score += if api_requests >= 4 { 25 } else { 10 };
         flags.push("single_query_endpoint");
     }
     if total >= 12

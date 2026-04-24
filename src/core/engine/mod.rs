@@ -58,7 +58,7 @@ mod network;
 
 #[cfg(feature = "http3")]
 use self::network::handle_http3_quic_connection;
-pub(crate) use self::network::peer_is_configured_trusted_proxy;
+pub(crate) use self::network::should_treat_peer_as_identity_proxy_before_http;
 use self::network::{handle_connection, handle_tls_connection, handle_udp_datagram};
 mod policy;
 mod proxy;

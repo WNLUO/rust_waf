@@ -302,7 +302,7 @@ pub(super) fn challenge_mode(request: &UnifiedHttpRequest, route_path: &str) -> 
         return HtmlResponseMode::TextOnly;
     }
 
-    if looks_like_static_asset(route_path) {
+    if looks_like_static_asset(route_path) || has_static_fetch_dest(request) {
         return HtmlResponseMode::TextOnly;
     }
 
@@ -310,7 +310,12 @@ pub(super) fn challenge_mode(request: &UnifiedHttpRequest, route_path: &str) -> 
         .get_header("accept")
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
-    if accept.contains("text/html") || accept.contains("application/xhtml+xml") {
+    if accept.contains("text/html")
+        || accept.contains("application/xhtml+xml")
+        || route_path == "/"
+        || route_path.ends_with(".html")
+        || route_path.ends_with(".htm")
+    {
         HtmlResponseMode::HtmlChallenge
     } else {
         HtmlResponseMode::TextOnly

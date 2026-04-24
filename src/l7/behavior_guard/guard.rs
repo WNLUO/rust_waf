@@ -103,6 +103,22 @@ impl L7BehaviorGuard {
             .cloned()
             .unwrap_or_else(|| normalized_route_path(request_path(&request.uri)));
         let kind = request_kind(request);
+        if matches!(kind, RequestKind::Static) {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "static_asset".to_string(),
+            );
+            return None;
+        }
+        if request_utils::is_browser_document_navigation(request)
+            && !request_utils::is_high_value_route(&route)
+        {
+            request.add_metadata(
+                "l7.behavior.skipped".to_string(),
+                "browser_document_navigation".to_string(),
+            );
+            return None;
+        }
         let client_ip = request
             .client_ip
             .as_deref()
@@ -339,8 +355,38 @@ impl L7BehaviorGuard {
             || assessment.score >= BLOCK_SCORE
             || (assessment.score >= CHALLENGE_SCORE
                 && assessment.recent_challenges >= CHALLENGES_BEFORE_AUTO_BLOCK);
+        let soften_browser_document_loop =
+            should_soften_browser_document_loop(request, &assessment, kind, &route);
 
         if should_auto_block {
+            if soften_browser_document_loop {
+                self.activate_aggregate_enforcement(
+                    &assessment,
+                    AggregateEnforcementAction::Challenge,
+                    now,
+                );
+                self.record_challenge(&assessment.identity, now, window);
+                request.add_metadata("l7.behavior.action".to_string(), "challenge".to_string());
+                request.add_metadata(
+                    "l7.behavior.auto_block_softened".to_string(),
+                    "browser_document_loop".to_string(),
+                );
+                let reason = format!(
+                    "l7 behavior guard softened browser-like document loop: score={} repeated_ratio={} document_repeated_ratio={} distinct_routes={} dominant_route={} recent_challenges={} flags={}",
+                    assessment.score,
+                    assessment.repeated_ratio_percent,
+                    assessment.document_repeated_ratio_percent,
+                    assessment.distinct_routes,
+                    assessment.dominant_route.as_deref().unwrap_or("*"),
+                    assessment.recent_challenges,
+                    assessment.flags.join("|"),
+                );
+                return Some(InspectionResult::respond(
+                    InspectionLayer::L7,
+                    reason.clone(),
+                    build_behavior_response(request, 429, "访问行为异常，请稍后再试", &reason),
+                ));
+            }
             self.activate_aggregate_enforcement(
                 &assessment,
                 AggregateEnforcementAction::Block,
@@ -429,4 +475,75 @@ impl L7BehaviorGuard {
 
         None
     }
+}
+
+fn should_soften_browser_document_loop(
+    request: &UnifiedHttpRequest,
+    assessment: &BehaviorAssessment,
+    kind: RequestKind,
+    route: &str,
+) -> bool {
+    if kind != RequestKind::Document || request_utils::is_high_value_route(route) {
+        return false;
+    }
+    if !request.method.eq_ignore_ascii_case("GET") && !request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    if assessment.distinct_client_ips > 2
+        || assessment.api_requests > 0
+        || assessment.document_requests < 4
+        || assessment.non_document_requests > assessment.document_requests.saturating_div(2).max(1)
+    {
+        return false;
+    }
+    if assessment.flags.iter().any(|flag| {
+        matches!(
+            *flag,
+            "distributed_document_burst"
+                | "distributed_document_probe"
+                | "source_rotation"
+                | "high_value_route_bias"
+                | "high_value_api_bias"
+        )
+    }) {
+        return false;
+    }
+    let accept_html = request
+        .get_header("accept")
+        .is_some_and(|value| value.to_ascii_lowercase().contains("text/html"));
+    let browser_ua = request
+        .get_header("user-agent")
+        .is_some_and(|value| looks_like_browser_user_agent(value));
+    let unresolved_trusted_proxy = request
+        .get_metadata("network.identity_state")
+        .is_some_and(|value| value == "trusted_cdn_unresolved")
+        || request
+            .get_metadata("network.client_ip_unresolved")
+            .is_some_and(|value| value == "true");
+
+    (accept_html && browser_ua) || unresolved_trusted_proxy
+}
+
+fn looks_like_browser_user_agent(value: &str) -> bool {
+    let ua = value.to_ascii_lowercase();
+    if [
+        "curl",
+        "wget",
+        "python",
+        "benchmark",
+        "wrk",
+        "ab/",
+        "go-http-client",
+        "okhttp",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+    {
+        return false;
+    }
+    [
+        "mozilla/", "chrome/", "safari/", "firefox/", "edg/", "mobile/",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
 }

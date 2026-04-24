@@ -177,6 +177,9 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     }
 
     if matches!(l4_risk, Some("high")) {
+        if is_browser_same_origin_subresource_request(request) {
+            return EarlyDefenseDecision::allow();
+        }
         if should_hard_drop_under_pressure(
             prefer_drop,
             runtime_depth,
@@ -577,6 +580,115 @@ fn is_low_risk_stable_identity_candidate(request: &UnifiedHttpRequest) -> bool {
         .unwrap_or(false)
 }
 
+fn is_browser_same_origin_subresource_request(request: &UnifiedHttpRequest) -> bool {
+    let method = request.method.to_ascii_uppercase();
+    if method != "GET" && method != "HEAD" {
+        return false;
+    }
+    if !looks_like_browser_user_agent(request) {
+        return false;
+    }
+    if !has_same_origin_context(request) {
+        return false;
+    }
+
+    let path = request.uri.split('?').next().unwrap_or("/");
+    let fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(
+        fetch_dest.as_str(),
+        "script" | "style" | "image" | "font" | "audio" | "video" | "manifest"
+    ) {
+        return true;
+    }
+    if matches!(fetch_dest.as_str(), "document" | "iframe") {
+        return false;
+    }
+    if looks_like_static_asset(path) {
+        return true;
+    }
+
+    request
+        .get_header("accept")
+        .map(|value| {
+            let accept = value.to_ascii_lowercase();
+            accept.contains("text/css")
+                || accept.contains("javascript")
+                || accept.contains("image/")
+                || accept.contains("font/")
+                || accept.contains("*/*")
+                    && !accept.contains("text/html")
+                    && !path.starts_with("/api/")
+        })
+        .unwrap_or(false)
+}
+
+fn looks_like_browser_user_agent(request: &UnifiedHttpRequest) -> bool {
+    let Some(ua) = request.get_header("user-agent") else {
+        return false;
+    };
+    let ua = ua.to_ascii_lowercase();
+    if [
+        "curl",
+        "wget",
+        "python",
+        "benchmark",
+        "wrk",
+        "ab/",
+        "go-http-client",
+        "okhttp",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+    {
+        return false;
+    }
+    [
+        "mozilla/", "chrome/", "safari/", "firefox/", "edg/", "mobile/",
+    ]
+    .iter()
+    .any(|needle| ua.contains(needle))
+}
+
+fn has_same_origin_context(request: &UnifiedHttpRequest) -> bool {
+    let Some(host) = request
+        .get_header("host")
+        .map(|value| normalize_host(value))
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    request
+        .get_header("origin")
+        .or_else(|| request.get_header("referer"))
+        .map(|value| normalize_origin_host(value) == host)
+        .unwrap_or(false)
+}
+
+fn normalize_origin_host(value: &str) -> String {
+    let trimmed = value.trim();
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))
+        .unwrap_or(trimmed);
+    normalize_host(without_scheme.split('/').next().unwrap_or(without_scheme))
+}
+
+fn normalize_host(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('[')
+        .split(']')
+        .next()
+        .unwrap_or(value)
+        .split(':')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_lowercase()
+}
+
 fn stable_browser_identity(request: &UnifiedHttpRequest) -> Option<&str> {
     let cookie_fp = cookie_value(request, "rwaf_fp").filter(|value| !value.trim().is_empty());
     let header_fp = request
@@ -945,6 +1057,67 @@ mod tests {
         );
 
         let result = evaluate_early_defense(&mut request).expect("drop decision");
+        assert!(result.blocked);
+        assert_eq!(
+            request.get_metadata("early_defense.reason").unwrap(),
+            "l4_high_risk_runtime_pressure"
+        );
+    }
+
+    #[test]
+    fn browser_same_origin_subresource_survives_high_l4_pressure() {
+        let mut request = request();
+        request.uri = "/assets/app.js?ver=1".to_string();
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_forwarded".to_string(),
+        );
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.pressure.level".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.identity_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.budget_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_header("host".to_string(), "example.com".to_string());
+        request.add_header(
+            "user-agent".to_string(),
+            "Mozilla/5.0 AppleWebKit/537.36 Chrome/147.0 Safari/537.36".to_string(),
+        );
+        request.add_header(
+            "referer".to_string(),
+            "https://example.com/admin/".to_string(),
+        );
+        request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        request.add_header("sec-fetch-dest".to_string(), "script".to_string());
+        request.add_header("accept".to_string(), "*/*".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert!(request.get_metadata("early_defense.action").is_none());
+    }
+
+    #[test]
+    fn scripted_subresource_still_drops_under_high_l4_pressure() {
+        let mut request = request();
+        request.uri = "/assets/app.js?ver=1".to_string();
+        request.add_metadata("l4.bucket_risk".to_string(), "high".to_string());
+        request.add_metadata("runtime.pressure.level".to_string(), "high".to_string());
+        request.add_metadata(
+            "runtime.auto_tuning.identity_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_metadata(
+            "runtime.auto_tuning.budget_windows".to_string(),
+            "2".to_string(),
+        );
+        request.add_header("host".to_string(), "example.com".to_string());
+        request.add_header("user-agent".to_string(), "curl/8.0".to_string());
+        request.add_header("accept".to_string(), "*/*".to_string());
+
+        let result = evaluate_early_defense(&mut request).expect("scripted asset should drop");
         assert!(result.blocked);
         assert_eq!(
             request.get_metadata("early_defense.reason").unwrap(),

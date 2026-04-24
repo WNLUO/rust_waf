@@ -758,6 +758,187 @@ async fn survival_fast_path_browser_async_burst_does_not_persist_or_hot_block_ip
 }
 
 #[tokio::test]
+async fn browser_same_origin_dynamic_subresource_is_not_challenged() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 2,
+        route_block_threshold: 100,
+        host_challenge_threshold: 100,
+        host_block_threshold: 200,
+        ip_challenge_threshold: 100,
+        ip_block_threshold: 200,
+        hot_path_challenge_threshold: 4,
+        hot_path_block_threshold: 100,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..8 {
+        let mut script = request("/dynamic/load-bundle?chunk=core");
+        script.add_header(
+            "user-agent".to_string(),
+            "Mozilla/5.0 AppleWebKit/537.36 Chrome/147.0 Safari/537.36".to_string(),
+        );
+        script.add_header("accept".to_string(), "*/*".to_string());
+        script.add_header(
+            "referer".to_string(),
+            "https://example.com/dashboard".to_string(),
+        );
+        script.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        script.add_header("sec-fetch-mode".to_string(), "no-cors".to_string());
+
+        let result = guard.inspect_request(&mut script).await;
+        assert!(
+            result.is_none(),
+            "same-origin browser subresource should not receive an invisible challenge at request {index}"
+        );
+        assert_eq!(
+            script
+                .get_metadata("l7.cc.browser_same_origin_subresource")
+                .map(String::as_str),
+            Some("true")
+        );
+        if index >= 1 {
+            assert_eq!(
+                script.get_metadata("l7.cc.action").map(String::as_str),
+                Some("skip_challenge:browser_same_origin_subresource")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn survival_fast_path_browser_dynamic_subresource_avoids_hot_path_challenge() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 3,
+        route_block_threshold: 6,
+        ip_challenge_threshold: 4,
+        ip_block_threshold: 8,
+        hot_path_challenge_threshold: 4,
+        hot_path_block_threshold: 6,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    for index in 0..12 {
+        let mut script = request("/dynamic/load-bundle?chunk=core");
+        script.add_header(
+            "user-agent".to_string(),
+            "Mozilla/5.0 AppleWebKit/537.36 Chrome/147.0 Safari/537.36".to_string(),
+        );
+        script.add_header("accept".to_string(), "*/*".to_string());
+        script.add_header(
+            "referer".to_string(),
+            "https://example.com/dashboard".to_string(),
+        );
+        script.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        script.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+        let result = guard.inspect_request(&mut script).await;
+        assert!(
+            result.is_none(),
+            "survival fast path should not challenge same-origin browser subresource at request {index}"
+        );
+        assert_eq!(
+            script
+                .get_metadata("l7.cc.fast_ip_bucket_skipped")
+                .map(String::as_str),
+            Some("browser_same_origin_subresource")
+        );
+        if index >= 3 {
+            assert_eq!(
+                script
+                    .get_metadata("l7.cc.fast_path_no_decision")
+                    .map(String::as_str),
+                Some("browser_same_origin_subresource_pressure")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn scripted_dynamic_subresource_path_still_hits_survival_cc() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 3,
+        route_block_threshold: 6,
+        ip_challenge_threshold: 4,
+        ip_block_threshold: 8,
+        hot_path_challenge_threshold: 4,
+        hot_path_block_threshold: 6,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut last = None;
+    for _ in 0..8 {
+        let mut scripted = request("/dynamic/load-bundle?chunk=core");
+        scripted.add_header("user-agent".to_string(), "webBenchmark/1.0".to_string());
+        scripted.add_header("accept".to_string(), "*/*".to_string());
+        scripted.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        last = guard.inspect_request(&mut scripted).await;
+        if last.is_some() {
+            break;
+        }
+    }
+
+    assert!(
+        last.is_some(),
+        "scripted traffic without same-origin browser context should still be controlled"
+    );
+}
+
+#[tokio::test]
+async fn browser_same_origin_subresource_ignores_existing_survival_hot_cache() {
+    let config = CcDefenseConfig {
+        route_challenge_threshold: 3,
+        route_block_threshold: 4,
+        ip_challenge_threshold: 4,
+        ip_block_threshold: 8,
+        hot_path_challenge_threshold: 3,
+        hot_path_block_threshold: 4,
+        ..CcDefenseConfig::default()
+    };
+    let guard = L7CcGuard::new(&config);
+
+    let mut scripted_block = None;
+    for _ in 0..5 {
+        let mut scripted = request("/dynamic/load-bundle?chunk=core");
+        scripted.add_header("user-agent".to_string(), "webBenchmark/1.0".to_string());
+        scripted.add_header("accept".to_string(), "*/*".to_string());
+        scripted.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        scripted_block = guard.inspect_request(&mut scripted).await;
+        if scripted_block.is_some() {
+            break;
+        }
+    }
+    assert!(
+        scripted_block.is_some(),
+        "scripted traffic should populate survival hot cache"
+    );
+
+    let mut browser_script = request("/dynamic/load-bundle?chunk=core");
+    browser_script.add_header(
+        "user-agent".to_string(),
+        "Mozilla/5.0 AppleWebKit/537.36 Chrome/147.0 Safari/537.36".to_string(),
+    );
+    browser_script.add_header("accept".to_string(), "*/*".to_string());
+    browser_script.add_header(
+        "referer".to_string(),
+        "https://example.com/dashboard".to_string(),
+    );
+    browser_script.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+    browser_script.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+
+    assert!(guard.inspect_request(&mut browser_script).await.is_none());
+    assert_eq!(browser_script.get_metadata("l7.cc.hot_cache_hit"), None);
+    assert_eq!(
+        browser_script
+            .get_metadata("l7.cc.survival_hot_cache_bypass")
+            .map(String::as_str),
+        Some("browser_same_origin_low_friction")
+    );
+}
+
+#[tokio::test]
 async fn browser_document_navigation_hard_block_does_not_persist_ip() {
     let config = CcDefenseConfig {
         route_challenge_threshold: 5,

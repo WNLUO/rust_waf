@@ -105,6 +105,9 @@ impl L7CcGuard {
                 && !is_high_value_cc_route(&route_path);
         let browser_like_document_request =
             is_browser_like_document_request(request, request_kind, &route_path);
+        let browser_same_origin_subresource =
+            is_browser_same_origin_subresource_request(request, &route_path);
+        let browser_same_origin_async = is_browser_same_origin_async_request(request, request_kind);
         let html_mode = challenge_mode(request, &raw_path);
         let identity_state = request
             .get_metadata("network.identity_state")
@@ -304,6 +307,14 @@ impl L7CcGuard {
             browser_like_document_request.to_string(),
         );
         request.add_metadata(
+            "l7.cc.browser_same_origin_subresource".to_string(),
+            browser_same_origin_subresource.to_string(),
+        );
+        request.add_metadata(
+            "l7.cc.browser_same_origin_async".to_string(),
+            browser_same_origin_async.to_string(),
+        );
+        request.add_metadata(
             "l7.cc.page_subresource".to_string(),
             is_page_subresource.to_string(),
         );
@@ -370,8 +381,10 @@ impl L7CcGuard {
         let block_multiplier = 1;
         let interactive_host_ip_multiplier = if interactive_session { 4 } else { 1 };
         let interactive_host_ip_block_multiplier = if interactive_session { 3 } else { 1 };
-        let low_risk_subresource = request_kind == RequestKind::StaticAsset
-            && (effective_page_subresource || interactive_session);
+        let low_risk_subresource = (request_kind == RequestKind::StaticAsset
+            && (effective_page_subresource || interactive_session))
+            || browser_same_origin_subresource
+            || browser_same_origin_async;
         let route_scale_percent = request
             .get_metadata("ai.cc.route_threshold_scale_percent")
             .and_then(|value| value.parse::<u32>().ok())
@@ -478,6 +491,20 @@ impl L7CcGuard {
             request.add_metadata("l7.enforcement".to_string(), "respond".to_string());
             request.add_metadata("l7.block_reason".to_string(), "cc_hard_block".to_string());
             request.add_metadata("l4.force_close".to_string(), "true".to_string());
+            if browser_same_origin_subresource || browser_same_origin_async {
+                request.add_metadata(
+                    "l7.cc.action".to_string(),
+                    if browser_same_origin_subresource {
+                        "skip_block:browser_same_origin_subresource"
+                    } else {
+                        "skip_block:browser_same_origin_async"
+                    }
+                    .to_string(),
+                );
+                request.add_metadata("l7.enforcement".to_string(), "allow".to_string());
+                request.add_metadata("l4.force_close".to_string(), "false".to_string());
+                return None;
+            }
             let should_persist_ip = !browser_document_navigation
                 && !browser_like_document_request
                 && (static_asset_persist_block
@@ -565,6 +592,18 @@ impl L7CcGuard {
                     ),
                 ));
             }
+        } else if !verified && challenge_needed {
+            if browser_same_origin_subresource {
+                request.add_metadata(
+                    "l7.cc.action".to_string(),
+                    "skip_challenge:browser_same_origin_subresource".to_string(),
+                );
+            } else if browser_same_origin_async {
+                request.add_metadata(
+                    "l7.cc.action".to_string(),
+                    "skip_challenge:browser_same_origin_async".to_string(),
+                );
+            }
         }
 
         let delay_threshold_percent = if client_identity_unresolved {
@@ -576,6 +615,7 @@ impl L7CcGuard {
             .saturating_mul(config.route_challenge_threshold.max(1))
             / 100;
         if !reduce_friction
+            && !low_risk_subresource
             && config.delay_ms > 0
             && (route_effective >= delay_threshold.max(1)
                 || host_effective
@@ -695,8 +735,12 @@ impl L7CcGuard {
         let can_persist_client_ip = can_persist_survival_fast_client_ip(request);
         let request_kind = fast_request_kind(request, &route_path);
         let browser_async_request = is_browser_same_origin_async_request(request, request_kind);
+        let browser_subresource_request =
+            is_browser_same_origin_subresource_request(request, &route_path);
         let browser_navigation_request =
             is_browser_document_navigation_request(request, request_kind);
+        let browser_same_origin_low_friction =
+            browser_navigation_request || browser_async_request || browser_subresource_request;
 
         request.add_metadata("l7.cc.fast_path".to_string(), "true".to_string());
         request.add_metadata(
@@ -705,22 +749,29 @@ impl L7CcGuard {
         );
 
         let mut hot_cache_expired = false;
-        if let Some(active) =
-            self.hot_block_cache_hit_and_extend(&ip_route_hot_key, unix_now, hot_cache_base_ttl)
-        {
-            if active {
-                return SurvivalFastPathResult::Block(build_survival_fast_ip_drop(
-                    request,
-                    "cc_hot_block",
-                    "ip_route_hot_cache",
-                    false,
-                    true,
-                ));
+        if !browser_same_origin_low_friction {
+            if let Some(active) =
+                self.hot_block_cache_hit_and_extend(&ip_route_hot_key, unix_now, hot_cache_base_ttl)
+            {
+                if active {
+                    return SurvivalFastPathResult::Block(build_survival_fast_ip_drop(
+                        request,
+                        "cc_hot_block",
+                        "ip_route_hot_cache",
+                        false,
+                        true,
+                    ));
+                }
+                hot_cache_expired = true;
             }
-            hot_cache_expired = true;
+        } else {
+            request.add_metadata(
+                "l7.cc.survival_hot_cache_bypass".to_string(),
+                "browser_same_origin_low_friction".to_string(),
+            );
         }
         let ip_hot_key = format!("ip:{}", client_ip_key);
-        if !survival_low_risk_identity && !browser_navigation_request {
+        if !survival_low_risk_identity && !browser_same_origin_low_friction {
             if let Some(active) =
                 self.hot_block_cache_hit_and_extend(&ip_hot_key, unix_now, hot_cache_base_ttl)
             {
@@ -747,10 +798,17 @@ impl L7CcGuard {
                 "l7.cc.survival_verified_normal".to_string(),
                 "true".to_string(),
             );
-        } else if browser_navigation_request {
+        } else if browser_same_origin_low_friction {
             request.add_metadata(
                 "l7.cc.survival_bypass".to_string(),
-                "browser_document_navigation".to_string(),
+                if browser_navigation_request {
+                    "browser_document_navigation"
+                } else if browser_async_request {
+                    "browser_same_origin_async"
+                } else {
+                    "browser_same_origin_subresource"
+                }
+                .to_string(),
             );
         } else {
             if let Some(active) =
@@ -807,9 +865,14 @@ impl L7CcGuard {
         let window_secs = config.request_window_secs.max(1);
         let route_key = format!("{}|{}|{}", client_ip_key, host, route_path);
         let hot_path_key = format!("{}|{}", host, route_path);
-        let ip_count = if request_kind == RequestKind::StaticAsset || browser_async_request {
+        let ip_count = if request_kind == RequestKind::StaticAsset
+            || browser_async_request
+            || browser_subresource_request
+        {
             let skip_reason = if browser_async_request {
                 "browser_same_origin_async"
+            } else if browser_subresource_request {
+                "browser_same_origin_subresource"
             } else {
                 "static_asset"
             };
@@ -909,6 +972,7 @@ impl L7CcGuard {
         let hot_path_scoped_block =
             hot_path_count >= hard_hot_path_threshold || hot_path_count >= hot_path_block_threshold;
         let browser_async_pressure = browser_async_request;
+        let browser_subresource_pressure = browser_subresource_request;
         let browser_navigation_pressure = browser_navigation_request;
         let static_asset_ip_only_pressure = request_kind == RequestKind::StaticAsset
             && ip_threshold_block
@@ -931,6 +995,13 @@ impl L7CcGuard {
             request.add_metadata(
                 "l7.cc.fast_path_no_decision".to_string(),
                 "browser_same_origin_async_pressure".to_string(),
+            );
+            return SurvivalFastPathResult::NoDecision;
+        }
+        if browser_subresource_pressure {
+            request.add_metadata(
+                "l7.cc.fast_path_no_decision".to_string(),
+                "browser_same_origin_subresource_pressure".to_string(),
             );
             return SurvivalFastPathResult::NoDecision;
         }
@@ -1010,6 +1081,13 @@ impl L7CcGuard {
                 request.add_metadata(
                     "l7.cc.fast_path_no_decision".to_string(),
                     "browser_same_origin_async_challenge_pressure".to_string(),
+                );
+                return SurvivalFastPathResult::NoDecision;
+            }
+            if browser_subresource_pressure {
+                request.add_metadata(
+                    "l7.cc.fast_path_no_decision".to_string(),
+                    "browser_same_origin_subresource_challenge_pressure".to_string(),
                 );
                 return SurvivalFastPathResult::NoDecision;
             }
@@ -1120,6 +1198,79 @@ fn is_browser_same_origin_async_request(
         request.get_header("cookie").is_some() || request.get_header("referer").is_some();
 
     explicit_async && has_browser_session_context
+}
+
+fn is_browser_same_origin_subresource_request(
+    request: &UnifiedHttpRequest,
+    route_path: &str,
+) -> bool {
+    if !request.method.eq_ignore_ascii_case("GET") && !request.method.eq_ignore_ascii_case("HEAD") {
+        return false;
+    }
+    if is_high_value_cc_route(route_path) {
+        return false;
+    }
+    if !request
+        .get_header("user-agent")
+        .is_some_and(|value| looks_like_browser_user_agent(value))
+    {
+        return false;
+    }
+    if !has_same_origin_context(request) {
+        return false;
+    }
+
+    let fetch_dest = request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(fetch_dest.as_str(), "document" | "iframe" | "frame") {
+        return false;
+    }
+    if matches!(
+        fetch_dest.as_str(),
+        "script" | "style" | "image" | "font" | "audio" | "video" | "manifest"
+    ) {
+        return true;
+    }
+    if looks_like_static_asset(route_path) {
+        return true;
+    }
+
+    request
+        .get_header("accept")
+        .map(|value| {
+            let accept = value.to_ascii_lowercase();
+            accept.contains("text/css")
+                || accept.contains("javascript")
+                || accept.contains("image/")
+                || accept.contains("font/")
+                || (accept.contains("*/*") && !accept.contains("text/html"))
+        })
+        .unwrap_or(false)
+}
+
+fn has_same_origin_context(request: &UnifiedHttpRequest) -> bool {
+    let host = normalized_host(request);
+    if host.is_empty() || host == "*" {
+        return false;
+    }
+    let fetch_site = request
+        .get_header("sec-fetch-site")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if matches!(fetch_site.as_str(), "same-origin" | "same-site") {
+        return true;
+    }
+    let same_origin_origin = request
+        .get_header("origin")
+        .and_then(|value| extract_host_from_origin(value))
+        .map(|origin_host| origin_host.eq_ignore_ascii_case(&host))
+        .unwrap_or(false);
+    let same_origin_referer = referer_host_path(request)
+        .map(|(referer_host, _)| referer_host.eq_ignore_ascii_case(&host))
+        .unwrap_or(false);
+    same_origin_origin || same_origin_referer
 }
 
 fn is_browser_document_navigation_request(

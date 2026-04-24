@@ -5,10 +5,10 @@ mod ai_temp_policy_runtime;
 mod auto_tuning;
 pub(crate) mod bot_intelligence;
 pub(crate) mod bot_verifier;
-mod environment_profile;
 pub mod engine;
 mod engine_maintenance;
 mod engine_tls;
+mod environment_profile;
 pub mod gateway;
 pub mod packet;
 mod resource_budget;
@@ -470,11 +470,17 @@ impl WafContext {
             runtime_config: Arc::new(RwLock::new(config.clone())),
             runtime_request_limit: AtomicUsize::new(config.max_concurrent_tasks.max(1)),
             runtime_connection_limit: AtomicUsize::new(
-                config.max_concurrent_tasks.saturating_mul(4).clamp(32, 4096),
+                config
+                    .max_concurrent_tasks
+                    .saturating_mul(4)
+                    .clamp(32, 4096),
             ),
             runtime_request_capacity: AtomicUsize::new(config.max_concurrent_tasks.max(1)),
             runtime_connection_capacity: AtomicUsize::new(
-                config.max_concurrent_tasks.saturating_mul(4).clamp(32, 4096),
+                config
+                    .max_concurrent_tasks
+                    .saturating_mul(4)
+                    .clamp(32, 4096),
             ),
             l4_inspector: RwLock::new(l4_enabled.then(|| {
                 Arc::new(L4Inspector::new(
@@ -600,13 +606,12 @@ impl WafContext {
             .sqlite_store
             .as_ref()
             .map(|store| store.queue_usage_percent());
-        let plan =
-            runtime_planner::apply_dynamic_runtime_plan(
-                config,
-                metrics.as_ref(),
-                queue_usage,
-                Some(self.cpu_pressure_snapshot().usage_percent),
-            );
+        let plan = runtime_planner::apply_dynamic_runtime_plan(
+            config,
+            metrics.as_ref(),
+            queue_usage,
+            Some(self.cpu_pressure_snapshot().usage_percent),
+        );
         let config = plan.config;
         self.set_runtime_capacity_limits(config.max_concurrent_tasks.max(1));
         {
@@ -823,7 +828,8 @@ fn dynamic_runtime_relevant_changed(current: &Config, planned: &Config) -> bool 
         || current.runtime_profile != planned.runtime_profile
         || current.api_enabled != planned.api_enabled
         || current.http3_config.enabled != planned.http3_config.enabled
-        || current.http3_config.max_concurrent_streams != planned.http3_config.max_concurrent_streams
+        || current.http3_config.max_concurrent_streams
+            != planned.http3_config.max_concurrent_streams
         || current.http3_config.idle_timeout_secs != planned.http3_config.idle_timeout_secs
         || current.l7_config.max_request_size != planned.l7_config.max_request_size
         || current.l7_config.http2_config.enabled != planned.l7_config.http2_config.enabled
@@ -840,8 +846,14 @@ fn dynamic_runtime_relevant_changed(current: &Config, planned: &Config) -> bool 
         || current.l7_config.upstream_healthcheck_timeout_ms
             != planned.l7_config.upstream_healthcheck_timeout_ms
         || current.l7_config.bloom_filter_scale != planned.l7_config.bloom_filter_scale
-        || current.l7_config.slow_attack_defense.idle_keepalive_timeout_ms
-            != planned.l7_config.slow_attack_defense.idle_keepalive_timeout_ms
+        || current
+            .l7_config
+            .slow_attack_defense
+            .idle_keepalive_timeout_ms
+            != planned
+                .l7_config
+                .slow_attack_defense
+                .idle_keepalive_timeout_ms
         || current.l4_config.max_tracked_ips != planned.l4_config.max_tracked_ips
         || current.l4_config.max_blocked_ips != planned.l4_config.max_blocked_ips
         || current.l4_config.behavior_event_channel_capacity
@@ -858,8 +870,14 @@ fn dynamic_runtime_relevant_changed(current: &Config, planned: &Config) -> bool 
             != planned.integrations.ai_audit.max_active_temp_policies
         || current.integrations.ai_audit.auto_audit_enabled
             != planned.integrations.ai_audit.auto_audit_enabled
-        || current.integrations.ai_audit.auto_defense_max_apply_per_tick
-            != planned.integrations.ai_audit.auto_defense_max_apply_per_tick
+        || current
+            .integrations
+            .ai_audit
+            .auto_defense_max_apply_per_tick
+            != planned
+                .integrations
+                .ai_audit
+                .auto_defense_max_apply_per_tick
 }
 
 #[cfg(test)]

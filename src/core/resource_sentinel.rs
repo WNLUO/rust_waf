@@ -723,14 +723,15 @@ impl ResourceSentinel {
             pressure.level = "high";
             pressure.drop_delay = true;
             pressure.trim_event_persistence = true;
-            pressure.prefer_drop = true;
         }
         if mode >= MODE_SURVIVAL {
             pressure.level = "attack";
             pressure.defense_depth = "survival";
             pressure.drop_delay = true;
             pressure.trim_event_persistence = true;
-            pressure.prefer_drop = true;
+            pressure.prefer_drop = pressure.storage_queue_usage_percent >= 95
+                || (pressure.cpu_pressure_score >= 3
+                    && pressure.storage_queue_usage_percent >= FAST_PATH_STORAGE_QUEUE_PERCENT);
         }
     }
 

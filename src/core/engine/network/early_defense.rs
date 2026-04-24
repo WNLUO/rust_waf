@@ -104,9 +104,11 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
     let site_priority = metadata(request, "runtime.site.priority");
     let site_over_rps_budget = metadata_bool(request, "runtime.site.over_rps_budget");
 
-    if site_proxy_mode == Some("shed") && (prefer_drop || matches!(runtime_depth, Some("survival")))
-    {
+    if site_proxy_mode == Some("shed") && prefer_drop {
         return EarlyDefenseDecision::drop("site_shed_under_runtime_pressure");
+    }
+    if site_proxy_mode == Some("shed") && matches!(runtime_depth, Some("survival")) {
+        return EarlyDefenseDecision::lightweight("site_shed_survival_tighten_l7", 45, 65);
     }
 
     if site_action == Some("block") && site_over_rps_budget {
@@ -152,9 +154,12 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
         return EarlyDefenseDecision::drop("spoofed_forward_header_under_pressure");
     }
 
+    if identity_state == Some("trusted_cdn_unresolved") && prefer_drop {
+        return EarlyDefenseDecision::drop("trusted_cdn_unresolved_survival");
+    }
     if identity_state == Some("trusted_cdn_unresolved") && matches!(runtime_depth, Some("survival"))
     {
-        return EarlyDefenseDecision::drop("trusted_cdn_unresolved_survival");
+        return EarlyDefenseDecision::challenge("trusted_cdn_unresolved_survival", 45, 65);
     }
 
     if metadata_bool(request, "l7.cc.survival_verified_normal")
@@ -164,8 +169,11 @@ pub(crate) fn early_defense_decision(request: &UnifiedHttpRequest) -> EarlyDefen
         return EarlyDefenseDecision::allow();
     }
 
-    if request_budget_softened && matches!(runtime_depth, Some("survival")) {
+    if request_budget_softened && matches!(runtime_depth, Some("survival")) && prefer_drop {
         return EarlyDefenseDecision::drop("l4_request_budget_softened_survival");
+    }
+    if request_budget_softened && matches!(runtime_depth, Some("survival")) {
+        return EarlyDefenseDecision::lightweight("l4_request_budget_softened_survival", 50, 70);
     }
 
     if matches!(l4_risk, Some("high")) {
@@ -945,7 +953,7 @@ mod tests {
     }
 
     #[test]
-    fn trusted_cdn_unresolved_drops_in_survival() {
+    fn trusted_cdn_unresolved_challenges_in_survival_before_emergency() {
         let mut request = request();
         request.add_metadata(
             "network.identity_state".to_string(),
@@ -953,12 +961,51 @@ mod tests {
         );
         request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
 
+        assert!(evaluate_early_defense(&mut request).is_none());
+
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "challenge"
+        );
+        assert_eq!(
+            request.get_metadata("early_defense.reason").unwrap(),
+            "trusted_cdn_unresolved_survival"
+        );
+    }
+
+    #[test]
+    fn trusted_cdn_unresolved_drops_only_when_emergency_drop_is_enabled() {
+        let mut request = request();
+        request.add_metadata(
+            "network.identity_state".to_string(),
+            "trusted_cdn_unresolved".to_string(),
+        );
+        request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        request.add_metadata("runtime.prefer_drop".to_string(), "true".to_string());
+
         let result = evaluate_early_defense(&mut request).expect("drop decision");
 
         assert!(result.blocked);
         assert_eq!(
             request.get_metadata("early_defense.reason").unwrap(),
             "trusted_cdn_unresolved_survival"
+        );
+    }
+
+    #[test]
+    fn request_budget_softening_tightens_before_emergency_drop() {
+        let mut request = request();
+        request.add_metadata("runtime.defense.depth".to_string(), "survival".to_string());
+        request.add_metadata("l4.request_budget_softened".to_string(), "true".to_string());
+
+        assert!(evaluate_early_defense(&mut request).is_none());
+        assert_eq!(
+            request.get_metadata("early_defense.action").unwrap(),
+            "lightweight_l7"
+        );
+        assert_eq!(
+            request.get_metadata("early_defense.reason").unwrap(),
+            "l4_request_budget_softened_survival"
         );
     }
 

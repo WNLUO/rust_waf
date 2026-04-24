@@ -100,11 +100,7 @@ fn derive_runtime_defense_stage(
         reasons.push("challenge_effect_good");
     }
 
-    let stage = if pressure.prefer_drop
-        || (pressure.defense_depth == "survival"
-            && (pressure.level == "attack" || pressure.storage_queue_usage_percent >= 90))
-        || score >= 6
-    {
+    let stage = if pressure.prefer_drop {
         "drop"
     } else if score >= 3 {
         "challenge"
@@ -189,6 +185,7 @@ impl WafContext {
             prefer_drop: false,
         };
         self.resource_sentinel.apply_runtime_pressure(&mut pressure);
+        let sentinel_prefer_drop = pressure.prefer_drop;
         let budget = resource_budget::current_runtime_resource_budget(
             pressure.level,
             pressure.storage_queue_usage_percent,
@@ -205,7 +202,7 @@ impl WafContext {
         pressure.l7_page_window_limit = budget.l7_page_window_limit;
         pressure.behavior_bucket_limit = budget.behavior_bucket_limit;
         pressure.behavior_sample_stride = budget.behavior_sample_stride;
-        pressure.prefer_drop = budget.prefer_drop;
+        pressure.prefer_drop = sentinel_prefer_drop || budget.prefer_drop;
         pressure
     }
 

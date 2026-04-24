@@ -95,7 +95,7 @@ fn plan_request_limit(
     signals: Option<&RuntimePlanningSignals>,
 ) -> usize {
     let memory_factor = match environment.memory_limit_mb {
-        0..=512 => 32,
+        0..=512 => 64,
         513..=768 => 48,
         769..=1024 => 64,
         1025..=2048 => 128,
@@ -112,7 +112,9 @@ fn plan_request_limit(
         .fd_soft_limit
         .map(|limit| ((limit / 32) as usize).clamp(32, 1024))
         .unwrap_or(256);
-    let mut planned = memory_factor.min(cpu_factor.max(memory_factor)).min(fd_factor);
+    let mut planned = memory_factor
+        .min(cpu_factor.max(memory_factor))
+        .min(fd_factor);
 
     if let Some(signals) = signals {
         if signals.storage_queue_usage_percent >= 85
@@ -132,7 +134,11 @@ fn plan_request_limit(
 }
 
 fn plan_connection_limit(request_limit: usize, environment: &EnvironmentProfile) -> usize {
-    let scale = if environment.memory_limit_mb <= 768 { 2 } else { 3 };
+    let scale = if environment.memory_limit_mb <= 768 {
+        2
+    } else {
+        3
+    };
     request_limit
         .saturating_mul(scale)
         .clamp(32, (environment.fd_soft_limit.unwrap_or(4096) / 4) as usize)
@@ -153,8 +159,7 @@ fn plan_sqlite_queue_capacity(
     if let Some(signals) = signals {
         if signals.storage_queue_usage_percent >= 85 {
             capacity = capacity.saturating_mul(3) / 4;
-        } else if signals.storage_queue_usage_percent <= 25 && environment.memory_limit_mb >= 2048
-        {
+        } else if signals.storage_queue_usage_percent <= 25 && environment.memory_limit_mb >= 2048 {
             capacity = capacity.saturating_mul(5) / 4;
         }
     }
@@ -264,7 +269,11 @@ fn plan_l7_config(
     } else {
         5_000
     };
-    config.tls_handshake_timeout_ms = if environment.cpu_cores <= 2 { 4_000 } else { 3_000 };
+    config.tls_handshake_timeout_ms = if environment.cpu_cores <= 2 {
+        4_000
+    } else {
+        3_000
+    };
     config.proxy_connect_timeout_ms = connect_floor;
     config.proxy_write_timeout_ms = if latency_ms >= 1000 { 5_000 } else { 3_000 };
     config.proxy_read_timeout_ms = read_floor;
@@ -306,7 +315,11 @@ fn plan_http3_config(
     }
 
     config.max_concurrent_streams = request_limit.clamp(16, 128);
-    config.idle_timeout_secs = if environment.memory_limit_mb <= 1024 { 30 } else { 120 };
+    config.idle_timeout_secs = if environment.memory_limit_mb <= 1024 {
+        30
+    } else {
+        120
+    };
     config.enable_connection_migration = environment.memory_limit_mb > 1024;
     config.qpack_table_size = if environment.memory_limit_mb <= 1024 {
         1024

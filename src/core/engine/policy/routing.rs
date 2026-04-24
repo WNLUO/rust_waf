@@ -156,11 +156,108 @@ pub(crate) fn select_upstream_target(site: Option<&GatewaySiteRuntime>) -> Optio
 }
 
 pub(crate) fn site_proxy_shed_reason(request: &UnifiedHttpRequest) -> Option<&'static str> {
-    (request
+    if request
         .get_metadata("runtime.site.proxy_mode")
         .map(String::as_str)
-        == Some("shed"))
-    .then_some("site temporarily shed under runtime pressure")
+        != Some("shed")
+    {
+        return None;
+    }
+    if !metadata_bool(request, "runtime.prefer_drop") && is_low_risk_stable_identity(request) {
+        return None;
+    }
+    Some("site temporarily shed under runtime pressure")
+}
+
+fn metadata_bool(request: &UnifiedHttpRequest, key: &str) -> bool {
+    request
+        .get_metadata(key)
+        .map(|value| value == "true" || value == "1")
+        .unwrap_or(false)
+}
+
+fn is_low_risk_stable_identity(request: &UnifiedHttpRequest) -> bool {
+    let method = request.method.to_ascii_uppercase();
+    if method != "GET" && method != "HEAD" {
+        return false;
+    }
+    let path = request.uri.split('?').next().unwrap_or("/");
+    if path.starts_with("/api/") {
+        return false;
+    }
+    let Some(identity) = stable_browser_identity(request) else {
+        return false;
+    };
+    if identity.len() < 6 || identity.len() > 128 {
+        return false;
+    }
+    if !request
+        .get_header("sec-fetch-site")
+        .map(|value| {
+            let value = value.to_ascii_lowercase();
+            matches!(value.as_str(), "same-origin" | "same-site")
+        })
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    if looks_like_static_asset(path)
+        || path == "/"
+        || path.ends_with(".html")
+        || path.ends_with(".htm")
+    {
+        return true;
+    }
+    request
+        .get_header("sec-fetch-dest")
+        .map(|value| value.eq_ignore_ascii_case("document"))
+        .unwrap_or(false)
+        || request
+            .get_header("accept")
+            .map(|value| {
+                let value = value.to_ascii_lowercase();
+                value.contains("text/html") || value.contains("application/xhtml+xml")
+            })
+            .unwrap_or(false)
+}
+
+fn stable_browser_identity(request: &UnifiedHttpRequest) -> Option<&str> {
+    let cookie_fp = cookie_value(request, "rwaf_fp").filter(|value| !value.trim().is_empty());
+    let header_fp = request
+        .get_header("x-browser-fingerprint-id")
+        .map(String::as_str)
+        .filter(|value| !value.trim().is_empty());
+
+    match (cookie_fp, header_fp) {
+        (Some(cookie), Some(header)) if cookie == header => Some(cookie),
+        (Some(cookie), None) => Some(cookie),
+        (None, Some(header)) => Some(header),
+        _ => None,
+    }
+}
+
+fn cookie_value<'a>(request: &'a UnifiedHttpRequest, name: &str) -> Option<&'a str> {
+    request.get_header("cookie").and_then(|header| {
+        header.split(';').find_map(|part| {
+            let trimmed = part.trim();
+            let (key, value) = trimmed.split_once('=')?;
+            if key.trim() == name {
+                Some(value.trim())
+            } else {
+                None
+            }
+        })
+    })
+}
+
+fn looks_like_static_asset(path: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    [
+        ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".woff", ".woff2",
+        ".ttf", ".map",
+    ]
+    .iter()
+    .any(|suffix| path.ends_with(suffix))
 }
 
 pub(crate) fn resolve_safeline_intercept_config<'a>(
@@ -401,4 +498,61 @@ pub(crate) fn unix_timestamp() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shed_request(path: &str) -> UnifiedHttpRequest {
+        let mut request =
+            UnifiedHttpRequest::new(HttpVersion::Http1_1, "GET".to_string(), path.to_string());
+        request.add_metadata("runtime.site.proxy_mode".to_string(), "shed".to_string());
+        request
+    }
+
+    fn add_stable_browser_headers(request: &mut UnifiedHttpRequest) {
+        request.add_header("cookie".to_string(), "rwaf_fp=stable-normal".to_string());
+        request.add_header(
+            "x-browser-fingerprint-id".to_string(),
+            "stable-normal".to_string(),
+        );
+        request.add_header("sec-fetch-site".to_string(), "same-origin".to_string());
+        request.add_header("sec-fetch-dest".to_string(), "document".to_string());
+        request.add_header(
+            "accept".to_string(),
+            "text/html,application/xhtml+xml".to_string(),
+        );
+    }
+
+    #[test]
+    fn stable_document_identity_can_bypass_site_shed_before_emergency_drop() {
+        let mut request = shed_request("/?manual=1");
+        add_stable_browser_headers(&mut request);
+
+        assert_eq!(site_proxy_shed_reason(&request), None);
+    }
+
+    #[test]
+    fn emergency_drop_still_sheds_stable_document_identity() {
+        let mut request = shed_request("/?manual=1");
+        add_stable_browser_headers(&mut request);
+        request.add_metadata("runtime.prefer_drop".to_string(), "true".to_string());
+
+        assert_eq!(
+            site_proxy_shed_reason(&request),
+            Some("site temporarily shed under runtime pressure")
+        );
+    }
+
+    #[test]
+    fn api_request_still_sheds_under_site_pressure() {
+        let mut request = shed_request("/api/search");
+        add_stable_browser_headers(&mut request);
+
+        assert_eq!(
+            site_proxy_shed_reason(&request),
+            Some("site temporarily shed under runtime pressure")
+        );
+    }
 }

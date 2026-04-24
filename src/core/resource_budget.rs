@@ -175,7 +175,8 @@ impl RuntimeResourceBudget {
         };
         budget.aggregate_events = budget.aggregate_events
             || matches!(server_mode, ServerMode::Conservative | ServerMode::Survival);
-        budget.prefer_drop = budget.prefer_drop || matches!(server_mode, ServerMode::Survival);
+        budget.prefer_drop = budget.prefer_drop
+            || emergency_global_drop(pressure_level, storage_queue_usage_percent);
 
         match defense_depth {
             DefenseDepth::Full => {}
@@ -196,7 +197,6 @@ impl RuntimeResourceBudget {
                 budget.behavior_bucket_limit = budget.behavior_bucket_limit.min(1_024);
                 budget.behavior_sample_stride = u64::MAX;
                 budget.aggregate_events = true;
-                budget.prefer_drop = true;
             }
         }
 
@@ -242,6 +242,10 @@ fn server_mode(
     match capacity_class {
         RuntimeCapacityClass::Tiny => {
             if pressure_level == "normal" {
+                ServerMode::Conservative
+            } else if matches!(pressure_level, "elevated" | "high")
+                && storage_queue_usage_percent < 90
+            {
                 ServerMode::Conservative
             } else {
                 ServerMode::Survival
@@ -309,8 +313,13 @@ fn defense_depth(
     if storage_queue_usage_percent >= 90 {
         return DefenseDepth::Survival;
     }
-    if matches!(capacity_class, RuntimeCapacityClass::Tiny) && pressure_level != "normal" {
-        return DefenseDepth::Survival;
+    if matches!(capacity_class, RuntimeCapacityClass::Tiny) {
+        return match pressure_level {
+            "attack" => DefenseDepth::Survival,
+            "high" => DefenseDepth::Lean,
+            "elevated" | "normal" => DefenseDepth::Balanced,
+            _ => DefenseDepth::Balanced,
+        };
     }
     if pressure_level == "attack" {
         return match capacity_class {
@@ -333,6 +342,11 @@ fn defense_depth(
     DefenseDepth::Full
 }
 
+fn emergency_global_drop(pressure_level: &str, storage_queue_usage_percent: u64) -> bool {
+    storage_queue_usage_percent >= 95
+        || (pressure_level == "attack" && storage_queue_usage_percent >= 90)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,20 +359,25 @@ mod tests {
     }
 
     #[test]
-    fn tiny_system_starts_balanced_and_enters_survival_under_pressure() {
+    fn tiny_system_stays_flexible_before_attack_pressure() {
         let normal =
             RuntimeResourceBudget::from_system_and_pressure(&profile(1, Some(512)), "normal", 0);
         let elevated =
             RuntimeResourceBudget::from_system_and_pressure(&profile(1, Some(512)), "elevated", 0);
+        let high =
+            RuntimeResourceBudget::from_system_and_pressure(&profile(1, Some(512)), "high", 0);
 
         assert_eq!(normal.capacity_class, RuntimeCapacityClass::Tiny);
         assert_eq!(normal.defense_depth, DefenseDepth::Balanced);
         assert_eq!(normal.server_mode, ServerMode::Conservative);
         assert_eq!(normal.server_mode_scale_percent, 85);
         assert!(!normal.prefer_drop);
-        assert_eq!(elevated.defense_depth, DefenseDepth::Survival);
-        assert_eq!(elevated.server_mode, ServerMode::Survival);
-        assert!(elevated.prefer_drop);
+        assert_eq!(elevated.defense_depth, DefenseDepth::Balanced);
+        assert_eq!(elevated.server_mode, ServerMode::Conservative);
+        assert!(!elevated.prefer_drop);
+        assert_eq!(high.defense_depth, DefenseDepth::Lean);
+        assert_eq!(high.server_mode, ServerMode::Conservative);
+        assert!(!high.prefer_drop);
     }
 
     #[test]
@@ -390,7 +409,7 @@ mod tests {
         assert!(!lean.prefer_drop);
         assert_eq!(survival.defense_depth, DefenseDepth::Survival);
         assert!(survival.aggregate_events);
-        assert!(survival.prefer_drop);
+        assert!(!survival.prefer_drop);
         assert_eq!(survival.behavior_sample_stride, u64::MAX);
         assert_eq!(survival.server_mode, ServerMode::Balanced);
     }
@@ -420,6 +439,16 @@ mod tests {
         assert_eq!(budget.behavior_bucket_limit, 1_024);
         assert_eq!(budget.trusted_cdn_auto_learn_limit, 38);
         assert!(budget.aggregate_events);
+        assert!(!budget.prefer_drop);
+        assert_eq!(budget.server_mode, ServerMode::Survival);
+    }
+
+    #[test]
+    fn emergency_queue_pressure_enables_global_drop() {
+        let budget =
+            RuntimeResourceBudget::from_system_and_pressure(&profile(2, Some(4096)), "high", 95);
+
+        assert_eq!(budget.defense_depth, DefenseDepth::Survival);
         assert!(budget.prefer_drop);
         assert_eq!(budget.server_mode, ServerMode::Survival);
     }

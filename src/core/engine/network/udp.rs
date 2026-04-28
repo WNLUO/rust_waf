@@ -80,7 +80,14 @@ pub(crate) async fn handle_udp_datagram(
     }
 
     if let Some(upstream_addr) = config.udp_upstream_addr.as_deref() {
-        forward_udp_payload(listener_socket, peer_addr, &payload, upstream_addr).await?;
+        forward_udp_payload(
+            listener_socket,
+            peer_addr,
+            &payload,
+            upstream_addr,
+            config.udp_upstream_response_timeout_ms,
+        )
+        .await?;
     }
 
     Ok(())
@@ -91,6 +98,7 @@ async fn forward_udp_payload(
     client_addr: std::net::SocketAddr,
     payload: &[u8],
     upstream_addr: &str,
+    response_timeout_ms: u64,
 ) -> Result<()> {
     let upstream_addr: std::net::SocketAddr = upstream_addr.parse()?;
     let bind_addr = match upstream_addr {
@@ -102,7 +110,7 @@ async fn forward_udp_payload(
 
     let mut response = vec![0u8; 65_535];
     let response_size = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
+        std::time::Duration::from_millis(response_timeout_ms.clamp(25, 1_000)),
         upstream_socket.recv(&mut response),
     )
     .await??;

@@ -7,9 +7,11 @@ mod normalize;
 mod rules;
 mod types;
 
-pub(crate) use self::env::default_sqlite_queue_capacity;
 use self::env::*;
 pub use self::env::{apply_env_overrides, resolve_sqlite_path};
+pub(crate) use self::env::{
+    default_sqlite_queue_capacity, default_udp_upstream_response_timeout_ms,
+};
 pub(crate) use self::normalize::deserialize_boolish;
 pub(crate) use self::rules::default_rule_response_content_type;
 pub use self::rules::{
@@ -250,6 +252,7 @@ mod tests {
 
         assert_eq!(config.runtime_profile, RuntimeProfile::Standard);
         assert_eq!(config.listen_addrs, vec!["0.0.0.0:66".to_string()]);
+        assert_eq!(config.udp_upstream_response_timeout_ms, 250);
         assert_eq!(config.gateway_config.https_listen_addr, "0.0.0.0:660");
         assert!(config.api_enabled);
         assert!(config.bloom_enabled);

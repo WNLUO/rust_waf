@@ -32,6 +32,10 @@ pub(crate) const fn default_sqlite_queue_capacity() -> usize {
     1024
 }
 
+pub(crate) const fn default_udp_upstream_response_timeout_ms() -> u64 {
+    250
+}
+
 pub(super) const fn default_sqlite_rules_enabled() -> bool {
     true
 }
@@ -158,6 +162,17 @@ pub fn apply_env_overrides(mut config: Config) -> Config {
 
     if let Ok(value) = env::var("WAF_UDP_UPSTREAM_ADDR") {
         config.udp_upstream_addr = non_empty_env(value);
+    }
+
+    if let Ok(value) = env::var("WAF_UDP_UPSTREAM_RESPONSE_TIMEOUT_MS") {
+        if let Ok(parsed) = value.parse::<u64>() {
+            config.udp_upstream_response_timeout_ms = parsed;
+        } else {
+            log::warn!(
+                "Unsupported WAF_UDP_UPSTREAM_RESPONSE_TIMEOUT_MS '{}', keeping configured value",
+                value
+            );
+        }
     }
 
     if let Ok(value) = env::var("WAF_SQLITE_RULES_ENABLED") {

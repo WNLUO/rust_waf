@@ -120,8 +120,7 @@ impl UnifiedHttpRequest {
         if include_body && !self.body.is_empty() {
             inspection_text.push('\n');
             let preview_len = self.body.len().min(INSPECTION_BODY_PREVIEW_BYTES);
-            let body_str = String::from_utf8_lossy(&self.body[..preview_len]);
-            inspection_text.push_str(&body_str);
+            inspection_text.push_str(&inspection_body_preview(&self.body[..preview_len]));
             if self.body.len() > preview_len {
                 inspection_text.push_str(&format!(
                     "\n[body truncated: previewed {} of {} bytes]",
@@ -237,6 +236,20 @@ impl UnifiedHttpRequest {
     }
 }
 
+fn inspection_body_preview(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len());
+    for &byte in bytes {
+        match byte {
+            b'\n' => output.push('\n'),
+            b'\r' => output.push_str("\\r"),
+            b'\t' => output.push('\t'),
+            0x20..=0x7e => output.push(byte as char),
+            _ => output.push_str(&format!("\\x{byte:02x}")),
+        }
+    }
+    output
+}
+
 impl Default for UnifiedHttpRequest {
     fn default() -> Self {
         Self::new(HttpVersion::Http1_1, "GET".to_string(), "/".to_string())
@@ -303,6 +316,17 @@ mod tests {
         assert!(inspection_text.contains("host: example.com"));
         assert!(inspection_text.contains("@l4.overload_level: critical"));
         assert!(!inspection_text.contains("secret body"));
+    }
+
+    #[test]
+    fn test_inspection_string_escapes_binary_body_bytes() {
+        let mut request = UnifiedHttpRequest::default();
+        request.body = vec![b'a', 0xff, 0x00, b'\r', b'\n', b'z'];
+
+        let inspection_text = request.to_inspection_string();
+
+        assert!(inspection_text.contains("a\\xff\\x00\\r\nz"));
+        assert!(!inspection_text.contains('\u{fffd}'));
     }
 
     #[test]

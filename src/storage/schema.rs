@@ -569,64 +569,69 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await?;
 
-    if let Err(err) =
-        sqlx::query("ALTER TABLE security_events ADD COLUMN handled INTEGER NOT NULL DEFAULT 0")
-            .execute(pool)
-            .await
-    {
-        if !err.to_string().contains("duplicate column name") {
-            return Err(err.into());
-        }
-    }
-    if let Err(err) = sqlx::query("ALTER TABLE security_events ADD COLUMN handled_at INTEGER")
-        .execute(pool)
-        .await
-    {
-        if !err.to_string().contains("duplicate column name") {
-            return Err(err.into());
-        }
-    }
-    for statement in [
-        "ALTER TABLE security_events ADD COLUMN provider TEXT",
-        "ALTER TABLE security_events ADD COLUMN provider_event_id TEXT",
-        "ALTER TABLE security_events ADD COLUMN provider_site_id TEXT",
-        "ALTER TABLE security_events ADD COLUMN provider_site_name TEXT",
-        "ALTER TABLE security_events ADD COLUMN provider_site_domain TEXT",
-        "ALTER TABLE security_events ADD COLUMN details_json TEXT",
+    for column in [
+        ("security_events", "handled", "INTEGER NOT NULL DEFAULT 0"),
+        ("security_events", "handled_at", "INTEGER"),
+        ("security_events", "provider", "TEXT"),
+        ("security_events", "provider_event_id", "TEXT"),
+        ("security_events", "provider_site_id", "TEXT"),
+        ("security_events", "provider_site_name", "TEXT"),
+        ("security_events", "provider_site_domain", "TEXT"),
+        ("security_events", "details_json", "TEXT"),
+        ("blocked_ips", "provider", "TEXT"),
+        ("blocked_ips", "provider_remote_id", "TEXT"),
+        ("rules", "plugin_template_id", "TEXT"),
+        ("rules", "response_template_json", "TEXT"),
+        (
+            "rule_action_plugins",
+            "enabled",
+            "INTEGER NOT NULL DEFAULT 1",
+        ),
+        ("local_sites", "safeline_intercept_json", "TEXT"),
+        ("local_sites", "priority", "TEXT NOT NULL DEFAULT 'normal'"),
+        (
+            "local_sites",
+            "overload_policy",
+            "TEXT NOT NULL DEFAULT 'inherit'",
+        ),
+        (
+            "local_sites",
+            "reserved_concurrency",
+            "INTEGER NOT NULL DEFAULT 0",
+        ),
+        ("local_sites", "reserved_rps", "INTEGER NOT NULL DEFAULT 0"),
+        (
+            "local_certificates",
+            "provider_remote_domains_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        ),
+        ("local_certificates", "last_remote_fingerprint", "TEXT"),
+        (
+            "local_certificates",
+            "sync_status",
+            "TEXT NOT NULL DEFAULT 'idle'",
+        ),
+        (
+            "local_certificates",
+            "sync_message",
+            "TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "local_certificates",
+            "auto_sync_enabled",
+            "INTEGER NOT NULL DEFAULT 0",
+        ),
+        ("action_idea_overrides", "status_code", "INTEGER"),
+        ("action_idea_overrides", "content_type", "TEXT"),
+        ("action_idea_overrides", "body_file_path", "TEXT"),
+        ("action_idea_overrides", "uploaded_file_name", "TEXT"),
+        (
+            "ai_route_profiles",
+            "evidence_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        ),
     ] {
-        if let Err(err) = sqlx::query(statement).execute(pool).await {
-            if !err.to_string().contains("duplicate column name") {
-                return Err(err.into());
-            }
-        }
-    }
-    for statement in [
-        "ALTER TABLE blocked_ips ADD COLUMN provider TEXT",
-        "ALTER TABLE blocked_ips ADD COLUMN provider_remote_id TEXT",
-        "ALTER TABLE rules ADD COLUMN plugin_template_id TEXT",
-        "ALTER TABLE rules ADD COLUMN response_template_json TEXT",
-        "ALTER TABLE rule_action_plugins ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE local_sites ADD COLUMN safeline_intercept_json TEXT",
-        "ALTER TABLE local_sites ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal'",
-        "ALTER TABLE local_sites ADD COLUMN overload_policy TEXT NOT NULL DEFAULT 'inherit'",
-        "ALTER TABLE local_sites ADD COLUMN reserved_concurrency INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE local_sites ADD COLUMN reserved_rps INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE local_certificates ADD COLUMN provider_remote_domains_json TEXT NOT NULL DEFAULT '[]'",
-        "ALTER TABLE local_certificates ADD COLUMN last_remote_fingerprint TEXT",
-        "ALTER TABLE local_certificates ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'idle'",
-        "ALTER TABLE local_certificates ADD COLUMN sync_message TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE local_certificates ADD COLUMN auto_sync_enabled INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE action_idea_overrides ADD COLUMN status_code INTEGER",
-        "ALTER TABLE action_idea_overrides ADD COLUMN content_type TEXT",
-        "ALTER TABLE action_idea_overrides ADD COLUMN body_file_path TEXT",
-        "ALTER TABLE action_idea_overrides ADD COLUMN uploaded_file_name TEXT",
-        "ALTER TABLE ai_route_profiles ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
-    ] {
-        if let Err(err) = sqlx::query(statement).execute(pool).await {
-            if !err.to_string().contains("duplicate column name") {
-                return Err(err.into());
-            }
-        }
+        add_column_if_missing(pool, column.0, column.1, column.2).await?;
     }
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_security_events_provider_site_id ON security_events(provider_site_id)",
@@ -658,4 +663,40 @@ pub(super) async fn initialize_schema(pool: &SqlitePool) -> Result<()> {
     .await?;
 
     Ok(())
+}
+
+async fn add_column_if_missing(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    if column_exists(pool, table, column).await? {
+        return Ok(());
+    }
+    sqlx::query(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+    ))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> Result<bool> {
+    debug_assert!(is_sql_identifier(table));
+    debug_assert!(is_sql_identifier(column));
+    let count: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?"
+    ))
+    .bind(column)
+    .fetch_one(pool)
+    .await?;
+    Ok(count > 0)
+}
+
+fn is_sql_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }

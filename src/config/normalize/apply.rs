@@ -95,6 +95,8 @@ fn normalize_base_config(config: &mut Config) {
             }
         }
     });
+    config.udp_upstream_response_timeout_ms =
+        clamp_u64(config.udp_upstream_response_timeout_ms, 25, 1_000, 250);
 
     config.tcp_upstream_addr = config.tcp_upstream_addr.take().and_then(|addr| {
         let trimmed = addr.trim();

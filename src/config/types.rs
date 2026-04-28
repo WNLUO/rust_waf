@@ -10,6 +10,8 @@ pub struct Config {
     pub tcp_upstream_addr: Option<String>,
     #[serde(default)]
     pub udp_upstream_addr: Option<String>,
+    #[serde(default = "super::default_udp_upstream_response_timeout_ms")]
+    pub udp_upstream_response_timeout_ms: u64,
     pub runtime_profile: RuntimeProfile,
     pub api_enabled: bool,
     pub api_bind: String,

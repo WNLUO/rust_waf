@@ -12,6 +12,7 @@ impl Default for Config {
             listen_addrs: vec!["0.0.0.0:66".to_string()],
             tcp_upstream_addr: None,
             udp_upstream_addr: None,
+            udp_upstream_response_timeout_ms: default_udp_upstream_response_timeout_ms(),
             runtime_profile: RuntimeProfile::Standard,
             api_enabled: true,
             api_bind: "127.0.0.1:3740".to_string(),

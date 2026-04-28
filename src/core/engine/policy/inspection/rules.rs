@@ -91,10 +91,10 @@ pub(crate) fn inspect_l7_bloom_filter(
 
 fn summarize_bloom_value(value: &str) -> String {
     let normalized = value.trim().replace('\n', " ").replace('\r', " ");
-    if normalized.len() <= 160 {
+    if normalized.chars().count() <= 160 {
         normalized
     } else {
-        format!("{}...", &normalized[..160])
+        format!("{}...", normalized.chars().take(160).collect::<String>())
     }
 }
 
@@ -187,6 +187,21 @@ fn inspect_l7_rules(
     }
 
     InspectionResult::allow(InspectionLayer::L7)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize_bloom_value;
+
+    #[test]
+    fn summarize_bloom_value_truncates_on_char_boundaries() {
+        let value = "测".repeat(200);
+
+        let summary = summarize_bloom_value(&value);
+
+        assert_eq!(summary.chars().count(), 163);
+        assert!(summary.ends_with("..."));
+    }
 }
 
 pub(crate) fn inspect_transport_layers(
